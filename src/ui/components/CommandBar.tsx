@@ -24,6 +24,7 @@ export function CommandBar({
     hasRuns ? 'j/k move' : '',
     hasRuns ? 'enter open' : '',
     activeView === 'run' ? 'esc overview' : '',
+    activeView === 'run' ? 'ctrl+s pause logs' : '',
     hasGates && focusPanel === 'gates' ? 'a approve' : '',
     hasGates && focusPanel === 'gates' ? 's skip' : '',
     hasGates && focusPanel === 'gates' ? 'r retry' : '',

@@ -34,7 +34,7 @@ export const codexAdapter: ToolAdapter = {
     let code: number;
     let stdout: string;
     let stderr: string;
-    const progress = createCodexProgress(feature.id);
+    const progress = createCodexProgress();
 
     try {
       ({ code, stdout, stderr } = await runCli('codex', args, {
@@ -45,12 +45,13 @@ export const codexAdapter: ToolAdapter = {
         heartbeatSuffix: () => progress.heartbeatSuffix(),
         onHeartbeat: (message) => emitRunOutput(opts.runId, feature, message, 'stderr', 'heartbeat'),
         onStdoutLine: (line) => {
-          const output = progress.onStdoutLine(line);
-          if (output) emitRunOutput(opts.runId, feature, output, 'stdout', 'agent');
+          const update = progress.onStdoutLine(line);
+          if (update.output) emitRunOutput(opts.runId, feature, update.output.line, 'stdout', update.output.source);
+          if (update.usage) emitUsage(opts.runId, feature, update.usage);
         },
         onStderrLine: (line) => {
-          const output = progress.onStderrLine(line);
-          if (output) emitRunOutput(opts.runId, feature, output, 'stderr', 'stderr');
+          const update = progress.onStderrLine(line);
+          if (update.output) emitRunOutput(opts.runId, feature, update.output.line, 'stderr', update.output.source);
         },
       }));
     } catch (error) {
@@ -171,46 +172,109 @@ function formatTouchedFiles(files: string[]): string {
     : `arquivos tocados: ${shown}`;
 }
 
-function createCodexProgress(featureId: string): {
-  onStdoutLine: (line: string) => string | null;
-  onStderrLine: (line: string) => string | null;
+interface ProgressUpdate {
+  output?: {
+    line: string;
+    source: 'agent' | 'tool' | 'stderr';
+  };
+  usage?: TokenUsage;
+}
+
+function createCodexProgress(): {
+  onStdoutLine: (line: string) => ProgressUpdate;
+  onStderrLine: (line: string) => ProgressUpdate;
   heartbeatSuffix: () => string | undefined;
 } {
   let eventCount = 0;
   let lastEventType = '';
   let lastAgentSnippet = '';
+  let lastToolSnippet = '';
   let lastStderrSnippet = '';
 
   return {
     onStdoutLine(line: string) {
       const evt = safeJson<any>(line);
-      if (!evt?.type) return null;
+      if (!evt?.type) return {};
       eventCount += 1;
       lastEventType = evt.type;
 
-      if (evt.type === 'item.completed' && evt.item?.type === 'agent_message') {
-        const text = String(evt.item.text ?? '').replace(/\s+/g, ' ').trim();
-        if (!text) return null;
-        lastAgentSnippet = text.slice(0, 120);
-        return lastAgentSnippet;
+      if (evt.type === 'turn.completed' && evt.usage) {
+        const input = (evt.usage.input_tokens ?? 0) + (evt.usage.cached_input_tokens ?? 0);
+        const output = (evt.usage.output_tokens ?? 0) + (evt.usage.reasoning_output_tokens ?? 0);
+        return { usage: { input, output, total: input + output } };
       }
-      return null;
+
+      if (evt.type === 'item.completed' && evt.item?.type === 'agent_message') {
+        const text = normalizeSnippet(evt.item.text);
+        if (!text) return {};
+        lastAgentSnippet = text;
+        return {
+          output: {
+            line: text,
+            source: 'agent',
+          },
+        };
+      }
+
+      const toolLine = summarizeCodexToolEvent(evt);
+      if (toolLine) {
+        lastToolSnippet = toolLine;
+        return {
+          output: {
+            line: toolLine,
+            source: 'tool',
+          },
+        };
+      }
+
+      return {};
     },
     onStderrLine(line: string) {
-      const text = line.trim();
-      if (!text) return null;
-      lastStderrSnippet = text.slice(-120);
-      return lastStderrSnippet;
+      const text = normalizeSnippet(line);
+      if (!text) return {};
+      lastStderrSnippet = text;
+      return {
+        output: {
+          line: text,
+          source: 'stderr',
+        },
+      };
     },
     heartbeatSuffix() {
       const parts: string[] = [];
       if (eventCount > 0) parts.push(`eventos=${eventCount}`);
       if (lastEventType) parts.push(`último=${lastEventType}`);
       if (lastAgentSnippet) parts.push(`agente="${lastAgentSnippet}"`);
+      else if (lastToolSnippet) parts.push(`tool="${lastToolSnippet}"`);
       else if (lastStderrSnippet) parts.push(`stderr="${lastStderrSnippet}"`);
       return parts.length > 0 ? `[${parts.join(' | ')}]` : undefined;
     },
   };
+}
+
+function normalizeSnippet(text: unknown): string {
+  return String(text ?? '').replace(/\s+/g, ' ').trim().slice(0, 140);
+}
+
+function summarizeCodexToolEvent(evt: any): string | null {
+  const item = evt?.item;
+  if (!item || item.type === 'agent_message') return null;
+  const itemType = normalizeSnippet(item.type);
+  if (!itemType) return null;
+  const name = normalizeSnippet(item.name ?? item.tool_name ?? item.call_id ?? item.id ?? itemType);
+  const payload = normalizeSnippet(
+    typeof item.arguments === 'string'
+      ? item.arguments
+      : item.arguments
+        ? JSON.stringify(item.arguments)
+        : item.input
+          ? JSON.stringify(item.input)
+          : item.output
+            ? JSON.stringify(item.output)
+            : '',
+  );
+  const detail = payload ? ` ${payload}` : '';
+  return normalizeSnippet(`tool ${name}${detail}`);
 }
 
 function emitRunOutput(
@@ -218,7 +282,7 @@ function emitRunOutput(
   feature: Feature,
   line: string,
   stream: 'stdout' | 'stderr',
-  source: 'agent' | 'stderr' | 'heartbeat',
+  source: 'agent' | 'tool' | 'stderr' | 'heartbeat',
 ): void {
   msqEventBus.emit('run:output', {
     runId,

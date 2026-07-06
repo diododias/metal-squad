@@ -103,6 +103,41 @@ describe('listRunsForTui deduplication', () => {
   });
 });
 
+describe('live run persistence helpers', () => {
+  it('updates live token columns on the run row', async () => {
+    const { updateRunUsage } = await import('../../src/db/repo.js');
+    updateRunUsage(9, { input: 10, output: 4, total: 14 });
+    expect(mockRun).toHaveBeenCalledWith(10, 4, 14, 9);
+  });
+
+  it('appends streamed output rows', async () => {
+    const { appendRunOutput } = await import('../../src/db/repo.js');
+    appendRunOutput({
+      runId: 9,
+      featureId: 'feat-9',
+      tool: 'codex',
+      line: 'tool write_file {"path":"src/ui/App.tsx"}',
+      stream: 'stdout',
+      source: 'tool',
+    });
+    expect(mockRun).toHaveBeenCalledWith(
+      9,
+      'feat-9',
+      'codex',
+      'stdout',
+      'tool',
+      'tool write_file {"path":"src/ui/App.tsx"}',
+    );
+  });
+
+  it('lists the stored run output tail', async () => {
+    mockAll.mockReturnValue([{ id: 1, line: 'done' }]);
+    const { listRunOutput } = await import('../../src/db/repo.js');
+    expect(listRunOutput(7, 20)).toEqual([{ id: 1, line: 'done' }]);
+    expect(mockAll).toHaveBeenCalledWith(7, 20);
+  });
+});
+
 // T022: openGates, resolveGate (idempotency), createGate
 describe('openGates', () => {
   it('returns empty when no open gates', async () => {

@@ -11,6 +11,7 @@ import { createSkillRegistry } from '../skills/index.js';
 import {
   attachDefaultEventLogger,
   attachEventNotifications,
+  attachRunPersistence,
   msqEventBus,
 } from '../events/index.js';
 
@@ -35,6 +36,7 @@ export async function executeBacklog(
     : topoOrder(backlog);
 
   const registry = createSkillRegistry();
+  const detachPersistence = attachRunPersistence();
   const detachLogger = attachDefaultEventLogger();
   const detachNotifications = attachEventNotifications();
 
@@ -106,6 +108,7 @@ export async function executeBacklog(
   } finally {
     detachNotifications();
     detachLogger();
+    detachPersistence();
     process.removeListener('SIGINT', handleSignal);
     process.removeListener('SIGTERM', handleSignal);
   }

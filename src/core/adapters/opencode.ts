@@ -30,9 +30,9 @@ export const opencodeAdapter: ToolAdapter = {
     const { code, stdout, stderr } = await runCli('opencode', args, {
       cwd: opts.cwd,
       onStdoutLine: (line) => {
-        const text = normalizeSnippet(line);
-        if (!text) return;
-        emitRunOutput(opts.runId, feature, text, 'stdout', 'stdout');
+        const update = parseOpenCodeLine(line);
+        if (update.output) emitRunOutput(opts.runId, feature, update.output.line, 'stdout', update.output.source);
+        if (update.usage) emitUsage(opts.runId, feature, update.usage);
       },
       onStderrLine: (line) => {
         const text = normalizeSnippet(line);
@@ -76,12 +76,45 @@ function normalizeSnippet(text: string): string {
   return text.replace(/\s+/g, ' ').trim().slice(0, 160);
 }
 
+function parseOpenCodeLine(line: string): {
+  output?: {
+    line: string;
+    source: 'agent' | 'tool' | 'stdout';
+  };
+  usage?: TokenUsage;
+} {
+  const json = safeJson<any>(line);
+  if (!json) {
+    const text = normalizeSnippet(line);
+    return text ? { output: { line: text, source: 'stdout' } } : {};
+  }
+
+  const usage = opencodeAdapter.parseUsage?.(JSON.stringify(json)) ?? undefined;
+  if (usage && usage.total > 0) {
+    return { usage };
+  }
+
+  const toolName = normalizeSnippet(json.tool ?? json.toolName ?? '');
+  if (toolName) {
+    const payload = normalizeSnippet(JSON.stringify(json.input ?? json.args ?? json.arguments ?? {}));
+    return {
+      output: {
+        line: normalizeSnippet(`tool ${toolName}${payload && payload !== '{}' ? ` ${payload}` : ''}`),
+        source: 'tool',
+      },
+    };
+  }
+
+  const text = normalizeSnippet(json.response ?? json.result ?? json.message ?? line);
+  return text ? { output: { line: text, source: 'agent' } } : {};
+}
+
 function emitRunOutput(
   runId: number,
   feature: Feature,
   line: string,
   stream: 'stdout' | 'stderr',
-  source: 'stdout' | 'stderr',
+  source: 'agent' | 'tool' | 'stdout' | 'stderr',
 ): void {
   msqEventBus.emit('run:output', {
     runId,

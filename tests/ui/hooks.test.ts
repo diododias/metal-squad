@@ -95,6 +95,52 @@ describe('ui hooks', () => {
     expect(setRuns).not.toHaveBeenCalled();
   });
 
+  it('useRunOutput loads the current tail and refreshes on matching events', async () => {
+    const setOutput = vi.fn();
+    const intervalCallbacks: Array<() => void> = [];
+    const listeners = new Map<string, Array<(event: { runId: number }) => void>>();
+
+    vi.doMock('react', () => ({
+      useState: () => [[], setOutput],
+      useEffect: (effect: () => void) => effect(),
+      useCallback: <T extends (...args: any[]) => any>(fn: T) => fn,
+    }));
+
+    vi.doMock('../../src/db/repo.js', () => ({
+      listRunOutput: vi.fn()
+        .mockReturnValueOnce([{ id: 1, line: 'one' }])
+        .mockReturnValueOnce([{ id: 2, line: 'two' }])
+        .mockReturnValueOnce([{ id: 3, line: 'three' }]),
+    }));
+
+    vi.doMock('../../src/core/events/index.js', () => ({
+      msqEventBus: {
+        subscribe: vi.fn((event: string, listener: (payload: { runId: number }) => void) => {
+          const current = listeners.get(event) ?? [];
+          current.push(listener);
+          listeners.set(event, current);
+          return () => {};
+        }),
+      },
+    }));
+
+    vi.spyOn(globalThis, 'setInterval').mockImplementation(((fn: () => void) => {
+      intervalCallbacks.push(fn);
+      return 1 as unknown as NodeJS.Timeout;
+    }) as typeof setInterval);
+
+    const { useRunOutput } = await import('../../src/ui/hooks/useRunOutput.js');
+    expect(useRunOutput(7, 123, 5)).toEqual([]);
+    expect(setOutput).toHaveBeenCalledWith([{ id: 1, line: 'one' }]);
+
+    listeners.get('run:output')?.[0]?.({ runId: 7 });
+    await Promise.resolve();
+    expect(setOutput).toHaveBeenCalledWith([{ id: 2, line: 'two' }]);
+
+    intervalCallbacks[0]?.();
+    expect(setOutput).toHaveBeenCalledWith([{ id: 3, line: 'three' }]);
+  });
+
   it('useGates loads gates, resolves them and tolerates polling errors', async () => {
     const setGates = vi.fn();
     const openGates = vi.fn()

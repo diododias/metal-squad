@@ -1,6 +1,6 @@
 import React from 'react';
 import { Box, Text } from 'ink';
-import type { GateRow, RunSummary } from '../../db/repo.js';
+import type { GateRow, RunOutputRow, RunSummary } from '../../db/repo.js';
 import type { FeatureCatalogEntry } from '../catalog.js';
 import type { LayoutMode } from '../format.js';
 import {
@@ -22,6 +22,8 @@ interface Props {
   selectedRun: RunSummary | null;
   selectedFeature: FeatureCatalogEntry | null;
   activeView: ActiveView;
+  output: RunOutputRow[];
+  outputPaused: boolean;
   mode: LayoutMode;
   width: number;
 }
@@ -53,10 +55,14 @@ export function MainPanel({
   selectedRun,
   selectedFeature,
   activeView,
+  output,
+  outputPaused,
   mode,
   width,
 }: Props): React.ReactElement {
   const innerWidth = Math.max(32, width - 4);
+  const visibleOutput = output.slice(-(mode === 'stacked' ? 8 : 14));
+  const lastOutput = visibleOutput[visibleOutput.length - 1] ?? null;
 
   return (
     <Box
@@ -101,10 +107,31 @@ export function MainPanel({
             )}
           </Box>
           <Box marginTop={1} flexDirection="column">
-            <Text bold>Operator note</Text>
+            <Text bold>Live output</Text>
             <Text dimColor>
-              Live output lands in F06. This panel already tracks the selected run and its execution metadata in real time.
+              {selectedRun.status === 'running'
+                ? outputPaused
+                  ? 'Auto-scroll paused. Press Ctrl+S to resume live tailing.'
+                  : lastOutput?.source === 'heartbeat'
+                    ? 'Agent thinking... heartbeat received while waiting for the next visible event.'
+                    : 'Streaming latest run events in real time.'
+                : 'Run finished. Tail below shows the latest captured output.'}
             </Text>
+            <Box marginTop={1} flexDirection="column">
+              {visibleOutput.length > 0 ? (
+                visibleOutput.map((entry) => (
+                  <Text key={entry.id} color={getOutputColor(entry)} dimColor={entry.source === 'tool' || entry.source === 'heartbeat'}>
+                    {formatOutputPrefix(entry)} {truncateText(entry.line, Math.max(24, innerWidth - 4))}
+                  </Text>
+                ))
+              ) : (
+                <Text dimColor>
+                  {selectedRun.status === 'running'
+                    ? 'Agent thinking... waiting for the first streamed line.'
+                    : 'No output captured for this run yet.'}
+                </Text>
+              )}
+            </Box>
           </Box>
         </Box>
       ) : (
@@ -129,4 +156,34 @@ export function MainPanel({
       )}
     </Box>
   );
+}
+
+function formatOutputPrefix(entry: RunOutputRow): string {
+  switch (entry.source) {
+    case 'agent':
+      return 'AI>';
+    case 'tool':
+      return 'TOOL>';
+    case 'heartbeat':
+      return '...';
+    case 'stderr':
+      return 'ERR>';
+    default:
+      return 'OUT>';
+  }
+}
+
+function getOutputColor(entry: RunOutputRow): 'white' | 'cyan' | 'gray' | 'red' {
+  switch (entry.source) {
+    case 'agent':
+      return 'white';
+    case 'tool':
+      return 'cyan';
+    case 'heartbeat':
+      return 'gray';
+    case 'stderr':
+      return 'red';
+    default:
+      return 'white';
+  }
 }

@@ -37,7 +37,7 @@ export const claudeAdapter: ToolAdapter = {
     let code: number;
     let stdout: string;
     let stderr: string;
-    const progress = createClaudeProgress(feature.id);
+    const progress = createClaudeProgress();
 
     try {
       ({ code, stdout, stderr } = await runCli('claude', args, {
@@ -47,12 +47,13 @@ export const claudeAdapter: ToolAdapter = {
         heartbeatSuffix: () => progress.heartbeatSuffix(),
         onHeartbeat: (message) => emitRunOutput(opts.runId, feature, message, 'stderr', 'heartbeat'),
         onStdoutLine: (line) => {
-          const output = progress.onStdoutLine(line);
-          if (output) emitRunOutput(opts.runId, feature, output, 'stdout', 'agent');
+          const update = progress.onStdoutLine(line);
+          if (update.output) emitRunOutput(opts.runId, feature, update.output.line, 'stdout', update.output.source);
+          if (update.usage) emitUsage(opts.runId, feature, update.usage);
         },
         onStderrLine: (line) => {
-          const output = progress.onStderrLine(line);
-          if (output) emitRunOutput(opts.runId, feature, output, 'stderr', 'stderr');
+          const update = progress.onStderrLine(line);
+          if (update.output) emitRunOutput(opts.runId, feature, update.output.line, 'stderr', update.output.source);
         },
       }));
     } catch (error) {
@@ -167,51 +168,106 @@ function normalizeSnippet(text: string): string {
   return text.replace(/\s+/g, ' ').trim().slice(0, 160);
 }
 
-function createClaudeProgress(featureId: string): {
-  onStdoutLine: (line: string) => string | null;
-  onStderrLine: (line: string) => string | null;
+interface ProgressUpdate {
+  output?: {
+    line: string;
+    source: 'agent' | 'tool' | 'stderr';
+  };
+  usage?: TokenUsage;
+}
+
+function createClaudeProgress(): {
+  onStdoutLine: (line: string) => ProgressUpdate;
+  onStderrLine: (line: string) => ProgressUpdate;
   heartbeatSuffix: () => string | undefined;
 } {
   let stdoutCount = 0;
   let stderrCount = 0;
   let lastAgentSnippet = '';
+  let lastToolSnippet = '';
   let lastStderrSnippet = '';
 
   return {
     onStdoutLine(line: string) {
-      const text = summarizeClaudeLine(line);
-      if (!text) return null;
+      const update = parseClaudeLine(line);
+      if (!update.output && !update.usage) return {};
       stdoutCount += 1;
-      lastAgentSnippet = text;
-      return text;
+      if (update.output?.source === 'tool') lastToolSnippet = update.output.line;
+      else if (update.output?.source === 'agent') lastAgentSnippet = update.output.line;
+      return update;
     },
     onStderrLine(line: string) {
       const text = normalizeSnippet(line);
-      if (!text) return null;
+      if (!text) return {};
       stderrCount += 1;
       lastStderrSnippet = text;
-      return text;
+      return {
+        output: {
+          line: text,
+          source: 'stderr',
+        },
+      };
     },
     heartbeatSuffix() {
       const parts: string[] = [];
       if (stdoutCount > 0) parts.push(`stdout=${stdoutCount}`);
       if (stderrCount > 0) parts.push(`stderr=${stderrCount}`);
       if (lastAgentSnippet) parts.push(`agente="${lastAgentSnippet}"`);
+      else if (lastToolSnippet) parts.push(`tool="${lastToolSnippet}"`);
       else if (lastStderrSnippet) parts.push(`stderr="${lastStderrSnippet}"`);
       return parts.length > 0 ? `[${parts.join(' | ')}]` : undefined;
     },
   };
 }
 
-function summarizeClaudeLine(line: string): string {
+function parseClaudeLine(line: string): ProgressUpdate {
   const json = safeJson<ClaudeJson>(line);
   if (json) {
+    if (json.usage) {
+      const input = json.usage.input_tokens ?? 0;
+      const output = json.usage.output_tokens ?? 0;
+      if (input > 0 || output > 0) {
+        return { usage: { input, output, total: input + output } };
+      }
+    }
+    const record = json as Record<string, unknown>;
+    if (record.type === 'tool_use') {
+      const name = normalizeSnippet(String(record.name ?? 'tool'));
+      const input = normalizeSnippet(JSON.stringify(record.input ?? {}));
+      return {
+        output: {
+          line: normalizeSnippet(`tool ${name}${input && input !== '{}' ? ` ${input}` : ''}`),
+          source: 'tool',
+        },
+      };
+    }
     const result = normalizeSnippet(json.result ?? '');
-    if (result) return result;
+    if (result) {
+      return {
+        output: {
+          line: result,
+          source: 'agent',
+        },
+      };
+    }
     const subtype = normalizeSnippet(json.subtype ?? '');
-    if (subtype) return subtype;
+    if (subtype) {
+      return {
+        output: {
+          line: subtype,
+          source: 'agent',
+        },
+      };
+    }
   }
-  return normalizeSnippet(line);
+  const text = normalizeSnippet(line);
+  if (!text) return {};
+  return {
+    output: {
+      line: text,
+      source: 'agent',
+    },
+  };
 }
 
 function emitRunOutput(
@@ -219,7 +275,7 @@ function emitRunOutput(
   feature: Feature,
   line: string,
   stream: 'stdout' | 'stderr',
-  source: 'agent' | 'stderr' | 'heartbeat',
+  source: 'agent' | 'tool' | 'stderr' | 'heartbeat',
 ): void {
   msqEventBus.emit('run:output', {
     runId,

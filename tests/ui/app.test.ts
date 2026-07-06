@@ -3,6 +3,7 @@ import React from 'react';
 
 const mockUseRuns = vi.fn();
 const mockUseGates = vi.fn();
+const mockUseRunOutput = vi.fn();
 const mockUseTerminalWidth = vi.fn();
 const mockGetFeatureCatalog = vi.fn();
 const mockMainPanel = vi.fn(() => React.createElement('main-panel'));
@@ -16,6 +17,7 @@ let stateValue: {
   selectedGate: number;
   focusPanel: 'runs' | 'gates' | 'main';
   activeView: 'overview' | 'run';
+  outputPaused: boolean;
 };
 
 vi.mock('react', async () => {
@@ -33,6 +35,10 @@ vi.mock('../../src/ui/hooks/useRuns.js', () => ({
 
 vi.mock('../../src/ui/hooks/useGates.js', () => ({
   useGates: mockUseGates,
+}));
+
+vi.mock('../../src/ui/hooks/useRunOutput.js', () => ({
+  useRunOutput: mockUseRunOutput,
 }));
 
 vi.mock('../../src/ui/hooks/useTerminalWidth.js', () => ({
@@ -93,10 +99,12 @@ describe('App', () => {
       selectedGate: 0,
       focusPanel: 'runs',
       activeView: 'overview',
+      outputPaused: false,
     };
     mockUseTerminalWidth.mockReturnValue(88);
     mockUseRuns.mockReturnValue([]);
     mockUseGates.mockReturnValue({ gates: [], resolve: vi.fn() });
+    mockUseRunOutput.mockReturnValue([]);
     mockGetFeatureCatalog.mockReturnValue({});
   });
 
@@ -115,6 +123,7 @@ describe('App', () => {
 
     expect(React.isValidElement(element)).toBe(true);
     expect(mainPanel?.props.runs).toEqual([]);
+    expect(mainPanel?.props.output).toEqual([]);
     expect(sidebar?.props.mode).toBe('compact');
     expect(statusBar?.props.selectedRun).toBeNull();
     expect(commandBar?.props.hasRuns).toBe(false);
@@ -150,6 +159,7 @@ describe('App', () => {
 
     expect(mainPanel?.props.selectedRun?.runId).toBe(1);
     expect(mainPanel?.props.selectedFeature?.title).toBe('F05 — Layout Multi-Painel');
+    expect(mainPanel?.props.outputPaused).toBe(false);
     expect(sidebar?.props.skills).toEqual(['implement']);
     expect(statusBar?.props.gateCount).toBe(1);
   });
@@ -186,8 +196,29 @@ describe('App', () => {
     expect(moveRun(stateValue).selectedRun).toBe(1);
     expect(tabFocus(stateValue).focusPanel).toBe('gates');
     expect(openRun(stateValue)).toMatchObject({ activeView: 'run', focusPanel: 'main' });
-    expect(escapeRun(stateValue)).toMatchObject({ activeView: 'overview', focusPanel: 'runs' });
+    expect(escapeRun(stateValue)).toMatchObject({ activeView: 'overview', focusPanel: 'runs', outputPaused: false });
     expect(resolve).not.toHaveBeenCalled();
+  });
+
+  it('toggles log pause with ctrl+s while a run detail is open', async () => {
+    stateValue = {
+      selectedRun: 0,
+      selectedGate: 0,
+      focusPanel: 'main',
+      activeView: 'run',
+      outputPaused: false,
+    };
+    mockUseRuns.mockReturnValue([{ runId: 1, featureId: 'feat-1' }]);
+    mockUseGates.mockReturnValue({ gates: [], resolve: vi.fn() });
+    const { App } = await import('../../src/ui/App.js');
+
+    App();
+    const handler = mockUseInput.mock.calls[0]?.[0] as (input: string, key: Record<string, boolean>) => void;
+    handler('s', { ctrl: true });
+
+    expect(setUi).toHaveBeenCalledTimes(1);
+    const pauseLogs = setUi.mock.calls[0]?.[0] as (state: typeof stateValue) => typeof stateValue;
+    expect(pauseLogs(stateValue).outputPaused).toBe(true);
   });
 
   it('handles gate decisions when the gates panel is focused', async () => {
@@ -197,6 +228,7 @@ describe('App', () => {
       selectedGate: 0,
       focusPanel: 'gates',
       activeView: 'overview',
+      outputPaused: false,
     };
     mockUseRuns.mockReturnValue([{ runId: 1, featureId: 'feat-1' }]);
     mockUseGates.mockReturnValue({
