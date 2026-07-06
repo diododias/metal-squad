@@ -1,0 +1,38 @@
+version: 2
+repo: metal-squad
+defaults:
+  tool: claude
+  effort: medium
+  skills: [implement]
+
+epics:
+  - id: epic-core
+    title: Núcleo de orquestração
+    features:
+      - id: feat-scheduler
+        title: Scheduler com concorrência global
+        tool: claude
+        effort: high
+        skills: [specify, plan, implement]
+        specFile: docs/features/F01-yaml-schema-v2.md
+        context:
+          - src/core/backlog/schema.ts
+        dependsOn: []
+        tasks:
+          - id: t-graph
+            title: Ordenação topológica do backlog
+            skills: [implement]
+          - id: t-run
+            title: Loop de execução com limite de concorrência
+            skills: [implement]
+            dependsOn: [t-graph]
+      - id: feat-telegram
+        title: Notificação em gates via Telegram
+        tool: codex
+        effort: medium
+        skills: [implement]
+        dependsOn: [feat-scheduler]
+        tasks:
+          - id: t-notify
+            title: Integração Telegram Bot API
+            skills: [implement]

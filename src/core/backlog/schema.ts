@@ -3,11 +3,19 @@ import { z } from 'zod';
 export const ToolSchema = z.enum(['claude', 'codex', 'opencode']);
 export const EffortSchema = z.enum(['low', 'medium', 'high']);
 
+export const DefaultsSchema = z.object({
+  tool: ToolSchema.default('claude'),
+  effort: EffortSchema.default('medium'),
+  skills: z.array(z.string()).default(['implement']),
+});
+
 export const TaskSchema = z.object({
   id: z.string(),
   title: z.string(),
   status: z.enum(['todo', 'running', 'done', 'failed', 'blocked']).default('todo'),
   dependsOn: z.array(z.string()).default([]),
+  taskFile: z.string().optional(),
+  skills: z.array(z.string()).optional(),
 });
 
 export const FeatureSchema = z.object({
@@ -19,6 +27,9 @@ export const FeatureSchema = z.object({
   effort: EffortSchema.default('medium'),
   dependsOn: z.array(z.string()).default([]),
   tasks: z.array(TaskSchema).default([]),
+  skills: z.array(z.string()).optional(),
+  specFile: z.string().optional(),
+  context: z.array(z.string()).optional(),
 });
 
 export const EpicSchema = z.object({
@@ -27,14 +38,27 @@ export const EpicSchema = z.object({
   features: z.array(FeatureSchema).default([]),
 });
 
-export const BacklogSchema = z.object({
-  version: z.literal(1).default(1),
+export const BacklogV1Schema = z.object({
+  version: z.literal(1).default(1 as const),
   repo: z.string(),
   epics: z.array(EpicSchema).default([]),
 });
 
+export const BacklogV2Schema = z.object({
+  version: z.literal(2),
+  repo: z.string(),
+  defaults: DefaultsSchema.default({}),
+  epics: z.array(EpicSchema).default([]),
+});
+
+export const BacklogSchema = z.union([BacklogV1Schema, BacklogV2Schema]);
+
 export type Tool = z.infer<typeof ToolSchema>;
 export type Effort = z.infer<typeof EffortSchema>;
+export type Defaults = z.infer<typeof DefaultsSchema>;
+export type Task = z.infer<typeof TaskSchema>;
 export type Feature = z.infer<typeof FeatureSchema>;
 export type Epic = z.infer<typeof EpicSchema>;
+export type BacklogV1 = z.infer<typeof BacklogV1Schema>;
+export type BacklogV2 = z.infer<typeof BacklogV2Schema>;
 export type Backlog = z.infer<typeof BacklogSchema>;
