@@ -27,7 +27,7 @@ export async function executeBacklog(
     try {
       const res = await getAdapter(feature.tool).runFeature(feature, opts.cwd);
       if (res.usage) recordUsage(runId, res.usage);
-      finishRun(runId, res.ok ? 'done' : 'failed');
+      finishRun(runId, res.ok ? 'done' : 'failed', res.summary);
       return res;
     } catch (err) {
       finishRun(runId, 'failed');
@@ -40,7 +40,7 @@ export async function executeBacklog(
       concurrency: opts.concurrency,
       execute,
       onStart: (f) => console.log(`▶ ${f.id} (${f.tool})`),
-      onDone: (f, r) => console.log(`${r.ok ? '✓' : '✗'} ${f.id} — ${r.summary}`),
+      onDone: (f, r) => console.log(`${r.ok ? "✓" : "✗"} ${f.id} — ${r.summary}`),
     });
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
