@@ -1,4 +1,4 @@
-import type { ToolAdapter, RunResult, TokenUsage } from './types.js';
+import type { ToolAdapter, RunResult, TokenUsage, RunFeatureOpts } from './types.js';
 import type { Effort, Feature } from '../backlog/schema.js';
 import { execFileSync } from 'node:child_process';
 import { loadConfig } from '../../config/index.js';
@@ -18,7 +18,7 @@ export const codexAdapter: ToolAdapter = {
     return ['-c', `model_reasoning_effort="${EFFORT[effort]}"`];
   },
 
-  async runFeature(feature: Feature, prompt: string, cwd: string): Promise<RunResult> {
+  async runFeature(feature: Feature, prompt: string, cwd: string, opts?: RunFeatureOpts): Promise<RunResult> {
     const args = [
       'exec',
       prompt,
@@ -33,7 +33,7 @@ export const codexAdapter: ToolAdapter = {
     let code: number;
     let stdout: string;
     let stderr: string;
-    const progress = createCodexProgress(feature.id);
+    const progress = createCodexProgress(feature.id, opts?.onOutput);
 
     try {
       ({ code, stdout, stderr } = await runCli('codex', args, {
@@ -159,7 +159,10 @@ function formatTouchedFiles(files: string[]): string {
     : `arquivos tocados: ${shown}`;
 }
 
-function createCodexProgress(featureId: string): {
+function createCodexProgress(
+  featureId: string,
+  onOutput?: (line: string, stream: 'stdout' | 'stderr') => void,
+): {
   onStdoutLine: (line: string) => void;
   onStderrLine: (line: string) => void;
   heartbeatSuffix: () => string | undefined;
@@ -180,14 +183,22 @@ function createCodexProgress(featureId: string): {
         const text = String(evt.item.text ?? '').replace(/\s+/g, ' ').trim();
         if (!text) return;
         lastAgentSnippet = text.slice(0, 120);
-        console.log(`[msq] codex ${featureId} agente: ${lastAgentSnippet}`);
+        if (onOutput) {
+          onOutput(lastAgentSnippet, 'stdout');
+        } else {
+          console.log(`[msq] codex ${featureId} agente: ${lastAgentSnippet}`);
+        }
       }
     },
     onStderrLine(line: string) {
       const text = line.trim();
       if (!text) return;
       lastStderrSnippet = text.slice(-120);
-      console.log(`[msq] codex ${featureId} stderr: ${lastStderrSnippet}`);
+      if (onOutput) {
+        onOutput(lastStderrSnippet, 'stderr');
+      } else {
+        console.log(`[msq] codex ${featureId} stderr: ${lastStderrSnippet}`);
+      }
     },
     heartbeatSuffix() {
       const parts: string[] = [];

@@ -15,6 +15,10 @@ vi.mock('../../src/config/index.js', () => ({
   ensureDataDir: vi.fn(),
   resolveDbPath: vi.fn(() => ':memory:'),
 }));
+const mockBusEmit = vi.fn();
+vi.mock('../../src/core/events/bus.js', () => ({
+  bus: { emit: mockBusEmit },
+}));
 
 // Reset DB singleton between tests
 beforeEach(async () => {
@@ -22,6 +26,7 @@ beforeEach(async () => {
   mockAll.mockReset();
   mockRun.mockReset();
   mockPrepare.mockImplementation(() => ({ all: mockAll, run: mockRun }));
+  mockBusEmit.mockReset();
 });
 
 // T014: listRunsForTui tests
@@ -135,12 +140,14 @@ describe('resolveGate', () => {
     const { resolveGate } = await import('../../src/db/repo.js');
     resolveGate(1, 'approved');
     expect(mockRun).toHaveBeenCalledWith('approved', 1);
+    expect(mockBusEmit).toHaveBeenCalledWith('gate:resolved', { gateId: 1, decision: 'approved' });
   });
 
   it('no-op if already resolved (changes = 0, no throw)', async () => {
     mockRun.mockReturnValue({ changes: 0 });
     const { resolveGate } = await import('../../src/db/repo.js');
     expect(() => resolveGate(1, 'approved')).not.toThrow();
+    expect(mockBusEmit).not.toHaveBeenCalled();
   });
 });
 
@@ -151,5 +158,6 @@ describe('createGate', () => {
     const id = createGate(10, 'feat-1', 'repo1');
     expect(id).toBe(42);
     expect(mockRun).toHaveBeenCalledWith(10, 'feat-1', 'repo1');
+    expect(mockBusEmit).toHaveBeenCalledWith('gate:created', { gateId: 42, featureId: 'feat-1' });
   });
 });

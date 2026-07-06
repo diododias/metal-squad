@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import type { ToolAdapter, RunResult, TokenUsage } from './types.js';
+import type { ToolAdapter, RunResult, TokenUsage, RunFeatureOpts } from './types.js';
 import type { Effort, Feature } from '../backlog/schema.js';
 import { CliTimeoutError, runCli } from './spawn.js';
 
@@ -24,7 +24,7 @@ export const claudeAdapter: ToolAdapter = {
     return ['--model', EFFORT_MODEL[effort]];
   },
 
-  async runFeature(feature: Feature, prompt: string, cwd: string): Promise<RunResult> {
+  async runFeature(feature: Feature, prompt: string, cwd: string, opts?: RunFeatureOpts): Promise<RunResult> {
     const model = feature.model ? ['--model', feature.model] : this.effortFlag(feature.effort);
     const args = [
       '-p', prompt,
@@ -36,7 +36,7 @@ export const claudeAdapter: ToolAdapter = {
     let code: number;
     let stdout: string;
     let stderr: string;
-    const progress = createClaudeProgress(feature.id);
+    const progress = createClaudeProgress(feature.id, opts?.onOutput);
 
     try {
       ({ code, stdout, stderr } = await runCli('claude', args, {
@@ -155,7 +155,10 @@ function normalizeSnippet(text: string): string {
   return text.replace(/\s+/g, ' ').trim().slice(0, 160);
 }
 
-function createClaudeProgress(featureId: string): {
+function createClaudeProgress(
+  featureId: string,
+  onOutput?: (line: string, stream: 'stdout' | 'stderr') => void,
+): {
   onStdoutLine: (line: string) => void;
   onStderrLine: (line: string) => void;
   heartbeatSuffix: () => string | undefined;
@@ -171,14 +174,22 @@ function createClaudeProgress(featureId: string): {
       if (!text) return;
       stdoutCount += 1;
       lastAgentSnippet = text;
-      console.log(`[msq] claude ${featureId} agente: ${text}`);
+      if (onOutput) {
+        onOutput(text, 'stdout');
+      } else {
+        console.log(`[msq] claude ${featureId} agente: ${text}`);
+      }
     },
     onStderrLine(line: string) {
       const text = normalizeSnippet(line);
       if (!text) return;
       stderrCount += 1;
       lastStderrSnippet = text;
-      console.log(`[msq] claude ${featureId} stderr: ${text}`);
+      if (onOutput) {
+        onOutput(text, 'stderr');
+      } else {
+        console.log(`[msq] claude ${featureId} stderr: ${text}`);
+      }
     },
     heartbeatSuffix() {
       const parts: string[] = [];

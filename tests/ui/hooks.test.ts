@@ -10,6 +10,20 @@ describe('ui hooks', () => {
     const setRuns = vi.fn();
     const clearIntervalSpy = vi.spyOn(globalThis, 'clearInterval');
     const intervalCallbacks: Array<() => void> = [];
+    const listeners = new Map<string, Set<(payload: unknown) => void>>();
+    const bus = {
+      on: vi.fn((event: string, listener: (payload: unknown) => void) => {
+        const eventListeners = listeners.get(event) ?? new Set();
+        eventListeners.add(listener);
+        listeners.set(event, eventListeners);
+      }),
+      off: vi.fn((event: string, listener: (payload: unknown) => void) => {
+        listeners.get(event)?.delete(listener);
+      }),
+      emit: vi.fn((event: string, payload: unknown) => {
+        listeners.get(event)?.forEach((listener) => listener(payload));
+      }),
+    };
 
     vi.doMock('react', () => ({
       useState: (value: unknown) => [typeof value === 'function' ? (value as () => unknown)() : value, setRuns],
@@ -17,13 +31,16 @@ describe('ui hooks', () => {
         const cleanup = effect();
         expect(cleanup).toBeTypeOf('function');
       },
+      useCallback: <T extends (...args: any[]) => any>(fn: T) => fn,
     }));
 
     vi.doMock('../../src/db/repo.js', () => ({
       listRunsForTui: vi.fn()
         .mockReturnValueOnce([{ runId: 1 }])
-        .mockReturnValueOnce([{ runId: 2 }]),
+        .mockReturnValueOnce([{ runId: 2 }])
+        .mockReturnValueOnce([{ runId: 3 }]),
     }));
+    vi.doMock('../../src/core/events/bus.js', () => ({ bus }));
 
     vi.spyOn(globalThis, 'setInterval').mockImplementation(((fn: () => void) => {
       intervalCallbacks.push(fn);
@@ -36,6 +53,8 @@ describe('ui hooks', () => {
     expect(runs).toEqual([{ runId: 1 }]);
     intervalCallbacks[0]?.();
     expect(setRuns).toHaveBeenCalledWith([{ runId: 2 }]);
+    bus.emit('run:start', { runId: 3, featureId: 'feat-3', tool: 'codex' });
+    expect(setRuns).toHaveBeenCalledWith([{ runId: 3 }]);
     const cleanup = (globalThis.setInterval as unknown as ReturnType<typeof vi.fn>).mock.results[0];
     expect(clearIntervalSpy).not.toHaveBeenCalled();
     expect(cleanup).toBeDefined();
@@ -48,6 +67,7 @@ describe('ui hooks', () => {
     vi.doMock('react', () => ({
       useState: (value: unknown) => [typeof value === 'function' ? (value as () => unknown)() : value, setRuns],
       useEffect: (effect: () => void) => effect(),
+      useCallback: <T extends (...args: any[]) => any>(fn: T) => fn,
     }));
 
     vi.doMock('../../src/db/repo.js', () => ({
@@ -79,6 +99,20 @@ describe('ui hooks', () => {
       });
     const resolveGate = vi.fn();
     const intervalCallbacks: Array<() => void> = [];
+    const listeners = new Map<string, Set<(payload: unknown) => void>>();
+    const bus = {
+      on: vi.fn((event: string, listener: (payload: unknown) => void) => {
+        const eventListeners = listeners.get(event) ?? new Set();
+        eventListeners.add(listener);
+        listeners.set(event, eventListeners);
+      }),
+      off: vi.fn((event: string, listener: (payload: unknown) => void) => {
+        listeners.get(event)?.delete(listener);
+      }),
+      emit: vi.fn((event: string, payload: unknown) => {
+        listeners.get(event)?.forEach((listener) => listener(payload));
+      }),
+    };
 
     vi.doMock('react', () => ({
       useState: (value: unknown) => [typeof value === 'function' ? (value as () => unknown)() : value, setGates],
@@ -90,6 +124,7 @@ describe('ui hooks', () => {
       openGates,
       resolveGate,
     }));
+    vi.doMock('../../src/core/events/bus.js', () => ({ bus }));
 
     vi.spyOn(globalThis, 'setInterval').mockImplementation(((fn: () => void) => {
       intervalCallbacks.push(fn);
@@ -103,6 +138,7 @@ describe('ui hooks', () => {
     result.resolve(1, 'approved');
     expect(resolveGate).toHaveBeenCalledWith(1, 'approved');
     expect(setGates).toHaveBeenCalledWith([{ id: 2 }]);
+    bus.emit('gate:created', { gateId: 3, featureId: 'feat-3' });
     expect(() => intervalCallbacks[0]?.()).not.toThrow();
   });
 

@@ -12,12 +12,16 @@ export interface RunResult {
   usage?: TokenUsage;
 }
 
+export interface RunFeatureOpts {
+  onOutput?: (line: string, stream: 'stdout' | 'stderr') => void;
+}
+
 export interface ToolAdapter {
   readonly tool: Tool;
   /** Mapeia effort normalizado para a flag nativa da ferramenta. */
   effortFlag(effort: Effort): string[];
   /** Executa uma fase spec-kit para a feature com o prompt já construído. */
-  runFeature(feature: Feature, prompt: string, cwd: string): Promise<RunResult>;
+  runFeature(feature: Feature, prompt: string, cwd: string, opts?: RunFeatureOpts): Promise<RunResult>;
   /** Extrai uso de tokens do transcript, se disponível. */
   parseUsage?(transcript: string): TokenUsage | null;
 }

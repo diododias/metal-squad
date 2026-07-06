@@ -91,4 +91,34 @@ describe('notify', () => {
       JSON.stringify({ chat_id: 'chat-1', text: 'ship it' }),
     );
   });
+
+  it('subscribes to gate, run failure and budget events', async () => {
+    vi.resetModules();
+    vi.doMock('../../src/security/secrets.js', () => ({
+      getSecret: vi.fn().mockResolvedValue('bot-token'),
+    }));
+    mockLoadConfig.mockReturnValue({ telegramChatId: 'chat-1' });
+    const fetchSpy = vi.fn().mockResolvedValue({ ok: true });
+    vi.stubGlobal('fetch', fetchSpy);
+
+    const { subscribeToNotifications } = await import('../../src/core/notify/telegram.js');
+    const { bus } = await import('../../src/core/events/bus.js');
+    const cleanup = subscribeToNotifications();
+
+    bus.emit('gate:created', { gateId: 7, featureId: 'feat-07' });
+    bus.emit('run:failed', { runId: 9, error: 'boom' });
+    bus.emit('budget:alert', { percent: 80, spent: 800, limit: 1000 });
+    await vi.waitFor(() => expect(fetchSpy).toHaveBeenCalledTimes(3));
+
+    const messages = fetchSpy.mock.calls.map((call) => JSON.parse(String(call[1]?.body)).text);
+    expect(messages).toContain('metal-squad: gate 7 aguardando decisão — feature feat-07');
+    expect(messages).toContain('metal-squad: run 9 falhou — boom');
+    expect(messages).toContain('metal-squad: alerta de budget — 80% usado (800/1000 tokens)');
+
+    cleanup();
+    fetchSpy.mockClear();
+    bus.emit('gate:created', { gateId: 8, featureId: 'feat-08' });
+    await Promise.resolve();
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
 });

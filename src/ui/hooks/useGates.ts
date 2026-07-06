@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { openGates, resolveGate, type GateRow, type GateDecision } from '../../db/repo.js';
+import { bus } from '../../core/events/bus.js';
 
 export type ResolveGateFn = (id: number, decision: GateDecision) => void;
 
@@ -21,14 +22,20 @@ export function useGates(intervalMs = 2000): { gates: GateRow[]; resolve: Resolv
   }, []);
 
   useEffect(() => {
+    bus.on('gate:created', poll);
+    bus.on('gate:resolved', poll);
     const id = setInterval(poll, intervalMs);
-    return () => clearInterval(id);
+    return () => {
+      bus.off('gate:created', poll);
+      bus.off('gate:resolved', poll);
+      clearInterval(id);
+    };
   }, [intervalMs, poll]);
 
   const resolve = useCallback<ResolveGateFn>((id, decision) => {
     resolveGate(id, decision);
     poll();
-  }, [poll]);
+  }, []);
 
   return { gates, resolve };
 }
