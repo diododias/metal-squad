@@ -26,6 +26,7 @@ Atue como QA do `msq`.
 - Nao transforme uma falha do executor em sucesso via implementacao manual.
 - Nao corrija a feature alvo por conta propria para destravar testes.
 - So ajuste o harness, backlog temporario ou a propria skill quando o problema estiver claramente no fluxo de teste e nao na feature.
+- **Nao invoque `msq`, `node dist/index.js run`, `npm run dev` ou qualquer nested runner dentro de uma run ja em andamento.** "Implementado pelo msq" significa "implementado pelo agente que o msq ja spawnada", nao uma nova chamada do CLI. Recursao e sempre um defeito do prompt/harness.
 
 Se o `msq` nao conseguir concluir a implementacao sozinho, trate isso como defeito do fluxo/ferramenta ou falha de execucao a ser investigada.
 
@@ -58,6 +59,7 @@ Se o `msq` nao conseguir concluir a implementacao sozinho, trate isso como defei
    - `tool`: `claude` (default)
    - `effort`: conforme spec da feature (low/medium/high)
    - `spec`: descricao completa inline com:
+     - **Primeiro bloco obrigatorio — regras anti-recursao**: proibir explicitamente invocar `msq`, `node dist/index.js run`, `npm run dev` ou qualquer comando que dispare uma nova run do orquestrador; deixar claro que a implementacao deve acontecer diretamente no agente ja spawnado, editando arquivos e rodando testes neste checkout
      - ESCOPO detalhado com cada mudanca necessaria em cada arquivo
      - Lista de arquivos de contexto relevantes
      - CRITERIOS DE ACEITE da spec
@@ -93,6 +95,7 @@ Se o `msq` nao conseguir concluir a implementacao sozinho, trate isso como defei
    - verificar se o executor recebeu contexto suficiente
    - verificar se houve erros de prompt, harness, ambiente, timeout ou execucao
    - coletar evidencias objetivas do comportamento do `msq`
+6. **Detectar recursao**: se o `msq status` mostrar mais de uma run para a mesma feature em sequencia rapida, ou se a arvore de processos mostrar `node dist/index.js run` aninhado dentro de outro `node dist/index.js run`, encerre a execucao com `pkill -f "node dist/index.js run"` e registre como defeito em `docs/hotfixes` (veja H05). Nao deixe a recursao continuar consumindo recursos.
 
 ### 5. Validar resultado
 
