@@ -6,333 +6,164 @@ defaults:
   skills: []
 
 epics:
-  - id: epic-modern-tui
-    title: E02 — Modern TUI
+  - id: epic-orchestration-v2
+    title: E03 — Orchestration v2
     features:
-      - id: feat-07
-        title: F07 — Status Bar & Token Tracker
-        tool: codex
-        model: gpt-5.4
-        effort: low
-        skills: [implement]
-        specFile: docs/features/F07-status-bar.md
+      - id: feat-11
+        title: F11 — Retry Policies
+        tool: claude
+        model: claude-sonnet-4-6
+        effort: medium
+        skills: []
+        specFile: docs/features/F11-retry-policies.md
         context:
-          - src/ui/components/StatusBar.tsx
-          - src/ui/App.tsx
-          - src/ui/format.ts
+          - src/core/backlog/schema.ts
+          - src/core/runner/execute.ts
+          - src/core/orchestrator/scheduler.ts
+          - src/db/index.ts
           - src/db/repo.ts
-          - tests/ui/components.test.ts
-          - tests/ui/app.test.ts
+          - tests/runner/execute.test.ts
         dependsOn: []
         spec: |
-          Implemente a feature F07 — Status Bar & Token Tracker no repositório metal-squad.
+          Implemente a feature F11 — Retry Policies no repositório metal-squad.
 
-          ## Contexto
+          ## Contexto atual
 
-          A TUI já tem um componente StatusBar básico em src/ui/components/StatusBar.tsx.
-          O componente atual exibe uma linha simples com feature, tool, status, elapsed, tokens totais e gates.
-          O objetivo é enriquecer esse componente com dados de tokens (input/output separados),
-          custo estimado via pricing table, e progresso global (X/Y features concluídas).
+          O scheduler em `src/core/orchestrator/scheduler.ts` tem política fixa stop-on-fail:
+          quando uma feature falha, `failed = true` e o pipeline para imediatamente com reject.
+          Não há retry automático.
+
+          O executor em `src/core/runner/execute.ts` chama `getAdapter(feature.tool).runFeature()`
+          diretamente, sem lógica de retry. Quando `res.ok === false`, simplesmente faz
+          `finishRun(runId, 'failed', res.summary)` e emite `run:failed`.
+
+          O schema em `src/core/backlog/schema.ts` não tem campo `retry` no `FeatureSchema`.
 
           ## Mudanças necessárias por arquivo
 
+          ### src/core/backlog/schema.ts
+
+          Adicionar schema de retry e campo opcional na feature:
+
+          ```typescript
+          export const OnFailSchema = z.enum(['stop', 'continue', 'gate']);
+
+          export const RetrySchema = z.object({
+            maxAttempts: z.number().int().min(1).max(10).default(1),
+            backoffMs: z.number().int().min(0).default(5000),
+            onFail: OnFailSchema.default('stop'),
+          });
+
+          // Dentro de FeatureSchema, adicionar:
+          retry: RetrySchema.optional(),
+          ```
+
+          Exportar `OnFail`, `Retry` como tipos derivados.
+
+          ### src/db/index.ts
+
+          Adicionar tabela `retry_history` na função `migrate()`:
+
+          ```sql
+          CREATE TABLE IF NOT EXISTS retry_history (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            run_id INTEGER NOT NULL REFERENCES runs(id),
+            attempt INTEGER NOT NULL,
+            error TEXT,
+            retried_at TEXT NOT NULL DEFAULT (datetime('now'))
+          );
+          ```
+
           ### src/db/repo.ts
 
-          Adicionar `inputTokens` e `outputTokens` ao `RunSummary`:
+          Adicionar função:
 
           ```typescript
-          export interface RunSummary {
-            runId: number;
-            repoId: string;
-            featureId: string;
-            tool: 'claude' | 'codex' | 'opencode';
-            status: 'running' | 'done' | 'failed' | 'blocked';
-            startedAt: string;
-            endedAt: string | null;
-            totalTokens: number | null;
-            inputTokens: number | null;   // NOVO
-            outputTokens: number | null;  // NOVO
-            gateId: number | null;
-            gateDecision: string | null;
+          export function createRetryRecord(runId: number, attempt: number, error?: string): void {
+            getDb('readwrite')
+              .prepare(
+                `INSERT INTO retry_history (run_id, attempt, error)
+                 VALUES (?, ?, ?)`,
+              )
+              .run(runId, attempt, error ?? null);
           }
           ```
 
-          Atualizar a query SQL em `listRunsForTui` para incluir:
-          ```sql
-          r.input_tokens  AS inputTokens,
-          r.output_tokens AS outputTokens,
-          ```
-          (inserir junto dos outros campos no SELECT)
+          ### src/core/runner/execute.ts
 
-          ### src/ui/format.ts
+          Substituir a chamada direta a `getAdapter(...).runFeature()` por uma função
+          `runWithRetry(feature, prompt, opts)` que:
 
-          Adicionar pricing table e helpers de custo:
+          1. Loop de tentativas até `maxAttempts` (default 1 = sem retry):
+             ```
+             for attempt 1..maxAttempts:
+               res = await adapter.runFeature(feature, prompt, { cwd, runId })
+               if res.ok → return res
+               createRetryRecord(runId, attempt, res.summary)
+               if attempt < maxAttempts → await sleep(backoffWithJitter(backoffMs, attempt))
+             ```
+          2. Backoff exponencial com jitter:
+             ```typescript
+             function backoffWithJitter(baseMs: number, attempt: number): number {
+               const exp = Math.min(baseMs * 2 ** (attempt - 1), 60_000);
+               return exp * (0.5 + Math.random() * 0.5);
+             }
+             ```
+          3. Após esgotar tentativas, verificar `retry.onFail`:
+             - `'stop'` (default): comportamento atual — finishRun failed, emite run:failed, throw
+             - `'continue'`: finishRun failed, emite run:failed, retorna `{ ok: false, summary }` SEM throw
+             - `'gate'`: cria gate via `createGate(runId, featureId, repoId)`, finishRun blocked, emite run:failed, retorna `{ ok: false }`
+
+          Para `onFail: 'continue'`, o executor não pode lançar exceção, pois o scheduler
+          interpreta exceção como falha fatal. O scheduler precisa receber `res.ok === false`
+          e ter como decidir se para ou continua.
+
+          ### src/core/orchestrator/scheduler.ts
+
+          Atualizar a política de falha para respeitar `onFail`:
+
+          O scheduler recebe `RunResult` de `execute(f)`. Atualmente para em qualquer `!res.ok`.
+          Ajustar para:
 
           ```typescript
-          // Preços por 1M tokens (USD)
-          export const PRICING: Record<string, { input: number; output: number }> = {
-            'claude': { input: 3, output: 15 },
-            'claude-opus': { input: 15, output: 75 },
-            'claude-sonnet': { input: 3, output: 15 },
-            'claude-haiku': { input: 0.25, output: 1.25 },
-            'codex': { input: 5, output: 15 },
-            'opencode': { input: 3, output: 15 },
-          };
-
-          export function estimateCost(
-            inputTokens: number | null,
-            outputTokens: number | null,
-            tool: string,
-          ): number | null {
-            const pricing = PRICING[tool] ?? PRICING['claude'];
-            if (inputTokens === null && outputTokens === null) return null;
-            const i = inputTokens ?? 0;
-            const o = outputTokens ?? 0;
-            return (i * pricing.input + o * pricing.output) / 1_000_000;
-          }
-
-          export function formatCost(cost: number | null): string {
-            if (cost === null) return '—';
-            if (cost < 0.001) return '<$0.001';
-            return `~$${cost.toFixed(3)}`;
-          }
-
-          export function formatTokensIO(
-            input: number | null,
-            output: number | null,
-          ): string {
-            if (input === null && output === null) return '—';
-            const i = input !== null ? formatTokens(input) : '?';
-            const o = output !== null ? formatTokens(output) : '?';
-            return `${i}in/${o}out`;
-          }
+          .then((res) => {
+            active--;
+            opts.onDone?.(f, res);
+            if (!res.ok) {
+              const policy = f.retry?.onFail ?? 'stop';
+              if (policy === 'stop') {
+                failed = true;
+                return reject(new Error(`Feature ${f.id} falhou: ${res.summary}`));
+              }
+              // 'continue' ou 'gate': marca como done para desbloquear dependentes
+              done.add(f.id);
+              pump();
+              return;
+            }
+            done.add(f.id);
+            pump();
+          })
           ```
 
-          ### src/ui/components/StatusBar.tsx
+          ### tests/runner/execute.test.ts
 
-          Atualizar Props para incluir os novos campos:
+          Adicionar testes para:
+          - Feature sem `retry` usa comportamento atual (stop-on-fail, 1 tentativa)
+          - Feature com `retry.maxAttempts: 3` tenta 3 vezes antes de falhar
+          - Feature com `retry.onFail: 'continue'` não lança exceção, pipeline continua
+          - `backoffWithJitter` retorna valor no intervalo esperado
 
-          ```typescript
-          interface Props {
-            selectedRun: RunSummary | null;
-            selectedFeature: FeatureCatalogEntry | null;
-            gateCount: number;
-            totalRuns: number;
-            doneRuns: number;
-            width: number;
-          }
-          ```
-
-          Atualizar o corpo do componente para usar `formatTokensIO`, `estimateCost`, `formatCost`
-          e mostrar progresso global:
-
-          Formato quando há run selecionada:
-          `▶ feat-01 | claude | 12.3in/3.2out | 2m34s | ~$0.04 | 2/5 done`
-
-          Formato idle:
-          `Idle | 0/3 done | N gates open`
-
-          Ajustar truncateText para o width disponível.
-
-          ### src/ui/App.tsx
-
-          Calcular `doneRuns` e `totalRuns` antes do return:
-          ```typescript
-          const totalRuns = runs.length;
-          const doneRuns = runs.filter(r => r.status === 'done').length;
-          ```
-
-          Passar os novos props ao StatusBar:
-          ```tsx
-          <StatusBar
-            selectedRun={selectedRun}
-            selectedFeature={selectedFeature}
-            gateCount={gates.length}
-            totalRuns={totalRuns}
-            doneRuns={doneRuns}
-            width={width}
-          />
-          ```
-
-          ## Testes
-
-          ### tests/ui/components.test.ts
-
-          Atualizar todos os casos de `StatusBar` para passar os novos props `totalRuns` e `doneRuns`.
-          Adicionar casos que verificam:
-          - exibição de custo estimado quando inputTokens e outputTokens estão presentes no selectedRun
-          - exibição de progresso "2/5 done"
-          - formato idle com progresso
-
-          ### tests/ui/app.test.ts
-
-          Verificar que o App passa totalRuns e doneRuns para StatusBar sem erros de tipo.
-          (Os testes existentes do App devem continuar passando.)
+          Use o padrão de mock já estabelecido no arquivo (vi.fn(), adapters mockados).
 
           ## Critérios de aceite
 
-          - RunSummary inclui inputTokens e outputTokens.
-          - listRunsForTui retorna esses campos via SQL.
-          - format.ts exporta PRICING, estimateCost, formatCost, formatTokensIO.
-          - StatusBar exibe tokens (in/out), custo estimado e progresso global.
-          - App calcula e passa totalRuns e doneRuns ao StatusBar.
-          - Todos os testes passam: npx vitest run
-          - Sem erros de tipo: npx tsc --noEmit
-        tasks: []
-
-      - id: feat-05
-        title: F05 — Layout Multi-Painel
-        tool: codex
-        model: gpt-5.4
-        effort: high
-        skills: [implement, test]
-        specFile: docs/features/F05-layout-multi-panel.md
-        context:
-          - docs/epics/E02-modern-tui.md
-          - docs/features/F07-status-bar.md
-          - docs/features/F08-session-navigation.md
-          - docs/features/F09-command-palette.md
-          - docs/features/F24-task-stage-progress.md
-          - src/commands/ui.ts
-          - src/ui/App.tsx
-          - src/ui/components/MainPanel.tsx
-          - src/ui/components/Sidebar.tsx
-          - src/ui/components/StatusBar.tsx
-          - src/ui/components/CommandBar.tsx
-          - src/ui/hooks/useRuns.ts
-          - src/ui/hooks/useGates.ts
-          - tests/ui/app.test.ts
-          - tests/ui/components.test.ts
-        dependsOn: []
-        spec: |
-          Desenvolva a feature F05 — Layout Multi-Painel usando Codex como executor e o modelo gpt-5.4.
-
-          Fluxo obrigatório:
-          1. Refine a spec executável da feature se necessário.
-          2. Implemente o novo shell da TUI diretamente neste checkout.
-          3. Atualize os testes da UI e valide a responsividade por largura de terminal.
-          4. Rode testes e typecheck ao final.
-
-          Escopo funcional:
-          - Introduzir layout multi-painel com painel principal, sidebar, status bar e command bar.
-          - Tornar a TUI responsiva para larguras <80, 80-119 e >=120 colunas.
-          - Adicionar navegação por teclado entre painéis com foco explícito e seleção de run.
-          - Mostrar contexto útil do run selecionado mesmo antes do log streaming da F06.
-          - Exibir skills declaradas do feature selecionado usando o backlog atual como metadado.
-          - Preservar o comportamento existente de gates e quit.
-          - Cobrir o novo contrato do App e dos componentes em testes automatizados.
-
-          Criterios de aceite:
-          - Existe layout multi-painel com sidebar + main + status bar + command bar.
-          - A TUI reage a larguras pequenas, médias e grandes.
-          - A navegação por Tab, setas/j/k, Enter e Esc funciona no App.
-          - O painel principal mostra overview ou detalhe contextual do run selecionado.
-          - Testes automatizados e typecheck passam ao final.
-        tasks: []
-
-  - id: epic-skills-system
-    title: E01 — Skills System
-    features:
-      - id: feat-03
-        title: F03 — Dynamic Prompt Builder
-        tool: codex
-        model: gpt-5.4
-        effort: medium
-        skills: [implement, test]
-        specFile: docs/features/F03-dynamic-prompt-builder.md
-        context:
-          - docs/epics/E01-skills-system.md
-          - docs/features/F01-yaml-schema-v2.md
-          - docs/features/F02-skill-registry.md
-          - docs/features/F03-dynamic-prompt-builder.md
-          - src/core/backlog/prompt.ts
-          - src/core/runner/execute.ts
-          - src/core/skills/builtin.ts
-          - src/core/skills/registry.ts
-          - tests/backlog/load-prompt.test.ts
-          - tests/runner/execute.test.ts
-        dependsOn:
-          - feat-02
-        spec: |
-          Desenvolva a feature F03 — Dynamic Prompt Builder usando Codex como executor e o modelo gpt-5.4.
-
-          Escopo funcional:
-          - Substituir de vez o fluxo hardcoded de prompt spec-kit por um builder dinâmico baseado nas skills declaradas.
-          - Renderizar skills em ordem, com placeholders para resumo da feature, spec detalhada, arquivos de contexto e tarefas.
-          - Injetar `specFile`, `context` e dados de `tasks`/`taskFile` no prompt final quando disponíveis.
-          - Respeitar `metadata.inputs` de cada skill para controle granular de contexto.
-          - Aplicar limite configurável de contexto para evitar prompts excessivos.
-          - Manter fallback compatível para `implement` quando nenhuma skill for resolvida.
-
-          Critérios de aceite:
-          - `buildPrompt` é a única rota de construção de prompt em runtime.
-          - Conteúdo de `spec`, `specFile`, `context` e `taskFile` pode ser incluído no prompt.
-          - Skills são renderizadas na ordem declarada.
-          - O runner passa um prompt pronto aos adapters.
-          - Existe cobertura automatizada para inputs filtrados, tarefas e truncamento de contexto.
-        tasks: []
-      - id: feat-02
-        title: F02 — Skill Registry & Discovery
-        tool: codex
-        model: gpt-5.4
-        effort: medium
-        skills: [specify, plan, tasks, implement]
-        specFile: docs/features/F02-skill-registry.md
-        context:
-          - docs/epics/E01-skills-system.md
-          - docs/features/F01-yaml-schema-v2.md
-          - docs/features/F02-skill-registry.md
-          - docs/features/F03-dynamic-prompt-builder.md
-          - src/commands/init.ts
-          - src/commands/run.ts
-          - src/core/backlog/load.ts
-          - src/core/backlog/prompt.ts
-          - src/core/backlog/schema.ts
-          - src/core/adapters/index.ts
-          - tests/backlog/schema.test.ts
-        dependsOn: []
-        spec: |
-          Desenvolva a feature F02 — Skill Registry & Discovery usando Codex como executor e o modelo gpt-5.4.
-
-          Fluxo obrigatório:
-          1. Rode /speckit-specify se precisar refinar a spec executável desta feature no repositório.
-          2. Rode /speckit-plan para definir a abordagem técnica.
-          3. Rode /speckit-tasks para gerar ou ajustar tarefas executáveis.
-          4. Rode /speckit-implement para executar a implementação completa.
-
-          Escopo funcional:
-          - Introduzir um módulo dedicado para skills em src/core/skills/ com tipos, descoberta, resolução e validação.
-          - Implementar descoberta das quatro fontes exigidas pela spec:
-            - built-in do msq
-            - repo-level em .msq/skills/<name>/
-            - global em ~/.config/metal-squad/skills/<name>/
-            - external/spec-kit quando .specify/ ou .agents/skills/speckit-* existirem
-          - Cada skill descoberta precisa expor nome, source, promptTemplate e metadata básica.
-          - Aceitar diretórios com SKILL.md e metadata.yaml, tratando metadata ausente com defaults razoáveis.
-          - Validar as skills declaradas em feature/task/defaults durante msq run e falhar cedo com mensagem clara quando houver skill faltante.
-          - Adicionar um comando CLI msq skills para listar as skills disponíveis com fonte e descrição.
-          - Manter compatibilidade com o schema v2 já existente e preparar base para o prompt builder dinâmico da F03 sem acoplamento extra desnecessário.
-
-          Mudanças esperadas por área:
-          - CLI:
-            - adicionar comando dedicado para listar skills
-            - integrar a validação de skills ao fluxo de run
-          - Core/backlog:
-            - resolver skills referenciadas no backlog antes da execução
-            - reaproveitar defaults já propagados pelo loader
-          - Core/skills:
-            - criar registry com discover(cwd), resolve(names, cwd) e validate(names, cwd)
-            - modelar built-ins mínimos como implement, review e test
-            - detectar skills do spec-kit derivando nomes a partir de .agents/skills/speckit-* e/ou .specify
-          - Testes:
-            - cobrir descoberta por fonte
-            - cobrir validação com skill faltante
-            - cobrir listagem/saída do novo comando quando viável
-
-          Critérios de aceite:
-          - Registry descobre skills de builtin, repo, global e external.
-          - msq skills lista skills disponíveis com fonte e descrição.
-          - msq run acusa skill inexistente antes de tentar executar o adapter.
-          - Skills spec-kit são detectadas automaticamente quando o repositório contém .specify/ ou .agents/skills/speckit-*.
-          - Testes automatizados e typecheck passam ao final.
+          - [ ] `FeatureSchema` aceita campo `retry` com `maxAttempts`, `backoffMs`, `onFail`
+          - [ ] Tabela `retry_history` criada no SQLite
+          - [ ] Tentativas registradas em `retry_history` após cada falha não-final
+          - [ ] `onFail: 'stop'` mantém comportamento atual (para tudo)
+          - [ ] `onFail: 'continue'` registra falha e avança pipeline
+          - [ ] `onFail: 'gate'` cria gate de aprovação humana
+          - [ ] Backoff exponencial com jitter entre tentativas
+          - [ ] Todos os testes passam: npx vitest run
+          - [ ] Sem erros de tipo: npx tsc --noEmit
         tasks: []
