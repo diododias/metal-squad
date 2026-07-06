@@ -5,15 +5,27 @@ import type { NotificationChannel } from './types.js';
 export class TelegramChannel implements NotificationChannel {
   readonly name = 'telegram';
 
-  constructor(private readonly chatId: string) {}
+  constructor(
+    private readonly chatId: string,
+    private readonly forumTopicId?: number,
+  ) {}
 
   async send(message: string): Promise<void> {
     const token = await getSecret('telegram-bot-token');
     if (!token) return;
+
+    const body: Record<string, unknown> = {
+      chat_id: this.chatId,
+      text: message,
+    };
+    if (this.forumTopicId !== undefined) {
+      body.message_thread_id = this.forumTopicId;
+    }
+
     await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ chat_id: this.chatId, text: message }),
+      body: JSON.stringify(body),
     });
   }
 }

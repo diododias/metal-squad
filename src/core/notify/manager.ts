@@ -11,7 +11,7 @@ function buildChannels(): NotificationChannel[] {
   const { notifications } = loadConfig();
   return notifications.channels.map((cfg) => {
     switch (cfg.type) {
-      case 'telegram': return new TelegramChannel(cfg.chatId);
+      case 'telegram': return new TelegramChannel(cfg.chatId, cfg.forumTopicId);
       case 'slack':    return new SlackChannel(cfg.webhookUrl);
       case 'discord':  return new DiscordChannel(cfg.webhookUrl);
       case 'webhook':  return new WebhookChannel(cfg.url);

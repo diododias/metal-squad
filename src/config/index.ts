@@ -14,7 +14,7 @@ export const DB_PATH = resolveDbPath();
 export const NOTIFICABLE_EVENTS = ['gate:created', 'run:failed', 'budget:alert', 'run:done'] as const;
 export type NotificableEvent = (typeof NOTIFICABLE_EVENTS)[number];
 
-const TelegramChannelConfig = z.object({ type: z.literal('telegram'), chatId: z.string() });
+const TelegramChannelConfig = z.object({ type: z.literal('telegram'), chatId: z.string(), forumTopicId: z.number().int().positive().optional() });
 const SlackChannelConfig = z.object({ type: z.literal('slack'), webhookUrl: z.string() });
 const DiscordChannelConfig = z.object({ type: z.literal('discord'), webhookUrl: z.string() });
 const WebhookChannelConfig = z.object({ type: z.literal('webhook'), url: z.string() });
