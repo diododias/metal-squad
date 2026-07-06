@@ -9,6 +9,177 @@ epics:
   - id: epic-modern-tui
     title: E02 — Modern TUI
     features:
+      - id: feat-07
+        title: F07 — Status Bar & Token Tracker
+        tool: codex
+        model: gpt-5.4
+        effort: low
+        skills: [implement]
+        specFile: docs/features/F07-status-bar.md
+        context:
+          - src/ui/components/StatusBar.tsx
+          - src/ui/App.tsx
+          - src/ui/format.ts
+          - src/db/repo.ts
+          - tests/ui/components.test.ts
+          - tests/ui/app.test.ts
+        dependsOn: []
+        spec: |
+          Implemente a feature F07 — Status Bar & Token Tracker no repositório metal-squad.
+
+          ## Contexto
+
+          A TUI já tem um componente StatusBar básico em src/ui/components/StatusBar.tsx.
+          O componente atual exibe uma linha simples com feature, tool, status, elapsed, tokens totais e gates.
+          O objetivo é enriquecer esse componente com dados de tokens (input/output separados),
+          custo estimado via pricing table, e progresso global (X/Y features concluídas).
+
+          ## Mudanças necessárias por arquivo
+
+          ### src/db/repo.ts
+
+          Adicionar `inputTokens` e `outputTokens` ao `RunSummary`:
+
+          ```typescript
+          export interface RunSummary {
+            runId: number;
+            repoId: string;
+            featureId: string;
+            tool: 'claude' | 'codex' | 'opencode';
+            status: 'running' | 'done' | 'failed' | 'blocked';
+            startedAt: string;
+            endedAt: string | null;
+            totalTokens: number | null;
+            inputTokens: number | null;   // NOVO
+            outputTokens: number | null;  // NOVO
+            gateId: number | null;
+            gateDecision: string | null;
+          }
+          ```
+
+          Atualizar a query SQL em `listRunsForTui` para incluir:
+          ```sql
+          r.input_tokens  AS inputTokens,
+          r.output_tokens AS outputTokens,
+          ```
+          (inserir junto dos outros campos no SELECT)
+
+          ### src/ui/format.ts
+
+          Adicionar pricing table e helpers de custo:
+
+          ```typescript
+          // Preços por 1M tokens (USD)
+          export const PRICING: Record<string, { input: number; output: number }> = {
+            'claude': { input: 3, output: 15 },
+            'claude-opus': { input: 15, output: 75 },
+            'claude-sonnet': { input: 3, output: 15 },
+            'claude-haiku': { input: 0.25, output: 1.25 },
+            'codex': { input: 5, output: 15 },
+            'opencode': { input: 3, output: 15 },
+          };
+
+          export function estimateCost(
+            inputTokens: number | null,
+            outputTokens: number | null,
+            tool: string,
+          ): number | null {
+            const pricing = PRICING[tool] ?? PRICING['claude'];
+            if (inputTokens === null && outputTokens === null) return null;
+            const i = inputTokens ?? 0;
+            const o = outputTokens ?? 0;
+            return (i * pricing.input + o * pricing.output) / 1_000_000;
+          }
+
+          export function formatCost(cost: number | null): string {
+            if (cost === null) return '—';
+            if (cost < 0.001) return '<$0.001';
+            return `~$${cost.toFixed(3)}`;
+          }
+
+          export function formatTokensIO(
+            input: number | null,
+            output: number | null,
+          ): string {
+            if (input === null && output === null) return '—';
+            const i = input !== null ? formatTokens(input) : '?';
+            const o = output !== null ? formatTokens(output) : '?';
+            return `${i}in/${o}out`;
+          }
+          ```
+
+          ### src/ui/components/StatusBar.tsx
+
+          Atualizar Props para incluir os novos campos:
+
+          ```typescript
+          interface Props {
+            selectedRun: RunSummary | null;
+            selectedFeature: FeatureCatalogEntry | null;
+            gateCount: number;
+            totalRuns: number;
+            doneRuns: number;
+            width: number;
+          }
+          ```
+
+          Atualizar o corpo do componente para usar `formatTokensIO`, `estimateCost`, `formatCost`
+          e mostrar progresso global:
+
+          Formato quando há run selecionada:
+          `▶ feat-01 | claude | 12.3in/3.2out | 2m34s | ~$0.04 | 2/5 done`
+
+          Formato idle:
+          `Idle | 0/3 done | N gates open`
+
+          Ajustar truncateText para o width disponível.
+
+          ### src/ui/App.tsx
+
+          Calcular `doneRuns` e `totalRuns` antes do return:
+          ```typescript
+          const totalRuns = runs.length;
+          const doneRuns = runs.filter(r => r.status === 'done').length;
+          ```
+
+          Passar os novos props ao StatusBar:
+          ```tsx
+          <StatusBar
+            selectedRun={selectedRun}
+            selectedFeature={selectedFeature}
+            gateCount={gates.length}
+            totalRuns={totalRuns}
+            doneRuns={doneRuns}
+            width={width}
+          />
+          ```
+
+          ## Testes
+
+          ### tests/ui/components.test.ts
+
+          Atualizar todos os casos de `StatusBar` para passar os novos props `totalRuns` e `doneRuns`.
+          Adicionar casos que verificam:
+          - exibição de custo estimado quando inputTokens e outputTokens estão presentes no selectedRun
+          - exibição de progresso "2/5 done"
+          - formato idle com progresso
+
+          ### tests/ui/app.test.ts
+
+          Verificar que o App passa totalRuns e doneRuns para StatusBar sem erros de tipo.
+          (Os testes existentes do App devem continuar passando.)
+
+          ## Critérios de aceite
+
+          - RunSummary inclui inputTokens e outputTokens.
+          - listRunsForTui retorna esses campos via SQL.
+          - format.ts exporta PRICING, estimateCost, formatCost, formatTokensIO.
+          - StatusBar exibe tokens (in/out), custo estimado e progresso global.
+          - App calcula e passa totalRuns e doneRuns ao StatusBar.
+          - Todos os testes passam: npx vitest run
+          - Sem erros de tipo: npx tsc --noEmit
+        tasks: []
+
       - id: feat-05
         title: F05 — Layout Multi-Painel
         tool: codex

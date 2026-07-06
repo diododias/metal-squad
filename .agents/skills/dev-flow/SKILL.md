@@ -1,3 +1,8 @@
+---
+name: "dev-flow"
+description: "Fluxo de desenvolvimento padrão: do worktree ao PR aberto."
+---
+
 # Skill: Fluxo de desenvolvimento
 
 Fluxo padrão de uma task: do worktree ao PR aberto. **Não mergeia** — humano fecha.

@@ -51,6 +51,8 @@ export function App(): React.ReactElement {
   const activeView: ActiveView = selectedRun ? ui.activeView : 'overview';
   const featureCatalog = getFeatureCatalog();
   const selectedFeature = selectedRun ? featureCatalog[selectedRun.featureId] ?? null : null;
+  const totalRuns = runs.length;
+  const doneRuns = runs.filter((r) => r.status === 'done').length;
   const sidebarWidth = layoutMode === 'full' ? 34 : layoutMode === 'compact' ? 28 : width - 2;
   const mainWidth = layoutMode === 'stacked' ? width - 2 : Math.max(38, width - sidebarWidth - 5);
 
@@ -160,6 +162,8 @@ export function App(): React.ReactElement {
         selectedRun={selectedRun}
         selectedFeature={selectedFeature}
         gateCount={gates.length}
+        totalRuns={totalRuns}
+        doneRuns={doneRuns}
         width={width}
       />
       <CommandBar
