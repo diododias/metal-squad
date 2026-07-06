@@ -3,6 +3,143 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
+describe('buildPrompt — dynamic skill-based prompt builder', () => {
+  let cwd = '';
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+    if (cwd) rmSync(cwd, { recursive: true, force: true });
+    cwd = '';
+  });
+
+  it('renders skill templates in order and joins with separator', async () => {
+    const { buildPrompt } = await import('../../src/core/backlog/prompt.js');
+    const skills = [
+      {
+        name: 'a',
+        source: 'builtin' as const,
+        promptTemplate: 'Step A for {{featureId}}',
+        metadata: { description: 'A' },
+      },
+      {
+        name: 'b',
+        source: 'builtin' as const,
+        promptTemplate: 'Step B for {{featureTitle}}',
+        metadata: { description: 'B' },
+      },
+    ];
+    const prompt = buildPrompt(
+      { id: 'feat-1', title: 'My Feature', tool: 'claude', effort: 'medium', dependsOn: [], tasks: [] },
+      skills,
+    );
+
+    expect(prompt).toBe('Step A for feat-1\n\n---\n\nStep B for My Feature');
+  });
+
+  it('injects specFile content via {{spec}} placeholder', async () => {
+    cwd = mkdtempSync(join(tmpdir(), 'msq-buildprompt-'));
+    mkdirSync(join(cwd, 'specs'));
+    writeFileSync(join(cwd, 'specs', 'f.md'), 'The spec content');
+
+    const { buildPrompt } = await import('../../src/core/backlog/prompt.js');
+    const skills = [
+      {
+        name: 'implement',
+        source: 'builtin' as const,
+        promptTemplate: 'Implement: {{featureId}}{{spec}}',
+        metadata: { description: 'impl' },
+      },
+    ];
+    const prompt = buildPrompt(
+      { id: 'f1', title: 'F', specFile: 'specs/f.md', tool: 'claude', effort: 'medium', dependsOn: [], tasks: [] },
+      skills,
+      cwd,
+    );
+
+    expect(prompt).toContain('Implement: f1');
+    expect(prompt).toContain('The spec content');
+  });
+
+  it('injects context files via {{context}} placeholder, skips missing files', async () => {
+    cwd = mkdtempSync(join(tmpdir(), 'msq-buildprompt-'));
+    mkdirSync(join(cwd, 'ctx'));
+    writeFileSync(join(cwd, 'ctx', 'a.md'), 'Context A');
+
+    const { buildPrompt } = await import('../../src/core/backlog/prompt.js');
+    const skills = [
+      {
+        name: 'implement',
+        source: 'builtin' as const,
+        promptTemplate: 'Go{{context}}',
+        metadata: { description: 'impl' },
+      },
+    ];
+    const prompt = buildPrompt(
+      {
+        id: 'f1',
+        title: 'F',
+        context: ['ctx/a.md', 'ctx/missing.md'],
+        tool: 'claude',
+        effort: 'medium',
+        dependsOn: [],
+        tasks: [],
+      },
+      skills,
+      cwd,
+    );
+
+    expect(prompt).toContain('--- ctx/a.md ---\nContext A');
+    expect(prompt).not.toContain('missing.md');
+  });
+
+  it('falls back to builtin implement skill when skills array is empty', async () => {
+    const { buildPrompt } = await import('../../src/core/backlog/prompt.js');
+    const prompt = buildPrompt(
+      { id: 'f1', title: 'My Feature', tool: 'claude', effort: 'medium', dependsOn: [], tasks: [] },
+      [],
+    );
+
+    expect(prompt).toContain('f1');
+    expect(prompt).toContain('My Feature');
+  });
+
+  it('respects inputs filter: specFile-only skill gets spec but not context', async () => {
+    cwd = mkdtempSync(join(tmpdir(), 'msq-buildprompt-'));
+    mkdirSync(join(cwd, 'specs'));
+    mkdirSync(join(cwd, 'ctx'));
+    writeFileSync(join(cwd, 'specs', 'f.md'), 'SPEC_DATA');
+    writeFileSync(join(cwd, 'ctx', 'c.md'), 'CTX_DATA');
+
+    const { buildPrompt } = await import('../../src/core/backlog/prompt.js');
+    const skills = [
+      {
+        name: 'spec-only',
+        source: 'builtin' as const,
+        promptTemplate: 'spec={{spec}} ctx={{context}}',
+        metadata: { description: 'test', inputs: ['specFile'] },
+      },
+    ];
+    const prompt = buildPrompt(
+      {
+        id: 'f1',
+        title: 'F',
+        specFile: 'specs/f.md',
+        context: ['ctx/c.md'],
+        tool: 'claude',
+        effort: 'medium',
+        dependsOn: [],
+        tasks: [],
+      },
+      skills,
+      cwd,
+    );
+
+    expect(prompt).toContain('SPEC_DATA');
+    expect(prompt).not.toContain('CTX_DATA');
+    expect(prompt).toContain('ctx=');
+  });
+});
+
 describe('backlog loading and prompt generation', () => {
   let cwd = '';
 
