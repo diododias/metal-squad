@@ -1,10 +1,30 @@
 # H03 — `msq run` precisa diagnosticar e contornar melhor banco global em modo somente leitura
 
 **Tipo**: Hotfix  
-**Status**: Aberto  
+**Status**: Resolvido  
 **Prioridade**: Alta  
 **Descoberto em**: 2026-07-06  
 **Comando observado**: `rtk node dist/index.js run --feature feat-15`
+
+## Resolucao
+
+Verificado em 2026-07-06 no codigo e nos testes automatizados.
+
+- `assertWritableDbPath()` agora faz preflight explicito de diretório e arquivo antes de abrir o SQLite.
+- `DbAccessError` passou a incluir o caminho do banco, causa acionavel e exemplo de override com `MSQ_DB_PATH`.
+- O comando `run` falha antes de carregar backlog ou spawnar adapter quando a persistencia nao e gravavel.
+- O override suportado por `MSQ_DB_PATH` esta coberto em teste de configuracao.
+
+## Evidencia de implementacao
+
+- `src/db/index.ts`
+- `src/commands/run.ts`
+- `src/config/index.ts`
+- `tests/db/index.test.ts`
+- `tests/commands/commands.test.ts`
+- `tests/config/index.test.ts`
+- validacao manual: `rtk npx vitest run tests/db/index.test.ts tests/config/index.test.ts tests/commands/commands.test.ts`
+- validacao manual: `rtk npx tsc --noEmit`
 
 ## Problema
 
