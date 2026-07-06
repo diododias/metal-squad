@@ -12,6 +12,7 @@ const mockRunFeature = vi.fn();
 const mockEventEmit = vi.fn();
 const mockAttachDefaultEventLogger = vi.fn();
 const mockAttachEventNotifications = vi.fn();
+const mockAttachRunPersistence = vi.fn();
 
 vi.mock('../../src/core/repo.js', () => ({
   resolveRepo: mockResolveRepo,
@@ -39,6 +40,7 @@ vi.mock('../../src/core/events/index.js', () => ({
   },
   attachDefaultEventLogger: mockAttachDefaultEventLogger,
   attachEventNotifications: mockAttachEventNotifications,
+  attachRunPersistence: mockAttachRunPersistence,
 }));
 
 vi.mock('../../src/config/index.js', () => ({
@@ -57,10 +59,12 @@ beforeEach(() => {
   mockEventEmit.mockReset();
   mockAttachDefaultEventLogger.mockReset();
   mockAttachEventNotifications.mockReset();
+  mockAttachRunPersistence.mockReset();
   mockResolveRepo.mockReturnValue({ repoId: 'repo-1', path: '/repo' });
   mockCreateRun.mockReturnValue(7);
   mockAttachDefaultEventLogger.mockReturnValue(vi.fn());
   mockAttachEventNotifications.mockReturnValue(vi.fn());
+  mockAttachRunPersistence.mockReturnValue(vi.fn());
 });
 
 describe('executeBacklog failure persistence', () => {
@@ -115,6 +119,7 @@ describe('executeBacklog failure persistence', () => {
     );
     expect(mockAttachDefaultEventLogger).toHaveBeenCalled();
     expect(mockAttachEventNotifications).toHaveBeenCalled();
+    expect(mockAttachRunPersistence).toHaveBeenCalled();
     expect(mockEventEmit).toHaveBeenCalledWith('run:start', {
       runId: 7,
       featureId: 'feat-02',

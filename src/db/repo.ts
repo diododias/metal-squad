@@ -3,6 +3,7 @@ import { getDb } from './index.js';
 import type { TokenUsage } from '../core/adapters/types.js';
 import { resolveDbPath } from '../config/index.js';
 import { msqEventBus } from '../core/events/index.js';
+import type { OutputSource, OutputStream, RunOutputEvent, TokensUpdateEvent } from '../core/events/types.js';
 
 export function registerRepo(repoId: string, path: string): void {
   getDb('readwrite')
@@ -39,9 +40,64 @@ export function cleanupStaleRuns(olderThanMinutes: number): number {
 }
 
 export function recordUsage(runId: number, usage: TokenUsage): void {
+  updateRunUsage(runId, usage);
   getDb('readwrite')
     .prepare(`INSERT INTO token_usage (run_id, input, output, total) VALUES (?, ?, ?, ?)`)
     .run(runId, usage.input, usage.output, usage.total);
+}
+
+export function updateRunUsage(runId: number, usage: TokenUsage | TokensUpdateEvent): void {
+  getDb('readwrite')
+    .prepare(
+      `UPDATE runs
+       SET input_tokens = ?, output_tokens = ?, total_tokens = ?
+       WHERE id = ?`,
+    )
+    .run(usage.input, usage.output, usage.total, runId);
+}
+
+export interface RunOutputRow {
+  id: number;
+  runId: number;
+  featureId: string;
+  tool: string;
+  stream: OutputStream;
+  source: OutputSource;
+  line: string;
+  createdAt: string;
+}
+
+export function appendRunOutput(event: RunOutputEvent): void {
+  getDb('readwrite')
+    .prepare(
+      `INSERT INTO run_output (run_id, feature_id, tool, stream, source, line)
+       VALUES (?, ?, ?, ?, ?, ?)`,
+    )
+    .run(
+      event.runId,
+      event.featureId ?? '',
+      event.tool ?? 'tool',
+      event.stream,
+      event.source ?? event.stream,
+      event.line,
+    );
+}
+
+export function listRunOutput(runId: number, limit = 120): RunOutputRow[] {
+  if (!hasDbFile()) return [];
+  return getDb('readonly')
+    .prepare(
+      `SELECT id, run_id AS runId, feature_id AS featureId, tool, stream, source, line, created_at AS createdAt
+       FROM (
+         SELECT *
+         FROM run_output
+         WHERE run_id = ?
+         ORDER BY id DESC
+         LIMIT ?
+       ) recent
+       ORDER BY id ASC`,
+    )
+    .all(runId, limit) as RunOutputRow[];
 }
 
 export interface RunRow {
@@ -101,7 +157,7 @@ export function listRunsForTui(limit = 50): RunSummary[] {
          r.status,
          r.started_at  AS startedAt,
          r.ended_at    AS endedAt,
-         u.total       AS totalTokens,
+         COALESCE(r.total_tokens, u.total) AS totalTokens,
          g.id          AS gateId,
          g.decision    AS gateDecision
        FROM runs r

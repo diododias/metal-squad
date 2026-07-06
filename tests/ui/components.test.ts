@@ -151,6 +151,17 @@ describe('ui components', () => {
       selectedRun: runs[0] ?? null,
       selectedFeature,
       activeView: 'run',
+      output: [{
+        id: 1,
+        runId: 1,
+        featureId: 'feat-1',
+        tool: 'codex',
+        stream: 'stdout',
+        source: 'agent',
+        line: 'Atualizando shell da TUI.',
+        createdAt: '2026-07-06T10:01:31Z',
+      }],
+      outputPaused: false,
       mode: 'full',
       width: 72,
     }))).toBe(true);

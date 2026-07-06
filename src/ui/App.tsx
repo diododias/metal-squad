@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { Box, Text, useInput } from 'ink';
 import { useRuns } from './hooks/useRuns.js';
 import { useGates } from './hooks/useGates.js';
+import { useRunOutput } from './hooks/useRunOutput.js';
 import { useTerminalWidth } from './hooks/useTerminalWidth.js';
 import { getFeatureCatalog } from './catalog.js';
 import { CommandBar } from './components/CommandBar.js';
@@ -18,6 +19,7 @@ interface UiState {
   selectedGate: number;
   focusPanel: FocusPanel;
   activeView: ActiveView;
+  outputPaused: boolean;
 }
 
 function clampIndex(index: number, size: number): number {
@@ -34,6 +36,7 @@ export function App(): React.ReactElement {
     selectedGate: 0,
     focusPanel: 'runs',
     activeView: 'overview',
+    outputPaused: false,
   });
   const layoutMode = getLayoutMode(width);
   const selectedRunIndex = clampIndex(ui.selectedRun, runs.length);
@@ -41,6 +44,10 @@ export function App(): React.ReactElement {
   const focusOrder: FocusPanel[] = gates.length > 0 ? ['runs', 'gates', 'main'] : ['runs', 'main'];
   const focusPanel = ui.focusPanel === 'gates' && gates.length === 0 ? 'runs' : ui.focusPanel;
   const selectedRun = runs[selectedRunIndex] ?? null;
+  const liveOutput = useRunOutput(
+    selectedRun ? selectedRun.runId : null,
+    ui.outputPaused ? 1_500 : 350,
+  );
   const activeView: ActiveView = selectedRun ? ui.activeView : 'overview';
   const featureCatalog = getFeatureCatalog();
   const selectedFeature = selectedRun ? featureCatalog[selectedRun.featureId] ?? null : null;
@@ -61,7 +68,12 @@ export function App(): React.ReactElement {
     }
 
     if (key.escape) {
-      setUi((current) => ({ ...current, activeView: 'overview', focusPanel: 'runs' }));
+      setUi((current) => ({ ...current, activeView: 'overview', focusPanel: 'runs', outputPaused: false }));
+      return;
+    }
+
+    if (key.ctrl && _input.toLowerCase() === 's' && selectedRun && activeView === 'run') {
+      setUi((current) => ({ ...current, outputPaused: !current.outputPaused }));
       return;
     }
 
@@ -128,6 +140,8 @@ export function App(): React.ReactElement {
           selectedRun={selectedRun}
           selectedFeature={selectedFeature}
           activeView={activeView}
+          output={liveOutput}
+          outputPaused={ui.outputPaused}
           mode={layoutMode}
           width={mainWidth}
         />

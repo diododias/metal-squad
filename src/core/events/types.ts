@@ -3,7 +3,7 @@ import type { RunResult } from '../adapters/types.js';
 
 export type GateDecision = 'approved' | 'skipped' | 'retried';
 export type OutputStream = 'stdout' | 'stderr';
-export type OutputSource = 'stdout' | 'stderr' | 'agent' | 'heartbeat';
+export type OutputSource = 'stdout' | 'stderr' | 'agent' | 'tool' | 'heartbeat';
 
 export interface RunStartEvent {
   runId: number;

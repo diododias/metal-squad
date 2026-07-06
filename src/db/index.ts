@@ -110,7 +110,10 @@ function migrate(d: Database.Database): void {
       tool       TEXT NOT NULL,
       status     TEXT NOT NULL DEFAULT 'running',
       started_at TEXT NOT NULL DEFAULT (datetime('now')),
-      ended_at   TEXT
+      ended_at   TEXT,
+      input_tokens INTEGER,
+      output_tokens INTEGER,
+      total_tokens INTEGER
     );
 
     CREATE TABLE IF NOT EXISTS token_usage (
@@ -130,6 +133,17 @@ function migrate(d: Database.Database): void {
       resolved_at TEXT,
       decision    TEXT
     );
+
+    CREATE TABLE IF NOT EXISTS run_output (
+      id         INTEGER PRIMARY KEY AUTOINCREMENT,
+      run_id     INTEGER NOT NULL REFERENCES runs(id),
+      feature_id TEXT NOT NULL,
+      tool       TEXT NOT NULL,
+      stream     TEXT NOT NULL,
+      source     TEXT NOT NULL,
+      line       TEXT NOT NULL,
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
   `);
 
   const runColumns = (d
@@ -138,6 +152,18 @@ function migrate(d: Database.Database): void {
   const hasSummary = runColumns.some((column) => column.name === 'summary');
   if (!hasSummary) {
     d.exec(`ALTER TABLE runs ADD COLUMN summary TEXT`);
+  }
+  const hasInputTokens = runColumns.some((column) => column.name === 'input_tokens');
+  if (!hasInputTokens) {
+    d.exec(`ALTER TABLE runs ADD COLUMN input_tokens INTEGER`);
+  }
+  const hasOutputTokens = runColumns.some((column) => column.name === 'output_tokens');
+  if (!hasOutputTokens) {
+    d.exec(`ALTER TABLE runs ADD COLUMN output_tokens INTEGER`);
+  }
+  const hasTotalTokens = runColumns.some((column) => column.name === 'total_tokens');
+  if (!hasTotalTokens) {
+    d.exec(`ALTER TABLE runs ADD COLUMN total_tokens INTEGER`);
   }
 }
 
