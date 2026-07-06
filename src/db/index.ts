@@ -49,4 +49,12 @@ function migrate(d: Database.Database): void {
       decision    TEXT
     );
   `);
+
+  const runColumns = (d
+    .prepare(`PRAGMA table_info(runs)`)
+    .all() ?? []) as Array<{ name?: string }>;
+  const hasSummary = runColumns.some((column) => column.name === 'summary');
+  if (!hasSummary) {
+    d.exec(`ALTER TABLE runs ADD COLUMN summary TEXT`);
+  }
 }

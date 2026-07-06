@@ -20,6 +20,7 @@ export function registerStatus(program: Command): void {
           status: r.status,
           tokens: r.total ?? '-',
           started: r.started_at,
+          summary: r.summary ? r.summary.slice(0, 120) : '-',
         })),
       );
     });
