@@ -5,8 +5,12 @@ import { BACKLOG_FILE } from '../core/backlog/load.js';
 import { resolveRepo } from '../core/repo.js';
 import { registerRepo } from '../db/repo.js';
 
-const TEMPLATE = (repo: string): string => `version: 1
+const TEMPLATE = (repo: string): string => `version: 2
 repo: ${repo}
+defaults:
+  tool: claude
+  effort: medium
+  skills: [implement]
 epics:
   - id: epic-1
     title: Primeiro épico
@@ -15,6 +19,7 @@ epics:
         title: Primeira feature
         tool: claude
         effort: medium
+        skills: [implement]
         dependsOn: []
         tasks: []
 `;
