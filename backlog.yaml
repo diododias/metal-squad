@@ -1,11 +1,112 @@
 version: 2
 repo: metal-squad
 defaults:
-  tool: codex
+  tool: claude
   effort: medium
-  skills: [specify, plan, tasks, implement]
+  skills: []
 
 epics:
+  - id: epic-orchestration-v2
+    title: E03 — Orchestration v2
+    features:
+      - id: feat-15
+        title: F15 — Event System
+        tool: claude
+        effort: medium
+        skills: []
+        specFile: docs/features/F15-event-system.md
+        context:
+          - docs/features/F06-log-streaming.md
+          - docs/features/F12-pause-resume-abort.md
+          - docs/features/F16-cost-dashboard.md
+          - docs/features/F19-notifications-v2.md
+          - src/commands/run.ts
+          - src/core/runner/execute.ts
+          - src/core/adapters/spawn.ts
+          - src/core/notify/telegram.ts
+          - src/db/repo.ts
+          - src/ui/App.tsx
+          - src/ui/hooks/useRuns.ts
+          - src/ui/hooks/useGates.ts
+          - tests/ui/hooks.test.ts
+          - tests/commands/commands.test.ts
+        dependsOn: []
+        spec: |
+          Valide e implemente a feature F15 — Event System dentro desta propria sessao do agente ja spawnada pelo msq. Esta skill de QA nao implementa a feature manualmente.
+
+          Regras obrigatorias para evitar recursao:
+          - Nao execute `msq`, `metal-squad`, `node dist/index.js run`, `npm run dev`, ou qualquer comando que dispare uma nova run do orquestrador.
+          - Nao invoque um novo executor para implementar esta feature.
+          - A implementacao deve ser feita diretamente pelo agente atual, editando arquivos, gerando specs/planos/tasks e rodando testes neste checkout.
+
+          Fluxo obrigatorio dentro do executor:
+          1. Refine a feature executando /speckit-specify se a spec ainda nao estiver operacional o suficiente.
+          2. Gere a abordagem tecnica com /speckit-plan.
+          3. Gere tarefas executaveis com /speckit-tasks.
+          4. Execute a implementacao com /speckit-implement no checkout atual, sem disparar nested runs.
+          5. Rode testes e typecheck ao final.
+
+          Escopo detalhado:
+          - Introduzir um event bus tipado para eventos internos do msq, cobrindo ao menos:
+            - run:start
+            - run:output
+            - run:done
+            - run:failed
+            - gate:created
+            - gate:resolved
+            - scheduler:paused
+            - scheduler:resumed
+            - budget:alert
+            - tokens:update
+          - Substituir o acoplamento atual baseado em console.log/polling por emissao e consumo de eventos.
+          - Runner:
+            - emitir run:start antes de iniciar adapter
+            - emitir run:done ou run:failed no encerramento
+            - manter persistencia no SQLite, mas publicar eventos em paralelo ao fluxo atual
+            - evitar regressao no scheduler e no fluxo --feature
+          - Spawn/Adapters:
+            - publicar linhas relevantes de stdout/stderr como run:output
+            - manter heartbeats e observabilidade existentes sem perder a nova emissao de eventos
+            - publicar atualizacoes de tokens quando houver usage
+          - TUI:
+            - parar de depender exclusivamente de polling em useRuns/useGates
+            - consumir o event bus para atualizar runs/gates em tempo real
+            - preservar comportamento atual de navegacao da App
+          - Notifications:
+            - integrar notificacoes com o event system, em especial para eventos equivalentes a gate:created e run:failed
+          - Estrutura:
+            - criar modulo dedicado e tipado para o event system
+            - manter o design preparado para futuras extensoes de F06, F12, F16 e F19
+          - Testes:
+            - adicionar cobertura automatizada para emissao/consumo de eventos no runner
+            - cobrir atualizacao reativa da TUI ou hooks equivalentes
+            - cobrir integracao minima com notificacoes/eventos quando viavel
+
+          Arquivos de contexto relevantes:
+          - docs/features/F15-event-system.md
+          - docs/features/F06-log-streaming.md
+          - docs/features/F12-pause-resume-abort.md
+          - docs/features/F16-cost-dashboard.md
+          - docs/features/F19-notifications-v2.md
+          - src/commands/run.ts
+          - src/core/runner/execute.ts
+          - src/core/adapters/spawn.ts
+          - src/core/notify/telegram.ts
+          - src/db/repo.ts
+          - src/ui/App.tsx
+          - src/ui/hooks/useRuns.ts
+          - src/ui/hooks/useGates.ts
+          - tests/ui/hooks.test.ts
+          - tests/commands/commands.test.ts
+
+          Criterios de aceite:
+          - Existe EventEmitter tipado com os eventos definidos na spec.
+          - Runner emite eventos em vez de depender apenas de console.log.
+          - TUI consome eventos em vez de depender apenas de polling no DB.
+          - Notification system usa eventos relevantes.
+          - Testes automatizados e typecheck passam ao final.
+        tasks: []
+
   - id: epic-skills-system
     title: E01 — Skills System
     features:
