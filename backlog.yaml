@@ -110,6 +110,44 @@ epics:
   - id: epic-skills-system
     title: E01 — Skills System
     features:
+      - id: feat-03
+        title: F03 — Dynamic Prompt Builder
+        tool: codex
+        model: gpt-5.4
+        effort: medium
+        skills: [implement, test]
+        specFile: docs/features/F03-dynamic-prompt-builder.md
+        context:
+          - docs/epics/E01-skills-system.md
+          - docs/features/F01-yaml-schema-v2.md
+          - docs/features/F02-skill-registry.md
+          - docs/features/F03-dynamic-prompt-builder.md
+          - src/core/backlog/prompt.ts
+          - src/core/runner/execute.ts
+          - src/core/skills/builtin.ts
+          - src/core/skills/registry.ts
+          - tests/backlog/load-prompt.test.ts
+          - tests/runner/execute.test.ts
+        dependsOn:
+          - feat-02
+        spec: |
+          Desenvolva a feature F03 — Dynamic Prompt Builder usando Codex como executor e o modelo gpt-5.4.
+
+          Escopo funcional:
+          - Substituir de vez o fluxo hardcoded de prompt spec-kit por um builder dinâmico baseado nas skills declaradas.
+          - Renderizar skills em ordem, com placeholders para resumo da feature, spec detalhada, arquivos de contexto e tarefas.
+          - Injetar `specFile`, `context` e dados de `tasks`/`taskFile` no prompt final quando disponíveis.
+          - Respeitar `metadata.inputs` de cada skill para controle granular de contexto.
+          - Aplicar limite configurável de contexto para evitar prompts excessivos.
+          - Manter fallback compatível para `implement` quando nenhuma skill for resolvida.
+
+          Critérios de aceite:
+          - `buildPrompt` é a única rota de construção de prompt em runtime.
+          - Conteúdo de `spec`, `specFile`, `context` e `taskFile` pode ser incluído no prompt.
+          - Skills são renderizadas na ordem declarada.
+          - O runner passa um prompt pronto aos adapters.
+          - Existe cobertura automatizada para inputs filtrados, tarefas e truncamento de contexto.
+        tasks: []
       - id: feat-02
         title: F02 — Skill Registry & Discovery
         tool: codex

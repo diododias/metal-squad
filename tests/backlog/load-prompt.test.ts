@@ -51,12 +51,22 @@ describe('buildPrompt — dynamic skill-based prompt builder', () => {
       },
     ];
     const prompt = buildPrompt(
-      { id: 'f1', title: 'F', specFile: 'specs/f.md', tool: 'claude', effort: 'medium', dependsOn: [], tasks: [] },
+      {
+        id: 'f1',
+        title: 'F',
+        spec: 'Short summary',
+        specFile: 'specs/f.md',
+        tool: 'claude',
+        effort: 'medium',
+        dependsOn: [],
+        tasks: [],
+      },
       skills,
       cwd,
     );
 
     expect(prompt).toContain('Implement: f1');
+    expect(prompt).toContain('Feature summary:\nShort summary');
     expect(prompt).toContain('The spec content');
   });
 
@@ -137,6 +147,79 @@ describe('buildPrompt — dynamic skill-based prompt builder', () => {
     expect(prompt).toContain('SPEC_DATA');
     expect(prompt).not.toContain('CTX_DATA');
     expect(prompt).toContain('ctx=');
+  });
+
+  it('injects task metadata and taskFile content via {{tasks}} placeholder', async () => {
+    cwd = mkdtempSync(join(tmpdir(), 'msq-buildprompt-'));
+    mkdirSync(join(cwd, 'tasks'));
+    writeFileSync(join(cwd, 'tasks', 't1.md'), 'Implement the parser');
+
+    const { buildPrompt } = await import('../../src/core/backlog/prompt.js');
+    const prompt = buildPrompt(
+      {
+        id: 'f1',
+        title: 'F',
+        tool: 'claude',
+        effort: 'medium',
+        dependsOn: [],
+        tasks: [
+          {
+            id: 'task-1',
+            title: 'Parser',
+            dependsOn: [],
+            skills: ['implement', 'test'],
+            status: 'running',
+            taskFile: 'tasks/t1.md',
+          },
+        ],
+      },
+      [
+        {
+          name: 'implement',
+          source: 'builtin' as const,
+          promptTemplate: 'Tasks:\n{{tasks}}',
+          metadata: { description: 'impl', inputs: ['tasks'] },
+        },
+      ],
+      cwd,
+    );
+
+    expect(prompt).toContain('## task-1 — Parser');
+    expect(prompt).toContain('Status: running');
+    expect(prompt).toContain('Skills: implement, test');
+    expect(prompt).toContain('--- tasks/t1.md ---\nImplement the parser');
+  });
+
+  it('truncates injected context when maxContextChars is configured', async () => {
+    cwd = mkdtempSync(join(tmpdir(), 'msq-buildprompt-'));
+    mkdirSync(join(cwd, 'ctx'));
+    writeFileSync(join(cwd, 'ctx', 'big.md'), 'A'.repeat(160));
+
+    const { buildPrompt } = await import('../../src/core/backlog/prompt.js');
+    const prompt = buildPrompt(
+      {
+        id: 'f1',
+        title: 'F',
+        context: ['ctx/big.md'],
+        tool: 'claude',
+        effort: 'medium',
+        dependsOn: [],
+        tasks: [],
+      },
+      [
+        {
+          name: 'implement',
+          source: 'builtin' as const,
+          promptTemplate: '{{context}}',
+          metadata: { description: 'impl', inputs: ['context'] },
+        },
+      ],
+      cwd,
+      { maxContextChars: 80 },
+    );
+
+    expect(prompt).toContain('[truncated to respect promptContextCharLimit]');
+    expect(prompt.length).toBeLessThan(140);
   });
 });
 
@@ -243,31 +326,30 @@ epics:
     );
   });
 
-  it('builds a prompt with optional spec and context files', async () => {
+  it('falls back to the builtin implement template when no skill resolves', async () => {
     cwd = mkdtempSync(join(tmpdir(), 'msq-prompt-'));
     mkdirSync(join(cwd, 'specs'));
     mkdirSync(join(cwd, 'context'));
     writeFileSync(join(cwd, 'specs', 'feat.md'), 'Detailed spec');
     writeFileSync(join(cwd, 'context', 'notes.md'), 'Context details');
 
-    const { buildSpecKitPrompt } = await import('../../src/core/backlog/prompt.js');
-    const prompt = buildSpecKitPrompt({
+    const { buildPrompt } = await import('../../src/core/backlog/prompt.js');
+    const prompt = buildPrompt({
       id: 'feat-1',
       title: 'Feature',
       spec: 'Short summary',
       specFile: 'specs/feat.md',
       context: ['context/notes.md', 'context/missing.md'],
-      skills: ['implement', 'test'],
+      skills: [],
       tool: 'codex',
       effort: 'medium',
       dependsOn: [],
       tasks: [],
-    }, cwd);
+    }, [], cwd);
 
-    expect(prompt).toContain('Rode o fluxo spec-kit para a feature "feat-1" (Feature).');
-    expect(prompt).toContain('Contexto adicional: Short summary');
-    expect(prompt).toContain('Spec detalhada (specs/feat.md):\nDetailed spec');
-    expect(prompt).toContain('Skills: implement, test');
+    expect(prompt).toContain('Implement feat-1 (Feature).');
+    expect(prompt).toContain('Feature summary:\nShort summary');
+    expect(prompt).toContain('--- specs/feat.md ---\nDetailed spec');
     expect(prompt).toContain('--- context/notes.md ---\nContext details');
     expect(prompt).not.toContain('context/missing.md');
   });

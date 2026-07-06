@@ -1,8 +1,10 @@
 export type SkillSource = 'builtin' | 'repo' | 'global' | 'external';
 
+export type SkillInput = 'summary' | 'specFile' | 'context' | 'tasks';
+
 export interface SkillMetadata {
   description: string;
-  inputs?: string[];
+  inputs?: SkillInput[];
   outputs?: string[];
 }
 

@@ -42,7 +42,7 @@ vi.mock('../../src/core/events/index.js', () => ({
 }));
 
 vi.mock('../../src/config/index.js', () => ({
-  loadConfig: () => ({ staleRunThresholdMinutes: 120 }),
+  loadConfig: () => ({ staleRunThresholdMinutes: 120, promptContextCharLimit: 20_000 }),
 }));
 
 beforeEach(() => {

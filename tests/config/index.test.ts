@@ -32,6 +32,7 @@ describe('config', () => {
       concurrency: 3,
       toolTimeoutMs: 600_000,
       staleRunThresholdMinutes: 120,
+      promptContextCharLimit: 20_000,
     });
   });
 
@@ -45,6 +46,7 @@ describe('config', () => {
       concurrency: 5,
       toolTimeoutMs: 1_000,
       staleRunThresholdMinutes: 30,
+      promptContextCharLimit: 10_000,
       telegramChatId: '123',
     });
 
@@ -53,6 +55,7 @@ describe('config', () => {
       concurrency: 5,
       toolTimeoutMs: 1_000,
       staleRunThresholdMinutes: 30,
+      promptContextCharLimit: 10_000,
       telegramChatId: '123',
     });
   });
@@ -67,6 +70,7 @@ describe('config', () => {
       concurrency: 2,
       toolTimeoutMs: 999,
       staleRunThresholdMinutes: 45,
+      promptContextCharLimit: 15_000,
     });
     ensureDataDir();
 
@@ -74,6 +78,7 @@ describe('config', () => {
       concurrency: 2,
       toolTimeoutMs: 999,
       staleRunThresholdMinutes: 45,
+      promptContextCharLimit: 15_000,
     });
     expect(existsSync(DB_PATH.replace(/\/app\.db$/, ''))).toBe(true);
   });
