@@ -1,0 +1,22 @@
+version: 1
+repo: metal-squad
+epics:
+  - id: epic-core
+    title: Núcleo de orquestração
+    features:
+      - id: feat-scheduler
+        title: Scheduler com concorrência global
+        tool: claude
+        effort: high
+        dependsOn: []
+        tasks:
+          - id: t-graph
+            title: Ordenação topológica do backlog
+          - id: t-run
+            title: Loop de execução com limite de concorrência
+            dependsOn: [t-graph]
+      - id: feat-telegram
+        title: Notificação em gates via Telegram
+        tool: codex
+        effort: medium
+        dependsOn: [feat-scheduler]
