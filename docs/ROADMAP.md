@@ -50,8 +50,9 @@ O que falta / problemas:
 | [F07 — Status Bar](features/F07-status-bar.md) | Low | Alta |
 | [F08 — Session Navigation](features/F08-session-navigation.md) | Medium | Media |
 | [F09 — Command Palette](features/F09-command-palette.md) | Medium | Media |
+| [F24 — Task & Stage Progress](features/F24-task-stage-progress.md) | Medium | Alta |
 
-**Entrega**: TUI multi-painel com streaming, status bar, e navegacao rica.
+**Entrega**: TUI multi-painel com streaming, status bar, navegacao rica, e progresso granular por task/stage.
 
 ---
 
@@ -123,7 +124,8 @@ F05 (layout multi-panel)
  ├→ F08 (session nav)
  ├→ F09 (command palette)
  ├→ F13 (execution graph)
- └→ F16 (cost dashboard)
+ ├→ F16 (cost dashboard)
+ └→ F24 (task & stage progress)
 
 F07 (status bar)
  └→ F16 (cost dashboard)
