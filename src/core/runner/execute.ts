@@ -6,6 +6,8 @@ import { resolveRepo } from '../repo.js';
 import { registerRepo, createRun, finishRun, recordUsage, cleanupStaleRuns } from '../../db/repo.js';
 import { notify } from '../notify/telegram.js';
 import { loadConfig } from '../../config/index.js';
+import { buildPrompt } from '../backlog/prompt.js';
+import { createSkillRegistry } from '../skills/index.js';
 
 export interface ExecuteOptions {
   cwd: string;
@@ -26,11 +28,15 @@ export async function executeBacklog(
     ? selectFeaturePlan(backlog, opts.featureId)
     : topoOrder(backlog);
 
+  const registry = createSkillRegistry();
+
   const execute = async (feature: Feature) => {
+    const skills = registry.resolve(feature.skills ?? [], opts.cwd);
+    const prompt = buildPrompt(feature, skills, opts.cwd);
     const runId = createRun(repoId, feature.id, feature.tool);
     activeRunIds.add(runId);
     try {
-      const res = await getAdapter(feature.tool).runFeature(feature, opts.cwd);
+      const res = await getAdapter(feature.tool).runFeature(feature, prompt, opts.cwd);
       if (res.usage) recordUsage(runId, res.usage);
       finishRun(runId, res.ok ? 'done' : 'failed', res.summary);
       activeRunIds.delete(runId);
