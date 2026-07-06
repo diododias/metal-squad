@@ -1,22 +1,98 @@
+import { accessSync, constants, existsSync } from 'node:fs';
+import { dirname } from 'node:path';
 import Database from 'better-sqlite3';
-import { DB_PATH, ensureDataDir } from '../config/index.js';
+import { DB_PATH_ENV, resolveDbPath, ensureDataDir } from '../config/index.js';
 
 let db: Database.Database | null = null;
+let dbMode: 'readonly' | 'readwrite' | null = null;
 
-export function getDb(): Database.Database {
-  if (db) return db;
-  ensureDataDir();
-  db = new Database(DB_PATH);
-  db.pragma('journal_mode = WAL');
-  db.pragma('foreign_keys = ON');
-  migrate(db);
-  return db;
+export class DbAccessError extends Error {
+  constructor(
+    readonly dbPath: string,
+    detail: string,
+  ) {
+    super(
+      [
+        `Banco SQLite sem escrita em: ${dbPath}`,
+        detail,
+        `Corrija as permissões do arquivo/diretório ou defina ${DB_PATH_ENV} para um caminho gravável.`,
+        `Exemplo: ${DB_PATH_ENV}=$(pwd)/.metal-squad/app.db msq run --feature feat-1`,
+      ].join('\n'),
+    );
+    this.name = 'DbAccessError';
+  }
+}
+
+export function assertWritableDbPath(dbPath = resolveDbPath()): void {
+  const dataDir = dirname(dbPath);
+
+  try {
+    ensureDataDir(dbPath);
+  } catch (error) {
+    throw new DbAccessError(
+      dbPath,
+      `Nao foi possivel criar ou acessar o diretório do banco: ${dataDir}`,
+    );
+  }
+
+  try {
+    accessSync(dataDir, constants.W_OK);
+  } catch {
+    throw new DbAccessError(
+      dbPath,
+      `Diretório sem permissão de escrita: ${dataDir}`,
+    );
+  }
+
+  if (!existsSync(dbPath)) return;
+
+  try {
+    accessSync(dbPath, constants.W_OK);
+  } catch {
+    throw new DbAccessError(
+      dbPath,
+      `Arquivo do banco sem permissão de escrita: ${dbPath}`,
+    );
+  }
+}
+
+export function getDb(mode: 'readonly' | 'readwrite' = 'readwrite'): Database.Database {
+  if (db && (dbMode === 'readwrite' || dbMode === mode)) return db;
+  if (db) {
+    db.close();
+    db = null;
+    dbMode = null;
+  }
+
+  const dbPath = resolveDbPath();
+
+  try {
+    if (mode === 'readonly') {
+      db = new Database(dbPath, { readonly: true, fileMustExist: true });
+      dbMode = 'readonly';
+      return db;
+    }
+
+    assertWritableDbPath(dbPath);
+    db = new Database(dbPath);
+    dbMode = 'readwrite';
+    db.pragma('journal_mode = WAL');
+    db.pragma('foreign_keys = ON');
+    migrate(db);
+    return db;
+  } catch (error) {
+    db?.close();
+    db = null;
+    dbMode = null;
+    throw toDbAccessError(error, dbPath);
+  }
 }
 
 export function resetDb(): void {
   if (!db) return;
   db.close();
   db = null;
+  dbMode = null;
 }
 
 function migrate(d: Database.Database): void {
@@ -63,4 +139,23 @@ function migrate(d: Database.Database): void {
   if (!hasSummary) {
     d.exec(`ALTER TABLE runs ADD COLUMN summary TEXT`);
   }
+}
+
+function toDbAccessError(error: unknown, dbPath: string): Error {
+  if (error instanceof DbAccessError) return error;
+
+  const message = error instanceof Error ? error.message : String(error);
+  if (
+    message.includes('readonly database')
+    || message.includes('SQLITE_READONLY')
+    || message.includes('SQLITE_CANTOPEN')
+    || message.includes('SQLITE_PERM')
+  ) {
+    return new DbAccessError(
+      dbPath,
+      `Falha ao abrir o banco em modo leitura/escrita: ${message}`,
+    );
+  }
+
+  return error instanceof Error ? error : new Error(message);
 }

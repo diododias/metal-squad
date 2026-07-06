@@ -13,6 +13,7 @@ vi.mock('better-sqlite3', () => ({ default: mockDatabase }));
 vi.mock('../../src/config/index.js', () => ({
   DB_PATH: ':memory:',
   ensureDataDir: vi.fn(),
+  resolveDbPath: vi.fn(() => ':memory:'),
 }));
 
 // Reset DB singleton between tests

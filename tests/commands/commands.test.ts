@@ -15,6 +15,7 @@ const mockFormatSkillList = vi.fn();
 const mockListRuns = vi.fn();
 const mockCleanupStaleRuns = vi.fn();
 const mockRender = vi.fn();
+const mockAssertWritableDbPath = vi.fn();
 
 vi.mock('../../src/core/repo.js', () => ({
   resolveRepo: mockResolveRepo,
@@ -48,6 +49,16 @@ vi.mock('../../src/config/index.js', () => ({
   loadConfig: mockLoadConfig,
 }));
 
+vi.mock('../../src/db/index.js', () => ({
+  assertWritableDbPath: mockAssertWritableDbPath,
+  DbAccessError: class DbAccessError extends Error {
+    constructor(message: string) {
+      super(message);
+      this.name = 'DbAccessError';
+    }
+  },
+}));
+
 vi.mock('ink', () => ({
   render: mockRender,
 }));
@@ -66,6 +77,7 @@ describe('commands', () => {
     mockLoadConfig.mockReturnValue({ concurrency: 3, staleRunThresholdMinutes: 120 });
     mockCreateSkillRegistry.mockReturnValue({ discover: vi.fn(() => ['implement']) });
     mockFormatSkillList.mockReturnValue('implement');
+    mockAssertWritableDbPath.mockReturnValue(undefined);
   });
 
   afterEach(() => {
@@ -111,6 +123,7 @@ describe('commands', () => {
 
     await program.parseAsync(['node', 'msq', 'run', '--feature', 'feat-1', '--concurrency', '9']);
 
+    expect(mockAssertWritableDbPath).toHaveBeenCalled();
     expect(mockLoadBacklog).toHaveBeenCalledWith(undefined, currentCwd);
     expect(mockValidateBacklogSkills).toHaveBeenCalledWith(backlog, currentCwd);
     expect(mockExecuteBacklog).toHaveBeenCalledWith(backlog, {
@@ -129,6 +142,7 @@ describe('commands', () => {
 
     await program.parseAsync(['node', 'msq', 'run']);
 
+    expect(mockAssertWritableDbPath).toHaveBeenCalled();
     expect(mockExecuteBacklog).toHaveBeenCalledWith(
       { version: 2, repo: 'demo', defaults: { tool: 'codex', effort: 'medium', skills: ['implement'] }, epics: [] },
       {
@@ -137,6 +151,29 @@ describe('commands', () => {
       featureId: undefined,
       },
     );
+  });
+
+  it('run surfaces a db path error before spawning adapters', async () => {
+    const backlog = { version: 2, repo: 'demo', defaults: { tool: 'codex', effort: 'medium', skills: ['implement'] }, epics: [] };
+    mockLoadBacklog.mockReturnValue(backlog);
+
+    const { DbAccessError } = await import('../../src/db/index.js');
+    mockAssertWritableDbPath.mockImplementation(() => {
+      throw new DbAccessError('Banco SQLite sem escrita em: /tmp/app.db');
+    });
+
+    const { registerRun } = await import('../../src/commands/run.js');
+    const program = new Command();
+    registerRun(program);
+
+    await expect(
+      program.parseAsync(['node', 'msq', 'run']),
+    ).rejects.toThrow(
+      'Nenhum adapter foi executado porque a persistência da run falhou antes do primeiro spawn.',
+    );
+
+    expect(mockLoadBacklog).not.toHaveBeenCalled();
+    expect(mockExecuteBacklog).not.toHaveBeenCalled();
   });
 
   it('skills lists discovered skills', async () => {
