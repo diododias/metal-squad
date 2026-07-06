@@ -2,7 +2,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { EventEmitter } from 'node:events';
 
 const mockRunCli = vi.fn();
-const mockBuildSpecKitPrompt = vi.fn(() => 'PROMPT');
 const mockSpawn = vi.fn();
 
 vi.mock('../../src/core/adapters/spawn.js', async () => {
@@ -12,10 +11,6 @@ vi.mock('../../src/core/adapters/spawn.js', async () => {
     runCli: mockRunCli,
   };
 });
-
-vi.mock('../../src/core/backlog/prompt.js', () => ({
-  buildSpecKitPrompt: mockBuildSpecKitPrompt,
-}));
 
 vi.mock('node:child_process', () => ({
   spawn: mockSpawn,
@@ -62,6 +57,7 @@ describe('claude adapter', () => {
           dependsOn: [],
           tasks: [],
         },
+        'test-prompt',
         '/repo',
       ),
     ).resolves.toEqual({ ok: false, summary: 'fatal' });
@@ -89,6 +85,7 @@ describe('claude adapter', () => {
           dependsOn: [],
           tasks: [],
         },
+        'PROMPT',
         '/repo',
       ),
     ).resolves.toEqual({
@@ -123,6 +120,7 @@ describe('claude adapter', () => {
           dependsOn: [],
           tasks: [],
         },
+        'test-prompt',
         '/repo',
       ),
     ).resolves.toMatchObject({ ok: false, summary: 'partial' });
@@ -145,6 +143,7 @@ describe('opencode adapter', () => {
           dependsOn: [],
           tasks: [],
         },
+        'test-prompt',
         '/repo',
       ),
     ).resolves.toEqual({ ok: false, summary: 'bad' });
@@ -172,6 +171,7 @@ describe('opencode adapter', () => {
           dependsOn: [],
           tasks: [],
         },
+        'test-prompt',
         '/repo',
       ),
     ).resolves.toEqual({

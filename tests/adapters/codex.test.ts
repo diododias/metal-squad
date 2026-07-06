@@ -34,10 +34,6 @@ vi.mock('../../src/core/adapters/spawn.js', () => ({
   CliTimeoutError: MockCliTimeoutError,
 }));
 
-vi.mock('../../src/core/backlog/prompt.js', () => ({
-  buildSpecKitPrompt: () => 'prompt',
-}));
-
 vi.mock('node:child_process', () => ({
   execFileSync: mockExecFileSync,
 }));
@@ -76,13 +72,11 @@ describe('codexAdapter timeout observability', () => {
     const result = await codexAdapter.runFeature({
       id: 'feat-02',
       title: 'Feature',
-      spec: 'spec',
-      plan: 'plan',
-      tasks: ['task'],
       tool: 'codex',
       effort: 'medium',
       dependsOn: [],
-    }, '/repo');
+      tasks: [],
+    }, 'prompt', '/repo');
 
     expect(result.ok).toBe(false);
     expect(result.summary).toContain('timeout após 605s');
