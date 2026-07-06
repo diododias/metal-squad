@@ -6,104 +6,56 @@ defaults:
   skills: []
 
 epics:
-  - id: epic-orchestration-v2
-    title: E03 — Orchestration v2
+  - id: epic-modern-tui
+    title: E02 — Modern TUI
     features:
-      - id: feat-15
-        title: F15 — Event System
-        tool: claude
-        effort: medium
-        skills: []
-        specFile: docs/features/F15-event-system.md
+      - id: feat-05
+        title: F05 — Layout Multi-Painel
+        tool: codex
+        model: gpt-5.4
+        effort: high
+        skills: [implement, test]
+        specFile: docs/features/F05-layout-multi-panel.md
         context:
-          - docs/features/F06-log-streaming.md
-          - docs/features/F12-pause-resume-abort.md
-          - docs/features/F16-cost-dashboard.md
-          - docs/features/F19-notifications-v2.md
-          - src/commands/run.ts
-          - src/core/runner/execute.ts
-          - src/core/adapters/spawn.ts
-          - src/core/notify/telegram.ts
-          - src/db/repo.ts
+          - docs/epics/E02-modern-tui.md
+          - docs/features/F07-status-bar.md
+          - docs/features/F08-session-navigation.md
+          - docs/features/F09-command-palette.md
+          - docs/features/F24-task-stage-progress.md
+          - src/commands/ui.ts
           - src/ui/App.tsx
+          - src/ui/components/MainPanel.tsx
+          - src/ui/components/Sidebar.tsx
+          - src/ui/components/StatusBar.tsx
+          - src/ui/components/CommandBar.tsx
           - src/ui/hooks/useRuns.ts
           - src/ui/hooks/useGates.ts
-          - tests/ui/hooks.test.ts
-          - tests/commands/commands.test.ts
+          - tests/ui/app.test.ts
+          - tests/ui/components.test.ts
         dependsOn: []
         spec: |
-          Valide e implemente a feature F15 — Event System dentro desta propria sessao do agente ja spawnada pelo msq. Esta skill de QA nao implementa a feature manualmente.
+          Desenvolva a feature F05 — Layout Multi-Painel usando Codex como executor e o modelo gpt-5.4.
 
-          Regras obrigatorias para evitar recursao:
-          - Nao execute `msq`, `metal-squad`, `node dist/index.js run`, `npm run dev`, ou qualquer comando que dispare uma nova run do orquestrador.
-          - Nao invoque um novo executor para implementar esta feature.
-          - A implementacao deve ser feita diretamente pelo agente atual, editando arquivos, gerando specs/planos/tasks e rodando testes neste checkout.
+          Fluxo obrigatório:
+          1. Refine a spec executável da feature se necessário.
+          2. Implemente o novo shell da TUI diretamente neste checkout.
+          3. Atualize os testes da UI e valide a responsividade por largura de terminal.
+          4. Rode testes e typecheck ao final.
 
-          Fluxo obrigatorio dentro do executor:
-          1. Refine a feature executando /speckit-specify se a spec ainda nao estiver operacional o suficiente.
-          2. Gere a abordagem tecnica com /speckit-plan.
-          3. Gere tarefas executaveis com /speckit-tasks.
-          4. Execute a implementacao com /speckit-implement no checkout atual, sem disparar nested runs.
-          5. Rode testes e typecheck ao final.
-
-          Escopo detalhado:
-          - Introduzir um event bus tipado para eventos internos do msq, cobrindo ao menos:
-            - run:start
-            - run:output
-            - run:done
-            - run:failed
-            - gate:created
-            - gate:resolved
-            - scheduler:paused
-            - scheduler:resumed
-            - budget:alert
-            - tokens:update
-          - Substituir o acoplamento atual baseado em console.log/polling por emissao e consumo de eventos.
-          - Runner:
-            - emitir run:start antes de iniciar adapter
-            - emitir run:done ou run:failed no encerramento
-            - manter persistencia no SQLite, mas publicar eventos em paralelo ao fluxo atual
-            - evitar regressao no scheduler e no fluxo --feature
-          - Spawn/Adapters:
-            - publicar linhas relevantes de stdout/stderr como run:output
-            - manter heartbeats e observabilidade existentes sem perder a nova emissao de eventos
-            - publicar atualizacoes de tokens quando houver usage
-          - TUI:
-            - parar de depender exclusivamente de polling em useRuns/useGates
-            - consumir o event bus para atualizar runs/gates em tempo real
-            - preservar comportamento atual de navegacao da App
-          - Notifications:
-            - integrar notificacoes com o event system, em especial para eventos equivalentes a gate:created e run:failed
-          - Estrutura:
-            - criar modulo dedicado e tipado para o event system
-            - manter o design preparado para futuras extensoes de F06, F12, F16 e F19
-          - Testes:
-            - adicionar cobertura automatizada para emissao/consumo de eventos no runner
-            - cobrir atualizacao reativa da TUI ou hooks equivalentes
-            - cobrir integracao minima com notificacoes/eventos quando viavel
-
-          Arquivos de contexto relevantes:
-          - docs/features/F15-event-system.md
-          - docs/features/F06-log-streaming.md
-          - docs/features/F12-pause-resume-abort.md
-          - docs/features/F16-cost-dashboard.md
-          - docs/features/F19-notifications-v2.md
-          - src/commands/run.ts
-          - src/core/runner/execute.ts
-          - src/core/adapters/spawn.ts
-          - src/core/notify/telegram.ts
-          - src/db/repo.ts
-          - src/ui/App.tsx
-          - src/ui/hooks/useRuns.ts
-          - src/ui/hooks/useGates.ts
-          - tests/ui/hooks.test.ts
-          - tests/commands/commands.test.ts
+          Escopo funcional:
+          - Introduzir layout multi-painel com painel principal, sidebar, status bar e command bar.
+          - Tornar a TUI responsiva para larguras <80, 80-119 e >=120 colunas.
+          - Adicionar navegação por teclado entre painéis com foco explícito e seleção de run.
+          - Mostrar contexto útil do run selecionado mesmo antes do log streaming da F06.
+          - Exibir skills declaradas do feature selecionado usando o backlog atual como metadado.
+          - Preservar o comportamento existente de gates e quit.
+          - Cobrir o novo contrato do App e dos componentes em testes automatizados.
 
           Criterios de aceite:
-          - Existe EventEmitter tipado com os eventos definidos na spec.
-          - Runner emite eventos em vez de depender apenas de console.log.
-          - TUI consome eventos em vez de depender apenas de polling no DB.
-          - Notification system usa eventos relevantes.
+          - Existe layout multi-painel com sidebar + main + status bar + command bar.
+          - A TUI reage a larguras pequenas, médias e grandes.
+          - A navegação por Tab, setas/j/k, Enter e Esc funciona no App.
+          - O painel principal mostra overview ou detalhe contextual do run selecionado.
           - Testes automatizados e typecheck passam ao final.
         tasks: []
 
