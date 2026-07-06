@@ -22,12 +22,13 @@ export const codexAdapter: ToolAdapter = {
   async runFeature(feature: Feature, prompt: string, opts: RunFeatureOptions): Promise<RunResult> {
     const args = [
       'exec',
-      prompt,
       '--json',
       '--skip-git-repo-check',
       '--full-auto', // troque por --dangerously-bypass-approvals-and-sandbox se precisar 100% unattended
       ...(feature.model ? ['-m', feature.model] : []),
       ...this.effortFlag(feature.effort),
+      '--',
+      prompt,
     ];
 
     const timeoutMs = Math.max(loadConfig().toolTimeoutMs, 1_800_000);
