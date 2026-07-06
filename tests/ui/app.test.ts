@@ -139,6 +139,8 @@ describe('App', () => {
       startedAt: '2026-07-06T10:00:00Z',
       endedAt: null,
       totalTokens: 1200,
+      inputTokens: 900,
+      outputTokens: 300,
       gateId: null,
       gateDecision: null,
     }]);

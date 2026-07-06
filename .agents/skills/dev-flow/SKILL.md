@@ -1,4 +1,9 @@
-# Skill: Dev Flow (compat shim)
+---
+name: "dev-flow"
+description: "Fluxo de desenvolvimento padrão: do worktree ao PR aberto."
+---
+
+# Skill: Fluxo de desenvolvimento
 
 Esta copia em `.agents/skills/dev-flow/` existe apenas por compatibilidade com discovery legado.
 

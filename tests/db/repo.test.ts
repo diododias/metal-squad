@@ -43,6 +43,8 @@ describe('listRunsForTui', () => {
       startedAt: '2026-07-06T10:00:00',
       endedAt: null,
       totalTokens: null,
+      inputTokens: null,
+      outputTokens: null,
       gateId: null,
       gateDecision: null,
     };
@@ -64,6 +66,8 @@ describe('listRunsForTui', () => {
       startedAt: '2026-07-06T10:00:00',
       endedAt: '2026-07-06T10:05:00',
       totalTokens: 1200,
+      inputTokens: 900,
+      outputTokens: 300,
       gateId: null,
       gateDecision: null,
     };

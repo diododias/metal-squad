@@ -135,6 +135,8 @@ export interface RunSummary {
   startedAt: string;
   endedAt: string | null;
   totalTokens: number | null;
+  inputTokens: number | null;
+  outputTokens: number | null;
   gateId: number | null;
   gateDecision: string | null;
 }
@@ -156,9 +158,11 @@ export function listRunsForTui(limit = 50): RunSummary[] {
          r.tool,
          r.status,
          r.started_at  AS startedAt,
-         r.ended_at    AS endedAt,
+         r.ended_at      AS endedAt,
          COALESCE(r.total_tokens, u.total) AS totalTokens,
-         g.id          AS gateId,
+         r.input_tokens  AS inputTokens,
+         r.output_tokens AS outputTokens,
+         g.id            AS gateId,
          g.decision    AS gateDecision
        FROM runs r
        JOIN latest ON latest.id = r.id
