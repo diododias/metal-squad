@@ -1,8 +1,12 @@
 import { describe, expect, it, vi } from 'vitest';
 import React from 'react';
+import { CommandBar } from '../../src/ui/components/CommandBar.js';
 import { EmptyState } from '../../src/ui/components/EmptyState.js';
 import { GatePanel } from '../../src/ui/components/GatePanel.js';
+import { MainPanel } from '../../src/ui/components/MainPanel.js';
 import { RunTable } from '../../src/ui/components/RunTable.js';
+import { Sidebar } from '../../src/ui/components/Sidebar.js';
+import { StatusBar } from '../../src/ui/components/StatusBar.js';
 
 describe('ui components', () => {
   it('renders the empty state message', () => {
@@ -96,5 +100,72 @@ describe('ui components', () => {
 
     expect(React.isValidElement(RunTable({ runs, width: 40 }))).toBe(true);
     expect(React.isValidElement(RunTable({ runs, width: 100 }))).toBe(true);
+  });
+
+  it('renders sidebar, main panel, status bar, and command bar', () => {
+    const runs = [
+      {
+        runId: 1,
+        repoId: 'repo-1',
+        featureId: 'feat-1',
+        tool: 'codex' as const,
+        status: 'running' as const,
+        startedAt: '2026-07-06T10:01:30Z',
+        endedAt: null,
+        totalTokens: 800,
+        gateId: null,
+        gateDecision: null,
+      },
+    ];
+    const gates = [
+      {
+        id: 1,
+        runId: 1,
+        featureId: 'feat-1',
+        repoId: 'repo-1',
+        createdAt: '2026-07-06T10:00:00Z',
+        resolvedAt: null,
+        decision: null,
+      },
+    ];
+    const selectedFeature = {
+      id: 'feat-1',
+      title: 'F05 — Layout Multi-Painel',
+      skills: ['implement', 'test'],
+      tool: 'codex',
+    };
+
+    expect(React.isValidElement(Sidebar({
+      runs,
+      gates,
+      selectedRunIndex: 0,
+      selectedGateIndex: 0,
+      focusPanel: 'runs',
+      skills: selectedFeature.skills,
+      width: 32,
+      mode: 'full',
+    }))).toBe(true);
+    expect(React.isValidElement(MainPanel({
+      runs,
+      gates,
+      selectedRun: runs[0] ?? null,
+      selectedFeature,
+      activeView: 'run',
+      mode: 'full',
+      width: 72,
+    }))).toBe(true);
+    expect(React.isValidElement(StatusBar({
+      selectedRun: runs[0] ?? null,
+      selectedFeature,
+      gateCount: gates.length,
+      width: 120,
+    }))).toBe(true);
+    expect(React.isValidElement(CommandBar({
+      activeView: 'run',
+      focusPanel: 'gates',
+      hasRuns: true,
+      hasGates: true,
+      width: 120,
+    }))).toBe(true);
   });
 });

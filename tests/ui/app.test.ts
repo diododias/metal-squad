@@ -4,18 +4,26 @@ import React from 'react';
 const mockUseRuns = vi.fn();
 const mockUseGates = vi.fn();
 const mockUseTerminalWidth = vi.fn();
-const mockRunTable = vi.fn(() => React.createElement('run-table'));
-const mockGatePanel = vi.fn(() => React.createElement('gate-panel'));
-const mockEmptyState = vi.fn(() => React.createElement('empty-state'));
+const mockGetFeatureCatalog = vi.fn();
+const mockMainPanel = vi.fn(() => React.createElement('main-panel'));
+const mockSidebar = vi.fn(() => React.createElement('sidebar-panel'));
+const mockStatusBar = vi.fn(() => React.createElement('status-bar'));
+const mockCommandBar = vi.fn(() => React.createElement('command-bar'));
 const mockUseInput = vi.fn();
-let setSelectedGate: ReturnType<typeof vi.fn>;
+let setUi: ReturnType<typeof vi.fn>;
+let stateValue: {
+  selectedRun: number;
+  selectedGate: number;
+  focusPanel: 'runs' | 'gates' | 'main';
+  activeView: 'overview' | 'run';
+};
 
 vi.mock('react', async () => {
   const actual = await vi.importActual<typeof import('react')>('react');
   return {
     ...actual,
     default: actual.default,
-    useState: vi.fn(() => [0, setSelectedGate]),
+    useState: vi.fn(() => [stateValue, setUi]),
   };
 });
 
@@ -31,16 +39,24 @@ vi.mock('../../src/ui/hooks/useTerminalWidth.js', () => ({
   useTerminalWidth: mockUseTerminalWidth,
 }));
 
-vi.mock('../../src/ui/components/RunTable.js', () => ({
-  RunTable: mockRunTable,
+vi.mock('../../src/ui/catalog.js', () => ({
+  getFeatureCatalog: mockGetFeatureCatalog,
 }));
 
-vi.mock('../../src/ui/components/GatePanel.js', () => ({
-  GatePanel: mockGatePanel,
+vi.mock('../../src/ui/components/MainPanel.js', () => ({
+  MainPanel: mockMainPanel,
 }));
 
-vi.mock('../../src/ui/components/EmptyState.js', () => ({
-  EmptyState: mockEmptyState,
+vi.mock('../../src/ui/components/Sidebar.js', () => ({
+  Sidebar: mockSidebar,
+}));
+
+vi.mock('../../src/ui/components/StatusBar.js', () => ({
+  StatusBar: mockStatusBar,
+}));
+
+vi.mock('../../src/ui/components/CommandBar.js', () => ({
+  CommandBar: mockCommandBar,
 }));
 
 vi.mock('ink', async () => {
@@ -54,52 +70,96 @@ vi.mock('ink', async () => {
 describe('App', () => {
   const exitSpy = vi.spyOn(process, 'exit').mockImplementation((() => undefined) as never);
 
+  function findElement(
+    node: React.ReactNode,
+    type: unknown,
+  ): React.ReactElement | undefined {
+    const children = React.Children.toArray(node);
+    for (const child of children) {
+      if (!React.isValidElement(child)) continue;
+      if (child.type === type) return child;
+      const nested = findElement(child.props.children, type);
+      if (nested) return nested;
+    }
+    return undefined;
+  }
+
   beforeEach(() => {
+    vi.resetModules();
     vi.clearAllMocks();
-    setSelectedGate = vi.fn();
+    setUi = vi.fn();
+    stateValue = {
+      selectedRun: 0,
+      selectedGate: 0,
+      focusPanel: 'runs',
+      activeView: 'overview',
+    };
     mockUseTerminalWidth.mockReturnValue(88);
     mockUseRuns.mockReturnValue([]);
     mockUseGates.mockReturnValue({ gates: [], resolve: vi.fn() });
+    mockGetFeatureCatalog.mockReturnValue({});
   });
 
   afterEach(() => {
     exitSpy.mockClear();
   });
 
-  it('renders empty state when there are no runs', async () => {
+  it('renders the multi-panel shell when there are no runs', async () => {
     const { App } = await import('../../src/ui/App.js');
     const element = App();
-    const children = React.Children.toArray((element.props as { children: React.ReactNode }).children);
+    const rootChildren = (element.props as { children: React.ReactNode }).children;
+    const mainPanel = findElement(rootChildren, mockMainPanel);
+    const sidebar = findElement(rootChildren, mockSidebar);
+    const statusBar = findElement(rootChildren, mockStatusBar);
+    const commandBar = findElement(rootChildren, mockCommandBar);
 
     expect(React.isValidElement(element)).toBe(true);
-    expect(children.some((child) => React.isValidElement(child) && child.type === mockEmptyState)).toBe(true);
-    expect(children.some((child) => React.isValidElement(child) && child.type === mockRunTable)).toBe(false);
+    expect(mainPanel?.props.runs).toEqual([]);
+    expect(sidebar?.props.mode).toBe('compact');
+    expect(statusBar?.props.selectedRun).toBeNull();
+    expect(commandBar?.props.hasRuns).toBe(false);
   });
 
-  it('renders table and gate panel when data exists', async () => {
-    mockUseRuns.mockReturnValue([{ runId: 1 }]);
+  it('passes selected run metadata to child panels', async () => {
+    mockUseRuns.mockReturnValue([{
+      runId: 1,
+      repoId: 'repo-1',
+      featureId: 'feat-1',
+      tool: 'codex',
+      status: 'running',
+      startedAt: '2026-07-06T10:00:00Z',
+      endedAt: null,
+      totalTokens: 1200,
+      gateId: null,
+      gateDecision: null,
+    }]);
     mockUseGates.mockReturnValue({
       gates: [{ id: 1, featureId: 'feat-1', repoId: 'repo-1' }],
       resolve: vi.fn(),
     });
+    mockGetFeatureCatalog.mockReturnValue({
+      'feat-1': { id: 'feat-1', title: 'F05 — Layout Multi-Painel', skills: ['implement'], tool: 'codex' },
+    });
     const { App } = await import('../../src/ui/App.js');
 
     const element = App();
-    const children = React.Children.toArray((element.props as { children: React.ReactNode }).children);
+    const rootChildren = (element.props as { children: React.ReactNode }).children;
+    const mainPanel = findElement(rootChildren, mockMainPanel);
+    const sidebar = findElement(rootChildren, mockSidebar);
+    const statusBar = findElement(rootChildren, mockStatusBar);
 
-    expect(children.some((child) => {
-      if (!React.isValidElement(child) || child.type !== mockRunTable) return false;
-      return child.props.runs[0]?.runId === 1 && child.props.width === 88;
-    })).toBe(true);
-    expect(children.some((child) => {
-      if (!React.isValidElement(child) || child.type !== mockGatePanel) return false;
-      return child.props.gates[0]?.id === 1 && child.props.selectedIndex === 0;
-    })).toBe(true);
+    expect(mainPanel?.props.selectedRun?.runId).toBe(1);
+    expect(mainPanel?.props.selectedFeature?.title).toBe('F05 — Layout Multi-Painel');
+    expect(sidebar?.props.skills).toEqual(['implement']);
+    expect(statusBar?.props.gateCount).toBe(1);
   });
 
-  it('handles keyboard interactions', async () => {
+  it('handles keyboard interactions for navigation', async () => {
     const resolve = vi.fn();
-    mockUseRuns.mockReturnValue([{ runId: 1 }]);
+    mockUseRuns.mockReturnValue([
+      { runId: 1, featureId: 'feat-1' },
+      { runId: 2, featureId: 'feat-2' },
+    ]);
     mockUseGates.mockReturnValue({
       gates: [{ id: 7, featureId: 'feat-1', repoId: 'repo-1' }],
       resolve,
@@ -110,14 +170,48 @@ describe('App', () => {
     const handler = mockUseInput.mock.calls[0]?.[0] as (input: string, key: Record<string, boolean>) => void;
 
     handler('q', {});
-    handler('', { upArrow: true });
     handler('', { downArrow: true });
+    handler('', { tab: true });
+    handler('', { return: true });
+    handler('', { escape: true });
+
+    expect(exitSpy).toHaveBeenCalledWith(0);
+    expect(setUi).toHaveBeenCalledTimes(4);
+
+    const moveRun = setUi.mock.calls[0]?.[0] as (state: typeof stateValue) => typeof stateValue;
+    const tabFocus = setUi.mock.calls[1]?.[0] as (state: typeof stateValue) => typeof stateValue;
+    const openRun = setUi.mock.calls[2]?.[0] as (state: typeof stateValue) => typeof stateValue;
+    const escapeRun = setUi.mock.calls[3]?.[0] as (state: typeof stateValue) => typeof stateValue;
+
+    expect(moveRun(stateValue).selectedRun).toBe(1);
+    expect(tabFocus(stateValue).focusPanel).toBe('gates');
+    expect(openRun(stateValue)).toMatchObject({ activeView: 'run', focusPanel: 'main' });
+    expect(escapeRun(stateValue)).toMatchObject({ activeView: 'overview', focusPanel: 'runs' });
+    expect(resolve).not.toHaveBeenCalled();
+  });
+
+  it('handles gate decisions when the gates panel is focused', async () => {
+    const resolve = vi.fn();
+    stateValue = {
+      selectedRun: 0,
+      selectedGate: 0,
+      focusPanel: 'gates',
+      activeView: 'overview',
+    };
+    mockUseRuns.mockReturnValue([{ runId: 1, featureId: 'feat-1' }]);
+    mockUseGates.mockReturnValue({
+      gates: [{ id: 7, featureId: 'feat-1', repoId: 'repo-1' }],
+      resolve,
+    });
+    const { App } = await import('../../src/ui/App.js');
+
+    App();
+    const handler = mockUseInput.mock.calls[0]?.[0] as (input: string, key: Record<string, boolean>) => void;
+
     handler('a', {});
     handler('s', {});
     handler('r', {});
 
-    expect(exitSpy).toHaveBeenCalledWith(0);
-    expect(setSelectedGate).toHaveBeenCalledTimes(2);
     expect(resolve).toHaveBeenCalledWith(7, 'approved');
     expect(resolve).toHaveBeenCalledWith(7, 'skipped');
     expect(resolve).toHaveBeenCalledWith(7, 'retried');

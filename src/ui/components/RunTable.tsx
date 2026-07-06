@@ -1,37 +1,9 @@
 import React from 'react';
 import { Box, Text } from 'ink';
 import type { RunSummary } from '../../db/repo.js';
+import { STATUS_COLOR, STATUS_ICON, formatElapsed, formatTokens } from '../format.js';
 
-type Status = RunSummary['status'];
-
-const STATUS_ICON: Record<Status, string> = {
-  running: '⟳',
-  done: '✓',
-  failed: '✗',
-  blocked: '⊘',
-};
-
-const STATUS_COLOR: Record<Status, string> = {
-  running: 'cyan',
-  done: 'green',
-  failed: 'red',
-  blocked: 'yellow',
-};
-
-function formatElapsed(startedAt: string, endedAt: string | null): string {
-  const start = new Date(startedAt).getTime();
-  const end = endedAt ? new Date(endedAt).getTime() : Date.now();
-  const secs = Math.floor((end - start) / 1000);
-  if (secs < 60) return `${secs}s`;
-  const mins = Math.floor(secs / 60);
-  return `${mins}m${secs % 60}s`;
-}
-
-export function formatTokens(total: number | null): string {
-  if (total === null) return '—';
-  if (total >= 1000) return `${(total / 1000).toFixed(1)}k`;
-  return String(total);
-}
+export { formatTokens } from '../format.js';
 
 interface Props {
   runs: RunSummary[];
