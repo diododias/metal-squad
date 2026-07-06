@@ -13,6 +13,12 @@ export function getDb(): Database.Database {
   return db;
 }
 
+export function resetDb(): void {
+  if (!db) return;
+  db.close();
+  db = null;
+}
+
 function migrate(d: Database.Database): void {
   d.exec(`
     CREATE TABLE IF NOT EXISTS repos (

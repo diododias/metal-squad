@@ -23,6 +23,18 @@ export function finishRun(runId: number, status: 'done' | 'failed', summary?: st
     .run(status, summary ?? null, runId);
 }
 
+export function cleanupStaleRuns(olderThanMinutes: number): number {
+  const info = getDb()
+    .prepare(
+      `UPDATE runs
+       SET status = 'failed', ended_at = datetime('now')
+       WHERE status = 'running'
+         AND started_at <= datetime('now', '-' || ? || ' minutes')`,
+    )
+    .run(olderThanMinutes);
+  return info.changes;
+}
+
 export function recordUsage(runId: number, usage: TokenUsage): void {
   getDb()
     .prepare(`INSERT INTO token_usage (run_id, input, output, total) VALUES (?, ?, ?, ?)`)

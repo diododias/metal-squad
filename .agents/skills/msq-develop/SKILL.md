@@ -30,7 +30,11 @@ Se o usuario especificou uma feature (ex: "feat-02", "F03"), use essa. Caso cont
 ### 2. Preparar o backlog.yaml
 
 1. Leia a spec da feature em `docs/features/F{XX}-*.md`
-2. Atualize o `backlog.yaml` com a feature configurada:
+2. Monte um backlog temporario valido para teste do `msq`:
+   - preserve a feature alvo
+   - preserve ou reconstrua a cadeia minima de `dependsOn` necessaria para ela
+   - se optar por backlog reduzido, valide que nenhum `dependsOn` aponta para ID ausente
+3. Atualize o `backlog.yaml` com a feature configurada:
    - `id`: o id da feature (ex: `feat-02`)
    - `title`: titulo da feature
    - `tool`: `claude` (default)
@@ -41,6 +45,7 @@ Se o usuario especificou uma feature (ex: "feat-02", "F03"), use essa. Caso cont
      - CRITERIOS DE ACEITE da spec
      - Instrucao para usar `/speckit-specify`, `/speckit-plan`, `/speckit-tasks`, `/speckit-implement`
    - `dependsOn`: lista de features das quais depende (se houver)
+4. Se o backlog temporario ficar inconsistente, pare o fluxo e registre o problema em `/docs` como feature ou hotfix do proprio `msq`
 
 ### 3. Criar worktree isolado
 
@@ -66,13 +71,20 @@ Se o usuario especificou uma feature (ex: "feat-02", "F03"), use essa. Caso cont
 ### 5. Validar resultado
 
 1. Verifique se o `msq run` terminou com sucesso (exit code 0)
-2. No worktree, execute:
+2. Verifique evidencias minimas de execucao real:
+   - houve nova `run` em `msq status` ou no banco SQLite
+   - houve output util do executor
+   - houve commits, diff ou artefatos produzidos no worktree
+3. No worktree, execute:
    - `npx vitest run` — todos os testes devem passar
    - `npx tsc --noEmit` — sem erros de tipo
-3. `git log --oneline` para ver os commits feitos
-4. Se falhou:
+4. `git log --oneline` para ver os commits feitos
+5. Se `msq run` retornar `0` mas nao houver evidencias minimas, trate como falha do `msq`, nao como sucesso
+6. Se falhou:
    - Analise o erro
-   - Tente corrigir o backlog.yaml e re-executar
+   - Corrija no maximo o harness/backlog temporario quando isso for claramente problema do fluxo de teste
+   - Nao implemente manualmente a feature alvo
+   - Registre cada problema encontrado em `/docs` como feature ou hotfix
    - Se persistir, reporte ao usuario
 
 ### 6. Abrir PR
@@ -101,3 +113,4 @@ Se o usuario especificou uma feature (ex: "feat-02", "F03"), use essa. Caso cont
 - O campo `spec` deve ser detalhado o suficiente para que o agente claude consiga implementar sem ambiguidade
 - Sempre valide com testes e typecheck antes de abrir o PR
 - Se o schema v2 ja estiver implementado, use os campos `specFile`, `skills`, `context` ao inves de `spec` inline
+- Se o objetivo do usuario for testar/evoluir o `msq`, priorize evidenciar defeitos do fluxo e melhorar a skill/harness antes de qualquer tentativa de concluir a feature alvo

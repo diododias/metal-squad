@@ -3,6 +3,7 @@ import type { Backlog } from '../../src/core/backlog/schema.js';
 
 const mockResolveRepo = vi.fn();
 const mockRegisterRepo = vi.fn();
+const mockCleanupStaleRuns = vi.fn();
 const mockCreateRun = vi.fn();
 const mockFinishRun = vi.fn();
 const mockRecordUsage = vi.fn();
@@ -15,6 +16,7 @@ vi.mock('../../src/core/repo.js', () => ({
 
 vi.mock('../../src/db/repo.js', () => ({
   registerRepo: mockRegisterRepo,
+  cleanupStaleRuns: mockCleanupStaleRuns,
   createRun: mockCreateRun,
   finishRun: mockFinishRun,
   recordUsage: mockRecordUsage,
@@ -28,9 +30,14 @@ vi.mock('../../src/core/notify/telegram.js', () => ({
   notify: mockNotify,
 }));
 
+vi.mock('../../src/config/index.js', () => ({
+  loadConfig: () => ({ staleRunThresholdMinutes: 120 }),
+}));
+
 beforeEach(() => {
   mockResolveRepo.mockReset();
   mockRegisterRepo.mockReset();
+  mockCleanupStaleRuns.mockReset();
   mockCreateRun.mockReset();
   mockFinishRun.mockReset();
   mockRecordUsage.mockReset();

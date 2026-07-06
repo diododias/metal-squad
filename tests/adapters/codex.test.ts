@@ -25,6 +25,10 @@ class MockCliTimeoutError extends Error {
   }
 }
 
+vi.mock('../../src/config/index.js', () => ({
+  loadConfig: () => ({ toolTimeoutMs: 600_000 }),
+}));
+
 vi.mock('../../src/core/adapters/spawn.js', () => ({
   runCli: mockRunCli,
   CliTimeoutError: MockCliTimeoutError,
@@ -73,10 +77,11 @@ describe('codexAdapter timeout observability', () => {
       id: 'feat-02',
       title: 'Feature',
       spec: 'spec',
+      plan: 'plan',
+      tasks: ['task'],
       tool: 'codex',
       effort: 'medium',
       dependsOn: [],
-      tasks: [],
     }, '/repo');
 
     expect(result.ok).toBe(false);

@@ -1,6 +1,7 @@
 import type { ToolAdapter, RunResult, TokenUsage } from './types.js';
 import type { Effort, Feature } from '../backlog/schema.js';
 import { execFileSync } from 'node:child_process';
+import { loadConfig } from '../../config/index.js';
 import { CliTimeoutError, runCli } from './spawn.js';
 import { buildSpecKitPrompt } from '../backlog/prompt.js';
 
@@ -29,7 +30,7 @@ export const codexAdapter: ToolAdapter = {
       ...this.effortFlag(feature.effort),
     ];
 
-    const timeoutMs = 1_800_000;
+    const timeoutMs = Math.max(loadConfig().toolTimeoutMs, 1_800_000);
     let code: number;
     let stdout: string;
     let stderr: string;
@@ -177,7 +178,7 @@ function createCodexProgress(featureId: string): {
       lastEventType = evt.type;
 
       if (evt.type === 'item.completed' && evt.item?.type === 'agent_message') {
-        const text = String(evt.item.text ?? '').replace(/s+/g, ' ').trim();
+        const text = String(evt.item.text ?? '').replace(/\s+/g, ' ').trim();
         if (!text) return;
         lastAgentSnippet = text.slice(0, 120);
         console.log(`[msq] codex ${featureId} agente: ${lastAgentSnippet}`);
@@ -195,7 +196,7 @@ function createCodexProgress(featureId: string): {
       if (lastEventType) parts.push(`último=${lastEventType}`);
       if (lastAgentSnippet) parts.push(`agente="${lastAgentSnippet}"`);
       else if (lastStderrSnippet) parts.push(`stderr="${lastStderrSnippet}"`);
-      return parts.length > 0 ? `[${parts.join(" | ")}]` : undefined;
+      return parts.length > 0 ? `[${parts.join(' | ')}]` : undefined;
     },
   };
 }
