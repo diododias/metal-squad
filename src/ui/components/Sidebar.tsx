@@ -1,12 +1,20 @@
 import React from 'react';
 import { Box, Text } from 'ink';
-import type { GateRow, RunSummary } from '../../db/repo.js';
+import type { GateRow, RunSummary, TaskRun } from '../../db/repo.js';
 import type { LayoutMode } from '../format.js';
 import { STATUS_COLOR, STATUS_ICON, truncateText } from '../format.js';
 import type { NotificationEntry } from '../hooks/useNotifications.js';
 import { NotificationsFeed } from './NotificationsFeed.js';
 
 export type FocusPanel = 'runs' | 'gates' | 'main';
+
+const TASK_STATUS_ICON: Record<TaskRun['status'], string> = {
+  done: '✓',
+  running: '⟳',
+  failed: '✗',
+  pending: '○',
+  skipped: '○',
+};
 
 interface Props {
   runs: RunSummary[];
@@ -16,6 +24,7 @@ interface Props {
   selectedGateIndex: number;
   focusPanel: FocusPanel;
   skills: string[];
+  taskRuns?: TaskRun[];
   width: number;
   mode: LayoutMode;
 }
@@ -49,6 +58,7 @@ export function Sidebar({
   selectedGateIndex,
   focusPanel,
   skills,
+  taskRuns = [],
   width,
   mode,
 }: Props): React.ReactElement {
@@ -66,16 +76,26 @@ export function Sidebar({
         const selected = index === selectedRunIndex;
         const color = STATUS_COLOR[run.status];
         return (
-          <Box key={run.runId}>
-            <Text color={selected ? 'cyan' : undefined} bold={selected}>
-              {selected ? '>' : ' '} {STATUS_ICON[run.status]} {truncateText(run.featureId, labelWidth)}
-            </Text>
-            {mode === 'full' && (
-              <Text dimColor>
-                {' '}[{run.tool}]
+          <Box key={run.runId} flexDirection="column">
+            <Box>
+              <Text color={selected ? 'cyan' : undefined} bold={selected}>
+                {selected ? '>' : ' '} {STATUS_ICON[run.status]} {truncateText(run.featureId, labelWidth)}
               </Text>
-            )}
-            {mode !== 'stacked' && <Text color={color}> {run.status}</Text>}
+              {mode === 'full' && (
+                <Text dimColor>
+                  {' '}[{run.tool}]
+                </Text>
+              )}
+              {mode !== 'stacked' && <Text color={color}> {run.status}</Text>}
+            </Box>
+            {selected && taskRuns.length > 0 && taskRuns.map((task) => (
+              <Box key={task.taskId} marginLeft={3}>
+                <Text color={task.status === 'done' ? 'green' : task.status === 'running' ? 'cyan' : task.status === 'failed' ? 'red' : 'gray'}>
+                  {TASK_STATUS_ICON[task.status]} {truncateText(task.title, labelWidth - 4)}
+                  {task.stage ? ` ${task.stage}` : ''}
+                </Text>
+              </Box>
+            ))}
           </Box>
         );
       })}

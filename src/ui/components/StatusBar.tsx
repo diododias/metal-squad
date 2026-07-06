@@ -19,6 +19,7 @@ interface Props {
   totalRuns: number;
   doneRuns: number;
   width: number;
+  currentStage?: string;
 }
 
 export function StatusBar({
@@ -28,12 +29,19 @@ export function StatusBar({
   totalRuns,
   doneRuns,
   width,
+  currentStage,
 }: Props): React.ReactElement {
   const progress = `${doneRuns}/${totalRuns} done`;
 
+  const featureLabel = selectedRun
+    ? currentStage
+      ? `${STATUS_ICON[selectedRun.status]} ${selectedRun.featureId} > ${currentStage}`
+      : `${STATUS_ICON[selectedRun.status]} ${selectedRun.featureId}`
+    : null;
+
   const summary = selectedRun
     ? [
-        `${STATUS_ICON[selectedRun.status]} ${selectedRun.featureId}`,
+        featureLabel,
         selectedRun.tool,
         formatTokensIO(selectedRun.inputTokens, selectedRun.outputTokens),
         formatElapsed(selectedRun.startedAt, selectedRun.endedAt),

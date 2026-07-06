@@ -41,6 +41,13 @@ export const claudeAdapter: ToolAdapter = {
     let stderr: string;
     const progress = createClaudeProgress();
 
+    msqEventBus.emit('task:started', {
+      runId: opts.runId,
+      featureId: feature.id,
+      taskId: feature.id,
+      title: feature.id,
+    });
+
     try {
       ({ code, stdout, stderr } = await runCli('claude', args, {
         cwd: opts.cwd,
@@ -52,6 +59,7 @@ export const claudeAdapter: ToolAdapter = {
           const update = progress.onStdoutLine(line);
           if (update.output) emitRunOutput(opts.runId, feature, update.output.line, 'stdout', update.output.source);
           if (update.usage) emitUsage(opts.runId, feature, update.usage);
+          if (update.stage) emitTaskStage(opts.runId, feature, update.stage);
         },
         onStderrLine: (line) => {
           const update = progress.onStderrLine(line);
@@ -176,6 +184,7 @@ interface ProgressUpdate {
     source: 'agent' | 'tool' | 'stderr';
   };
   usage?: TokenUsage;
+  stage?: string;
 }
 
 function createClaudeProgress(): {
@@ -236,11 +245,13 @@ function parseClaudeLine(line: string): ProgressUpdate {
     if (record.type === 'tool_use') {
       const name = normalizeSnippet(String(record.name ?? 'tool'));
       const input = normalizeSnippet(JSON.stringify(record.input ?? {}));
+      const stage = detectStageFromSkill(name);
       return {
         output: {
           line: normalizeSnippet(`tool ${name}${input && input !== '{}' ? ` ${input}` : ''}`),
           source: 'tool',
         },
+        ...(stage ? { stage } : {}),
       };
     }
     const result = normalizeSnippet(json.result ?? '');
@@ -297,5 +308,34 @@ function emitUsage(runId: number, feature: Feature, usage: TokenUsage): void {
     input: usage.input,
     output: usage.output,
     total: usage.total,
+  });
+}
+
+const SKILL_STAGE_MAP: Record<string, string> = {
+  'speckit-specify': 'specify',
+  'speckit_specify': 'specify',
+  'speckit-plan': 'plan',
+  'speckit_plan': 'plan',
+  'speckit-implement': 'implement',
+  'speckit_implement': 'implement',
+  'speckit-tasks': 'tasks',
+  'speckit_tasks': 'tasks',
+};
+
+function detectStageFromSkill(skillName: string): string | null {
+  const lower = skillName.toLowerCase();
+  for (const [pattern, stage] of Object.entries(SKILL_STAGE_MAP)) {
+    if (lower.includes(pattern)) return stage;
+  }
+  return null;
+}
+
+function emitTaskStage(runId: number, feature: Feature, stage: string): void {
+  msqEventBus.emit('task:updated', {
+    runId,
+    featureId: feature.id,
+    taskId: feature.id,
+    status: 'running',
+    stage,
   });
 }

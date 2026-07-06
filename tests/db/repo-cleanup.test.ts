@@ -5,11 +5,17 @@ import { tmpdir } from 'node:os';
 
 describe('cleanupStaleRuns', () => {
   const previousHome = process.env.HOME;
+  const previousMsqDbPath = process.env['MSQ_DB_PATH'];
   let home = '';
 
   afterEach(async () => {
     if (home) rmSync(home, { recursive: true, force: true });
     process.env.HOME = previousHome;
+    if (previousMsqDbPath === undefined) {
+      delete process.env['MSQ_DB_PATH'];
+    } else {
+      process.env['MSQ_DB_PATH'] = previousMsqDbPath;
+    }
     home = '';
     await import('../../src/db/index.js').then(({ resetDb }) => {
       resetDb();
@@ -19,6 +25,7 @@ describe('cleanupStaleRuns', () => {
   it('marks old running rows as failed and keeps fresh runs untouched', async () => {
     home = mkdtempSync(join(tmpdir(), 'msq-db-cleanup-'));
     process.env.HOME = home;
+    delete process.env['MSQ_DB_PATH'];
 
     const { getDb } = await import('../../src/db/index.js');
     const { cleanupStaleRuns } = await import('../../src/db/repo.js');

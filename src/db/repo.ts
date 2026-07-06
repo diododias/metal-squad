@@ -233,6 +233,52 @@ export function createGate(runId: number, featureId: string, repoId: string): nu
   return gateId;
 }
 
+export interface TaskRun {
+  id: number;
+  runId: number;
+  taskId: string;
+  title: string;
+  status: 'pending' | 'running' | 'done' | 'failed' | 'skipped';
+  stage: string | null;
+  startedAt: string | null;
+  endedAt: string | null;
+}
+
+export function upsertTaskRun(
+  runId: number,
+  taskId: string,
+  title: string,
+  status: TaskRun['status'],
+  stage?: string,
+  startedAt?: string,
+  endedAt?: string,
+): void {
+  const db = getDb('readwrite');
+  db.prepare(
+    `INSERT INTO task_runs (run_id, task_id, title, status, stage, started_at, ended_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?)
+     ON CONFLICT DO NOTHING`,
+  ).run(runId, taskId, title, status, stage ?? null, startedAt ?? null, endedAt ?? null);
+  db.prepare(
+    `UPDATE task_runs
+     SET status = ?, stage = COALESCE(?, stage), ended_at = COALESCE(?, ended_at)
+     WHERE run_id = ? AND task_id = ?`,
+  ).run(status, stage ?? null, endedAt ?? null, runId, taskId);
+}
+
+export function listTaskRunsForRun(runId: number): TaskRun[] {
+  if (!hasDbFile()) return [];
+  return getDb('readonly')
+    .prepare(
+      `SELECT id, run_id AS runId, task_id AS taskId, title, status, stage,
+              started_at AS startedAt, ended_at AS endedAt
+       FROM task_runs
+       WHERE run_id = ?
+       ORDER BY id ASC`,
+    )
+    .all(runId) as TaskRun[];
+}
+
 function hasDbFile(): boolean {
   return getResolvedDbPathExists();
 }
