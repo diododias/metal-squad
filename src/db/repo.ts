@@ -1,8 +1,10 @@
+import { existsSync } from 'node:fs';
 import { getDb } from './index.js';
 import type { TokenUsage } from '../core/adapters/types.js';
+import { resolveDbPath } from '../config/index.js';
 
 export function registerRepo(repoId: string, path: string): void {
-  getDb()
+  getDb('readwrite')
     .prepare(
       `INSERT INTO repos (repo_id, path) VALUES (?, ?)
        ON CONFLICT(repo_id) DO UPDATE SET path = excluded.path`,
@@ -11,20 +13,20 @@ export function registerRepo(repoId: string, path: string): void {
 }
 
 export function createRun(repoId: string, featureId: string, tool: string): number {
-  const info = getDb()
+  const info = getDb('readwrite')
     .prepare(`INSERT INTO runs (repo_id, feature_id, tool) VALUES (?, ?, ?)`)
     .run(repoId, featureId, tool);
   return Number(info.lastInsertRowid);
 }
 
 export function finishRun(runId: number, status: 'done' | 'failed', summary?: string): void {
-  getDb()
+  getDb('readwrite')
     .prepare(`UPDATE runs SET status = ?, summary = ?, ended_at = datetime('now') WHERE id = ?`)
     .run(status, summary ?? null, runId);
 }
 
 export function cleanupStaleRuns(olderThanMinutes: number): number {
-  const info = getDb()
+  const info = getDb('readwrite')
     .prepare(
       `UPDATE runs
        SET status = 'failed', ended_at = datetime('now')
@@ -36,7 +38,7 @@ export function cleanupStaleRuns(olderThanMinutes: number): number {
 }
 
 export function recordUsage(runId: number, usage: TokenUsage): void {
-  getDb()
+  getDb('readwrite')
     .prepare(`INSERT INTO token_usage (run_id, input, output, total) VALUES (?, ?, ?, ?)`)
     .run(runId, usage.input, usage.output, usage.total);
 }
@@ -54,7 +56,8 @@ export interface RunRow {
 }
 
 export function listRuns(limit = 50): RunRow[] {
-  return getDb()
+  if (!hasDbFile()) return [];
+  return getDb('readonly')
     .prepare(
       `SELECT r.*, u.total
          FROM runs r
@@ -81,7 +84,8 @@ export interface RunSummary {
 
 // T003: listRunsForTui — most recent run per feature per repo (US2 deduplication via CTE)
 export function listRunsForTui(limit = 50): RunSummary[] {
-  return getDb()
+  if (!hasDbFile()) return [];
+  return getDb('readonly')
     .prepare(
       `WITH latest AS (
          SELECT MAX(id) AS id
@@ -124,7 +128,8 @@ export interface GateRow {
 
 // T005: openGates — SELECT WHERE resolved_at IS NULL, ORDER BY created_at ASC
 export function openGates(): GateRow[] {
-  return getDb()
+  if (!hasDbFile()) return [];
+  return getDb('readonly')
     .prepare(
       `SELECT
          id,
@@ -143,7 +148,7 @@ export function openGates(): GateRow[] {
 
 // T006: resolveGate — sets resolved_at + decision atomically, no-op if already resolved
 export function resolveGate(id: number, decision: GateDecision): void {
-  getDb()
+  getDb('readwrite')
     .prepare(
       `UPDATE gates
        SET resolved_at = datetime('now'), decision = ?
@@ -154,10 +159,19 @@ export function resolveGate(id: number, decision: GateDecision): void {
 
 // T007: createGate — INSERT, returns new gate id
 export function createGate(runId: number, featureId: string, repoId: string): number {
-  const info = getDb()
+  const info = getDb('readwrite')
     .prepare(
       `INSERT INTO gates (run_id, feature_id, repo_id) VALUES (?, ?, ?)`,
     )
     .run(runId, featureId, repoId);
   return Number(info.lastInsertRowid);
+}
+
+function hasDbFile(): boolean {
+  return getResolvedDbPathExists();
+}
+
+function getResolvedDbPathExists(): boolean {
+  const dbPath = resolveDbPath();
+  return dbPath === ':memory:' || existsSync(dbPath);
 }

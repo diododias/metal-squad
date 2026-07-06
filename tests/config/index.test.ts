@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -7,10 +7,16 @@ describe('config', () => {
   const previousHome = process.env.HOME;
   let home = '';
 
+  beforeEach(() => {
+    vi.resetModules();
+  });
+
   afterEach(async () => {
     if (home) rmSync(home, { recursive: true, force: true });
     process.env.HOME = previousHome;
+    delete process.env.MSQ_DB_PATH;
     home = '';
+    vi.resetModules();
     await import('../../src/db/index.js').then(({ resetDb }) => {
       resetDb();
     }).catch(() => {});
@@ -70,5 +76,19 @@ describe('config', () => {
       staleRunThresholdMinutes: 45,
     });
     expect(existsSync(DB_PATH.replace(/\/app\.db$/, ''))).toBe(true);
+  });
+
+  it('supports overriding the db path with MSQ_DB_PATH', async () => {
+    home = mkdtempSync(join(tmpdir(), 'msq-config-'));
+    process.env.HOME = home;
+    process.env.MSQ_DB_PATH = join(home, 'custom-db', 'runs.sqlite');
+
+    const { DB_PATH, ensureDataDir, resolveDbPath } = await import('../../src/config/index.js');
+
+    expect(DB_PATH).toBe(join(home, 'custom-db', 'runs.sqlite'));
+    expect(resolveDbPath()).toBe(join(home, 'custom-db', 'runs.sqlite'));
+
+    ensureDataDir();
+    expect(existsSync(join(home, 'custom-db'))).toBe(true);
   });
 });

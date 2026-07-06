@@ -4,6 +4,7 @@ import type { Command } from 'commander';
 import { BACKLOG_FILE } from '../core/backlog/load.js';
 import { resolveRepo } from '../core/repo.js';
 import { registerRepo } from '../db/repo.js';
+import { assertWritableDbPath } from '../db/index.js';
 
 const TEMPLATE = (repo: string): string => `version: 2
 repo: ${repo}
@@ -29,6 +30,7 @@ export function registerInit(program: Command): void {
     .command('init')
     .description('Cria backlog.yaml no repo atual e registra o repo no DB global')
     .action(async () => {
+      assertWritableDbPath();
       const cwd = process.cwd();
       if (existsSync(BACKLOG_FILE)) {
         console.log(`${BACKLOG_FILE} já existe — nada a fazer.`);

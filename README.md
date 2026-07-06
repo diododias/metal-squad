@@ -36,6 +36,13 @@ npm run dev -- <comando>
 - `~/.config/metal-squad/config.json` — config global
 - `~/.local/share/metal-squad/app.db` — SQLite (WAL) com estado de runs e tokens
 
+Se o banco global nao puder ser gravado no ambiente atual, use `MSQ_DB_PATH`
+para apontar o SQLite para um caminho local gravavel:
+
+```bash
+MSQ_DB_PATH="$(pwd)/.metal-squad/app.db" msq run --feature feat-1
+```
+
 ## Estrutura
 
 ```
