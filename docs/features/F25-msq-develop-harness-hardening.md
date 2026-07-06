@@ -20,6 +20,7 @@ Tornar `msq-develop` um harness de validacao do proprio `msq`, com evidencias ob
 
 - Preservar ou reconstruir a cadeia de dependencias minima no backlog temporario usado pelo teste.
 - Validar antes do run se a feature selecionada depende de IDs ausentes no backlog temporario.
+- Nao criar worktree automaticamente no fluxo do `msq-develop`; se isolamento for desejado, a IA/operador cria o worktree antes de iniciar a execucao.
 - Exigir verificacao pos-run com pelo menos:
   - nova linha em `msq status` ou no banco `runs`
   - output do executor

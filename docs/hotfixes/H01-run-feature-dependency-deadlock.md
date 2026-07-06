@@ -1,9 +1,26 @@
 # H01 — `msq run --feature` precisa falhar explicitamente quando a feature filtrada fica com dependencias nao satisfeitas
 
 **Tipo**: Hotfix  
+**Status**: Resolvido  
 **Prioridade**: Critica  
 **Descoberto em**: 2026-07-06  
 **Comando observado**: `rtk node dist/index.js run --feature feat-03`
+
+## Resolucao
+
+Verificado em 2026-07-06 no codigo e nos testes automatizados.
+
+- `selectFeaturePlan()` agora inclui a feature alvo e todas as dependencias transitivas antes da execucao.
+- `schedule()` agora detecta deadlock explicito quando nenhuma feature pode iniciar por dependencia ausente ou insatisfeita.
+- O comportamento esta coberto por testes para dependencias transitivas, dependencia ausente e erro de deadlock.
+
+## Evidencia de implementacao
+
+- `src/core/orchestrator/graph.ts`
+- `src/core/orchestrator/scheduler.ts`
+- `tests/orchestrator/graph.test.ts`
+- `tests/orchestrator/scheduler.test.ts`
+- validacao manual: `rtk npx vitest run tests/orchestrator/graph.test.ts tests/orchestrator/scheduler.test.ts`
 
 ## Problema
 

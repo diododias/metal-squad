@@ -25,6 +25,8 @@ npm run dev -- <comando>
 | `msq status`   | Estado dos runs e uso de tokens (todos os repos)     |
 | `msq ui`       | TUI interativa (ink)                                 |
 
+> Observacao: o fluxo `msq-develop` nao cria worktree automaticamente; quando isolamento for necessario, a IA/operador prepara o worktree antes de rodar o fluxo.
+
 ## Armazenamento
 
 - `backlog.yaml` — por repo, versionável e editável à mão

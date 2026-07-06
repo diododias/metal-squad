@@ -1,9 +1,25 @@
 # H02 — timeout do adapter `codex` precisa expor progresso e estado parcial
 
 **Tipo**: Hotfix  
+**Status**: Resolvido  
 **Prioridade**: Alta  
 **Descoberto em**: 2026-07-06  
 **Comando observado**: `rtk ~/.nvm/versions/node/v24.16.0/bin/node /Users/luizdiodo/new_repos/metal-squad/dist/index.js run --feature feat-03`
+
+## Resolucao
+
+Verificado em 2026-07-06 no codigo e nos testes automatizados.
+
+- `runCli()` passou a ser chamado com heartbeat periodico e callbacks de stdout/stderr para feedback incremental.
+- O adapter `codex` agora registra a ultima mensagem do agente, resume saida parcial em timeout e detecta arquivos tocados no worktree.
+- O fluxo de execucao persiste `failed` com resumo parcial recuperavel quando o adapter expira por timeout.
+
+## Evidencia de implementacao
+
+- `src/core/adapters/codex.ts`
+- `tests/adapters/codex.test.ts`
+- `tests/runner/execute.test.ts`
+- validacao manual: `rtk npx vitest run tests/adapters/codex.test.ts tests/runner/execute.test.ts`
 
 ## Problema
 

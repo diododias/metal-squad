@@ -47,20 +47,19 @@ Se o usuario especificou uma feature (ex: "feat-02", "F03"), use essa. Caso cont
    - `dependsOn`: lista de features das quais depende (se houver)
 4. Se o backlog temporario ficar inconsistente, pare o fluxo e registre o problema em `/docs` como feature ou hotfix do proprio `msq`
 
-### 3. Criar worktree isolado
+### 3. Preparar o checkout atual
 
-1. Crie um worktree a partir de `develop`:
-   ```bash
-   git worktree add .claude/worktrees/msq-feat-XX -b feat/fXX-nome develop
-   ```
-2. No worktree:
-   - Copie o `backlog.yaml` atualizado
+1. Trabalhe no checkout atual onde o fluxo foi iniciado.
+2. Nao crie `worktree` dentro deste fluxo.
+3. Se isolamento for desejado, a IA/ferramenta responsavel prepara o checkout antes de chamar `msq-develop`.
+4. No checkout atual:
+   - Atualize o `backlog.yaml`
    - `npm install --silent`
    - `npm run build`
 
 ### 4. Executar msq run
 
-1. No worktree, execute:
+1. No checkout atual, execute:
    ```bash
    node dist/index.js run --feature feat-XX
    ```
@@ -74,8 +73,8 @@ Se o usuario especificou uma feature (ex: "feat-02", "F03"), use essa. Caso cont
 2. Verifique evidencias minimas de execucao real:
    - houve nova `run` em `msq status` ou no banco SQLite
    - houve output util do executor
-   - houve commits, diff ou artefatos produzidos no worktree
-3. No worktree, execute:
+   - houve commits, diff ou artefatos produzidos no checkout atual
+3. No checkout atual, execute:
    - `npx vitest run` — todos os testes devem passar
    - `npx tsc --noEmit` — sem erros de tipo
 4. `git log --oneline` para ver os commits feitos
