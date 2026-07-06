@@ -15,6 +15,7 @@ export const ConfigSchema = z.object({
   concurrency: z.number().int().positive().default(3),
   toolTimeoutMs: z.number().int().positive().default(600_000),
   staleRunThresholdMinutes: z.number().int().positive().default(120),
+  promptContextCharLimit: z.number().int().positive().default(20_000),
   telegramChatId: z.string().optional(),
 });
 export type Config = z.infer<typeof ConfigSchema>;

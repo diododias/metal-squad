@@ -24,9 +24,10 @@ export async function executeBacklog(
   backlog: Backlog,
   opts: ExecuteOptions,
 ): Promise<void> {
+  const config = loadConfig();
   const { repoId, path } = resolveRepo(opts.cwd);
   registerRepo(repoId, path);
-  cleanupStaleRuns(loadConfig().staleRunThresholdMinutes);
+  cleanupStaleRuns(config.staleRunThresholdMinutes);
   const activeRunIds = new Set<number>();
 
   const ordered = opts.featureId
@@ -39,7 +40,9 @@ export async function executeBacklog(
 
   const execute = async (feature: Feature) => {
     const skills = registry.resolve(feature.skills ?? [], opts.cwd);
-    const prompt = buildPrompt(feature, skills, opts.cwd);
+    const prompt = buildPrompt(feature, skills, opts.cwd, {
+      maxContextChars: config.promptContextCharLimit,
+    });
     const runId = createRun(repoId, feature.id, feature.tool);
     activeRunIds.add(runId);
     msqEventBus.emit('run:start', { runId, featureId: feature.id, tool: feature.tool });
