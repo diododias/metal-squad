@@ -3,6 +3,7 @@ import { EventEmitter } from 'node:events';
 
 const mockRunCli = vi.fn();
 const mockSpawn = vi.fn();
+const mockExecFileSync = vi.fn();
 
 vi.mock('../../src/core/adapters/spawn.js', async () => {
   const actual = await vi.importActual<typeof import('../../src/core/adapters/spawn.js')>('../../src/core/adapters/spawn.js');
@@ -14,10 +15,12 @@ vi.mock('../../src/core/adapters/spawn.js', async () => {
 
 vi.mock('node:child_process', () => ({
   spawn: mockSpawn,
+  execFileSync: mockExecFileSync,
 }));
 
 beforeEach(() => {
   vi.clearAllMocks();
+  mockExecFileSync.mockReset();
 });
 
 afterEach(() => {
@@ -60,7 +63,7 @@ describe('claude adapter', () => {
         'test-prompt',
         '/repo',
       ),
-    ).resolves.toEqual({ ok: false, summary: 'fatal' });
+    ).resolves.toEqual({ ok: false, summary: 'exit 1. stderr final: fatal' });
   });
 
   it('parses successful JSON output and usage', async () => {
@@ -96,7 +99,14 @@ describe('claude adapter', () => {
     expect(mockRunCli).toHaveBeenCalledWith(
       'claude',
       ['-p', 'PROMPT', '--output-format', 'json', '--dangerously-skip-permissions', '--model', 'custom'],
-      { cwd: '/repo' },
+      expect.objectContaining({
+        cwd: '/repo',
+        heartbeatMs: 30_000,
+        logLabel: 'claude feat-1',
+        onStdoutLine: expect.any(Function),
+        onStderrLine: expect.any(Function),
+        heartbeatSuffix: expect.any(Function),
+      }),
     );
   });
 
@@ -124,6 +134,72 @@ describe('claude adapter', () => {
         '/repo',
       ),
     ).resolves.toMatchObject({ ok: false, summary: 'partial' });
+  });
+
+  it('logs incremental stdout and stderr snippets while the run is active', async () => {
+    const log = vi.spyOn(console, 'log').mockImplementation(() => {});
+    mockRunCli.mockImplementation(async (_bin, _args, opts) => {
+      opts.onStdoutLine?.(JSON.stringify({ result: 'Atualizando prompt builder agora.' }));
+      opts.onStderrLine?.('warning: still running');
+      return {
+        code: 0,
+        stdout: JSON.stringify({ result: 'done', usage: { input_tokens: 1, output_tokens: 2 } }),
+        stderr: '',
+      };
+    });
+    const { claudeAdapter } = await import('../../src/core/adapters/claude.js');
+
+    await claudeAdapter.runFeature(
+      {
+        id: 'feat-1',
+        title: 'Feature',
+        tool: 'claude',
+        effort: 'medium',
+        dependsOn: [],
+        tasks: [],
+      },
+      'PROMPT',
+      '/repo',
+    );
+
+    expect(log).toHaveBeenCalledWith('[msq] claude feat-1 agente: Atualizando prompt builder agora.');
+    expect(log).toHaveBeenCalledWith('[msq] claude feat-1 stderr: warning: still running');
+  });
+
+  it('returns timeout summary with partial output, touched files and parsed usage', async () => {
+    const { CliTimeoutError } = await import('../../src/core/adapters/spawn.js');
+    const transcript = JSON.stringify({
+      result: 'Aplicando ajustes nos testes finais.',
+      usage: { input_tokens: 8, output_tokens: 5 },
+    });
+    mockRunCli.mockRejectedValue(
+      new CliTimeoutError('claude', 600_000, 605_000, transcript, ''),
+    );
+    mockExecFileSync.mockReturnValue(
+      ' M src/core/adapters/claude.ts\n?? tests/adapters/misc.test.ts\n',
+    );
+    const { claudeAdapter } = await import('../../src/core/adapters/claude.js');
+
+    const result = await claudeAdapter.runFeature(
+      {
+        id: 'feat-1',
+        title: 'Feature',
+        tool: 'claude',
+        effort: 'medium',
+        dependsOn: [],
+        tasks: [],
+      },
+      'PROMPT',
+      '/repo',
+    );
+
+    expect(result.ok).toBe(false);
+    expect(result.summary).toContain('timeout após 605s');
+    expect(result.summary).toContain('última mensagem do agente: Aplicando ajustes nos testes finais.');
+    expect(result.summary).toContain(
+      'arquivos tocados: src/core/adapters/claude.ts, tests/adapters/misc.test.ts',
+    );
+    expect(result.usage).toEqual({ input: 8, output: 5, total: 13 });
   });
 });
 
