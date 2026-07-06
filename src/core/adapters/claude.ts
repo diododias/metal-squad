@@ -28,10 +28,12 @@ export const claudeAdapter: ToolAdapter = {
   async runFeature(feature: Feature, prompt: string, opts: RunFeatureOptions): Promise<RunResult> {
     const model = feature.model ? ['--model', feature.model] : this.effortFlag(feature.effort);
     const args = [
-      '-p', prompt,
+      '--print',
       '--output-format', 'json',
       '--dangerously-skip-permissions',
       ...model,
+      '--',
+      prompt,
     ];
 
     let code: number;

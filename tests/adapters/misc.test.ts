@@ -106,7 +106,7 @@ describe('claude adapter', () => {
     });
     expect(mockRunCli).toHaveBeenCalledWith(
       'claude',
-      ['-p', 'PROMPT', '--output-format', 'json', '--dangerously-skip-permissions', '--model', 'custom'],
+      ['--print', '--output-format', 'json', '--dangerously-skip-permissions', '--model', 'custom', '--', 'PROMPT'],
       expect.objectContaining({
         cwd: '/repo',
         heartbeatMs: 30_000,
@@ -194,6 +194,25 @@ describe('claude adapter', () => {
       stream: 'stderr',
       source: 'stderr',
     });
+  });
+
+  it('passes --print as boolean flag and prompt as positional arg after --', async () => {
+    mockRunCli.mockResolvedValue({ code: 0, stdout: JSON.stringify({ result: 'ok' }), stderr: '' });
+    const { claudeAdapter } = await import('../../src/core/adapters/claude.js');
+    const frontMatterPrompt = '---\nname: "speckit-specify"\n---\nprompt body';
+
+    await claudeAdapter.runFeature(
+      { id: 'feat-1', title: 'F', tool: 'claude', effort: 'medium', dependsOn: [], tasks: [] },
+      frontMatterPrompt,
+      { cwd: '/repo', runId: 99 },
+    );
+
+    const [, args] = mockRunCli.mock.calls[0] as [string, string[], unknown];
+    expect(args).not.toContain('-p');
+    expect(args.includes('--print')).toBe(true);
+    const doubleDashIdx = args.indexOf('--');
+    expect(doubleDashIdx).toBeGreaterThan(-1);
+    expect(args[doubleDashIdx + 1]).toBe(frontMatterPrompt);
   });
 
   it('returns timeout summary with partial output, touched files and parsed usage', async () => {
@@ -305,6 +324,40 @@ describe('opencode adapter', () => {
       output: 7,
       total: 12,
     });
+  });
+});
+
+describe('codex adapter', () => {
+  it('places all options before the prompt positional arg, separated by --', async () => {
+    mockRunCli.mockResolvedValue({ code: 0, stdout: '', stderr: '' });
+    const { codexAdapter } = await import('../../src/core/adapters/codex.js');
+    const frontMatterPrompt = '---\nname: "speckit-specify"\n---\nprompt body';
+
+    await codexAdapter.runFeature(
+      { id: 'feat-1', title: 'F', tool: 'codex', effort: 'high', model: 'o3', dependsOn: [], tasks: [] },
+      frontMatterPrompt,
+      { cwd: '/repo', runId: 10 },
+    );
+
+    const [, args] = mockRunCli.mock.calls[0] as [string, string[], unknown];
+    expect(args[0]).toBe('exec');
+    const doubleDashIdx = args.indexOf('--');
+    expect(doubleDashIdx).toBeGreaterThan(-1);
+    expect(args[doubleDashIdx + 1]).toBe(frontMatterPrompt);
+    // all option flags must appear before --
+    const optionArgs = args.slice(0, doubleDashIdx);
+    expect(optionArgs).toContain('--json');
+    expect(optionArgs).toContain('--skip-git-repo-check');
+    expect(optionArgs).toContain('--full-auto');
+    expect(optionArgs).toContain('-m');
+  });
+
+  it('maps effort tiers via -c config flag', async () => {
+    const { codexAdapter } = await import('../../src/core/adapters/codex.js');
+
+    expect(codexAdapter.effortFlag('low')).toEqual(['-c', 'model_reasoning_effort="low"']);
+    expect(codexAdapter.effortFlag('medium')).toEqual(['-c', 'model_reasoning_effort="medium"']);
+    expect(codexAdapter.effortFlag('high')).toEqual(['-c', 'model_reasoning_effort="high"']);
   });
 });
 
