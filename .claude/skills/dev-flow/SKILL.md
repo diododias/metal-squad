@@ -1,126 +1,110 @@
-# Skill: Fluxo de desenvolvimento
+# Skill: Dev Flow
 
-Fluxo padrão de uma task: do worktree ao PR aberto. **Não mergeia** — humano fecha.
+Fonte canonica desta skill: este arquivo em `.claude/skills/dev-flow/`.
 
-→ Padrões de código: [`../../rules/`](../../rules/)
-→ Branch/commit: [`../../rules/git-workflow.md`](../../rules/git-workflow.md)
-→ Testes: [`../../rules/testing.md`](../../rules/testing.md)
+Use esta skill para desenvolvimento normal no `metal-squad`: feature, hotfix, refactor, docs tecnicos, ajustes de skill e melhorias locais no repo.
 
-## Etapas
+Nao use esta skill para validar o proprio executor `msq` ponta a ponta. Nesse caso, carregue [`../msq-develop/SKILL.md`](../msq-develop/SKILL.md), que e o harness dedicado.
 
-1. PLAN
-2. WORKTREE
-3. ISSUE
-4. IMPLEMENT
-5. TEST
-6. SONAR
-7. VALIDATION
-8. COMMIT
-9. PUSH + OPEN PR
-10. **STOP** — humano mergeia
+## Regras do repositorio
 
-Limpeza de worktree é um ciclo separado, executado **depois** que humano mergear.
+- Contexto do produto e fontes de verdade: [`../../rules/repo-context.md`](../../rules/repo-context.md)
+- Limites de arquitetura e ownership por pasta: [`../../rules/architecture.md`](../../rules/architecture.md)
+- Branch, worktree, commit e PR: [`../../rules/git-workflow.md`](../../rules/git-workflow.md)
+- Validacao automatizada: [`../../rules/testing.md`](../../rules/testing.md)
+- Harness local, `MSQ_DB_PATH` e regras anti-recursao: [`../../rules/harness.md`](../../rules/harness.md)
+- Template de PR: [`./pr-template.md`](./pr-template.md)
 
----
+## Objetivo
 
-### 1. PLAN
-- Ler task: escopo, critério de aceitação, restrições.
-- Identificar dependências (backend / storefront / módulo `craft_schedule`).
-- Checklist curto do que entregar.
-- Decidir branch name: `feat/NNN-slug` | `fix/NNN-slug` | `refactor/NNN-slug` (NNN = issue GitHub).
+Levar uma mudanca do entendimento inicial ate um diff validado e, quando fizer sentido, pronto para commit/push/PR.
 
-### 2. WORKTREE
-- **Obrigatório** (regra inegociável #2 do CLAUDE.md).
-- `EnterWorktree` com `name` casando com branch.
-- Nunca editar árvore principal pra feature work.
+## Fluxo padrao
 
-### 3. ISSUE
-- Toda demanda exige issue antes de implementar (rastreio + auto-close).
-- Reaproveitar se já existir: `gh issue edit <N> --add-assignee @me`.
+### 1. Classificar o trabalho
 
-```bash
-gh issue create \
-  --title "feat(escopo): descrição curta" \
-  --body "$(cat <<'EOF'
-## Contexto
-<por que>
+Antes de alterar codigo, decida em qual trilha a tarefa cai:
 
-## Escopo
-- [ ] item 1
-- [ ] item 2
+- **Fluxo normal deste repo**: implementar feature/hotfix/refactor/docs locais no `msq`.
+- **Harness do produto**: validar `msq run`, adapters, backlog temporario, observabilidade, recursao, SQLite, ou outra falha operacional do proprio orquestrador.
 
-## Critério de aceitação
-- ...
-EOF
-)"
-```
+Se for harness do produto, interrompa esta skill e siga `msq-develop`.
 
-### 4. IMPLEMENT
-- Mínimo viável primeiro. Aumentar escopo só se necessário.
-- Seguir convenções: [`../../rules/coding-style.md`](../../rules/coding-style.md), [`../../rules/patterns.md`](../../rules/patterns.md), [`../../rules/ARCHITECTURE.md`](../../rules/ARCHITECTURE.md).
-- Nova rota? Seguir checklist em `rules/patterns.md`.
+### 2. Ler o contexto correto
 
-### 5. TEST
-- Cobrir nova lógica (unit ≥80%; reserva/capacidade/pagamento/webhook = 100%).
-- `pnpm test` (unit) + `pnpm test:integration` (real DB, sem mock).
-- Coverage obrigatória: `pnpm --filter @ecommerce-calendar-based/backend test:coverage`.
-- Endpoint coverage: `pnpm --filter @ecommerce-calendar-based/backend test:coverage:endpoints` (rota nova).
-- Detalhes: [`../../rules/testing.md`](../../rules/testing.md).
+Leia somente o necessario, priorizando estas fontes:
 
-### 6. SONAR
-- `pnpm sonar` → checar Quality Gate + BLOCKER/CRITICAL.
-- Procedimento: [`../../rules/sonar.md`](../../rules/sonar.md).
-- Não suprimir issue pra passar gate.
+1. `README.md` para setup/comandos
+2. `docs/ROADMAP.md` para prioridade, dependencias e nomenclatura `Fxx/Hxx`
+3. `docs/features/Fxx-*.md` ou `docs/hotfixes/Hxx-*.md` quando a demanda mapear para um item do backlog
+4. `backlog.yaml` quando a mudanca tocar fluxo de feature, skills, prompt ou selecao de tool/model
+5. arquivos reais em `src/` e `tests/` que serao alterados
 
-### 7. VALIDATION
-- Subagente Sonnet valida o diff contra: spec da feature, checklist pre-commit, regras de arquitetura, testes e gaps de CI.
-- PASS → pode commitar. FAIL → corrigir e re-rodar.
+Nao trate `docs/ARCHITECTURE.md` como fonte de verdade hoje; ele esta placeholder.
 
-### 8. COMMIT
-- Formato: `tipo(escopo): descrição em português` (pt-BR).
-- Trailer: `Co-Authored-By: Claude <noreply@anthropic.com>`.
-- Tipos válidos: `feat` `fix` `refactor` `test` `docs` `chore` `perf`.
-- Atualizar `.sdd-workspace/TRACKING.md` no mesmo commit (ou commit logo após).
+### 3. Isolar o trabalho
 
-### 9. PUSH + OPEN PR
-- Docker build check: `docker build -f apps/backend/Dockerfile apps/backend` e `docker build -f apps/storefront/Dockerfile apps/storefront`.
-- `git push origin <branch>`.
-- Base branch = **develop** (sempre).
-- `gh pr create --base develop --title "..." --body "..."`.
-- Corpo **obrigatório**: `Closes #N` (compensa workflow de auto-close removido).
-- Release PRs: semver manual, título `[RELEASE]`/`[PRODUCTION]`, referência em `.github/workflows/test.yml.disabled`.
-- Template: [`pr-template.md`](./pr-template.md).
+- Para feature, hotfix ou refactor de medio/alto risco, prefira worktree isolada.
+- Para ajuste pequeno de docs/skill/regra no checkout ja preparado pelo usuario, trabalhar no checkout atual e aceitavel.
+- Nunca crie worktree de dentro do fluxo `msq-develop`.
+
+### 4. Planejar de forma curta
+
+Monte um checklist enxuto antes de editar:
+
+- comportamento que muda
+- camadas/pastas afetadas
+- testes ou validacoes necessarias
+- docs que precisam acompanhar a mudanca
+
+### 5. Implementar no layer correto
+
+Siga os limites em `rules/architecture.md`:
+
+- `src/commands/`: parsing de CLI e delegacao
+- `src/core/`: backlog, orchestrator, adapters, skills, events
+- `src/db/`: persistencia SQLite e migracoes
+- `src/ui/`: componentes Ink, hooks e formatacao de tela
+- `tests/`: cobertura por area impactada
+
+Se a mudanca revelar bug operacional do produto, registre ou atualize o item correspondente em `docs/hotfixes/` em vez de esconder o problema no texto do PR.
+
+### 6. Validar
+
+Escolha a menor bateria que realmente prova a mudanca:
+
+- baseline para codigo TS: `rtk npm run build`, `rtk npm test`, `rtk npm run typecheck`
+- `rtk npm run lint` quando tocar `src/**/*.ts` ou `src/**/*.tsx`
+- suites focadas com `rtk npx vitest run ...` para adapters, runner, db, backlog, ui, skills ou commands
+- validacao live do `msq` somente quando o risco pedir prova ponta a ponta
+
+Se rodar `msq`, `node dist/index.js`, `msq status` ou outro fluxo que persiste runs, use caminho local gravavel:
 
 ```bash
-gh pr create \
-  --base develop \
-  --title "feat(escopo): descrição" \
-  --body "$(cat <<'EOF'
-## Resumo
-<o que mudou e por quê>
-
-## Como testar
-- ...
-
-Closes #N
-EOF
-)"
+MSQ_DB_PATH="$(pwd)/.metal-squad/app.db" rtk node dist/index.js run --feature feat-XX
 ```
 
-### 10. STOP
-- **Nunca** `gh pr merge`. **Nunca** `git merge develop`.
-- Humano decide merge (regra inegociável #4 do CLAUDE.md).
+### 7. Empacotar
 
-## 11. Limpeza pós-push
-- Atualizar `TRACKING.md` (NEXT → DONE) se ainda não estiver.
-- `ExitWorktree action: remove` ou `git worktree remove <path>`.
-- `git status` limpo antes da próxima task.
-- retornar para branch develop e dar git pull.
+Quando o usuario pedir publicacao ou quando a tarefa claramente inclui entrega pronta:
 
-## Resumo rápido
+- commit somente depois da validacao relevante
+- base de PR: `develop`
+- incluir referencia a feature/hotfix/issue real quando existir
+- usar o template em [`pr-template.md`](./pr-template.md)
+- nunca mergear por conta propria
 
-- Worktree antes de tudo (#2).
-- Issue antes de implementar.
-- TDD: teste falhando precede implementação.
-- PR com `Closes #N`.
-- Push → Limpeza
+## Checklist operacional
+
+- use `rtk` em todos os comandos shell
+- mantenha a alteracao no menor conjunto coerente de arquivos
+- atualize docs do produto quando o comportamento, contrato ou harness mudarem
+- trate `exit 0` sem diff/run/log util como sinal fraco, nao como sucesso automatico
+- se houver duvida entre fluxo normal e harness, prefira explicitar a diferenca antes de continuar
+
+## Nao faca
+
+- nao use esta skill para rodar nested `msq run` dentro de uma sessao que ja foi spawnada pelo `msq`
+- nao copie instrucoes de outro repo para este skill folder
+- nao trate placeholder docs como arquitetura confirmada
+- nao abrir PR com claims de validacao que voce nao executou
