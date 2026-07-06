@@ -6,6 +6,11 @@ export interface TokenUsage {
   total: number;
 }
 
+export interface RunFeatureOptions {
+  cwd: string;
+  runId: number;
+}
+
 export interface RunResult {
   ok: boolean;
   summary: string;
@@ -17,7 +22,7 @@ export interface ToolAdapter {
   /** Mapeia effort normalizado para a flag nativa da ferramenta. */
   effortFlag(effort: Effort): string[];
   /** Executa uma fase spec-kit para a feature com o prompt já construído. */
-  runFeature(feature: Feature, prompt: string, cwd: string): Promise<RunResult>;
+  runFeature(feature: Feature, prompt: string, opts: RunFeatureOptions): Promise<RunResult>;
   /** Extrai uso de tokens do transcript, se disponível. */
   parseUsage?(transcript: string): TokenUsage | null;
 }

@@ -2,6 +2,7 @@ import { existsSync } from 'node:fs';
 import { getDb } from './index.js';
 import type { TokenUsage } from '../core/adapters/types.js';
 import { resolveDbPath } from '../config/index.js';
+import { msqEventBus } from '../core/events/index.js';
 
 export function registerRepo(repoId: string, path: string): void {
   getDb('readwrite')
@@ -148,13 +149,16 @@ export function openGates(): GateRow[] {
 
 // T006: resolveGate — sets resolved_at + decision atomically, no-op if already resolved
 export function resolveGate(id: number, decision: GateDecision): void {
-  getDb('readwrite')
+  const info = getDb('readwrite')
     .prepare(
       `UPDATE gates
        SET resolved_at = datetime('now'), decision = ?
        WHERE id = ? AND resolved_at IS NULL`,
     )
     .run(decision, id);
+  if (info.changes > 0) {
+    msqEventBus.emit('gate:resolved', { gateId: id, decision });
+  }
 }
 
 // T007: createGate — INSERT, returns new gate id
@@ -164,7 +168,9 @@ export function createGate(runId: number, featureId: string, repoId: string): nu
       `INSERT INTO gates (run_id, feature_id, repo_id) VALUES (?, ?, ?)`,
     )
     .run(runId, featureId, repoId);
-  return Number(info.lastInsertRowid);
+  const gateId = Number(info.lastInsertRowid);
+  msqEventBus.emit('gate:created', { gateId, runId, featureId, repoId });
+  return gateId;
 }
 
 function hasDbFile(): boolean {

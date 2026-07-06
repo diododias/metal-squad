@@ -10,6 +10,7 @@ describe('ui hooks', () => {
     const setRuns = vi.fn();
     const clearIntervalSpy = vi.spyOn(globalThis, 'clearInterval');
     const intervalCallbacks: Array<() => void> = [];
+    const listeners = new Map<string, Array<() => void>>();
 
     vi.doMock('react', () => ({
       useState: (value: unknown) => [typeof value === 'function' ? (value as () => unknown)() : value, setRuns],
@@ -25,6 +26,17 @@ describe('ui hooks', () => {
         .mockReturnValueOnce([{ runId: 2 }]),
     }));
 
+    vi.doMock('../../src/core/events/index.js', () => ({
+      msqEventBus: {
+        subscribe: vi.fn((event: string, listener: () => void) => {
+          const current = listeners.get(event) ?? [];
+          current.push(listener);
+          listeners.set(event, current);
+          return () => {};
+        }),
+      },
+    }));
+
     vi.spyOn(globalThis, 'setInterval').mockImplementation(((fn: () => void) => {
       intervalCallbacks.push(fn);
       return 1 as unknown as NodeJS.Timeout;
@@ -34,8 +46,9 @@ describe('ui hooks', () => {
     const runs = useRuns(1234);
 
     expect(runs).toEqual([{ runId: 1 }]);
-    intervalCallbacks[0]?.();
+    listeners.get('run:start')?.[0]?.();
     expect(setRuns).toHaveBeenCalledWith([{ runId: 2 }]);
+    intervalCallbacks[0]?.();
     const cleanup = (globalThis.setInterval as unknown as ReturnType<typeof vi.fn>).mock.results[0];
     expect(clearIntervalSpy).not.toHaveBeenCalled();
     expect(cleanup).toBeDefined();
@@ -44,6 +57,7 @@ describe('ui hooks', () => {
   it('useRuns keeps stale data when db polling throws', async () => {
     const setRuns = vi.fn();
     const intervalCallbacks: Array<() => void> = [];
+    const listeners = new Map<string, Array<() => void>>();
 
     vi.doMock('react', () => ({
       useState: (value: unknown) => [typeof value === 'function' ? (value as () => unknown)() : value, setRuns],
@@ -53,9 +67,20 @@ describe('ui hooks', () => {
     vi.doMock('../../src/db/repo.js', () => ({
       listRunsForTui: vi.fn()
         .mockReturnValueOnce([])
-        .mockImplementationOnce(() => {
+        .mockImplementation(() => {
           throw new Error('db locked');
         }),
+    }));
+
+    vi.doMock('../../src/core/events/index.js', () => ({
+      msqEventBus: {
+        subscribe: vi.fn((event: string, listener: () => void) => {
+          const current = listeners.get(event) ?? [];
+          current.push(listener);
+          listeners.set(event, current);
+          return () => {};
+        }),
+      },
     }));
 
     vi.spyOn(globalThis, 'setInterval').mockImplementation(((fn: () => void) => {
@@ -65,6 +90,7 @@ describe('ui hooks', () => {
 
     const { useRuns } = await import('../../src/ui/hooks/useRuns.js');
     expect(useRuns()).toEqual([]);
+    expect(() => listeners.get('run:start')?.[0]?.()).not.toThrow();
     expect(() => intervalCallbacks[0]?.()).not.toThrow();
     expect(setRuns).not.toHaveBeenCalled();
   });
@@ -79,6 +105,7 @@ describe('ui hooks', () => {
       });
     const resolveGate = vi.fn();
     const intervalCallbacks: Array<() => void> = [];
+    const listeners = new Map<string, Array<() => void>>();
 
     vi.doMock('react', () => ({
       useState: (value: unknown) => [typeof value === 'function' ? (value as () => unknown)() : value, setGates],
@@ -89,6 +116,17 @@ describe('ui hooks', () => {
     vi.doMock('../../src/db/repo.js', () => ({
       openGates,
       resolveGate,
+    }));
+
+    vi.doMock('../../src/core/events/index.js', () => ({
+      msqEventBus: {
+        subscribe: vi.fn((event: string, listener: () => void) => {
+          const current = listeners.get(event) ?? [];
+          current.push(listener);
+          listeners.set(event, current);
+          return () => {};
+        }),
+      },
     }));
 
     vi.spyOn(globalThis, 'setInterval').mockImplementation(((fn: () => void) => {
@@ -103,6 +141,7 @@ describe('ui hooks', () => {
     result.resolve(1, 'approved');
     expect(resolveGate).toHaveBeenCalledWith(1, 'approved');
     expect(setGates).toHaveBeenCalledWith([{ id: 2 }]);
+    expect(() => listeners.get('gate:created')?.[0]?.()).not.toThrow();
     expect(() => intervalCallbacks[0]?.()).not.toThrow();
   });
 

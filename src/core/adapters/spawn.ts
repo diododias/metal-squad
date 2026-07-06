@@ -35,6 +35,7 @@ export interface SpawnOptions {
   heartbeatMs?: number;
   logLabel?: string;
   heartbeatSuffix?: () => string | undefined;
+  onHeartbeat?: (message: string) => void;
   onStdoutLine?: (line: string) => void;
   onStderrLine?: (line: string) => void;
 }
@@ -74,7 +75,7 @@ export function runCli(
           const idleMs = Date.now() - lastOutputAt;
           const label = opts.logLabel ?? bin;
           const suffix = opts.heartbeatSuffix?.();
-          console.log(
+          opts.onHeartbeat?.(
             `[msq] ${label} em execução há ${Math.round(elapsedMs / 1000)}s `
               + `(stdout=${stdout.length}B stderr=${stderr.length}B idle=${Math.round(idleMs / 1000)}s)`
               + (suffix ? ` ${suffix}` : ''),

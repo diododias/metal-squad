@@ -1,6 +1,7 @@
-import type { ToolAdapter, RunResult, TokenUsage } from './types.js';
+import type { ToolAdapter, RunResult, RunFeatureOptions, TokenUsage } from './types.js';
 import type { Effort, Feature } from '../backlog/schema.js';
 import { runCli } from './spawn.js';
+import { msqEventBus } from '../events/index.js';
 
 // OpenCode não expõe reasoning-effort direto (depende do provider/modelo).
 // Convenção: modelo no formato "provider/model" (ex: anthropic/claude-sonnet-4-5).
@@ -18,7 +19,7 @@ export const opencodeAdapter: ToolAdapter = {
     return [];
   },
 
-  async runFeature(feature: Feature, prompt: string, cwd: string): Promise<RunResult> {
+  async runFeature(feature: Feature, prompt: string, opts: RunFeatureOptions): Promise<RunResult> {
     const args = [
       'run',
       prompt,
@@ -26,14 +27,28 @@ export const opencodeAdapter: ToolAdapter = {
       ...(feature.model ? ['--model', feature.model] : []),
     ];
 
-    const { code, stdout, stderr } = await runCli('opencode', args, { cwd });
+    const { code, stdout, stderr } = await runCli('opencode', args, {
+      cwd: opts.cwd,
+      onStdoutLine: (line) => {
+        const text = normalizeSnippet(line);
+        if (!text) return;
+        emitRunOutput(opts.runId, feature, text, 'stdout', 'stdout');
+      },
+      onStderrLine: (line) => {
+        const text = normalizeSnippet(line);
+        if (!text) return;
+        emitRunOutput(opts.runId, feature, text, 'stderr', 'stderr');
+      },
+    });
     if (code !== 0) return { ok: false, summary: stderr.slice(-500) || `exit ${code}` };
 
     const json = safeJson<{ response?: string }>(stdout);
+    const usage = this.parseUsage?.(stdout) ?? undefined;
+    if (usage) emitUsage(opts.runId, feature, usage);
     return {
       ok: true,
       summary: (json?.response ?? stdout).slice(0, 200),
-      usage: this.parseUsage?.(stdout) ?? undefined,
+      usage,
     };
   },
 
@@ -55,4 +70,36 @@ function safeJson<T>(s: string): T | null {
   } catch {
     return null;
   }
+}
+
+function normalizeSnippet(text: string): string {
+  return text.replace(/\s+/g, ' ').trim().slice(0, 160);
+}
+
+function emitRunOutput(
+  runId: number,
+  feature: Feature,
+  line: string,
+  stream: 'stdout' | 'stderr',
+  source: 'stdout' | 'stderr',
+): void {
+  msqEventBus.emit('run:output', {
+    runId,
+    featureId: feature.id,
+    tool: feature.tool,
+    line,
+    stream,
+    source,
+  });
+}
+
+function emitUsage(runId: number, feature: Feature, usage: TokenUsage): void {
+  msqEventBus.emit('tokens:update', {
+    runId,
+    featureId: feature.id,
+    tool: feature.tool,
+    input: usage.input,
+    output: usage.output,
+    total: usage.total,
+  });
 }

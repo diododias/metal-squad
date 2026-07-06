@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 const mockRunCli = vi.fn();
 const mockExecFileSync = vi.fn();
+const mockEventEmit = vi.fn();
 
 class MockCliTimeoutError extends Error {
   readonly stdout: string;
@@ -34,6 +35,12 @@ vi.mock('../../src/core/adapters/spawn.js', () => ({
   CliTimeoutError: MockCliTimeoutError,
 }));
 
+vi.mock('../../src/core/events/index.js', () => ({
+  msqEventBus: {
+    emit: mockEventEmit,
+  },
+}));
+
 vi.mock('node:child_process', () => ({
   execFileSync: mockExecFileSync,
 }));
@@ -41,6 +48,7 @@ vi.mock('node:child_process', () => ({
 beforeEach(() => {
   mockRunCli.mockReset();
   mockExecFileSync.mockReset();
+  mockEventEmit.mockReset();
 });
 
 describe('codexAdapter timeout observability', () => {
@@ -76,7 +84,7 @@ describe('codexAdapter timeout observability', () => {
       effort: 'medium',
       dependsOn: [],
       tasks: [],
-    }, 'prompt', '/repo');
+    }, 'prompt', { cwd: '/repo', runId: 7 });
 
     expect(result.ok).toBe(false);
     expect(result.summary).toContain('timeout após 605s');
@@ -92,9 +100,18 @@ describe('codexAdapter timeout observability', () => {
         cwd: '/repo',
         heartbeatMs: 30_000,
         logLabel: 'codex feat-02',
+        onHeartbeat: expect.any(Function),
         onStdoutLine: expect.any(Function),
         heartbeatSuffix: expect.any(Function),
       }),
     );
+    expect(mockEventEmit).toHaveBeenCalledWith('tokens:update', {
+      runId: 7,
+      featureId: 'feat-02',
+      tool: 'codex',
+      input: 120,
+      output: 40,
+      total: 160,
+    });
   });
 });
