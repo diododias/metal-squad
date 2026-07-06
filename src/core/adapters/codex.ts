@@ -1,8 +1,9 @@
-import type { ToolAdapter, RunResult, TokenUsage } from './types.js';
+import type { ToolAdapter, RunResult, RunFeatureOptions, TokenUsage } from './types.js';
 import type { Effort, Feature } from '../backlog/schema.js';
 import { execFileSync } from 'node:child_process';
 import { loadConfig } from '../../config/index.js';
 import { CliTimeoutError, runCli } from './spawn.js';
+import { msqEventBus } from '../events/index.js';
 
 // Codex tem effort nativo via config: model_reasoning_effort.
 const EFFORT: Record<Effort, string> = {
@@ -18,7 +19,7 @@ export const codexAdapter: ToolAdapter = {
     return ['-c', `model_reasoning_effort="${EFFORT[effort]}"`];
   },
 
-  async runFeature(feature: Feature, prompt: string, cwd: string): Promise<RunResult> {
+  async runFeature(feature: Feature, prompt: string, opts: RunFeatureOptions): Promise<RunResult> {
     const args = [
       'exec',
       prompt,
@@ -37,22 +38,31 @@ export const codexAdapter: ToolAdapter = {
 
     try {
       ({ code, stdout, stderr } = await runCli('codex', args, {
-        cwd,
+        cwd: opts.cwd,
         timeoutMs,
         heartbeatMs: 30_000,
         logLabel: `codex ${feature.id}`,
         heartbeatSuffix: () => progress.heartbeatSuffix(),
-        onStdoutLine: (line) => progress.onStdoutLine(line),
-        onStderrLine: (line) => progress.onStderrLine(line),
+        onHeartbeat: (message) => emitRunOutput(opts.runId, feature, message, 'stderr', 'heartbeat'),
+        onStdoutLine: (line) => {
+          const output = progress.onStdoutLine(line);
+          if (output) emitRunOutput(opts.runId, feature, output, 'stdout', 'agent');
+        },
+        onStderrLine: (line) => {
+          const output = progress.onStderrLine(line);
+          if (output) emitRunOutput(opts.runId, feature, output, 'stderr', 'stderr');
+        },
       }));
     } catch (error) {
       if (error instanceof CliTimeoutError) {
-        const touchedFiles = detectTouchedFiles(cwd);
+        const touchedFiles = detectTouchedFiles(opts.cwd);
         const partial = summarizePartialOutput(error.stdout, error.stderr, touchedFiles);
+        const usage = this.parseUsage?.(error.stdout) ?? undefined;
+        if (usage) emitUsage(opts.runId, feature, usage);
         return {
           ok: false,
           summary: `timeout após ${Math.round(error.runtimeMs / 1000)}s. ${partial}`,
-          usage: this.parseUsage?.(error.stdout) ?? undefined,
+          usage,
         };
       }
       throw error;
@@ -61,10 +71,12 @@ export const codexAdapter: ToolAdapter = {
     if (code !== 0) return { ok: false, summary: stderr.slice(-500) || `exit ${code}` };
 
     const finalMsg = lastAgentMessage(stdout);
+    const usage = this.parseUsage?.(stdout) ?? undefined;
+    if (usage) emitUsage(opts.runId, feature, usage);
     return {
       ok: true,
       summary: finalMsg.slice(0, 200),
-      usage: this.parseUsage?.(stdout) ?? undefined,
+      usage,
     };
   },
 
@@ -160,8 +172,8 @@ function formatTouchedFiles(files: string[]): string {
 }
 
 function createCodexProgress(featureId: string): {
-  onStdoutLine: (line: string) => void;
-  onStderrLine: (line: string) => void;
+  onStdoutLine: (line: string) => string | null;
+  onStderrLine: (line: string) => string | null;
   heartbeatSuffix: () => string | undefined;
 } {
   let eventCount = 0;
@@ -172,22 +184,23 @@ function createCodexProgress(featureId: string): {
   return {
     onStdoutLine(line: string) {
       const evt = safeJson<any>(line);
-      if (!evt?.type) return;
+      if (!evt?.type) return null;
       eventCount += 1;
       lastEventType = evt.type;
 
       if (evt.type === 'item.completed' && evt.item?.type === 'agent_message') {
         const text = String(evt.item.text ?? '').replace(/\s+/g, ' ').trim();
-        if (!text) return;
+        if (!text) return null;
         lastAgentSnippet = text.slice(0, 120);
-        console.log(`[msq] codex ${featureId} agente: ${lastAgentSnippet}`);
+        return lastAgentSnippet;
       }
+      return null;
     },
     onStderrLine(line: string) {
       const text = line.trim();
-      if (!text) return;
+      if (!text) return null;
       lastStderrSnippet = text.slice(-120);
-      console.log(`[msq] codex ${featureId} stderr: ${lastStderrSnippet}`);
+      return lastStderrSnippet;
     },
     heartbeatSuffix() {
       const parts: string[] = [];
@@ -198,4 +211,32 @@ function createCodexProgress(featureId: string): {
       return parts.length > 0 ? `[${parts.join(' | ')}]` : undefined;
     },
   };
+}
+
+function emitRunOutput(
+  runId: number,
+  feature: Feature,
+  line: string,
+  stream: 'stdout' | 'stderr',
+  source: 'agent' | 'stderr' | 'heartbeat',
+): void {
+  msqEventBus.emit('run:output', {
+    runId,
+    featureId: feature.id,
+    tool: feature.tool,
+    line,
+    stream,
+    source,
+  });
+}
+
+function emitUsage(runId: number, feature: Feature, usage: TokenUsage): void {
+  msqEventBus.emit('tokens:update', {
+    runId,
+    featureId: feature.id,
+    tool: feature.tool,
+    input: usage.input,
+    output: usage.output,
+    total: usage.total,
+  });
 }

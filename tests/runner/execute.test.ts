@@ -9,6 +9,9 @@ const mockFinishRun = vi.fn();
 const mockRecordUsage = vi.fn();
 const mockNotify = vi.fn();
 const mockRunFeature = vi.fn();
+const mockEventEmit = vi.fn();
+const mockAttachDefaultEventLogger = vi.fn();
+const mockAttachEventNotifications = vi.fn();
 
 vi.mock('../../src/core/repo.js', () => ({
   resolveRepo: mockResolveRepo,
@@ -30,6 +33,14 @@ vi.mock('../../src/core/notify/telegram.js', () => ({
   notify: mockNotify,
 }));
 
+vi.mock('../../src/core/events/index.js', () => ({
+  msqEventBus: {
+    emit: mockEventEmit,
+  },
+  attachDefaultEventLogger: mockAttachDefaultEventLogger,
+  attachEventNotifications: mockAttachEventNotifications,
+}));
+
 vi.mock('../../src/config/index.js', () => ({
   loadConfig: () => ({ staleRunThresholdMinutes: 120 }),
 }));
@@ -43,8 +54,13 @@ beforeEach(() => {
   mockRecordUsage.mockReset();
   mockNotify.mockReset();
   mockRunFeature.mockReset();
+  mockEventEmit.mockReset();
+  mockAttachDefaultEventLogger.mockReset();
+  mockAttachEventNotifications.mockReset();
   mockResolveRepo.mockReturnValue({ repoId: 'repo-1', path: '/repo' });
   mockCreateRun.mockReturnValue(7);
+  mockAttachDefaultEventLogger.mockReturnValue(vi.fn());
+  mockAttachEventNotifications.mockReturnValue(vi.fn());
 });
 
 describe('executeBacklog failure persistence', () => {
@@ -92,8 +108,24 @@ describe('executeBacklog failure persistence', () => {
       'timeout após 605s. última mensagem do agente: Atualizando registry. arquivos tocados: src/core/skills/registry.ts',
     );
     expect(mockRecordUsage).not.toHaveBeenCalled();
-    expect(mockNotify).toHaveBeenCalledWith(
-      expect.stringContaining('Feature feat-02 falhou: timeout após 605s.'),
+    expect(mockRunFeature).toHaveBeenCalledWith(
+      expect.any(Object),
+      expect.any(String),
+      { cwd: '/repo', runId: 7 },
     );
+    expect(mockAttachDefaultEventLogger).toHaveBeenCalled();
+    expect(mockAttachEventNotifications).toHaveBeenCalled();
+    expect(mockEventEmit).toHaveBeenCalledWith('run:start', {
+      runId: 7,
+      featureId: 'feat-02',
+      tool: 'codex',
+    });
+    expect(mockEventEmit).toHaveBeenCalledWith('run:failed', {
+      runId: 7,
+      featureId: 'feat-02',
+      tool: 'codex',
+      error: 'timeout após 605s. última mensagem do agente: Atualizando registry. arquivos tocados: src/core/skills/registry.ts',
+    });
+    expect(mockNotify).not.toHaveBeenCalled();
   });
 });

@@ -1,7 +1,8 @@
 import { execFileSync } from 'node:child_process';
-import type { ToolAdapter, RunResult, TokenUsage } from './types.js';
+import type { ToolAdapter, RunResult, RunFeatureOptions, TokenUsage } from './types.js';
 import type { Effort, Feature } from '../backlog/schema.js';
 import { CliTimeoutError, runCli } from './spawn.js';
+import { msqEventBus } from '../events/index.js';
 
 // Sem flag nativa de "effort": mapeia para o tier de modelo.
 const EFFORT_MODEL: Record<Effort, string> = {
@@ -24,7 +25,7 @@ export const claudeAdapter: ToolAdapter = {
     return ['--model', EFFORT_MODEL[effort]];
   },
 
-  async runFeature(feature: Feature, prompt: string, cwd: string): Promise<RunResult> {
+  async runFeature(feature: Feature, prompt: string, opts: RunFeatureOptions): Promise<RunResult> {
     const model = feature.model ? ['--model', feature.model] : this.effortFlag(feature.effort);
     const args = [
       '-p', prompt,
@@ -40,36 +41,47 @@ export const claudeAdapter: ToolAdapter = {
 
     try {
       ({ code, stdout, stderr } = await runCli('claude', args, {
-        cwd,
+        cwd: opts.cwd,
         heartbeatMs: 30_000,
         logLabel: `claude ${feature.id}`,
         heartbeatSuffix: () => progress.heartbeatSuffix(),
-        onStdoutLine: (line) => progress.onStdoutLine(line),
-        onStderrLine: (line) => progress.onStderrLine(line),
+        onHeartbeat: (message) => emitRunOutput(opts.runId, feature, message, 'stderr', 'heartbeat'),
+        onStdoutLine: (line) => {
+          const output = progress.onStdoutLine(line);
+          if (output) emitRunOutput(opts.runId, feature, output, 'stdout', 'agent');
+        },
+        onStderrLine: (line) => {
+          const output = progress.onStderrLine(line);
+          if (output) emitRunOutput(opts.runId, feature, output, 'stderr', 'stderr');
+        },
       }));
     } catch (error) {
       if (error instanceof CliTimeoutError) {
-        const touchedFiles = detectTouchedFiles(cwd);
+        const touchedFiles = detectTouchedFiles(opts.cwd);
         const partial = summarizePartialOutput(error.stdout, error.stderr, touchedFiles);
+        const usage = this.parseUsage?.(error.stdout) ?? undefined;
+        if (usage) emitUsage(opts.runId, feature, usage);
         return {
           ok: false,
           summary: `timeout após ${Math.round(error.runtimeMs / 1000)}s. ${partial}`,
-          usage: this.parseUsage?.(error.stdout) ?? undefined,
+          usage,
         };
       }
       throw error;
     }
 
     if (code !== 0) {
-      const partial = summarizePartialOutput(stdout, stderr, detectTouchedFiles(cwd));
+      const partial = summarizePartialOutput(stdout, stderr, detectTouchedFiles(opts.cwd));
       return { ok: false, summary: `exit ${code}. ${partial}` };
     }
 
     const json = safeJson<ClaudeJson>(stdout);
+    const usage = this.parseUsage?.(stdout) ?? undefined;
+    if (usage) emitUsage(opts.runId, feature, usage);
     return {
       ok: json?.subtype !== 'error_max_turns' && code === 0,
       summary: (json?.result ?? '').slice(0, 200),
-      usage: this.parseUsage?.(stdout) ?? undefined,
+      usage,
     };
   },
 
@@ -156,8 +168,8 @@ function normalizeSnippet(text: string): string {
 }
 
 function createClaudeProgress(featureId: string): {
-  onStdoutLine: (line: string) => void;
-  onStderrLine: (line: string) => void;
+  onStdoutLine: (line: string) => string | null;
+  onStderrLine: (line: string) => string | null;
   heartbeatSuffix: () => string | undefined;
 } {
   let stdoutCount = 0;
@@ -168,17 +180,17 @@ function createClaudeProgress(featureId: string): {
   return {
     onStdoutLine(line: string) {
       const text = summarizeClaudeLine(line);
-      if (!text) return;
+      if (!text) return null;
       stdoutCount += 1;
       lastAgentSnippet = text;
-      console.log(`[msq] claude ${featureId} agente: ${text}`);
+      return text;
     },
     onStderrLine(line: string) {
       const text = normalizeSnippet(line);
-      if (!text) return;
+      if (!text) return null;
       stderrCount += 1;
       lastStderrSnippet = text;
-      console.log(`[msq] claude ${featureId} stderr: ${text}`);
+      return text;
     },
     heartbeatSuffix() {
       const parts: string[] = [];
@@ -200,4 +212,32 @@ function summarizeClaudeLine(line: string): string {
     if (subtype) return subtype;
   }
   return normalizeSnippet(line);
+}
+
+function emitRunOutput(
+  runId: number,
+  feature: Feature,
+  line: string,
+  stream: 'stdout' | 'stderr',
+  source: 'agent' | 'stderr' | 'heartbeat',
+): void {
+  msqEventBus.emit('run:output', {
+    runId,
+    featureId: feature.id,
+    tool: feature.tool,
+    line,
+    stream,
+    source,
+  });
+}
+
+function emitUsage(runId: number, feature: Feature, usage: TokenUsage): void {
+  msqEventBus.emit('tokens:update', {
+    runId,
+    featureId: feature.id,
+    tool: feature.tool,
+    input: usage.input,
+    output: usage.output,
+    total: usage.total,
+  });
 }

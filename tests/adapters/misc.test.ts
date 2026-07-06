@@ -4,6 +4,7 @@ import { EventEmitter } from 'node:events';
 const mockRunCli = vi.fn();
 const mockSpawn = vi.fn();
 const mockExecFileSync = vi.fn();
+const mockEventEmit = vi.fn();
 
 vi.mock('../../src/core/adapters/spawn.js', async () => {
   const actual = await vi.importActual<typeof import('../../src/core/adapters/spawn.js')>('../../src/core/adapters/spawn.js');
@@ -18,9 +19,16 @@ vi.mock('node:child_process', () => ({
   execFileSync: mockExecFileSync,
 }));
 
+vi.mock('../../src/core/events/index.js', () => ({
+  msqEventBus: {
+    emit: mockEventEmit,
+  },
+}));
+
 beforeEach(() => {
   vi.clearAllMocks();
   mockExecFileSync.mockReset();
+  mockEventEmit.mockReset();
 });
 
 afterEach(() => {
@@ -61,7 +69,7 @@ describe('claude adapter', () => {
           tasks: [],
         },
         'test-prompt',
-        '/repo',
+        { cwd: '/repo', runId: 1 },
       ),
     ).resolves.toEqual({ ok: false, summary: 'exit 1. stderr final: fatal' });
   });
@@ -89,7 +97,7 @@ describe('claude adapter', () => {
           tasks: [],
         },
         'PROMPT',
-        '/repo',
+        { cwd: '/repo', runId: 2 },
       ),
     ).resolves.toEqual({
       ok: true,
@@ -103,11 +111,20 @@ describe('claude adapter', () => {
         cwd: '/repo',
         heartbeatMs: 30_000,
         logLabel: 'claude feat-1',
+        onHeartbeat: expect.any(Function),
         onStdoutLine: expect.any(Function),
         onStderrLine: expect.any(Function),
         heartbeatSuffix: expect.any(Function),
       }),
     );
+    expect(mockEventEmit).toHaveBeenCalledWith('tokens:update', {
+      runId: 2,
+      featureId: 'feat-1',
+      tool: 'claude',
+      input: 2,
+      output: 3,
+      total: 5,
+    });
   });
 
   it('handles malformed JSON and max-turn errors', async () => {
@@ -131,13 +148,12 @@ describe('claude adapter', () => {
           tasks: [],
         },
         'test-prompt',
-        '/repo',
+        { cwd: '/repo', runId: 3 },
       ),
     ).resolves.toMatchObject({ ok: false, summary: 'partial' });
   });
 
-  it('logs incremental stdout and stderr snippets while the run is active', async () => {
-    const log = vi.spyOn(console, 'log').mockImplementation(() => {});
+  it('emits incremental stdout and stderr snippets while the run is active', async () => {
     mockRunCli.mockImplementation(async (_bin, _args, opts) => {
       opts.onStdoutLine?.(JSON.stringify({ result: 'Atualizando prompt builder agora.' }));
       opts.onStderrLine?.('warning: still running');
@@ -159,11 +175,25 @@ describe('claude adapter', () => {
         tasks: [],
       },
       'PROMPT',
-      '/repo',
+      { cwd: '/repo', runId: 4 },
     );
 
-    expect(log).toHaveBeenCalledWith('[msq] claude feat-1 agente: Atualizando prompt builder agora.');
-    expect(log).toHaveBeenCalledWith('[msq] claude feat-1 stderr: warning: still running');
+    expect(mockEventEmit).toHaveBeenCalledWith('run:output', {
+      runId: 4,
+      featureId: 'feat-1',
+      tool: 'claude',
+      line: 'Atualizando prompt builder agora.',
+      stream: 'stdout',
+      source: 'agent',
+    });
+    expect(mockEventEmit).toHaveBeenCalledWith('run:output', {
+      runId: 4,
+      featureId: 'feat-1',
+      tool: 'claude',
+      line: 'warning: still running',
+      stream: 'stderr',
+      source: 'stderr',
+    });
   });
 
   it('returns timeout summary with partial output, touched files and parsed usage', async () => {
@@ -190,7 +220,7 @@ describe('claude adapter', () => {
         tasks: [],
       },
       'PROMPT',
-      '/repo',
+      { cwd: '/repo', runId: 5 },
     );
 
     expect(result.ok).toBe(false);
@@ -200,6 +230,14 @@ describe('claude adapter', () => {
       'arquivos tocados: src/core/adapters/claude.ts, tests/adapters/misc.test.ts',
     );
     expect(result.usage).toEqual({ input: 8, output: 5, total: 13 });
+    expect(mockEventEmit).toHaveBeenCalledWith('tokens:update', {
+      runId: 5,
+      featureId: 'feat-1',
+      tool: 'claude',
+      input: 8,
+      output: 5,
+      total: 13,
+    });
   });
 });
 
@@ -220,7 +258,7 @@ describe('opencode adapter', () => {
           tasks: [],
         },
         'test-prompt',
-        '/repo',
+        { cwd: '/repo', runId: 6 },
       ),
     ).resolves.toEqual({ ok: false, summary: 'bad' });
   });
@@ -248,7 +286,7 @@ describe('opencode adapter', () => {
           tasks: [],
         },
         'test-prompt',
-        '/repo',
+        { cwd: '/repo', runId: 7 },
       ),
     ).resolves.toEqual({
       ok: true,
@@ -259,6 +297,14 @@ describe('opencode adapter', () => {
       tokens: { input_tokens: 1, output_tokens: 4 },
     }))).toEqual({ input: 1, output: 4, total: 5 });
     expect(opencodeAdapter.parseUsage?.('not-json')).toBeNull();
+    expect(mockEventEmit).toHaveBeenCalledWith('tokens:update', {
+      runId: 7,
+      featureId: 'feat-1',
+      tool: 'opencode',
+      input: 5,
+      output: 7,
+      total: 12,
+    });
   });
 });
 
@@ -327,13 +373,13 @@ describe('runCli', () => {
     await expect(promise).rejects.toThrow('spawn failed');
   });
 
-  it('times out, kills the child and emits heartbeat logs', async () => {
+  it('times out, kills the child and emits heartbeat callbacks', async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date('2026-07-06T10:00:00Z'));
 
     const { child } = makeChild();
     mockSpawn.mockReturnValue(child);
-    const log = vi.spyOn(console, 'log').mockImplementation(() => {});
+    const onHeartbeat = vi.fn();
     const { CliTimeoutError, runCli } = await vi.importActual<typeof import('../../src/core/adapters/spawn.js')>(
       '../../src/core/adapters/spawn.js',
     );
@@ -343,6 +389,7 @@ describe('runCli', () => {
       timeoutMs: 50,
       heartbeatMs: 20,
       heartbeatSuffix: () => 'extra',
+      onHeartbeat,
     });
     const captured = promise.catch((error) => error);
 
@@ -350,7 +397,7 @@ describe('runCli', () => {
 
     expect(await captured).toBeInstanceOf(CliTimeoutError);
     expect(child.kill).toHaveBeenCalledWith('SIGKILL');
-    expect(log).toHaveBeenCalledWith(expect.stringContaining('[msq] codex em execução há'));
-    expect(log).toHaveBeenCalledWith(expect.stringContaining('extra'));
+    expect(onHeartbeat).toHaveBeenCalledWith(expect.stringContaining('[msq] codex em execução há'));
+    expect(onHeartbeat).toHaveBeenCalledWith(expect.stringContaining('extra'));
   });
 });
