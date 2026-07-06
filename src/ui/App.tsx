@@ -4,6 +4,7 @@ import { useRuns } from './hooks/useRuns.js';
 import { useGates } from './hooks/useGates.js';
 import { useRunOutput } from './hooks/useRunOutput.js';
 import { useTerminalWidth } from './hooks/useTerminalWidth.js';
+import { useNotifications } from './hooks/useNotifications.js';
 import { getFeatureCatalog } from './catalog.js';
 import { CommandBar } from './components/CommandBar.js';
 import { MainPanel } from './components/MainPanel.js';
@@ -30,6 +31,7 @@ function clampIndex(index: number, size: number): number {
 export function App(): React.ReactElement {
   const runs = useRuns(2000);
   const { gates, resolve } = useGates(2000);
+  const notifications = useNotifications(12);
   const width = useTerminalWidth();
   const [ui, setUi] = useState<UiState>({
     selectedRun: 0,
@@ -150,6 +152,7 @@ export function App(): React.ReactElement {
         <Sidebar
           runs={runs}
           gates={gates}
+          notifications={notifications}
           selectedRunIndex={selectedRunIndex}
           selectedGateIndex={selectedGateIndex}
           focusPanel={focusPanel}

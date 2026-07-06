@@ -5,6 +5,7 @@ const mockUseRuns = vi.fn();
 const mockUseGates = vi.fn();
 const mockUseRunOutput = vi.fn();
 const mockUseTerminalWidth = vi.fn();
+const mockUseNotifications = vi.fn();
 const mockGetFeatureCatalog = vi.fn();
 const mockMainPanel = vi.fn(() => React.createElement('main-panel'));
 const mockSidebar = vi.fn(() => React.createElement('sidebar-panel'));
@@ -43,6 +44,10 @@ vi.mock('../../src/ui/hooks/useRunOutput.js', () => ({
 
 vi.mock('../../src/ui/hooks/useTerminalWidth.js', () => ({
   useTerminalWidth: mockUseTerminalWidth,
+}));
+
+vi.mock('../../src/ui/hooks/useNotifications.js', () => ({
+  useNotifications: mockUseNotifications,
 }));
 
 vi.mock('../../src/ui/catalog.js', () => ({
@@ -105,6 +110,7 @@ describe('App', () => {
     mockUseRuns.mockReturnValue([]);
     mockUseGates.mockReturnValue({ gates: [], resolve: vi.fn() });
     mockUseRunOutput.mockReturnValue([]);
+    mockUseNotifications.mockReturnValue([]);
     mockGetFeatureCatalog.mockReturnValue({});
   });
 

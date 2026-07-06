@@ -4,8 +4,11 @@ import { registerRun } from './commands/run.js';
 import { registerSkills } from './commands/skills.js';
 import { registerStatus } from './commands/status.js';
 import { registerUi } from './commands/ui.js';
+import { initConfig } from './config/index.js';
 
 export async function run(argv: string[]): Promise<void> {
+  initConfig();
+
   const program = new Command();
 
   program

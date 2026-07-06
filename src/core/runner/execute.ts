@@ -4,7 +4,8 @@ import { schedule } from '../orchestrator/scheduler.js';
 import { getAdapter } from '../adapters/index.js';
 import { resolveRepo } from '../repo.js';
 import { registerRepo, createRun, finishRun, recordUsage, cleanupStaleRuns } from '../../db/repo.js';
-import { notify } from '../notify/telegram.js';
+import { dispatch } from '../notify/manager.js';
+import { startTelegramPoller, stopTelegramPoller } from '../notify/telegram-poller.js';
 import { loadConfig } from '../../config/index.js';
 import { buildPrompt } from '../backlog/prompt.js';
 import { createSkillRegistry } from '../skills/index.js';
@@ -39,6 +40,7 @@ export async function executeBacklog(
   const detachPersistence = attachRunPersistence();
   const detachLogger = attachDefaultEventLogger();
   const detachNotifications = attachEventNotifications();
+  startTelegramPoller();
 
   const execute = async (feature: Feature) => {
     const skills = registry.resolve(feature.skills ?? [], opts.cwd);
@@ -102,10 +104,11 @@ export async function executeBacklog(
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     if (!msg.startsWith('Feature ')) {
-      await notify(`metal-squad: execução parada — ${msg}`);
+      void dispatch('run:failed', `metal-squad: execução parada — ${msg}`).catch(() => {});
     }
     throw err;
   } finally {
+    stopTelegramPoller();
     detachNotifications();
     detachLogger();
     detachPersistence();

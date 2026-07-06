@@ -1,4 +1,4 @@
-import { notify } from '../notify/telegram.js';
+import { dispatch } from '../notify/manager.js';
 import { msqEventBus } from './bus.js';
 import type { TypedEventBus } from './bus.js';
 import type { MsqEvents } from './types.js';
@@ -8,10 +8,29 @@ export function attachEventNotifications(
 ): () => void {
   const unsubscribers = [
     eventBus.subscribe('gate:created', ({ gateId, featureId }) => {
-      void Promise.resolve(notify(`metal-squad: gate ${gateId} criado para ${featureId}`)).catch(() => {});
+      const message = [
+        `metal-squad: gate ${gateId} criado para ${featureId}`,
+        `Responda: gate:${gateId} approve | gate:${gateId} skip | gate:${gateId} retry`,
+      ].join('\n');
+      void dispatch('gate:created', message, { gateId, featureId }).catch(() => {});
     }),
     eventBus.subscribe('run:failed', ({ featureId, error }) => {
-      void Promise.resolve(notify(`metal-squad: ${featureId} falhou — ${error}`)).catch(() => {});
+      void dispatch('run:failed', `metal-squad: ${featureId} falhou — ${error}`, {
+        featureId,
+        error,
+      }).catch(() => {});
+    }),
+    eventBus.subscribe('budget:alert', ({ percent, spent, limit }) => {
+      void dispatch('budget:alert', `metal-squad: budget ${percent}% atingido (${spent}/${limit})`, {
+        percent,
+        spent,
+        limit,
+      }).catch(() => {});
+    }),
+    eventBus.subscribe('run:done', ({ featureId, result }) => {
+      void dispatch('run:done', `metal-squad: ${featureId} concluido — ${result.summary}`, {
+        featureId,
+      }).catch(() => {});
     }),
   ];
 
