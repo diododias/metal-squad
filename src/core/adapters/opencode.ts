@@ -1,7 +1,6 @@
 import type { ToolAdapter, RunResult, TokenUsage } from './types.js';
 import type { Effort, Feature } from '../backlog/schema.js';
 import { runCli } from './spawn.js';
-import { buildSpecKitPrompt } from '../backlog/prompt.js';
 
 // OpenCode não expõe reasoning-effort direto (depende do provider/modelo).
 // Convenção: modelo no formato "provider/model" (ex: anthropic/claude-sonnet-4-5).
@@ -19,10 +18,10 @@ export const opencodeAdapter: ToolAdapter = {
     return [];
   },
 
-  async runFeature(feature: Feature, cwd: string): Promise<RunResult> {
+  async runFeature(feature: Feature, prompt: string, cwd: string): Promise<RunResult> {
     const args = [
       'run',
-      buildSpecKitPrompt(feature),
+      prompt,
       '--format', 'json',
       ...(feature.model ? ['--model', feature.model] : []),
     ];

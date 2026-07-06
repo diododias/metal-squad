@@ -16,8 +16,8 @@ export interface ToolAdapter {
   readonly tool: Tool;
   /** Mapeia effort normalizado para a flag nativa da ferramenta. */
   effortFlag(effort: Effort): string[];
-  /** Executa uma fase spec-kit para a feature. */
-  runFeature(feature: Feature, cwd: string): Promise<RunResult>;
+  /** Executa uma fase spec-kit para a feature com o prompt já construído. */
+  runFeature(feature: Feature, prompt: string, cwd: string): Promise<RunResult>;
   /** Extrai uso de tokens do transcript, se disponível. */
   parseUsage?(transcript: string): TokenUsage | null;
 }

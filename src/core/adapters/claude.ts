@@ -1,7 +1,6 @@
 import type { ToolAdapter, RunResult, TokenUsage } from './types.js';
 import type { Effort, Feature } from '../backlog/schema.js';
 import { runCli } from './spawn.js';
-import { buildSpecKitPrompt } from '../backlog/prompt.js';
 
 // Sem flag nativa de "effort": mapeia para o tier de modelo.
 const EFFORT_MODEL: Record<Effort, string> = {
@@ -24,10 +23,10 @@ export const claudeAdapter: ToolAdapter = {
     return ['--model', EFFORT_MODEL[effort]];
   },
 
-  async runFeature(feature: Feature, cwd: string): Promise<RunResult> {
+  async runFeature(feature: Feature, prompt: string, cwd: string): Promise<RunResult> {
     const model = feature.model ? ['--model', feature.model] : this.effortFlag(feature.effort);
     const args = [
-      '-p', buildSpecKitPrompt(feature),
+      '-p', prompt,
       '--output-format', 'json',
       '--dangerously-skip-permissions',
       ...model,

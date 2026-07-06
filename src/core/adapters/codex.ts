@@ -3,7 +3,6 @@ import type { Effort, Feature } from '../backlog/schema.js';
 import { execFileSync } from 'node:child_process';
 import { loadConfig } from '../../config/index.js';
 import { CliTimeoutError, runCli } from './spawn.js';
-import { buildSpecKitPrompt } from '../backlog/prompt.js';
 
 // Codex tem effort nativo via config: model_reasoning_effort.
 const EFFORT: Record<Effort, string> = {
@@ -19,10 +18,10 @@ export const codexAdapter: ToolAdapter = {
     return ['-c', `model_reasoning_effort="${EFFORT[effort]}"`];
   },
 
-  async runFeature(feature: Feature, cwd: string): Promise<RunResult> {
+  async runFeature(feature: Feature, prompt: string, cwd: string): Promise<RunResult> {
     const args = [
       'exec',
-      buildSpecKitPrompt(feature),
+      prompt,
       '--json',
       '--skip-git-repo-check',
       '--full-auto', // troque por --dangerously-bypass-approvals-and-sandbox se precisar 100% unattended
