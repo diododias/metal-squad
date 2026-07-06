@@ -17,10 +17,22 @@ export function createRun(repoId: string, featureId: string, tool: string): numb
   return Number(info.lastInsertRowid);
 }
 
-export function finishRun(runId: number, status: 'done' | 'failed'): void {
+export function finishRun(runId: number, status: 'done' | 'failed', summary?: string): void {
   getDb()
-    .prepare(`UPDATE runs SET status = ?, ended_at = datetime('now') WHERE id = ?`)
-    .run(status, runId);
+    .prepare(`UPDATE runs SET status = ?, summary = ?, ended_at = datetime('now') WHERE id = ?`)
+    .run(status, summary ?? null, runId);
+}
+
+export function cleanupStaleRuns(olderThanMinutes: number): number {
+  const info = getDb()
+    .prepare(
+      `UPDATE runs
+       SET status = 'failed', ended_at = datetime('now')
+       WHERE status = 'running'
+         AND started_at <= datetime('now', '-' || ? || ' minutes')`,
+    )
+    .run(olderThanMinutes);
+  return info.changes;
 }
 
 export function recordUsage(runId: number, usage: TokenUsage): void {
@@ -37,6 +49,7 @@ export interface RunRow {
   status: string;
   started_at: string;
   ended_at: string | null;
+  summary: string | null;
   total: number | null;
 }
 

@@ -103,6 +103,17 @@ O que falta / problemas:
 
 ---
 
+## Backlog operacional descoberto em validacao
+
+| Item | Tipo | Prioridade |
+|------|------|------------|
+| [H01 — `msq run --feature` com dependencias insatisfeitas encerra em falso positivo](hotfixes/H01-run-feature-dependency-deadlock.md) | Hotfix | Critica |
+| [H02 — timeout do adapter `codex` precisa expor progresso e estado parcial](hotfixes/H02-codex-adapter-timeout-observability.md) | Hotfix | Alta |
+| [F25 — Hardening do fluxo `msq-develop`](features/F25-msq-develop-harness-hardening.md) | Feature | Alta |
+| [F26 — Resume de pipeline a partir do estado persistido](features/F26-resume-pipeline-from-state.md) | Feature | Alta |
+
+---
+
 ## Grafo de dependencias
 
 ```

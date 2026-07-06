@@ -24,3 +24,27 @@ export function topoOrder(backlog: Backlog): Feature[] {
   for (const f of features) visit(f);
   return out;
 }
+
+/** Seleciona uma feature e todas as dependências transitivas, preservando a ordem topológica. */
+export function selectFeaturePlan(backlog: Backlog, featureId: string): Feature[] {
+  const ordered = topoOrder(backlog);
+  const byId = new Map(ordered.map((feature) => [feature.id, feature]));
+  const selected = new Set<string>();
+
+  const visit = (id: string, parent?: string): void => {
+    const feature = byId.get(id);
+    if (!feature) {
+      if (parent) {
+        throw new Error(`Feature ${parent} depends on missing feature ${id}`);
+      }
+      throw new Error(`Feature not found in backlog: ${id}`);
+    }
+
+    if (selected.has(id)) return;
+    for (const dep of feature.dependsOn) visit(dep, feature.id);
+    selected.add(id);
+  };
+
+  visit(featureId);
+  return ordered.filter((feature) => selected.has(feature.id));
+}

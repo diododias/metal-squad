@@ -13,6 +13,12 @@ export function getDb(): Database.Database {
   return db;
 }
 
+export function resetDb(): void {
+  if (!db) return;
+  db.close();
+  db = null;
+}
+
 function migrate(d: Database.Database): void {
   d.exec(`
     CREATE TABLE IF NOT EXISTS repos (
@@ -49,4 +55,12 @@ function migrate(d: Database.Database): void {
       decision    TEXT
     );
   `);
+
+  const runColumns = (d
+    .prepare(`PRAGMA table_info(runs)`)
+    .all() ?? []) as Array<{ name?: string }>;
+  const hasSummary = runColumns.some((column) => column.name === 'summary');
+  if (!hasSummary) {
+    d.exec(`ALTER TABLE runs ADD COLUMN summary TEXT`);
+  }
 }

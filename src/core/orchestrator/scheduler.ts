@@ -30,8 +30,22 @@ export async function schedule(
     const pump = (): void => {
       if (failed) return;
       if (remaining.length === 0 && active === 0) return resolve();
+      const readyFeatures = ready();
+      if (readyFeatures.length === 0 && active === 0) {
+        const blockers = remaining
+          .map((feature) => {
+            const missing = feature.dependsOn.filter((dep) => !done.has(dep));
+            return `${feature.id} -> [${missing.join(', ')}]`;
+          })
+          .join('; ');
+        return reject(
+          new Error(
+            `Deadlock: no executable features are ready. Unsatisfied dependencies: ${blockers}`,
+          ),
+        );
+      }
 
-      for (const f of ready()) {
+      for (const f of readyFeatures) {
         if (active >= opts.concurrency) break;
         remaining.splice(remaining.indexOf(f), 1);
         active++;

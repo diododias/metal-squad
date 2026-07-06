@@ -1,10 +1,11 @@
 import type { Backlog, Feature } from '../backlog/schema.js';
-import { topoOrder } from '../orchestrator/graph.js';
+import { topoOrder, selectFeaturePlan } from '../orchestrator/graph.js';
 import { schedule } from '../orchestrator/scheduler.js';
 import { getAdapter } from '../adapters/index.js';
 import { resolveRepo } from '../repo.js';
-import { registerRepo, createRun, finishRun, recordUsage } from '../../db/repo.js';
+import { registerRepo, createRun, finishRun, recordUsage, cleanupStaleRuns } from '../../db/repo.js';
 import { notify } from '../notify/telegram.js';
+import { loadConfig } from '../../config/index.js';
 
 export interface ExecuteOptions {
   cwd: string;
@@ -18,22 +19,36 @@ export async function executeBacklog(
 ): Promise<void> {
   const { repoId, path } = resolveRepo(opts.cwd);
   registerRepo(repoId, path);
+  cleanupStaleRuns(loadConfig().staleRunThresholdMinutes);
+  const activeRunIds = new Set<number>();
 
-  let ordered = topoOrder(backlog);
-  if (opts.featureId) ordered = ordered.filter((f) => f.id === opts.featureId);
+  const ordered = opts.featureId
+    ? selectFeaturePlan(backlog, opts.featureId)
+    : topoOrder(backlog);
 
   const execute = async (feature: Feature) => {
     const runId = createRun(repoId, feature.id, feature.tool);
+    activeRunIds.add(runId);
     try {
       const res = await getAdapter(feature.tool).runFeature(feature, opts.cwd);
       if (res.usage) recordUsage(runId, res.usage);
-      finishRun(runId, res.ok ? 'done' : 'failed');
+      finishRun(runId, res.ok ? 'done' : 'failed', res.summary);
+      activeRunIds.delete(runId);
       return res;
     } catch (err) {
       finishRun(runId, 'failed');
+      activeRunIds.delete(runId);
       throw err;
     }
   };
+
+  const handleSignal = (signal: NodeJS.Signals): void => {
+    for (const runId of activeRunIds) finishRun(runId, 'failed');
+    throw new Error(`Execução interrompida por ${signal}`);
+  };
+
+  process.once('SIGINT', handleSignal);
+  process.once('SIGTERM', handleSignal);
 
   try {
     await schedule(ordered, {
@@ -46,5 +61,8 @@ export async function executeBacklog(
     const msg = err instanceof Error ? err.message : String(err);
     await notify(`metal-squad: execução parada — ${msg}`);
     throw err;
+  } finally {
+    process.removeListener('SIGINT', handleSignal);
+    process.removeListener('SIGTERM', handleSignal);
   }
 }
