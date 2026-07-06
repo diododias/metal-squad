@@ -61,6 +61,23 @@ export interface TokensUpdateEvent {
   tool?: Tool;
 }
 
+export interface TaskStartedEvent {
+  runId: number;
+  featureId: string;
+  taskId: string;
+  title: string;
+  stage?: string;
+}
+
+export interface TaskUpdatedEvent {
+  runId: number;
+  featureId: string;
+  taskId: string;
+  status: 'running' | 'done' | 'failed' | 'skipped';
+  stage?: string;
+  endedAt?: string;
+}
+
 export interface MsqEvents {
   'run:start': RunStartEvent;
   'run:output': RunOutputEvent;
@@ -72,4 +89,6 @@ export interface MsqEvents {
   'scheduler:resumed': Record<string, never>;
   'budget:alert': BudgetAlertEvent;
   'tokens:update': TokensUpdateEvent;
+  'task:started': TaskStartedEvent;
+  'task:updated': TaskUpdatedEvent;
 }

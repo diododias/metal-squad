@@ -144,6 +144,17 @@ function migrate(d: Database.Database): void {
       line       TEXT NOT NULL,
       created_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
+
+    CREATE TABLE IF NOT EXISTS task_runs (
+      id         INTEGER PRIMARY KEY AUTOINCREMENT,
+      run_id     INTEGER NOT NULL REFERENCES runs(id),
+      task_id    TEXT NOT NULL,
+      title      TEXT NOT NULL,
+      status     TEXT NOT NULL DEFAULT 'pending',
+      stage      TEXT,
+      started_at TEXT,
+      ended_at   TEXT
+    );
   `);
 
   const runColumns = (d

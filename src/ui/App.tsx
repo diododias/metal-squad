@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { Box, Text, useInput } from 'ink';
-import { useRuns } from './hooks/useRuns.js';
+import { useRuns, useTaskRuns } from './hooks/useRuns.js';
 import { useGates } from './hooks/useGates.js';
 import { useRunOutput } from './hooks/useRunOutput.js';
 import { useTerminalWidth } from './hooks/useTerminalWidth.js';
@@ -50,11 +50,13 @@ export function App(): React.ReactElement {
     selectedRun ? selectedRun.runId : null,
     ui.outputPaused ? 1_500 : 350,
   );
+  const taskRuns = useTaskRuns(selectedRun ? selectedRun.runId : null);
   const activeView: ActiveView = selectedRun ? ui.activeView : 'overview';
   const featureCatalog = getFeatureCatalog();
   const selectedFeature = selectedRun ? featureCatalog[selectedRun.featureId] ?? null : null;
   const totalRuns = runs.length;
   const doneRuns = runs.filter((r) => r.status === 'done').length;
+  const currentStage = taskRuns.find((t) => t.status === 'running')?.stage ?? undefined;
   const sidebarWidth = layoutMode === 'full' ? 34 : layoutMode === 'compact' ? 28 : width - 2;
   const mainWidth = layoutMode === 'stacked' ? width - 2 : Math.max(38, width - sidebarWidth - 5);
 
@@ -157,6 +159,7 @@ export function App(): React.ReactElement {
           selectedGateIndex={selectedGateIndex}
           focusPanel={focusPanel}
           skills={selectedFeature?.skills ?? []}
+          taskRuns={taskRuns}
           width={sidebarWidth}
           mode={layoutMode}
         />
@@ -168,6 +171,7 @@ export function App(): React.ReactElement {
         totalRuns={totalRuns}
         doneRuns={doneRuns}
         width={width}
+        currentStage={currentStage}
       />
       <CommandBar
         activeView={activeView}
