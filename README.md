@@ -10,6 +10,9 @@ npm run build
 npm link        # disponibiliza `msq` global
 ```
 
+Se o shell retornar `permission denied: msq`, refaca `npm run build` antes do
+`npm link` para regenerar `dist/index.js` com permissao de execucao.
+
 Dev sem build:
 
 ```bash
