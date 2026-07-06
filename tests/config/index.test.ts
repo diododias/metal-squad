@@ -3,6 +3,8 @@ import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
+const DEFAULT_NOTIFICATIONS = { channels: [], events: ['gate:created', 'run:failed'] };
+
 describe('config', () => {
   const previousHome = process.env.HOME;
   let home = '';
@@ -33,6 +35,7 @@ describe('config', () => {
       toolTimeoutMs: 600_000,
       staleRunThresholdMinutes: 120,
       promptContextCharLimit: 20_000,
+      notifications: DEFAULT_NOTIFICATIONS,
     });
   });
 
@@ -48,6 +51,7 @@ describe('config', () => {
       staleRunThresholdMinutes: 30,
       promptContextCharLimit: 10_000,
       telegramChatId: '123',
+      notifications: DEFAULT_NOTIFICATIONS,
     });
 
     expect(existsSync(CONFIG_PATH)).toBe(true);
@@ -57,6 +61,7 @@ describe('config', () => {
       staleRunThresholdMinutes: 30,
       promptContextCharLimit: 10_000,
       telegramChatId: '123',
+      notifications: DEFAULT_NOTIFICATIONS,
     });
   });
 
@@ -71,6 +76,7 @@ describe('config', () => {
       toolTimeoutMs: 999,
       staleRunThresholdMinutes: 45,
       promptContextCharLimit: 15_000,
+      notifications: DEFAULT_NOTIFICATIONS,
     });
     ensureDataDir();
 
@@ -79,6 +85,7 @@ describe('config', () => {
       toolTimeoutMs: 999,
       staleRunThresholdMinutes: 45,
       promptContextCharLimit: 15_000,
+      notifications: DEFAULT_NOTIFICATIONS,
     });
     expect(existsSync(DB_PATH.replace(/\/app\.db$/, ''))).toBe(true);
   });

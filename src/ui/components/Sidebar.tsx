@@ -3,12 +3,15 @@ import { Box, Text } from 'ink';
 import type { GateRow, RunSummary } from '../../db/repo.js';
 import type { LayoutMode } from '../format.js';
 import { STATUS_COLOR, STATUS_ICON, truncateText } from '../format.js';
+import type { NotificationEntry } from '../hooks/useNotifications.js';
+import { NotificationsFeed } from './NotificationsFeed.js';
 
 export type FocusPanel = 'runs' | 'gates' | 'main';
 
 interface Props {
   runs: RunSummary[];
   gates: GateRow[];
+  notifications: NotificationEntry[];
   selectedRunIndex: number;
   selectedGateIndex: number;
   focusPanel: FocusPanel;
@@ -41,6 +44,7 @@ function sectionBox(
 export function Sidebar({
   runs,
   gates,
+  notifications,
   selectedRunIndex,
   selectedGateIndex,
   focusPanel,
@@ -51,6 +55,7 @@ export function Sidebar({
   const runLimit = mode === 'full' ? 8 : 5;
   const gateLimit = mode === 'full' ? 5 : 3;
   const skillLimit = Math.max(1, Math.min(6, mode === 'stacked' ? 4 : 5));
+  const notifLimit = mode === 'full' ? 5 : 3;
   const labelWidth = Math.max(12, width - 8);
 
   const runsContent = runs.length === 0 ? (
@@ -89,6 +94,9 @@ export function Sidebar({
           </Text>
         );
       })}
+      {gates.length > 0 && (
+        <Text dimColor>  [a]pprove [s]kip [r]etry</Text>
+      )}
     </>
   );
 
@@ -110,6 +118,9 @@ export function Sidebar({
       {sectionBox('Runs', focusPanel === 'runs', runsContent)}
       {sectionBox('Gates', focusPanel === 'gates', gatesContent)}
       {sectionBox('Skills', focusPanel === 'main', skillsContent)}
+      {sectionBox('Notifications', false, (
+        <NotificationsFeed notifications={notifications} maxVisible={notifLimit} />
+      ))}
     </Box>
   );
 }
