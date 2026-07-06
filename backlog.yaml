@@ -1,76 +1,108 @@
 version: 2
 repo: metal-squad
 defaults:
-  tool: codex
+  tool: claude
   effort: medium
-  skills: [specify, plan, tasks, implement]
+  skills: []
 
 epics:
-  - id: epic-skills-system
-    title: E01 — Skills System
+  - id: epic-orchestration-v2
+    title: E03 — Orchestration v2
     features:
-      - id: feat-02
-        title: F02 — Skill Registry & Discovery
-        tool: codex
-        model: gpt-5.4
+      - id: feat-15
+        title: F15 — Event System
+        tool: claude
         effort: medium
-        skills: [specify, plan, tasks, implement]
-        specFile: docs/features/F02-skill-registry.md
+        skills: []
+        specFile: docs/features/F15-event-system.md
         context:
-          - docs/epics/E01-skills-system.md
-          - docs/features/F01-yaml-schema-v2.md
-          - docs/features/F02-skill-registry.md
-          - docs/features/F03-dynamic-prompt-builder.md
-          - src/commands/init.ts
+          - docs/features/F06-log-streaming.md
+          - docs/features/F12-pause-resume-abort.md
+          - docs/features/F16-cost-dashboard.md
+          - docs/features/F19-notifications-v2.md
           - src/commands/run.ts
-          - src/core/backlog/load.ts
-          - src/core/backlog/prompt.ts
-          - src/core/backlog/schema.ts
-          - src/core/adapters/index.ts
-          - tests/backlog/schema.test.ts
+          - src/core/runner/execute.ts
+          - src/core/adapters/spawn.ts
+          - src/core/notify/telegram.ts
+          - src/db/repo.ts
+          - src/ui/App.tsx
+          - src/ui/hooks/useRuns.ts
+          - src/ui/hooks/useGates.ts
+          - tests/ui/hooks.test.ts
+          - tests/commands/commands.test.ts
         dependsOn: []
         spec: |
-          Desenvolva a feature F02 — Skill Registry & Discovery usando Codex como executor e o modelo gpt-5.4.
+          Valide e implemente a feature F15 — Event System dentro desta propria sessao do agente ja spawnada pelo msq. Esta skill de QA nao implementa a feature manualmente.
 
-          Fluxo obrigatório:
-          1. Rode /speckit-specify se precisar refinar a spec executável desta feature no repositório.
-          2. Rode /speckit-plan para definir a abordagem técnica.
-          3. Rode /speckit-tasks para gerar ou ajustar tarefas executáveis.
-          4. Rode /speckit-implement para executar a implementação completa.
+          Regras obrigatorias para evitar recursao:
+          - Nao execute `msq`, `metal-squad`, `node dist/index.js run`, `npm run dev`, ou qualquer comando que dispare uma nova run do orquestrador.
+          - Nao invoque um novo executor para implementar esta feature.
+          - A implementacao deve ser feita diretamente pelo agente atual, editando arquivos, gerando specs/planos/tasks e rodando testes neste checkout.
 
-          Escopo funcional:
-          - Introduzir um módulo dedicado para skills em src/core/skills/ com tipos, descoberta, resolução e validação.
-          - Implementar descoberta das quatro fontes exigidas pela spec:
-            - built-in do msq
-            - repo-level em .msq/skills/<name>/
-            - global em ~/.config/metal-squad/skills/<name>/
-            - external/spec-kit quando .specify/ ou .agents/skills/speckit-* existirem
-          - Cada skill descoberta precisa expor nome, source, promptTemplate e metadata básica.
-          - Aceitar diretórios com SKILL.md e metadata.yaml, tratando metadata ausente com defaults razoáveis.
-          - Validar as skills declaradas em feature/task/defaults durante msq run e falhar cedo com mensagem clara quando houver skill faltante.
-          - Adicionar um comando CLI msq skills para listar as skills disponíveis com fonte e descrição.
-          - Manter compatibilidade com o schema v2 já existente e preparar base para o prompt builder dinâmico da F03 sem acoplamento extra desnecessário.
+          Fluxo obrigatorio dentro do executor:
+          1. Refine a feature executando /speckit-specify se a spec ainda nao estiver operacional o suficiente.
+          2. Gere a abordagem tecnica com /speckit-plan.
+          3. Gere tarefas executaveis com /speckit-tasks.
+          4. Execute a implementacao com /speckit-implement no checkout atual, sem disparar nested runs.
+          5. Rode testes e typecheck ao final.
 
-          Mudanças esperadas por área:
-          - CLI:
-            - adicionar comando dedicado para listar skills
-            - integrar a validação de skills ao fluxo de run
-          - Core/backlog:
-            - resolver skills referenciadas no backlog antes da execução
-            - reaproveitar defaults já propagados pelo loader
-          - Core/skills:
-            - criar registry com discover(cwd), resolve(names, cwd) e validate(names, cwd)
-            - modelar built-ins mínimos como implement, review e test
-            - detectar skills do spec-kit derivando nomes a partir de .agents/skills/speckit-* e/ou .specify
+          Escopo detalhado:
+          - Introduzir um event bus tipado para eventos internos do msq, cobrindo ao menos:
+            - run:start
+            - run:output
+            - run:done
+            - run:failed
+            - gate:created
+            - gate:resolved
+            - scheduler:paused
+            - scheduler:resumed
+            - budget:alert
+            - tokens:update
+          - Substituir o acoplamento atual baseado em console.log/polling por emissao e consumo de eventos.
+          - Runner:
+            - emitir run:start antes de iniciar adapter
+            - emitir run:done ou run:failed no encerramento
+            - manter persistencia no SQLite, mas publicar eventos em paralelo ao fluxo atual
+            - evitar regressao no scheduler e no fluxo --feature
+          - Spawn/Adapters:
+            - publicar linhas relevantes de stdout/stderr como run:output
+            - manter heartbeats e observabilidade existentes sem perder a nova emissao de eventos
+            - publicar atualizacoes de tokens quando houver usage
+          - TUI:
+            - parar de depender exclusivamente de polling em useRuns/useGates
+            - consumir o event bus para atualizar runs/gates em tempo real
+            - preservar comportamento atual de navegacao da App
+          - Notifications:
+            - integrar notificacoes com o event system, em especial para eventos equivalentes a gate:created e run:failed
+          - Estrutura:
+            - criar modulo dedicado e tipado para o event system
+            - manter o design preparado para futuras extensoes de F06, F12, F16 e F19
           - Testes:
-            - cobrir descoberta por fonte
-            - cobrir validação com skill faltante
-            - cobrir listagem/saída do novo comando quando viável
+            - adicionar cobertura automatizada para emissao/consumo de eventos no runner
+            - cobrir atualizacao reativa da TUI ou hooks equivalentes
+            - cobrir integracao minima com notificacoes/eventos quando viavel
 
-          Critérios de aceite:
-          - Registry descobre skills de builtin, repo, global e external.
-          - msq skills lista skills disponíveis com fonte e descrição.
-          - msq run acusa skill inexistente antes de tentar executar o adapter.
-          - Skills spec-kit são detectadas automaticamente quando o repositório contém .specify/ ou .agents/skills/speckit-*.
+          Arquivos de contexto relevantes:
+          - docs/features/F15-event-system.md
+          - docs/features/F06-log-streaming.md
+          - docs/features/F12-pause-resume-abort.md
+          - docs/features/F16-cost-dashboard.md
+          - docs/features/F19-notifications-v2.md
+          - src/commands/run.ts
+          - src/core/runner/execute.ts
+          - src/core/adapters/spawn.ts
+          - src/core/notify/telegram.ts
+          - src/db/repo.ts
+          - src/ui/App.tsx
+          - src/ui/hooks/useRuns.ts
+          - src/ui/hooks/useGates.ts
+          - tests/ui/hooks.test.ts
+          - tests/commands/commands.test.ts
+
+          Criterios de aceite:
+          - Existe EventEmitter tipado com os eventos definidos na spec.
+          - Runner emite eventos em vez de depender apenas de console.log.
+          - TUI consome eventos em vez de depender apenas de polling no DB.
+          - Notification system usa eventos relevantes.
           - Testes automatizados e typecheck passam ao final.
         tasks: []
