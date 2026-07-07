@@ -6,6 +6,7 @@ import { SlackChannel } from './slack.js';
 import { DiscordChannel } from './discord.js';
 import { WebhookChannel } from './webhook.js';
 import { DesktopChannel } from './desktop.js';
+import { sanitizeNotificationMessage } from './sanitize.js';
 import type { NotificationChannelConfig } from '../../config/index.js';
 
 function buildChannels(): NotificationChannel[] {
@@ -35,12 +36,13 @@ export async function dispatch(
   const { notifications } = loadConfig();
   if (!notifications.events.includes(event)) return;
 
+  const safeMessage = sanitizeNotificationMessage(message);
   const channels = buildChannels();
 
   if (channels.length === 0) {
-    await new DesktopChannel().send(message, metadata).catch(() => {});
+    await new DesktopChannel().send(safeMessage, metadata).catch(() => {});
     return;
   }
 
-  await Promise.allSettled(channels.map((ch) => ch.send(message, metadata)));
+  await Promise.allSettled(channels.map((ch) => ch.send(safeMessage, metadata)));
 }

@@ -211,6 +211,50 @@ describe('claude adapter', () => {
     });
   });
 
+  it('emits cumulative tokens:update from per-message usage during the stream', async () => {
+    const assistant1 = JSON.stringify({
+      type: 'assistant',
+      message: {
+        content: [{ type: 'text', text: 'primeira etapa' }],
+        usage: { input_tokens: 100, output_tokens: 20 },
+      },
+    });
+    const assistant2 = JSON.stringify({
+      type: 'assistant',
+      message: {
+        content: [{ type: 'text', text: 'segunda etapa' }],
+        usage: { input_tokens: 150, output_tokens: 30 },
+      },
+    });
+    mockRunCli.mockImplementation(async (_bin, _args, opts) => {
+      opts.onStdoutLine?.(assistant1);
+      opts.onStdoutLine?.(assistant2);
+      return { code: 0, stdout: '', stderr: '' };
+    });
+    const { claudeAdapter } = await import('../../src/core/adapters/claude.js');
+
+    await claudeAdapter.runFeature(
+      { id: 'feat-1', title: 'F', tool: 'claude', effort: 'medium', dependsOn: [], tasks: [] },
+      'PROMPT',
+      { cwd: '/repo', runId: 7 },
+    );
+
+    // Primeiro assistant: output acumulado = 20.
+    expect(mockEventEmit).toHaveBeenCalledWith('tokens:update', expect.objectContaining({
+      runId: 7,
+      input: 100,
+      output: 20,
+      total: 120,
+    }));
+    // Segundo assistant: output acumula (20 + 30 = 50), input passa ao mais recente.
+    expect(mockEventEmit).toHaveBeenCalledWith('tokens:update', expect.objectContaining({
+      runId: 7,
+      input: 150,
+      output: 50,
+      total: 200,
+    }));
+  });
+
   it('passes --print as boolean flag and prompt as positional arg after --', async () => {
     mockRunCli.mockResolvedValue({ code: 0, stdout: JSON.stringify({ result: 'ok' }), stderr: '' });
     const { claudeAdapter } = await import('../../src/core/adapters/claude.js');

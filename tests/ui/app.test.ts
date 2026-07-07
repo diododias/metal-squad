@@ -350,7 +350,7 @@ describe('App', () => {
     const escapeRun = setUi.mock.calls[1]?.[0] as (state: typeof stateValue) => typeof stateValue;
 
     expect(moveRun(stateValue).selectedRun).toBe(1);
-    expect(escapeRun(stateValue)).toMatchObject({ activeView: 'overview', focusPanel: 'runs', outputPaused: false });
+    expect(escapeRun(stateValue)).toMatchObject({ activeView: 'overview', focusPanel: 'main', outputPaused: false });
     expect(resolve).not.toHaveBeenCalled();
   });
 

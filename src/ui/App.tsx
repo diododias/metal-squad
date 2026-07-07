@@ -40,6 +40,24 @@ import { mergeInkStyles } from './theme/styles.js';
 type FocusPanel = 'runs' | 'gates' | 'main';
 type ShortcutContext = FocusPanel | 'run-detail';
 
+// Wordmark aligned as two full-width rows; sliced at a fixed column so the
+// "METAL" (primary) and "SQUAD" (accent) halves stay column-aligned between rows.
+const WORDMARK_TOP = '█▀▄▀█ █▀▀ ▀█▀ ▄▀█ █   ▀   █▀ █▀█ █ █ ▄▀█ █▀▄';
+const WORDMARK_BOTTOM = '█░▀░█ ██▄  █  █▀█ █▄▄     ▄█ ▀▀█ █▄█ █▀█ █▄▀';
+const SQUAD_COLUMN = 26;
+
+const BANNER = {
+  metalTop: WORDMARK_TOP.slice(0, SQUAD_COLUMN),
+  metalBottom: WORDMARK_BOTTOM.slice(0, SQUAD_COLUMN),
+  squadTop: WORDMARK_TOP.slice(SQUAD_COLUMN),
+  squadBottom: WORDMARK_BOTTOM.slice(SQUAD_COLUMN),
+} as const;
+
+function bannerRule(width: number): string {
+  const span = Math.min(Math.max(WORDMARK_TOP.length, 32), Math.max(0, width - 2));
+  return '─'.repeat(span);
+}
+
 interface UiState {
   selectedRun: number;
   selectedGate: number;
@@ -116,7 +134,9 @@ export function App(): React.ReactElement {
     selectedRun: 0,
     selectedGate: 0,
     selectedPending: 0,
-    focusPanel: 'runs',
+    // Foco inicial na lista de features (painel principal): setas navegam entre
+    // features; Tab cicla para runs/gates.
+    focusPanel: 'main',
     activeView: 'overview',
     outputPaused: false,
     logsVisible: true,
@@ -131,7 +151,7 @@ export function App(): React.ReactElement {
   const layoutMode = getLayoutMode(width);
   const selectedRunIndex = clampIndex(ui.selectedRun, runs.length);
   const selectedGateIndex = clampIndex(ui.selectedGate, gates.length);
-  const focusOrder: FocusPanel[] = gates.length > 0 ? ['runs', 'gates', 'main'] : ['runs', 'main'];
+  const focusOrder: FocusPanel[] = gates.length > 0 ? ['main', 'runs', 'gates'] : ['main', 'runs'];
   const focusPanel = ui.focusPanel === 'gates' && gates.length === 0 ? 'runs' : ui.focusPanel;
   const selectedRun = runs[selectedRunIndex] ?? null;
   const selectedGate = gates[selectedGateIndex] ?? null;
@@ -197,7 +217,7 @@ export function App(): React.ReactElement {
     setUi((current) => ({
       ...current,
       activeView: 'overview',
-      focusPanel: 'runs',
+      focusPanel: 'main',
       outputPaused: false,
       dashboard: false,
     }));
@@ -567,23 +587,28 @@ export function App(): React.ReactElement {
       ? ['type:search', 'enter:execute', 'esc:close', 'j/k:navigate']
       : getStatusBarHints();
 
-  const logoStyle = mergeInkStyles(themeResolution.profile.roles.primary, { bold: true });
+  const metalStyle = mergeInkStyles(themeResolution.profile.roles.primary, { bold: true });
+  const squadStyle = mergeInkStyles(themeResolution.profile.roles.accent, { bold: true });
+  const accentStyle = themeResolution.profile.roles.accent;
   const subtitleStyle = themeResolution.profile.roles.muted;
+  const layoutLabel = layoutMode === 'stacked' ? 'single-column' : `${layoutMode} split`;
 
   return (
     <ThemeProvider resolution={themeResolution}>
       <Box flexDirection="column" padding={1}>
         <Box>
-          <Text {...logoStyle}>
-            {'█▀▄▀█ █▀▀ ▀█▀ ▄▀█ █   ▀   █▀ █▀█ █ █ ▄▀█ █▀▄'}
-          </Text>
+          <Text {...metalStyle}>{BANNER.metalTop}</Text>
+          <Text {...squadStyle}>{BANNER.squadTop}</Text>
         </Box>
         <Box>
-          <Text {...logoStyle}>
-            {'█░▀░█ ██▄  █  █▀█ █▄▄     ▄█ ▀▀█ █▄█ █▀█ █▄▀'}
-          </Text>
+          <Text {...metalStyle}>{BANNER.metalBottom}</Text>
+          <Text {...squadStyle}>{BANNER.squadBottom}</Text>
         </Box>
-        <Text {...subtitleStyle}>{layoutMode === 'stacked' ? 'single-column layout' : `${layoutMode} split layout`}</Text>
+        <Box>
+          <Text {...accentStyle}>{`⚡ `}</Text>
+          <Text {...subtitleStyle}>{`ai dev pipeline orchestrator · ${layoutLabel}`}</Text>
+        </Box>
+        <Text {...accentStyle}>{bannerRule(width)}</Text>
         {dashboardOpen ? (
           <Box marginTop={1}>
             <CostDashboard rows={statsRows} periodLabel={dashboardPeriod.label} width={width - 2} />

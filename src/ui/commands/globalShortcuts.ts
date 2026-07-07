@@ -48,7 +48,21 @@ export function createGlobalShortcuts(options: GlobalShortcutOptions): KeyboardS
       action: movePrevious,
     },
     {
+      key: 'up',
+      scope: 'global',
+      label: 'Navigate up',
+      condition: () => canMove,
+      action: movePrevious,
+    },
+    {
       key: 'j',
+      scope: 'global',
+      label: 'Navigate down',
+      condition: () => canMove,
+      action: moveNext,
+    },
+    {
+      key: 'down',
       scope: 'global',
       label: 'Navigate down',
       condition: () => canMove,
