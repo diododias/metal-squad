@@ -15,9 +15,16 @@ export { formatTokens } from '../format.js';
 interface Props {
   runs: RunSummary[];
   width: number;
+  selectedIndex?: number;
+  isFocused?: boolean;
 }
 
-export function RunTable({ runs, width }: Props): React.ReactElement {
+export function RunTable({
+  runs,
+  width,
+  selectedIndex = 0,
+  isFocused = false,
+}: Props): React.ReactElement {
   const compact = width < 60;
 
   return (
@@ -31,7 +38,7 @@ export function RunTable({ runs, width }: Props): React.ReactElement {
           <Text bold dimColor>{'feature_id'.padEnd(24)} {'tool'.padEnd(12)} {'stage'.padEnd(20)} {'status'.padEnd(18)} {'duration'.padEnd(10)} {'tokens'.padEnd(8)}</Text>
         </Box>
       )}
-      {runs.map((run) => {
+      {runs.map((run, index) => {
         const icon = STATUS_ICON[run.status];
         const color = STATUS_COLOR[run.status];
         const duration = formatElapsed(run.startedAt, run.endedAt);
@@ -39,11 +46,14 @@ export function RunTable({ runs, width }: Props): React.ReactElement {
         const featureId = run.featureId.slice(0, compact ? 19 : 23);
         const stage = getRunStageLabel(run) ?? '—';
         const statusLabel = getRunStatusLabel(run);
+        const selected = index === selectedIndex;
 
         if (compact) {
           return (
             <Box key={run.runId}>
-              <Text>{featureId.padEnd(20)}</Text>
+              <Text color={selected && isFocused ? 'cyan' : undefined} bold={selected}>
+                {selected ? '>' : ' '} {featureId.padEnd(18)}
+              </Text>
               <Text color={color}>{icon} {statusLabel}</Text>
             </Box>
           );
@@ -51,7 +61,9 @@ export function RunTable({ runs, width }: Props): React.ReactElement {
 
         return (
           <Box key={run.runId}>
-            <Text>{featureId.padEnd(24)}</Text>
+            <Text color={selected && isFocused ? 'cyan' : undefined} bold={selected}>
+              {(selected ? '> ' : '  ') + featureId.padEnd(22)}
+            </Text>
             <Text dimColor>{run.tool.padEnd(12)}</Text>
             <Text dimColor>{stage.padEnd(20)}</Text>
             <Text color={color}>{(icon + ' ' + statusLabel).padEnd(18)}</Text>

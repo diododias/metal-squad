@@ -365,7 +365,10 @@ describe('codex adapter', () => {
     const optionArgs = args.slice(0, doubleDashIdx);
     expect(optionArgs).toContain('--json');
     expect(optionArgs).toContain('--skip-git-repo-check');
-    expect(optionArgs).toContain('--full-auto');
+    expect(optionArgs).toContain('--ask-for-approval');
+    expect(optionArgs).toContain('never');
+    expect(optionArgs).toContain('--sandbox');
+    expect(optionArgs).toContain('workspace-write');
     expect(optionArgs).toContain('-m');
   });
 

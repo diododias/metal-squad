@@ -270,4 +270,104 @@ describe('ui hooks', () => {
     cleanup?.();
     expect(off).toHaveBeenCalledWith('resize', expect.any(Function));
   });
+
+  it('useCommandPalette filters available commands, fuzzy matches queries, and executes the selection', async () => {
+    const pause = vi.fn();
+    const quit = vi.fn();
+    const state = {
+      isOpen: false,
+      query: '',
+      selectedIndex: 0,
+    };
+    let useStateCallIndex = 0;
+
+    vi.doMock('react', () => ({
+      useState: (_initialValue: unknown) => {
+        const callIndex = useStateCallIndex++;
+        if (callIndex === 0) {
+          return [
+            state.isOpen,
+            (value: boolean) => {
+              state.isOpen = value;
+            },
+          ];
+        }
+        if (callIndex === 1) {
+          return [
+            state.query,
+            (value: string) => {
+              state.query = value;
+            },
+          ];
+        }
+        return [
+          state.selectedIndex,
+          (value: number | ((prev: number) => number)) => {
+            state.selectedIndex = typeof value === 'function' ? value(state.selectedIndex) : value;
+          },
+        ];
+      },
+      useCallback: <T extends (...args: any[]) => any>(fn: T) => fn,
+      useMemo: <T>(factory: () => T) => factory(),
+    }));
+
+    const { useCommandPalette } = await import('../../src/ui/hooks/useCommandPalette.js');
+
+    const renderHook = () => {
+      useStateCallIndex = 0;
+      return useCommandPalette({
+        commands: [
+          {
+            id: 'run-pause',
+            name: 'Pause run',
+            category: 'run',
+            keywords: ['pause', 'hold'],
+            available: () => true,
+            execute: pause,
+          },
+          {
+            id: 'run-resume',
+            name: 'Resume run',
+            category: 'run',
+            keywords: ['resume', 'continue'],
+            available: () => false,
+            execute: vi.fn(),
+          },
+          {
+            id: 'system-quit',
+            name: 'Quit',
+            category: 'system',
+            keywords: ['quit', 'exit'],
+            available: () => true,
+            execute: quit,
+          },
+        ],
+      });
+    };
+
+    let result = renderHook();
+    expect(result.state.filteredCommands.map((command) => command.name)).toEqual(['Pause run', 'Quit']);
+
+    result.open();
+    result = renderHook();
+    expect(result.state.isOpen).toBe(true);
+
+    result.setQuery('pau');
+    result = renderHook();
+    expect(result.state.filteredCommands.map((command) => command.name)).toEqual(['Pause run']);
+
+    result.executeSelected();
+    expect(pause).toHaveBeenCalledTimes(1);
+
+    result = renderHook();
+    expect(result.state.isOpen).toBe(false);
+    expect(result.state.query).toBe('');
+
+    result.open();
+    result = renderHook();
+    result.setQuery('xyzabc123');
+    result = renderHook();
+    expect(result.state.filteredCommands).toEqual([]);
+    expect(quit).not.toHaveBeenCalled();
+  });
 });
