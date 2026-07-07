@@ -44,6 +44,98 @@ Nao considere o fluxo bem-sucedido so porque o processo saiu com `0`. Exija pelo
 
 Sem isso, trate como falha operacional do produto ou do harness.
 
+## Testes de UI (Ink / React)
+
+Os testes em `tests/ui/` **nao usam render de DOM real** nem `@testing-library/react`. As convencoes sao:
+
+### Componentes (`tests/ui/components.test.ts`)
+
+Chame a funcao do componente diretamente e verifique o retorno com `React.isValidElement`:
+
+```ts
+const element = EmptyState();
+expect(React.isValidElement(element)).toBe(true);
+```
+
+Para verificar props de filhos, use o helper `findElement` (definido em `app.test.ts`) para percorrer a arvore JSX retornada.
+
+### App / input handlers (`tests/ui/app.test.ts`)
+
+- Use `vi.mock` no nivel do modulo (hoistado pelo Vitest) para todos os mocks.
+- Mock do `useState` via indice de chamada com a variavel `useStateCallIndex`:
+
+```ts
+useState: vi.fn((initialValue) => {
+  const callIndex = useStateCallIndex++;
+  if (callIndex === 0) return [stateValue, setUi];
+  if (callIndex === 1) return [helpOpenValue, setHelpOpen];
+  ...
+})
+```
+
+- Resete `useStateCallIndex = 0` e `vi.clearAllMocks()` no `beforeEach`.
+- Extraia o handler de teclado de `useInput` assim:
+
+```ts
+const handler = mockUseInput.mock.calls[0]?.[0] as (input: string, key: Record<string, boolean>) => void;
+handler('j', {});
+handler('', { tab: true });
+```
+
+- Para verificar transicoes de estado, extraia o updater do `setUi.mock.calls` e aplique-o sobre `stateValue`:
+
+```ts
+const cycleFocus = setUi.mock.calls[0]?.[0] as (state: typeof stateValue) => typeof stateValue;
+expect(cycleFocus(stateValue).focusPanel).toBe('gates');
+```
+
+### Hooks (`tests/ui/hooks.test.ts`)
+
+- Use `vi.doMock` (nao `vi.mock`) dentro de cada `it`, seguido de `await import(...)` dinamico.
+- Chame `vi.resetModules()` no `afterEach` para evitar vazamento de modulo entre testes.
+- Mock de `useEffect` executa o efeito de forma sincrona: `useEffect: (effect) => effect()`.
+- Listeners de eventos capturados via `Map` local e chamados diretamente para simular eventos:
+
+```ts
+const listeners = new Map<string, Array<() => void>>();
+// ... mock do eventBus ...
+listeners.get('run:start')?.[0]?.();
+```
+
+### Testes de render de terminal (`tests/ui/render.test.tsx`)
+
+Para verificar o texto que o usuario **realmente ve no terminal**, use `ink-testing-library`:
+
+```ts
+import { render, cleanup } from 'ink-testing-library';
+import React from 'react';
+
+afterEach(() => cleanup());
+
+it('renders idle state', () => {
+  const { lastFrame } = render(<StatusBar {...props} />);
+  expect(lastFrame()).toContain('Idle');
+});
+```
+
+- `lastFrame()` retorna o frame ASCII atual do terminal virtual (80x24 por padrao).
+- Prefira `toContain` em vez de `toBe` para evitar fragilidade com padding/cores ANSI.
+- **Limitacao conhecida**: componentes que usam `position="absolute"` (e.g. `CommandPalette`) nao aparecem no frame virtual do ink-testing-library. Teste esses via mock em `app.test.ts`.
+- O arquivo e `.tsx` — o Vitest compila JSX via esbuild automaticamente.
+
+### Suite de UI focada
+
+```bash
+rtk npx vitest run tests/ui/app.test.ts tests/ui/components.test.ts tests/ui/hooks.test.ts tests/ui/format.test.ts tests/ui/render.test.tsx
+```
+
+### O que nao fazer
+
+- Nao use `render()` do `@testing-library/react` — os componentes sao Ink, nao DOM.
+- Nao teste via `msq ui` live para validar logica de componente; use a suite focada.
+- Nao adicione mocks globais de modulo fora de `vi.mock`/`vi.doMock` — eles nao sao limpos automaticamente.
+- Nao tente verificar texto de componentes com `position="absolute"` via `lastFrame()` — o resultado sera string vazia; use o padrao de mock do `app.test.ts` nesses casos.
+
 ## Escolha da skill correta
 
 - desenvolvimento normal do repo: `.claude/skills/dev-flow/SKILL.md`

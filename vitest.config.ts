@@ -4,6 +4,7 @@ export default defineConfig({
   test: {
     exclude: [
       '.claude/**',
+      '.stryker-tmp/**',
       'dist/**',
       'node_modules/**',
     ],
