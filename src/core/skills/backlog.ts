@@ -7,6 +7,7 @@ export function collectBacklogSkillNames(backlog: BacklogV2): string[] {
   for (const epic of backlog.epics) {
     for (const feature of epic.features) {
       for (const skill of feature.skills ?? []) names.add(skill);
+      for (const stage of feature.workflow?.stages ?? []) names.add(stage);
       for (const task of feature.tasks) {
         for (const skill of task.skills ?? []) names.add(skill);
       }

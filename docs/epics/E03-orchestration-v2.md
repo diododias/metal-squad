@@ -15,6 +15,7 @@ Evoluir o scheduler e o runner para suportar politicas de falha configuraveis, r
 - [F13 — Execution Graph Visualization](../features/F13-execution-graph.md)
 - [F14 — Budget Caps & Cost Controls](../features/F14-budget-caps.md)
 - [F15 — Event System (pub/sub interno)](../features/F15-event-system.md)
+- [F27 — Workflow por etapas com sessoes isoladas](../features/F27-stage-sessions-telegram.md)
 
 ## Impacto
 

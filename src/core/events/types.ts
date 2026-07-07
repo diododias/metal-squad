@@ -4,6 +4,7 @@ import type { RunResult } from '../adapters/types.js';
 export type GateDecision = 'approved' | 'skipped' | 'retried';
 export type OutputStream = 'stdout' | 'stderr';
 export type OutputSource = 'stdout' | 'stderr' | 'agent' | 'tool' | 'heartbeat';
+export type StageRequestKind = 'approval' | 'input';
 
 export interface RunStartEvent {
   runId: number;
@@ -46,6 +47,22 @@ export interface GateResolvedEvent {
   decision: GateDecision;
 }
 
+export interface StageRequestCreatedEvent {
+  requestId: number;
+  pipelineId: number;
+  featureId: string;
+  stage: string;
+  kind: StageRequestKind;
+  prompt: string;
+  source?: 'manual' | 'auto';
+}
+
+export interface StageRequestResolvedEvent {
+  requestId: number;
+  kind: StageRequestKind;
+  response: string;
+}
+
 export interface BudgetAlertEvent {
   percent: number;
   spent: number;
@@ -73,7 +90,7 @@ export interface TaskUpdatedEvent {
   runId: number;
   featureId: string;
   taskId: string;
-  status: 'running' | 'done' | 'failed' | 'skipped';
+  status: 'running' | 'done' | 'failed' | 'skipped' | 'blocked';
   stage?: string;
   endedAt?: string;
 }
@@ -85,6 +102,8 @@ export interface MsqEvents {
   'run:failed': RunFailedEvent;
   'gate:created': GateCreatedEvent;
   'gate:resolved': GateResolvedEvent;
+  'stage:request-created': StageRequestCreatedEvent;
+  'stage:request-resolved': StageRequestResolvedEvent;
   'scheduler:paused': Record<string, never>;
   'scheduler:resumed': Record<string, never>;
   'budget:alert': BudgetAlertEvent;

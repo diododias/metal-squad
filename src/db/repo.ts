@@ -14,14 +14,31 @@ export function registerRepo(repoId: string, path: string): void {
     .run(repoId, path);
 }
 
-export function createRun(repoId: string, featureId: string, tool: string): number {
+export interface CreateRunOptions {
+  pipelineId?: number;
+  stage?: string;
+}
+
+export function createRun(
+  repoId: string,
+  featureId: string,
+  tool: string,
+  opts: CreateRunOptions = {},
+): number {
   const info = getDb('readwrite')
-    .prepare(`INSERT INTO runs (repo_id, feature_id, tool) VALUES (?, ?, ?)`)
-    .run(repoId, featureId, tool);
+    .prepare(
+      `INSERT INTO runs (repo_id, feature_id, tool, pipeline_id, stage)
+       VALUES (?, ?, ?, ?, ?)`,
+    )
+    .run(repoId, featureId, tool, opts.pipelineId ?? null, opts.stage ?? null);
   return Number(info.lastInsertRowid);
 }
 
-export function finishRun(runId: number, status: 'done' | 'failed', summary?: string): void {
+export function finishRun(
+  runId: number,
+  status: 'done' | 'failed' | 'blocked',
+  summary?: string,
+): void {
   getDb('readwrite')
     .prepare(`UPDATE runs SET status = ?, summary = ?, ended_at = datetime('now') WHERE id = ?`)
     .run(status, summary ?? null, runId);
@@ -105,6 +122,8 @@ export interface RunRow {
   repo_id: string;
   feature_id: string;
   tool: string;
+  pipeline_id: number | null;
+  stage: string | null;
   status: string;
   started_at: string;
   ended_at: string | null;
@@ -131,6 +150,8 @@ export interface RunSummary {
   repoId: string;
   featureId: string;
   tool: 'claude' | 'codex' | 'opencode';
+  pipelineId: number | null;
+  stage: string | null;
   status: 'running' | 'done' | 'failed' | 'blocked';
   startedAt: string;
   endedAt: string | null;
@@ -156,6 +177,8 @@ export function listRunsForTui(limit = 50): RunSummary[] {
          r.repo_id     AS repoId,
          r.feature_id  AS featureId,
          r.tool,
+         r.pipeline_id AS pipelineId,
+         r.stage       AS stage,
          r.status,
          r.started_at  AS startedAt,
          r.ended_at      AS endedAt,
@@ -233,12 +256,21 @@ export function createGate(runId: number, featureId: string, repoId: string): nu
   return gateId;
 }
 
+export function createRetryRecord(runId: number, attempt: number, error?: string): void {
+  getDb('readwrite')
+    .prepare(
+      `INSERT INTO retry_history (run_id, attempt, error)
+       VALUES (?, ?, ?)`,
+    )
+    .run(runId, attempt, error ?? null);
+}
+
 export interface TaskRun {
   id: number;
   runId: number;
   taskId: string;
   title: string;
-  status: 'pending' | 'running' | 'done' | 'failed' | 'skipped';
+  status: 'pending' | 'running' | 'done' | 'failed' | 'skipped' | 'blocked';
   stage: string | null;
   startedAt: string | null;
   endedAt: string | null;
@@ -286,4 +318,154 @@ function hasDbFile(): boolean {
 function getResolvedDbPathExists(): boolean {
   const dbPath = resolveDbPath();
   return dbPath === ':memory:' || existsSync(dbPath);
+}
+
+export interface PipelineRow {
+  id: number;
+  repoId: string;
+  featureId: string;
+  status: 'running' | 'done' | 'failed' | 'blocked';
+  currentStage: string | null;
+  autoAdvance: number;
+  createdAt: string;
+  updatedAt: string;
+  endedAt: string | null;
+}
+
+export type StageRequestKind = 'approval' | 'input';
+export type StageApprovalResponse = 'advance' | 'hold' | 'retry';
+
+export interface StageRequestRow {
+  id: number;
+  pipelineId: number;
+  runId: number | null;
+  featureId: string;
+  stage: string;
+  kind: StageRequestKind;
+  prompt: string;
+  status: 'pending' | 'resolved';
+  response: string | null;
+  source: 'manual' | 'auto';
+  createdAt: string;
+  resolvedAt: string | null;
+}
+
+export function createPipeline(repoId: string, featureId: string, autoAdvance: boolean): number {
+  const info = getDb('readwrite')
+    .prepare(
+      `INSERT INTO pipelines (repo_id, feature_id, auto_advance)
+       VALUES (?, ?, ?)`,
+    )
+    .run(repoId, featureId, autoAdvance ? 1 : 0);
+  return Number(info.lastInsertRowid);
+}
+
+export function updatePipelineStage(pipelineId: number, stage: string): void {
+  getDb('readwrite')
+    .prepare(
+      `UPDATE pipelines
+       SET current_stage = ?, updated_at = datetime('now')
+       WHERE id = ?`,
+    )
+    .run(stage, pipelineId);
+}
+
+export function finishPipeline(
+  pipelineId: number,
+  status: PipelineRow['status'],
+): void {
+  getDb('readwrite')
+    .prepare(
+      `UPDATE pipelines
+       SET status = ?, updated_at = datetime('now'), ended_at = datetime('now')
+       WHERE id = ?`,
+    )
+    .run(status, pipelineId);
+}
+
+export function createStageRequest(
+  pipelineId: number,
+  featureId: string,
+  stage: string,
+  kind: StageRequestKind,
+  prompt: string,
+  opts: {
+    runId?: number;
+    response?: string;
+    source?: 'manual' | 'auto';
+  } = {},
+): number {
+  const status = opts.response ? 'resolved' : 'pending';
+  const info = getDb('readwrite')
+    .prepare(
+      `INSERT INTO stage_requests
+         (pipeline_id, run_id, feature_id, stage, kind, prompt, status, response, source, resolved_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    )
+    .run(
+      pipelineId,
+      opts.runId ?? null,
+      featureId,
+      stage,
+      kind,
+      prompt,
+      status,
+      opts.response ?? null,
+      opts.source ?? 'manual',
+      opts.response ? new Date().toISOString() : null,
+    );
+  const requestId = Number(info.lastInsertRowid);
+  msqEventBus.emit('stage:request-created', {
+    requestId,
+    pipelineId,
+    featureId,
+    stage,
+    kind,
+    prompt,
+    source: opts.source ?? 'manual',
+  });
+  return requestId;
+}
+
+export function resolveStageRequest(id: number, response: string): void {
+  const row = getStageRequest(id);
+  getDb('readwrite')
+    .prepare(
+      `UPDATE stage_requests
+       SET status = 'resolved',
+           response = ?,
+           resolved_at = datetime('now')
+       WHERE id = ? AND status = 'pending'`,
+    )
+    .run(response, id);
+  if (row && row.status === 'pending') {
+    msqEventBus.emit('stage:request-resolved', {
+      requestId: id,
+      kind: row.kind,
+      response,
+    });
+  }
+}
+
+export function getStageRequest(id: number): StageRequestRow | null {
+  if (!hasDbFile()) return null;
+  return (getDb('readonly')
+    .prepare(
+      `SELECT
+         id,
+         pipeline_id AS pipelineId,
+         run_id AS runId,
+         feature_id AS featureId,
+         stage,
+         kind,
+         prompt,
+         status,
+         response,
+         source,
+         created_at AS createdAt,
+         resolved_at AS resolvedAt
+       FROM stage_requests
+       WHERE id = ?`,
+    )
+    .get(id) as StageRequestRow | undefined) ?? null;
 }

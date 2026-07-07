@@ -18,7 +18,7 @@ describe('ConfigSchema notifications defaults', () => {
           { type: 'webhook', url: 'https://example.com/hook' },
           { type: 'desktop' },
         ],
-        events: ['gate:created', 'run:failed', 'budget:alert', 'run:done'],
+        events: ['gate:created', 'run:failed', 'budget:alert', 'run:done', 'stage:approval', 'stage:input'],
       },
     });
     expect(cfg.notifications.channels).toHaveLength(5);
@@ -37,5 +37,7 @@ describe('ConfigSchema notifications defaults', () => {
     expect(NOTIFICABLE_EVENTS).toContain('run:failed');
     expect(NOTIFICABLE_EVENTS).toContain('budget:alert');
     expect(NOTIFICABLE_EVENTS).toContain('run:done');
+    expect(NOTIFICABLE_EVENTS).toContain('stage:approval');
+    expect(NOTIFICABLE_EVENTS).toContain('stage:input');
   });
 });

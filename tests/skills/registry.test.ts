@@ -119,12 +119,18 @@ describe('backlog skill validation', () => {
             tool: 'claude',
             effort: 'medium',
             dependsOn: [],
+            workflow: {
+              mode: 'staged',
+              stages: ['specify', 'plan', 'tasks'],
+              approvals: { channel: 'telegram', autoAdvance: false },
+              syncTasksToBacklog: true,
+            },
             tasks: [
               {
                 id: 'task-1',
                 title: 'Validation',
                 dependsOn: [],
-                skills: ['plan'],
+                skills: ['plan', 'shipit'],
                 status: 'todo',
               },
             ],
@@ -144,16 +150,29 @@ describe('backlog skill validation', () => {
   });
 
   it('collects distinct skill names from defaults, features, and tasks', () => {
-    expect(collectBacklogSkillNames(backlog).sort()).toEqual(['implement', 'plan', 'review']);
+    expect(collectBacklogSkillNames(backlog).sort()).toEqual([
+      'implement',
+      'plan',
+      'review',
+      'shipit',
+      'specify',
+      'tasks',
+    ]);
   });
 
   it('fails fast when the backlog references a missing skill', () => {
     cwd = mkdtempSync(join(tmpdir(), 'msq-backlog-cwd-'));
     home = mkdtempSync(join(tmpdir(), 'msq-backlog-home-'));
     process.env.HOME = home;
+    mkdirSync(join(cwd, '.agents/skills', 'speckit-plan'), { recursive: true });
+    writeFileSync(join(cwd, '.agents/skills', 'speckit-plan', 'SKILL.md'), '# plan\n');
+    mkdirSync(join(cwd, '.agents/skills', 'speckit-specify'), { recursive: true });
+    writeFileSync(join(cwd, '.agents/skills', 'speckit-specify', 'SKILL.md'), '# specify\n');
+    mkdirSync(join(cwd, '.agents/skills', 'speckit-tasks'), { recursive: true });
+    writeFileSync(join(cwd, '.agents/skills', 'speckit-tasks', 'SKILL.md'), '# tasks\n');
 
     expect(() => validateBacklogSkills(backlog, cwd)).toThrow(
-      'Missing skills referenced in backlog: plan',
+      'Missing skills referenced in backlog: shipit',
     );
   });
 });

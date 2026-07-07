@@ -1,5 +1,5 @@
 import { getSecret } from '../../security/secrets.js';
-import { resolveGate } from '../../db/repo.js';
+import { resolveGate, resolveStageRequest } from '../../db/repo.js';
 import type { GateDecision } from '../../db/repo.js';
 
 interface TelegramUpdate {
@@ -10,6 +10,8 @@ interface TelegramUpdate {
 
 // Matches: gate:42 approve, gate:42 skip, gate:42 retry (and word variants)
 const GATE_CMD = /gate:(\d+)\s+(approv(?:e|ed)|skip(?:ped)?|retr(?:y|ied))/i;
+const STAGE_CMD = /stage:(\d+)\s+(advance|hold|retry)/i;
+const INPUT_CMD = /^input:(\d+)\s+([\s\S]+)$/i;
 
 function parseDecision(raw: string): GateDecision | null {
   const lower = raw.toLowerCase();
@@ -55,11 +57,31 @@ export class TelegramPoller {
           this.offset = update.update_id + 1;
           const text = update.message?.text ?? update.callback_query?.data ?? '';
           const match = GATE_CMD.exec(text);
-          if (!match) continue;
-          const gateId = Number(match[1]);
-          const decision = match[2] ? parseDecision(match[2]) : null;
-          if (decision === null) continue;
-          try { resolveGate(gateId, decision); } catch { /* DB may be unavailable */ }
+          if (match) {
+            const gateId = Number(match[1]);
+            const decision = match[2] ? parseDecision(match[2]) : null;
+            if (decision !== null) {
+              try { resolveGate(gateId, decision); } catch { /* DB may be unavailable */ }
+            }
+            continue;
+          }
+
+          const stageMatch = STAGE_CMD.exec(text);
+          if (stageMatch) {
+            const requestId = stageMatch[1];
+            const response = stageMatch[2];
+            if (!requestId || !response) continue;
+            try { resolveStageRequest(Number(requestId), response.toLowerCase()); } catch { /* DB may be unavailable */ }
+            continue;
+          }
+
+          const inputMatch = INPUT_CMD.exec(text);
+          if (inputMatch) {
+            const requestId = inputMatch[1];
+            const response = inputMatch[2];
+            if (!requestId || !response) continue;
+            try { resolveStageRequest(Number(requestId), response.trim()); } catch { /* DB may be unavailable */ }
+          }
         }
       } catch {
         if (this.stopped) break;

@@ -2,6 +2,7 @@ import type { ToolAdapter, RunResult, RunFeatureOptions, TokenUsage } from './ty
 import type { Effort, Feature } from '../backlog/schema.js';
 import { runCli } from './spawn.js';
 import { msqEventBus } from '../events/index.js';
+import { parseControlSignal } from './control.js';
 
 // OpenCode não expõe reasoning-effort direto (depende do provider/modelo).
 // Convenção: modelo no formato "provider/model" (ex: anthropic/claude-sonnet-4-5).
@@ -49,6 +50,7 @@ export const opencodeAdapter: ToolAdapter = {
       ok: true,
       summary: (json?.response ?? stdout).slice(0, 200),
       usage,
+      control: parseControlSignal(json?.response ?? stdout),
     };
   },
 

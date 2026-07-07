@@ -11,8 +11,8 @@ epics:
     features:
       - id: feat-11
         title: F11 — Retry Policies
-        tool: claude
-        model: claude-sonnet-4-6
+        tool: codex
+        model: gpt-5.4
         effort: medium
         skills: []
         specFile: docs/features/F11-retry-policies.md

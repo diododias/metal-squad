@@ -6,6 +6,13 @@ export interface TokenUsage {
   total: number;
 }
 
+export interface RunControlNeedsInput {
+  type: 'needs_input';
+  prompt: string;
+}
+
+export type RunControl = RunControlNeedsInput;
+
 export interface RunFeatureOptions {
   cwd: string;
   runId: number;
@@ -15,6 +22,7 @@ export interface RunResult {
   ok: boolean;
   summary: string;
   usage?: TokenUsage;
+  control?: RunControl;
 }
 
 export interface ToolAdapter {

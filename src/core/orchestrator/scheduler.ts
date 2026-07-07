@@ -12,7 +12,7 @@ export interface SchedulerOptions {
 
 /**
  * Executa features respeitando dependsOn e o limite global de concorrência.
- * Política de falha: stop-and-notify (sem retry automático).
+ * Política de falha configurável por feature via retry.onFail.
  */
 export async function schedule(
   ordered: Feature[],
@@ -56,8 +56,14 @@ export async function schedule(
             active--;
             opts.onDone?.(f, res);
             if (!res.ok) {
-              failed = true;
-              return reject(new Error(`Feature ${f.id} falhou: ${res.summary}`));
+              const policy = f.retry?.onFail ?? 'stop';
+              if (policy === 'stop') {
+                failed = true;
+                return reject(new Error(`Feature ${f.id} falhou: ${res.summary}`));
+              }
+              done.add(f.id);
+              pump();
+              return;
             }
             done.add(f.id);
             pump();

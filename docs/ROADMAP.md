@@ -66,6 +66,7 @@ O que falta / problemas:
 | [F12 — Pause/Resume/Abort](features/F12-pause-resume-abort.md) | Medium | Alta |
 | [F14 — Budget Caps](features/F14-budget-caps.md) | Medium | Alta |
 | [F04 — Skill Task Sizer](features/F04-skill-task-sizer.md) | Medium | Alta |
+| [F27 — Workflow por etapas com sessoes isoladas](features/F27-stage-sessions-telegram.md) | High | Alta |
 
 **Entrega**: retry, pause/resume, budget caps, decomposicao automatica de tasks.
 
@@ -118,6 +119,7 @@ O que falta / problemas:
 |------|------|------------|
 | [F25 — Hardening do fluxo `msq-develop`](features/F25-msq-develop-harness-hardening.md) | Feature | Alta |
 | [F26 — Resume de pipeline a partir do estado persistido](features/F26-resume-pipeline-from-state.md) | Feature | Alta |
+| [F27 — Workflow por etapas com sessoes isoladas](features/F27-stage-sessions-telegram.md) | Feature | Alta |
 
 ---
 

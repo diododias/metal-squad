@@ -4,6 +4,7 @@ import { execFileSync } from 'node:child_process';
 import { loadConfig } from '../../config/index.js';
 import { CliTimeoutError, runCli } from './spawn.js';
 import { msqEventBus } from '../events/index.js';
+import { parseControlSignal } from './control.js';
 
 // Codex tem effort nativo via config: model_reasoning_effort.
 const EFFORT: Record<Effort, string> = {
@@ -79,6 +80,7 @@ export const codexAdapter: ToolAdapter = {
       ok: true,
       summary: finalMsg.slice(0, 200),
       usage,
+      control: parseControlSignal(finalMsg),
     };
   },
 

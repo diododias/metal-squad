@@ -38,4 +38,25 @@ describe('schedule', () => {
 
     expect(executed).toEqual(['feat-01', 'feat-02']);
   });
+
+  it('continues dependents when a failed feature uses onFail continue', async () => {
+    const executed: string[] = [];
+
+    await schedule(
+      [
+        { ...feature('feat-01'), retry: { maxAttempts: 1, backoffMs: 0, onFail: 'continue' } },
+        feature('feat-02', ['feat-01']),
+      ],
+      {
+        concurrency: 1,
+        execute: async (item) => {
+          executed.push(item.id);
+          if (item.id === 'feat-01') return { ok: false, summary: 'falhou mas segue' };
+          return { ok: true, summary: item.id };
+        },
+      },
+    );
+
+    expect(executed).toEqual(['feat-01', 'feat-02']);
+  });
 });

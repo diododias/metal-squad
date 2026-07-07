@@ -74,7 +74,11 @@ describe('commands', () => {
     cwd = mkdtempSync(join(tmpdir(), 'msq-command-'));
     process.chdir(cwd);
     mockResolveRepo.mockReturnValue({ repoId: 'repo-1', path: cwd });
-    mockLoadConfig.mockReturnValue({ concurrency: 3, staleRunThresholdMinutes: 120 });
+    mockLoadConfig.mockReturnValue({
+      concurrency: 3,
+      staleRunThresholdMinutes: 120,
+      workflow: { autoAdvanceStages: false, pollIntervalMs: 2_000 },
+    });
     mockCreateSkillRegistry.mockReturnValue({ discover: vi.fn(() => ['implement']) });
     mockFormatSkillList.mockReturnValue('implement');
     mockAssertWritableDbPath.mockReturnValue(undefined);
@@ -130,6 +134,7 @@ describe('commands', () => {
       cwd: currentCwd,
       concurrency: 9,
       featureId: 'feat-1',
+      autoAdvanceStages: false,
     });
   });
 
@@ -147,8 +152,9 @@ describe('commands', () => {
       { version: 2, repo: 'demo', defaults: { tool: 'codex', effort: 'medium', skills: ['implement'] }, epics: [] },
       {
         cwd: currentCwd,
-      concurrency: 3,
-      featureId: undefined,
+        concurrency: 3,
+        featureId: undefined,
+        autoAdvanceStages: false,
       },
     );
   });

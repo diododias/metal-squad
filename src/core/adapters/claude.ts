@@ -3,6 +3,7 @@ import type { ToolAdapter, RunResult, RunFeatureOptions, TokenUsage } from './ty
 import type { Effort, Feature } from '../backlog/schema.js';
 import { CliTimeoutError, runCli } from './spawn.js';
 import { msqEventBus } from '../events/index.js';
+import { parseControlSignal } from './control.js';
 
 // Sem flag nativa de "effort": mapeia para o tier de modelo.
 const EFFORT_MODEL: Record<Effort, string> = {
@@ -93,6 +94,7 @@ export const claudeAdapter: ToolAdapter = {
       ok: json?.subtype !== 'error_max_turns' && code === 0,
       summary: (json?.result ?? '').slice(0, 200),
       usage,
+      control: parseControlSignal(json?.result ?? ''),
     };
   },
 

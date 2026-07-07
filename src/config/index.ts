@@ -11,7 +11,14 @@ export const CONFIG_PATH = join(CONFIG_DIR, 'config.json');
 export const DEFAULT_DB_PATH = join(DATA_DIR, 'app.db');
 export const DB_PATH = resolveDbPath();
 
-export const NOTIFICABLE_EVENTS = ['gate:created', 'run:failed', 'budget:alert', 'run:done'] as const;
+export const NOTIFICABLE_EVENTS = [
+  'gate:created',
+  'run:failed',
+  'budget:alert',
+  'run:done',
+  'stage:approval',
+  'stage:input',
+] as const;
 export type NotificableEvent = (typeof NOTIFICABLE_EVENTS)[number];
 
 const TelegramChannelConfig = z.object({ type: z.literal('telegram'), chatId: z.string(), forumTopicId: z.number().int().positive().optional() });
@@ -34,6 +41,11 @@ const NotificationsConfig = z.object({
   events: z.array(z.enum(NOTIFICABLE_EVENTS)).default(['gate:created', 'run:failed']),
 });
 
+const WorkflowConfig = z.object({
+  autoAdvanceStages: z.boolean().default(false),
+  pollIntervalMs: z.number().int().positive().default(2_000),
+});
+
 export const ConfigSchema = z.object({
   concurrency: z.number().int().positive().default(3),
   toolTimeoutMs: z.number().int().positive().default(600_000),
@@ -41,6 +53,7 @@ export const ConfigSchema = z.object({
   promptContextCharLimit: z.number().int().positive().default(20_000),
   telegramChatId: z.string().optional(),
   notifications: NotificationsConfig.default({}),
+  workflow: WorkflowConfig.default({}),
 });
 export type Config = z.infer<typeof ConfigSchema>;
 

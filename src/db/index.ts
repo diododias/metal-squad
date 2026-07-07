@@ -108,6 +108,8 @@ function migrate(d: Database.Database): void {
       repo_id    TEXT NOT NULL REFERENCES repos(repo_id),
       feature_id TEXT NOT NULL,
       tool       TEXT NOT NULL,
+      pipeline_id INTEGER REFERENCES pipelines(id),
+      stage      TEXT,
       status     TEXT NOT NULL DEFAULT 'running',
       started_at TEXT NOT NULL DEFAULT (datetime('now')),
       ended_at   TEXT,
@@ -134,6 +136,14 @@ function migrate(d: Database.Database): void {
       decision    TEXT
     );
 
+    CREATE TABLE IF NOT EXISTS retry_history (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      run_id INTEGER NOT NULL REFERENCES runs(id),
+      attempt INTEGER NOT NULL,
+      error TEXT,
+      retried_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+
     CREATE TABLE IF NOT EXISTS run_output (
       id         INTEGER PRIMARY KEY AUTOINCREMENT,
       run_id     INTEGER NOT NULL REFERENCES runs(id),
@@ -155,6 +165,33 @@ function migrate(d: Database.Database): void {
       started_at TEXT,
       ended_at   TEXT
     );
+
+    CREATE TABLE IF NOT EXISTS pipelines (
+      id          INTEGER PRIMARY KEY AUTOINCREMENT,
+      repo_id     TEXT NOT NULL REFERENCES repos(repo_id),
+      feature_id  TEXT NOT NULL,
+      status      TEXT NOT NULL DEFAULT 'running',
+      current_stage TEXT,
+      auto_advance INTEGER NOT NULL DEFAULT 0,
+      created_at  TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at  TEXT NOT NULL DEFAULT (datetime('now')),
+      ended_at    TEXT
+    );
+
+    CREATE TABLE IF NOT EXISTS stage_requests (
+      id          INTEGER PRIMARY KEY AUTOINCREMENT,
+      pipeline_id INTEGER NOT NULL REFERENCES pipelines(id),
+      run_id      INTEGER REFERENCES runs(id),
+      feature_id  TEXT NOT NULL,
+      stage       TEXT NOT NULL,
+      kind        TEXT NOT NULL,
+      prompt      TEXT NOT NULL,
+      status      TEXT NOT NULL DEFAULT 'pending',
+      response    TEXT,
+      source      TEXT NOT NULL DEFAULT 'manual',
+      created_at  TEXT NOT NULL DEFAULT (datetime('now')),
+      resolved_at TEXT
+    );
   `);
 
   const runColumns = (d
@@ -175,6 +212,14 @@ function migrate(d: Database.Database): void {
   const hasTotalTokens = runColumns.some((column) => column.name === 'total_tokens');
   if (!hasTotalTokens) {
     d.exec(`ALTER TABLE runs ADD COLUMN total_tokens INTEGER`);
+  }
+  const hasPipelineId = runColumns.some((column) => column.name === 'pipeline_id');
+  if (!hasPipelineId) {
+    d.exec(`ALTER TABLE runs ADD COLUMN pipeline_id INTEGER REFERENCES pipelines(id)`);
+  }
+  const hasStage = runColumns.some((column) => column.name === 'stage');
+  if (!hasStage) {
+    d.exec(`ALTER TABLE runs ADD COLUMN stage TEXT`);
   }
 }
 

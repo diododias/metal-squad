@@ -12,6 +12,7 @@ const TASK_STATUS_ICON: Record<TaskRun['status'], string> = {
   done: '✓',
   running: '⟳',
   failed: '✗',
+  blocked: '!',
   pending: '○',
   skipped: '○',
 };

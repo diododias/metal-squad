@@ -11,7 +11,8 @@ export function registerRun(program: Command): void {
     .description('Executa o workflow spec-kit do backlog (grafo de dependências)')
     .option('-f, --feature <id>', 'roda apenas uma feature')
     .option('-c, --concurrency <n>', 'runs paralelos globais')
-    .action(async (opts: { feature?: string; concurrency?: string }) => {
+    .option('--auto-advance-stages', 'avanca etapas staged sem aprovacao manual no Telegram')
+    .action(async (opts: { feature?: string; concurrency?: string; autoAdvanceStages?: boolean }) => {
       try {
         assertWritableDbPath();
 
@@ -25,6 +26,7 @@ export function registerRun(program: Command): void {
           cwd,
           concurrency,
           featureId: opts.feature,
+          autoAdvanceStages: Boolean(opts.autoAdvanceStages),
         });
       } catch (error) {
         if (error instanceof DbAccessError) {

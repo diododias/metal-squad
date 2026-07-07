@@ -37,6 +37,12 @@ const V2_YAML_OBJ = {
           tool: 'claude',
           effort: 'medium',
           skills: ['specify', 'implement'],
+          workflow: {
+            mode: 'staged',
+            stages: ['specify', 'plan', 'tasks'],
+            approvals: { channel: 'telegram', autoAdvance: false },
+            syncTasksToBacklog: true,
+          },
           specFile: undefined,
           context: ['src/core/backlog/schema.ts'],
           dependsOn: [],
@@ -85,6 +91,7 @@ describe('BacklogV2Schema', () => {
     if (result.success) {
       expect(result.data.version).toBe(2);
       expect(result.data.defaults.skills).toEqual(['implement']);
+      expect(result.data.epics[0]?.features[0]?.workflow?.mode).toBe('staged');
     }
   });
 
@@ -120,6 +127,35 @@ describe('BacklogV2Schema', () => {
     if (result.success) {
       const task = result.data.epics[0]?.features[0]?.tasks[0];
       expect(task?.skills).toEqual(['implement']);
+    }
+  });
+
+  it('parses retry policy with defaults and onFail', () => {
+    const result = BacklogV2Schema.safeParse({
+      ...V2_YAML_OBJ,
+      epics: [
+        {
+          ...V2_YAML_OBJ.epics[0],
+          features: [
+            {
+              ...V2_YAML_OBJ.epics[0].features[0],
+              retry: {
+                maxAttempts: 3,
+                backoffMs: 1500,
+                onFail: 'continue',
+              },
+            },
+          ],
+        },
+      ],
+    });
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.epics[0]?.features[0]?.retry).toEqual({
+        maxAttempts: 3,
+        backoffMs: 1500,
+        onFail: 'continue',
+      });
     }
   });
 });

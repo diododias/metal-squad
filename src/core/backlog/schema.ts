@@ -2,6 +2,14 @@ import { z } from 'zod';
 
 export const ToolSchema = z.enum(['claude', 'codex', 'opencode']);
 export const EffortSchema = z.enum(['low', 'medium', 'high']);
+export const WorkflowModeSchema = z.enum(['single', 'staged']);
+export const WorkflowApprovalChannelSchema = z.enum(['telegram']);
+export const OnFailSchema = z.enum(['stop', 'continue', 'gate']);
+export const RetrySchema = z.object({
+  maxAttempts: z.number().int().min(1).max(10).default(1),
+  backoffMs: z.number().int().min(0).default(5000),
+  onFail: OnFailSchema.default('stop'),
+});
 
 export const DefaultsSchema = z.object({
   tool: ToolSchema.default('claude'),
@@ -18,6 +26,18 @@ export const TaskSchema = z.object({
   skills: z.array(z.string()).optional(),
 });
 
+export const WorkflowApprovalsSchema = z.object({
+  channel: WorkflowApprovalChannelSchema.default('telegram'),
+  autoAdvance: z.boolean().default(false),
+});
+
+export const WorkflowSchema = z.object({
+  mode: WorkflowModeSchema.default('single'),
+  stages: z.array(z.string()).min(1).default(['implement']),
+  approvals: WorkflowApprovalsSchema.default({}),
+  syncTasksToBacklog: z.boolean().default(false),
+});
+
 export const FeatureSchema = z.object({
   id: z.string(),
   title: z.string(),
@@ -30,6 +50,8 @@ export const FeatureSchema = z.object({
   skills: z.array(z.string()).optional(),
   specFile: z.string().optional(),
   context: z.array(z.string()).optional(),
+  workflow: WorkflowSchema.optional(),
+  retry: RetrySchema.optional(),
 });
 
 export const EpicSchema = z.object({
@@ -55,8 +77,12 @@ export const BacklogSchema = z.union([BacklogV1Schema, BacklogV2Schema]);
 
 export type Tool = z.infer<typeof ToolSchema>;
 export type Effort = z.infer<typeof EffortSchema>;
+export type OnFail = z.infer<typeof OnFailSchema>;
+export type Retry = z.infer<typeof RetrySchema>;
 export type Defaults = z.infer<typeof DefaultsSchema>;
 export type Task = z.infer<typeof TaskSchema>;
+export type WorkflowApprovals = z.infer<typeof WorkflowApprovalsSchema>;
+export type Workflow = z.infer<typeof WorkflowSchema>;
 export type Feature = z.infer<typeof FeatureSchema>;
 export type Epic = z.infer<typeof EpicSchema>;
 export type BacklogV1 = z.infer<typeof BacklogV1Schema>;

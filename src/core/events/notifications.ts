@@ -14,6 +14,36 @@ export function attachEventNotifications(
       ].join('\n');
       void dispatch('gate:created', message, { gateId, featureId }).catch(() => {});
     }),
+    eventBus.subscribe('stage:request-created', ({ requestId, featureId, stage, kind, prompt, source }) => {
+      if (kind === 'approval') {
+        const responseHint = source === 'auto'
+          ? `Aprovacao automatica registrada para avancar apos ${stage}.`
+          : `Responda: stage:${requestId} advance | stage:${requestId} hold | stage:${requestId} retry`;
+        const message = [
+          `metal-squad: ${featureId} concluiu a etapa ${stage}`,
+          prompt,
+          responseHint,
+        ].join('\n');
+        void dispatch('stage:approval', message, {
+          requestId,
+          featureId,
+          stage,
+          source: source ?? 'manual',
+        }).catch(() => {});
+        return;
+      }
+
+      const message = [
+        `metal-squad: ${featureId} precisa de input humano na etapa ${stage}`,
+        prompt,
+        `Responda: input:${requestId} <texto>`,
+      ].join('\n');
+      void dispatch('stage:input', message, {
+        requestId,
+        featureId,
+        stage,
+      }).catch(() => {});
+    }),
     eventBus.subscribe('run:failed', ({ featureId, error }) => {
       void dispatch('run:failed', `metal-squad: ${featureId} falhou — ${error}`, {
         featureId,

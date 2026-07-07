@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 const DEFAULT_NOTIFICATIONS = { channels: [], events: ['gate:created', 'run:failed'] };
+const DEFAULT_WORKFLOW = { autoAdvanceStages: false, pollIntervalMs: 2_000 };
 
 describe('config', () => {
   const previousHome = process.env.HOME;
@@ -36,6 +37,7 @@ describe('config', () => {
       staleRunThresholdMinutes: 120,
       promptContextCharLimit: 20_000,
       notifications: DEFAULT_NOTIFICATIONS,
+      workflow: DEFAULT_WORKFLOW,
     });
   });
 
@@ -52,6 +54,7 @@ describe('config', () => {
       promptContextCharLimit: 10_000,
       telegramChatId: '123',
       notifications: DEFAULT_NOTIFICATIONS,
+      workflow: DEFAULT_WORKFLOW,
     });
 
     expect(existsSync(CONFIG_PATH)).toBe(true);
@@ -62,6 +65,7 @@ describe('config', () => {
       promptContextCharLimit: 10_000,
       telegramChatId: '123',
       notifications: DEFAULT_NOTIFICATIONS,
+      workflow: DEFAULT_WORKFLOW,
     });
   });
 
@@ -77,6 +81,7 @@ describe('config', () => {
       staleRunThresholdMinutes: 45,
       promptContextCharLimit: 15_000,
       notifications: DEFAULT_NOTIFICATIONS,
+      workflow: DEFAULT_WORKFLOW,
     });
     ensureDataDir();
 
@@ -86,6 +91,7 @@ describe('config', () => {
       staleRunThresholdMinutes: 45,
       promptContextCharLimit: 15_000,
       notifications: DEFAULT_NOTIFICATIONS,
+      workflow: DEFAULT_WORKFLOW,
     });
     expect(existsSync(DB_PATH.replace(/\/app\.db$/, ''))).toBe(true);
   });

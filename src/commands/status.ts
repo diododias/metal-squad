@@ -34,6 +34,7 @@ export function registerStatus(program: Command): void {
         rows.map((r) => ({
           id: r.id,
           feature: r.feature_id,
+          stage: r.stage ?? '-',
           tool: r.tool,
           status: r.status,
           tokens: r.total ?? '-',
