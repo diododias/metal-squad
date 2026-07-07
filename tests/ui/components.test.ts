@@ -7,6 +7,8 @@ import { MainPanel } from '../../src/ui/components/MainPanel.js';
 import { RunTable } from '../../src/ui/components/RunTable.js';
 import { Sidebar } from '../../src/ui/components/Sidebar.js';
 import { StatusBar } from '../../src/ui/components/StatusBar.js';
+import { CostDashboard } from '../../src/ui/components/CostDashboard.js';
+import type { StatsRunRow } from '../../src/db/repo.js';
 
 describe('ui components', () => {
   it('renders the empty state message', () => {
@@ -198,5 +200,28 @@ describe('ui components', () => {
       hasGates: true,
       width: 120,
     }))).toBe(true);
+  });
+
+  it('renders the cost dashboard with aggregated rows', () => {
+    const rows: StatsRunRow[] = [
+      {
+        id: 1,
+        repoId: 'repo-1',
+        featureId: 'feat-1',
+        tool: 'claude',
+        status: 'done',
+        startedAt: '2026-07-06 10:00:00',
+        endedAt: '2026-07-06 10:04:00',
+        inputTokens: 1000,
+        cachedInputTokens: null,
+        outputTokens: 500,
+        totalTokens: 1500,
+      },
+    ];
+    expect(React.isValidElement(CostDashboard({ rows, periodLabel: 'last 7 days', width: 100 }))).toBe(true);
+  });
+
+  it('renders the cost dashboard empty state', () => {
+    expect(React.isValidElement(CostDashboard({ rows: [], periodLabel: 'today', width: 100 }))).toBe(true);
   });
 });

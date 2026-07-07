@@ -293,8 +293,8 @@ describe('executeBacklog failure persistence', () => {
 
     await rejection;
     expect(mockRunFeature).toHaveBeenCalledTimes(3);
-    expect(mockCreateRetryRecord).toHaveBeenNthCalledWith(1, 7, 1, 'falha 1');
-    expect(mockCreateRetryRecord).toHaveBeenNthCalledWith(2, 7, 2, 'falha 2');
+    expect(mockCreateRetryRecord).toHaveBeenNthCalledWith(1, 7, 1, 'falha 1', expect.any(Number));
+    expect(mockCreateRetryRecord).toHaveBeenNthCalledWith(2, 7, 2, 'falha 2', expect.any(Number));
     expect(mockCreateRetryRecord).toHaveBeenCalledTimes(2);
     expect(mockFinishRun).toHaveBeenCalledWith(7, 'failed', 'falha 3');
 
@@ -543,5 +543,100 @@ describe('executeBacklog failure persistence', () => {
     expect(attempt3).toBeLessThanOrEqual(4000);
     expect(capped).toBeGreaterThanOrEqual(30_000);
     expect(capped).toBeLessThanOrEqual(60_000);
+  });
+});
+
+describe('executeBacklog budget caps', () => {
+  it('pauses the pipeline, creates a gate, and alerts when the budget is exceeded', async () => {
+    const backlog: Backlog = {
+      version: 2,
+      repo: 'repo',
+      defaults: { tool: 'codex', effort: 'medium', skills: ['implement'] },
+      budget: { maxTokens: 100 },
+      epics: [
+        {
+          id: 'epic-1',
+          title: 'Epic',
+          features: [
+            {
+              id: 'feat-budget',
+              title: 'Expensive Feature',
+              spec: 'spec',
+              tasks: [],
+              tool: 'codex',
+              effort: 'medium',
+              dependsOn: [],
+            },
+          ],
+        },
+      ],
+    };
+
+    mockRunFeature.mockResolvedValue({
+      ok: true,
+      summary: 'done',
+      usage: { input: 150, output: 50, total: 200 },
+    });
+
+    const { executeBacklog } = await import('../../src/core/runner/execute.js');
+    await executeBacklog(backlog, { cwd: '/repo', concurrency: 1 });
+
+    expect(mockRecordUsage).toHaveBeenCalledWith(7, { input: 150, output: 50, total: 200 });
+    expect(mockPausePipeline).toHaveBeenCalledWith(9);
+    expect(mockCreateGate).toHaveBeenCalledWith(7, 'feat-budget', 'repo-1');
+    expect(mockFinishRun).toHaveBeenCalledWith(
+      7,
+      'blocked',
+      expect.stringContaining('budget exceeded'),
+    );
+    expect(mockEventEmit).toHaveBeenCalledWith('budget:alert', {
+      percent: 100,
+      spent: 200,
+      limit: 100,
+    });
+  });
+
+  it('emits a budget alert at the configured threshold without pausing', async () => {
+    const backlog: Backlog = {
+      version: 2,
+      repo: 'repo',
+      defaults: { tool: 'codex', effort: 'medium', skills: ['implement'] },
+      budget: { maxTokens: 1000 },
+      epics: [
+        {
+          id: 'epic-1',
+          title: 'Epic',
+          features: [
+            {
+              id: 'feat-alert',
+              title: 'Feature',
+              spec: 'spec',
+              tasks: [],
+              tool: 'codex',
+              effort: 'medium',
+              dependsOn: [],
+            },
+          ],
+        },
+      ],
+    };
+
+    mockRunFeature.mockResolvedValue({
+      ok: true,
+      summary: 'done',
+      usage: { input: 500, output: 300, total: 800 },
+    });
+
+    const { executeBacklog } = await import('../../src/core/runner/execute.js');
+    await executeBacklog(backlog, { cwd: '/repo', concurrency: 1 });
+
+    expect(mockEventEmit).toHaveBeenCalledWith('budget:alert', {
+      percent: 80,
+      spent: 800,
+      limit: 1000,
+    });
+    expect(mockPausePipeline).not.toHaveBeenCalled();
+    expect(mockCreateGate).not.toHaveBeenCalled();
+    expect(mockFinishPipeline).toHaveBeenCalledWith(9, 'done');
   });
 });

@@ -38,8 +38,8 @@ Quando pausado, o estado eh salvo no DB para poder retomar entre sessoes:
 
 ## Criterios de aceite
 
-- [ ] `p` na TUI pausa o pipeline
-- [ ] `r` na TUI retoma
-- [ ] `x` aborta a feature selecionada
-- [ ] Estado persistido entre sessoes (pode fechar e reabrir)
-- [ ] `msq resume` via CLI retoma pipeline pausado
+- [x] `p` na TUI pausa o pipeline
+- [x] `r` na TUI retoma
+- [x] `x` aborta a feature selecionada
+- [x] Estado persistido entre sessoes (pode fechar e reabrir)
+- [x] `msq resume` via CLI retoma pipeline pausado

@@ -13,6 +13,7 @@ interface Props {
   canPause: boolean;
   canResume: boolean;
   canAbort: boolean;
+  dashboardOpen?: boolean;
   width: number;
 }
 
@@ -25,9 +26,12 @@ export function CommandBar({
   canPause,
   canResume,
   canAbort,
+  dashboardOpen,
   width,
 }: Props): React.ReactElement {
-  const actions = [
+  const actions = dashboardOpen
+    ? ['[/] period', 'd close', 'esc close', 'q quit']
+    : [
     'tab panel',
     hasRuns ? 'j/k move' : '',
     hasRuns ? 'enter open' : '',
@@ -41,6 +45,7 @@ export function CommandBar({
     hasGates && focusPanel === 'gates' ? 'a approve' : '',
     hasGates && focusPanel === 'gates' ? 's skip' : '',
     hasGates && focusPanel === 'gates' ? 'r retry' : '',
+    'd dashboard',
     'q quit',
   ].filter(Boolean);
 

@@ -5,10 +5,13 @@ import { abortPipeline, pausePipeline, requestFeatureAbort, resumePipeline } fro
 import { useRuns, useTaskRuns } from './hooks/useRuns.js';
 import { useGates } from './hooks/useGates.js';
 import { useRunOutput } from './hooks/useRunOutput.js';
+import { useRunBreakdown } from './hooks/useRunBreakdown.js';
 import { useTerminalWidth } from './hooks/useTerminalWidth.js';
 import { useNotifications } from './hooks/useNotifications.js';
 import { getFeatureCatalog, getPendingFeatures } from './catalog.js';
 import { CommandBar } from './components/CommandBar.js';
+import { CostDashboard } from './components/CostDashboard.js';
+import { useStatsRows } from './hooks/useStatsRows.js';
 import { MainPanel } from './components/MainPanel.js';
 import { Sidebar } from './components/Sidebar.js';
 import { StatusBar } from './components/StatusBar.js';
@@ -24,7 +27,16 @@ interface UiState {
   focusPanel: FocusPanel;
   activeView: ActiveView;
   outputPaused: boolean;
+  dashboard?: boolean;
+  dashboardPeriod?: number;
 }
+
+const DASHBOARD_PERIODS: Array<{ label: string; days: number | null }> = [
+  { label: 'today', days: 1 },
+  { label: 'last 7 days', days: 7 },
+  { label: 'last 30 days', days: 30 },
+  { label: 'all time', days: null },
+];
 
 function clampIndex(index: number, size: number): number {
   if (size <= 0) return 0;
@@ -63,7 +75,16 @@ export function App(): React.ReactElement {
     ui.outputPaused ? 1_500 : 350,
   );
   const taskRuns = useTaskRuns(selectedRun ? selectedRun.runId : null);
+  const runBreakdown = useRunBreakdown(
+    selectedRun ? selectedRun.runId : null,
+    selectedRun?.startedAt ?? null,
+    selectedRun?.endedAt ?? null,
+  );
   const activeView: ActiveView = selectedRun ? ui.activeView : 'overview';
+  const dashboardOpen = Boolean(ui.dashboard);
+  const dashboardPeriodIndex = Math.min(ui.dashboardPeriod ?? 1, DASHBOARD_PERIODS.length - 1);
+  const dashboardPeriod = DASHBOARD_PERIODS[dashboardPeriodIndex] ?? DASHBOARD_PERIODS[1]!;
+  const statsRows = useStatsRows(dashboardOpen, dashboardPeriod.days);
   const featureCatalog = getFeatureCatalog();
   const selectedFeature = selectedRun ? featureCatalog[selectedRun.featureId] ?? null : null;
   const totalRuns = runs.length;
@@ -99,9 +120,25 @@ export function App(): React.ReactElement {
     }
 
     if (key.escape) {
-      setUi((current) => ({ ...current, activeView: 'overview', focusPanel: 'runs', outputPaused: false }));
+      setUi((current) => ({ ...current, activeView: 'overview', focusPanel: 'runs', outputPaused: false, dashboard: false }));
       return;
     }
+
+    if (_input === 'd') {
+      setUi((current) => ({ ...current, dashboard: !current.dashboard }));
+      return;
+    }
+
+    if (dashboardOpen && (_input === '[' || _input === ']')) {
+      const delta = _input === '[' ? -1 : 1;
+      setUi((current) => ({
+        ...current,
+        dashboardPeriod: (dashboardPeriodIndex + delta + DASHBOARD_PERIODS.length) % DASHBOARD_PERIODS.length,
+      }));
+      return;
+    }
+
+    if (dashboardOpen) return;
 
     if (key.ctrl && _input.toLowerCase() === 's' && selectedRun && activeView === 'run') {
       setUi((current) => ({ ...current, outputPaused: !current.outputPaused }));
@@ -206,6 +243,11 @@ export function App(): React.ReactElement {
         </Text>
       </Box>
       <Text dimColor>{layoutMode === 'stacked' ? 'single-column layout' : `${layoutMode} split layout`}</Text>
+      {dashboardOpen ? (
+        <Box marginTop={1}>
+          <CostDashboard rows={statsRows} periodLabel={dashboardPeriod.label} width={width - 2} />
+        </Box>
+      ) : (
       <Box flexDirection={layoutMode === 'stacked' ? 'column' : 'row'} marginTop={1}>
         <MainPanel
           runs={runs}
@@ -219,6 +261,7 @@ export function App(): React.ReactElement {
           width={mainWidth}
           pendingFeatures={pendingFeatures}
           selectedPendingIndex={selectedPendingIndex}
+          breakdown={runBreakdown}
         />
         <Sidebar
           runs={runs}
@@ -233,6 +276,7 @@ export function App(): React.ReactElement {
           mode={layoutMode}
         />
       </Box>
+      )}
       <StatusBar
         selectedRun={selectedRun}
         selectedFeature={selectedFeature}
@@ -251,6 +295,7 @@ export function App(): React.ReactElement {
         canPause={canPause}
         canResume={canResume}
         canAbort={canAbortFeature || canAbortPipeline}
+        dashboardOpen={dashboardOpen}
         width={width}
       />
     </Box>

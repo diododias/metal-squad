@@ -36,6 +36,12 @@ import { createSkillRegistry } from '../skills/index.js';
 import { syncFeatureTasksToBacklog } from '../backlog/sync.js';
 import type { Skill } from '../skills/types.js';
 import {
+  createBudgetTracker,
+  formatBudgetViolation,
+  resolveBudgetLimits,
+  type BudgetViolation,
+} from '../budget/tracker.js';
+import {
   attachDefaultEventLogger,
   attachEventNotifications,
   attachRunPersistence,
@@ -67,6 +73,11 @@ export async function executeBacklog(
   cleanupStaleRuns(config.staleRunThresholdMinutes);
   const activeRunIds = new Set<number>();
   const activeControllers = new Map<string, AbortController>();
+  const budget = createBudgetTracker(resolveBudgetLimits(
+    backlog.version === 2 ? backlog.budget : undefined,
+    config.budget,
+  ));
+  let budgetPauseTriggered = false;
 
   const repoStageSkills = backlog.version === 2 ? backlog.defaults.stageSkills : {};
   const effectiveStageSkills: Record<string, string[]> = {
@@ -118,6 +129,38 @@ export async function executeBacklog(
   const detachNotifications = attachEventNotifications();
   startTelegramPoller();
 
+  const handleGlobalBudgetViolation = (violation: BudgetViolation, featureId: string): void => {
+    if (budgetPauseTriggered) return;
+    budgetPauseTriggered = true;
+    const gateRunId = createRun(repoId, featureId, 'budget', { pipelineId });
+    finishRun(gateRunId, 'blocked', formatBudgetViolation(violation));
+    createGate(gateRunId, featureId, repoId);
+    pausePipeline(pipelineId);
+    msqEventBus.emit('budget:alert', {
+      percent: 100,
+      spent: Math.round(violation.spent * 100) / 100,
+      limit: violation.limit,
+    });
+  };
+
+  const applyBudgetUsage = (feature: Feature, usage: NonNullable<RunResult['usage']>, runId: number): void => {
+    const { violations, alerts } = budget.record(feature.id, usage, feature.model ?? feature.tool);
+    for (const alert of alerts) {
+      msqEventBus.emit('budget:alert', {
+        percent: alert.percent,
+        spent: Math.round(alert.spent * 100) / 100,
+        limit: alert.limit,
+      });
+    }
+    for (const violation of violations) {
+      if (violation.scope === 'global') {
+        handleGlobalBudgetViolation(violation, feature.id);
+      } else {
+        createGate(runId, feature.id, repoId);
+      }
+    }
+  };
+
   const executeStageRun = async (
     feature: Feature,
     prompt: string,
@@ -143,7 +186,10 @@ export async function executeBacklog(
         repoId,
         signal: abortSignal,
       });
-      if (res.usage) recordUsage(runId, res.usage);
+      if (res.usage) {
+        recordUsage(runId, res.usage);
+        applyBudgetUsage(feature, res.usage, runId);
+      }
 
       if (res.control?.type === 'needs_input') {
         finishRun(runId, 'blocked', res.summary);
@@ -237,7 +283,16 @@ export async function executeBacklog(
     }
   };
 
-  const execute = async (feature: Feature) => {
+  const execute = async (feature: Feature): Promise<RunResult> => {
+    const violation = budget.globalViolation();
+    if (violation) {
+      handleGlobalBudgetViolation(violation, feature.id);
+      return {
+        ok: false,
+        aborted: true,
+        summary: formatBudgetViolation(violation),
+      };
+    }
     const controller = new AbortController();
     activeControllers.set(feature.id, controller);
     if (feature.workflow?.mode === 'staged') {
@@ -415,8 +470,9 @@ async function runWithRetry(
     lastResult = res;
 
     if (attempt < maxAttempts) {
-      createRetryRecord(opts.runId, attempt, res.summary);
-      await sleep(backoffWithJitter(backoffMs, attempt));
+      const waitMs = backoffWithJitter(backoffMs, attempt);
+      createRetryRecord(opts.runId, attempt, res.summary, waitMs);
+      await sleep(waitMs);
     }
   }
 

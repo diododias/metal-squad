@@ -37,7 +37,7 @@ metal-squad — last 7 days
 
 ## Criterios de aceite
 
-- [ ] `msq stats` com output formatado
-- [ ] Filtros por periodo, repo, tool
-- [ ] Metricas: runs, tokens, custo, duracao, success rate
-- [ ] `--format json` para integracao
+- [x] `msq stats` com output formatado
+- [x] Filtros por periodo, repo, tool
+- [x] Metricas: runs, tokens, custo, duracao, success rate
+- [x] `--format json` para integracao

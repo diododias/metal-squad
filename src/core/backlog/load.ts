@@ -16,6 +16,7 @@ function normalizeV1(backlog: BacklogV1): BacklogV2 {
     version: 2,
     repo: backlog.repo,
     defaults,
+    ...(backlog.budget ? { budget: backlog.budget } : {}),
     epics: backlog.epics.map((epic) => ({
       ...epic,
       features: epic.features.map((feature) => ({

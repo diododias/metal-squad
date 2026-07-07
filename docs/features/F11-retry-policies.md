@@ -47,7 +47,7 @@ CREATE TABLE retry_history (
 
 ## Criterios de aceite
 
-- [ ] Retry com maxAttempts e backoff configuravel
-- [ ] Politica onFail: stop, continue, gate
-- [ ] Historico de retries no DB
-- [ ] Retry count visivel na TUI
+- [x] Retry com maxAttempts e backoff configuravel
+- [x] Politica onFail: stop, continue, gate
+- [x] Historico de retries no DB
+- [x] Retry count visivel na TUI

@@ -13,6 +13,7 @@ import {
 } from '../format.js';
 import { EmptyState } from './EmptyState.js';
 import { RunTable } from './RunTable.js';
+import { formatDurationMs, type RunBreakdown } from '../../core/stats.js';
 
 export type ActiveView = 'overview' | 'run';
 
@@ -28,6 +29,7 @@ interface Props {
   width: number;
   pendingFeatures: FeatureCatalogEntry[];
   selectedPendingIndex: number;
+  breakdown?: RunBreakdown | null;
 }
 
 function overviewSummary(runs: RunSummary[], gates: GateRow[]): React.ReactElement {
@@ -66,6 +68,7 @@ export function MainPanel({
   width,
   pendingFeatures,
   selectedPendingIndex,
+  breakdown = null,
 }: Props): React.ReactElement {
   const innerWidth = Math.max(32, width - 4);
   const visibleOutput = output.slice(-(mode === 'stacked' ? 8 : 14));
@@ -104,6 +107,17 @@ export function MainPanel({
             <Text dimColor> | ended {formatClock(selectedRun.endedAt)}</Text>
             <Text dimColor> | tokens {formatTokens(selectedRun.totalTokens)}</Text>
           </Box>
+          {breakdown && breakdown.wallMs !== null && (
+            <Box>
+              <Text dimColor>agent {formatDurationMs(breakdown.agentMs)}</Text>
+              {breakdown.gateWaitMs > 0 && (
+                <Text dimColor> | gate wait {formatDurationMs(breakdown.gateWaitMs)}</Text>
+              )}
+              {breakdown.retryCount > 0 && (
+                <Text dimColor> | retry {formatDurationMs(breakdown.retryWaitMs)} ({breakdown.retryCount}x)</Text>
+              )}
+            </Box>
+          )}
           <Box marginTop={1} flexDirection="column">
             <Text bold>Declared skills</Text>
             {selectedFeature?.skills?.length ? (

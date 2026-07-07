@@ -15,11 +15,11 @@ O que ja funciona:
 O que falta / problemas:
 - Acoplado ao spec-kit (prompt hardcoded)
 - TUI muito simples vs opencode/claude-code/codex
-- Sem retry, pause, resume, abort
-- Sem analytics/dashboard de custos
+- ~~Sem retry, pause, resume, abort~~ (F11/F12 entregues)
+- ~~Sem analytics/dashboard de custos~~ (F16/F17/F18 entregues)
 - Adapters hardcoded (3 tools fixos)
 - Sem streaming de output em tempo real
-- Sem controle de budget
+- ~~Sem controle de budget~~ (F14 entregue)
 - Sem arquivos associados a features/tasks
 
 ---
