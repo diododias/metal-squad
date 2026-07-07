@@ -10,6 +10,7 @@ export interface RunStartEvent {
   runId: number;
   featureId: string;
   tool: Tool;
+  stage?: string;
 }
 
 export interface RunOutputEvent {
