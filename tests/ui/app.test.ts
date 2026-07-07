@@ -30,7 +30,7 @@ let stateValue: {
   selectedGate: number;
   selectedPending: number;
   focusPanel: 'runs' | 'gates' | 'main';
-  activeView: 'overview' | 'run';
+  activeView: 'overview' | 'run' | 'notifications';
   outputPaused: boolean;
   dashboard?: boolean;
   dashboardPeriod?: number;
@@ -324,6 +324,28 @@ describe('App', () => {
     expect(setUi).toHaveBeenCalledTimes(1);
     const toggle = setUi.mock.calls[0]?.[0] as (state: typeof stateValue) => typeof stateValue;
     expect(toggle(stateValue).dashboard).toBe(true);
+  });
+
+  it('opens and closes the notifications view with o', async () => {
+    stateValue = {
+      selectedRun: 0,
+      selectedGate: 0,
+      selectedPending: 0,
+      focusPanel: 'runs',
+      activeView: 'overview',
+      outputPaused: false,
+    };
+    mockUseRuns.mockReturnValue([{ runId: 1, featureId: 'feat-1' }]);
+    mockUseGates.mockReturnValue({ gates: [], resolve: vi.fn() });
+    const { App } = await import('../../src/ui/App.js');
+
+    App();
+    const handler = mockUseInput.mock.calls[0]?.[0] as (input: string, key: Record<string, boolean>) => void;
+    handler('o', {});
+
+    expect(setUi).toHaveBeenCalledTimes(1);
+    const toggle = setUi.mock.calls[0]?.[0] as (state: typeof stateValue) => typeof stateValue;
+    expect(toggle(stateValue)).toMatchObject({ activeView: 'notifications', focusPanel: 'main' });
   });
 
   it('handles gate decisions when the gates panel is focused', async () => {

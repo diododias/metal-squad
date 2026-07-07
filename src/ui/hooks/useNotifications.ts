@@ -32,6 +32,12 @@ export function useNotifications(maxItems = 12): NotificationEntry[] {
         push('run:start', `${featureId} started`)),
       msqEventBus.subscribe('gate:created', ({ gateId, featureId }) =>
         push('gate:created', `gate ${gateId} → ${featureId}`)),
+      msqEventBus.subscribe('gate:resolved', ({ gateId, decision }) =>
+        push('gate:resolved', `gate ${gateId} ${decision}`)),
+      msqEventBus.subscribe('stage:request-created', ({ requestId, featureId, stage, prompt }) =>
+        push('stage:request-created', `stage:${requestId} ${featureId} ${stage} · ${prompt}`)),
+      msqEventBus.subscribe('stage:request-resolved', ({ requestId, response }) =>
+        push('stage:request-resolved', formatStageResponse(requestId, response))),
       msqEventBus.subscribe('run:failed', ({ featureId }) =>
         push('run:failed', `${featureId} failed`)),
       msqEventBus.subscribe('budget:alert', ({ percent }) =>
@@ -48,4 +54,11 @@ export function useNotifications(maxItems = 12): NotificationEntry[] {
   }, [maxItems]);
 
   return items;
+}
+
+function formatStageResponse(requestId: number, response: string): string {
+  if (response === 'advance') return `stage:${requestId} approved and advanced`;
+  if (response === 'hold') return `stage:${requestId} skipped for now and kept on hold`;
+  if (response === 'retry') return `stage:${requestId} requested retry`;
+  return `stage:${requestId} resolved as ${response}`;
 }
