@@ -1,0 +1,169 @@
+version: 2
+repo: metal-squad
+defaults:
+  tool: claude
+  effort: medium
+  skills: []
+
+epics:
+  - id: epic-orchestration-v2
+    title: E03 — Orchestration v2
+    features:
+      - id: feat-11
+        title: F11 — Retry Policies
+        tool: codex
+        model: gpt-5.4
+        effort: medium
+        skills: []
+        specFile: docs/features/F11-retry-policies.md
+        context:
+          - src/core/backlog/schema.ts
+          - src/core/runner/execute.ts
+          - src/core/orchestrator/scheduler.ts
+          - src/db/index.ts
+          - src/db/repo.ts
+          - tests/runner/execute.test.ts
+        dependsOn: []
+        spec: |
+          Implemente a feature F11 — Retry Policies no repositório metal-squad.
+
+          ## Contexto atual
+
+          O scheduler em `src/core/orchestrator/scheduler.ts` tem política fixa stop-on-fail:
+          quando uma feature falha, `failed = true` e o pipeline para imediatamente com reject.
+          Não há retry automático.
+
+          O executor em `src/core/runner/execute.ts` chama `getAdapter(feature.tool).runFeature()`
+          diretamente, sem lógica de retry. Quando `res.ok === false`, simplesmente faz
+          `finishRun(runId, 'failed', res.summary)` e emite `run:failed`.
+
+          O schema em `src/core/backlog/schema.ts` não tem campo `retry` no `FeatureSchema`.
+
+          ## Mudanças necessárias por arquivo
+
+          ### src/core/backlog/schema.ts
+
+          Adicionar schema de retry e campo opcional na feature:
+
+          ```typescript
+          export const OnFailSchema = z.enum(['stop', 'continue', 'gate']);
+
+          export const RetrySchema = z.object({
+            maxAttempts: z.number().int().min(1).max(10).default(1),
+            backoffMs: z.number().int().min(0).default(5000),
+            onFail: OnFailSchema.default('stop'),
+          });
+
+          // Dentro de FeatureSchema, adicionar:
+          retry: RetrySchema.optional(),
+          ```
+
+          Exportar `OnFail`, `Retry` como tipos derivados.
+
+          ### src/db/index.ts
+
+          Adicionar tabela `retry_history` na função `migrate()`:
+
+          ```sql
+          CREATE TABLE IF NOT EXISTS retry_history (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            run_id INTEGER NOT NULL REFERENCES runs(id),
+            attempt INTEGER NOT NULL,
+            error TEXT,
+            retried_at TEXT NOT NULL DEFAULT (datetime('now'))
+          );
+          ```
+
+          ### src/db/repo.ts
+
+          Adicionar função:
+
+          ```typescript
+          export function createRetryRecord(runId: number, attempt: number, error?: string): void {
+            getDb('readwrite')
+              .prepare(
+                `INSERT INTO retry_history (run_id, attempt, error)
+                 VALUES (?, ?, ?)`,
+              )
+              .run(runId, attempt, error ?? null);
+          }
+          ```
+
+          ### src/core/runner/execute.ts
+
+          Substituir a chamada direta a `getAdapter(...).runFeature()` por uma função
+          `runWithRetry(feature, prompt, opts)` que:
+
+          1. Loop de tentativas até `maxAttempts` (default 1 = sem retry):
+             ```
+             for attempt 1..maxAttempts:
+               res = await adapter.runFeature(feature, prompt, { cwd, runId })
+               if res.ok → return res
+               createRetryRecord(runId, attempt, res.summary)
+               if attempt < maxAttempts → await sleep(backoffWithJitter(backoffMs, attempt))
+             ```
+          2. Backoff exponencial com jitter:
+             ```typescript
+             function backoffWithJitter(baseMs: number, attempt: number): number {
+               const exp = Math.min(baseMs * 2 ** (attempt - 1), 60_000);
+               return exp * (0.5 + Math.random() * 0.5);
+             }
+             ```
+          3. Após esgotar tentativas, verificar `retry.onFail`:
+             - `'stop'` (default): comportamento atual — finishRun failed, emite run:failed, throw
+             - `'continue'`: finishRun failed, emite run:failed, retorna `{ ok: false, summary }` SEM throw
+             - `'gate'`: cria gate via `createGate(runId, featureId, repoId)`, finishRun blocked, emite run:failed, retorna `{ ok: false }`
+
+          Para `onFail: 'continue'`, o executor não pode lançar exceção, pois o scheduler
+          interpreta exceção como falha fatal. O scheduler precisa receber `res.ok === false`
+          e ter como decidir se para ou continua.
+
+          ### src/core/orchestrator/scheduler.ts
+
+          Atualizar a política de falha para respeitar `onFail`:
+
+          O scheduler recebe `RunResult` de `execute(f)`. Atualmente para em qualquer `!res.ok`.
+          Ajustar para:
+
+          ```typescript
+          .then((res) => {
+            active--;
+            opts.onDone?.(f, res);
+            if (!res.ok) {
+              const policy = f.retry?.onFail ?? 'stop';
+              if (policy === 'stop') {
+                failed = true;
+                return reject(new Error(`Feature ${f.id} falhou: ${res.summary}`));
+              }
+              // 'continue' ou 'gate': marca como done para desbloquear dependentes
+              done.add(f.id);
+              pump();
+              return;
+            }
+            done.add(f.id);
+            pump();
+          })
+          ```
+
+          ### tests/runner/execute.test.ts
+
+          Adicionar testes para:
+          - Feature sem `retry` usa comportamento atual (stop-on-fail, 1 tentativa)
+          - Feature com `retry.maxAttempts: 3` tenta 3 vezes antes de falhar
+          - Feature com `retry.onFail: 'continue'` não lança exceção, pipeline continua
+          - `backoffWithJitter` retorna valor no intervalo esperado
+
+          Use o padrão de mock já estabelecido no arquivo (vi.fn(), adapters mockados).
+
+          ## Critérios de aceite
+
+          - [ ] `FeatureSchema` aceita campo `retry` com `maxAttempts`, `backoffMs`, `onFail`
+          - [ ] Tabela `retry_history` criada no SQLite
+          - [ ] Tentativas registradas em `retry_history` após cada falha não-final
+          - [ ] `onFail: 'stop'` mantém comportamento atual (para tudo)
+          - [ ] `onFail: 'continue'` registra falha e avança pipeline
+          - [ ] `onFail: 'gate'` cria gate de aprovação humana
+          - [ ] Backoff exponencial com jitter entre tentativas
+          - [ ] Todos os testes passam: npx vitest run
+          - [ ] Sem erros de tipo: npx tsc --noEmit
+        tasks: []
