@@ -6,15 +6,22 @@ const mockDescription = vi.fn();
 const mockVersion = vi.fn();
 const mockRegisterInit = vi.fn();
 const mockRegisterRun = vi.fn();
+const mockRegisterResume = vi.fn();
 const mockRegisterSkills = vi.fn();
 const mockRegisterStatus = vi.fn();
 const mockRegisterUi = vi.fn();
+const mockCommandCreate = vi.fn();
+const mockCommandOption = vi.fn();
+const mockCommandAction = vi.fn();
 
 class MockCommand {
   name = mockName.mockReturnThis();
   description = mockDescription.mockReturnThis();
   version = mockVersion.mockReturnThis();
   parseAsync = mockParseAsync;
+  command = mockCommandCreate.mockReturnThis();
+  option = mockCommandOption.mockReturnThis();
+  action = mockCommandAction.mockReturnThis();
 }
 
 vi.mock('commander', () => ({
@@ -31,6 +38,10 @@ vi.mock('../src/commands/run.js', () => ({
 
 vi.mock('../src/commands/skills.js', () => ({
   registerSkills: mockRegisterSkills,
+}));
+
+vi.mock('../src/commands/resume.js', () => ({
+  registerResume: mockRegisterResume,
 }));
 
 vi.mock('../src/commands/status.js', () => ({
@@ -58,6 +69,7 @@ describe('cli bootstrap', () => {
     expect(mockVersion).toHaveBeenCalledWith('0.0.1');
     expect(mockRegisterInit).toHaveBeenCalled();
     expect(mockRegisterRun).toHaveBeenCalled();
+    expect(mockRegisterResume).toHaveBeenCalled();
     expect(mockRegisterSkills).toHaveBeenCalled();
     expect(mockRegisterStatus).toHaveBeenCalled();
     expect(mockRegisterUi).toHaveBeenCalled();

@@ -28,6 +28,8 @@ export function useRunOutput(
   useEffect(() => {
     if (runId === null) return undefined;
 
+    void intervalMs;
+
     const maybeRefresh = (eventRunId: number): void => {
       if (eventRunId !== runId) return;
       queueMicrotask(refresh);
@@ -44,9 +46,7 @@ export function useRunOutput(
         maybeRefresh(event.runId);
       }),
     ];
-    const id = setInterval(refresh, intervalMs);
     return () => {
-      clearInterval(id);
       for (const unsubscribe of unsubscribers) unsubscribe();
     };
   }, [intervalMs, refresh, runId]);

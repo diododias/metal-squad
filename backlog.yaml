@@ -23,6 +23,11 @@ epics:
         model: gpt-5.4
         effort: medium
         specFile: docs/features/F15-event-system.md
+        context:
+          - src/core/events/index.ts
+          - src/core/events/types.ts
+          - src/core/runner/execute.ts
+          - src/ui/hooks/useNotifications.ts
         dependsOn: []
 
       - id: feat-12
@@ -31,5 +36,23 @@ epics:
         model: gpt-5.4
         effort: medium
         specFile: docs/features/F12-pause-resume-abort.md
+        context:
+          - src/core/adapters/types.ts
+          - src/core/adapters/spawn.ts
+          - src/core/adapters/claude.ts
+          - src/core/adapters/codex.ts
+          - src/core/adapters/opencode.ts
+          - src/core/orchestrator/scheduler.ts
+          - src/core/runner/execute.ts
+          - src/core/events/types.ts
+          - src/db/index.ts
+          - src/db/repo.ts
+          - src/cli.ts
+          - src/commands/status.ts
+          - src/ui/App.tsx
+          - src/ui/components/CommandBar.tsx
+          - tests/orchestrator/scheduler.test.ts
+          - tests/commands/commands.test.ts
+          - tests/ui/app.test.ts
         dependsOn:
           - feat-15

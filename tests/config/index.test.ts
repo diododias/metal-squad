@@ -3,7 +3,10 @@ import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-const DEFAULT_NOTIFICATIONS = { channels: [], events: ['gate:created', 'run:failed'] };
+const DEFAULT_NOTIFICATIONS = {
+  channels: [],
+  events: ['gate:created', 'run:failed', 'run:done', 'stage:approval', 'stage:input'],
+};
 const DEFAULT_WORKFLOW = { autoAdvanceStages: false, pollIntervalMs: 2_000 };
 
 describe('config', () => {

@@ -1,6 +1,6 @@
 import type { ToolAdapter, RunResult, RunFeatureOptions, TokenUsage } from './types.js';
 import type { Effort, Feature } from '../backlog/schema.js';
-import { runCli } from './spawn.js';
+import { CliAbortError, runCli } from './spawn.js';
 import { msqEventBus } from '../events/index.js';
 import { parseControlSignal } from './control.js';
 
@@ -28,19 +28,37 @@ export const opencodeAdapter: ToolAdapter = {
       ...(feature.model ? ['--model', feature.model] : []),
     ];
 
-    const { code, stdout, stderr } = await runCli('opencode', args, {
-      cwd: opts.cwd,
-      onStdoutLine: (line) => {
-        const update = parseOpenCodeLine(line);
-        if (update.output) emitRunOutput(opts.runId, feature, update.output.line, 'stdout', update.output.source);
-        if (update.usage) emitUsage(opts.runId, feature, update.usage);
-      },
-      onStderrLine: (line) => {
-        const text = normalizeSnippet(line);
-        if (!text) return;
-        emitRunOutput(opts.runId, feature, text, 'stderr', 'stderr');
-      },
-    });
+    let code: number;
+    let stdout: string;
+    let stderr: string;
+    try {
+      ({ code, stdout, stderr } = await runCli('opencode', args, {
+        cwd: opts.cwd,
+        signal: opts.signal,
+        onStdoutLine: (line) => {
+          const update = parseOpenCodeLine(line);
+          if (update.output) emitRunOutput(opts.runId, feature, update.output.line, 'stdout', update.output.source);
+          if (update.usage) emitUsage(opts.runId, feature, update.usage);
+        },
+        onStderrLine: (line) => {
+          const text = normalizeSnippet(line);
+          if (!text) return;
+          emitRunOutput(opts.runId, feature, text, 'stderr', 'stderr');
+        },
+      }));
+    } catch (error) {
+      if (error instanceof CliAbortError) {
+        const usage = this.parseUsage?.(error.stdout) ?? undefined;
+        if (usage) emitUsage(opts.runId, feature, usage);
+        return {
+          ok: false,
+          aborted: true,
+          summary: `abortado manualmente após ${Math.round(error.runtimeMs / 1000)}s`,
+          usage,
+        };
+      }
+      throw error;
+    }
     if (code !== 0) return { ok: false, summary: stderr.slice(-500) || `exit ${code}` };
 
     const json = safeJson<{ response?: string }>(stdout);
@@ -136,5 +154,6 @@ function emitUsage(runId: number, feature: Feature, usage: TokenUsage): void {
     input: usage.input,
     output: usage.output,
     total: usage.total,
+    ...(usage.cachedInput !== undefined ? { cachedInput: usage.cachedInput } : {}),
   });
 }

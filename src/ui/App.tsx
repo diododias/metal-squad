@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { Box, Text, useInput } from 'ink';
 import { spawn } from 'node:child_process';
+import { abortPipeline, pausePipeline, requestFeatureAbort, resumePipeline } from '../db/repo.js';
 import { useRuns, useTaskRuns } from './hooks/useRuns.js';
 import { useGates } from './hooks/useGates.js';
 import { useRunOutput } from './hooks/useRunOutput.js';
@@ -70,6 +71,13 @@ export function App(): React.ReactElement {
   const currentStage = taskRuns.find((t) => t.status === 'running')?.stage ?? undefined;
   const sidebarWidth = layoutMode === 'full' ? 34 : layoutMode === 'compact' ? 28 : width - 2;
   const mainWidth = layoutMode === 'stacked' ? width - 2 : Math.max(38, width - sidebarWidth - 5);
+  const canPause = Boolean(selectedRun?.pipelineId && selectedRun.pipelineStatus === 'running');
+  const canResume = Boolean(selectedRun?.pipelineId && selectedRun.pipelineStatus === 'paused');
+  const canAbortFeature = Boolean(selectedRun?.pipelineId && selectedRun.status === 'running');
+  const canAbortPipeline = Boolean(
+    selectedRun?.pipelineId
+      && (selectedRun.pipelineStatus === 'running' || selectedRun.pipelineStatus === 'paused'),
+  );
 
   const activeFeatureIds = new Set(
     runs.filter((r) => r.status === 'running' || r.status === 'done').map((r) => r.featureId),
@@ -154,6 +162,25 @@ export function App(): React.ReactElement {
       return;
     }
 
+    if (focusPanel !== 'gates' && _input === 'p' && canPause && selectedRun?.pipelineId) {
+      pausePipeline(selectedRun.pipelineId);
+      return;
+    }
+
+    if (focusPanel !== 'gates' && _input === 'r' && canResume && selectedRun?.pipelineId) {
+      resumePipeline(selectedRun.pipelineId);
+      return;
+    }
+
+    if (_input === 'x' && selectedRun?.pipelineId) {
+      if (focusPanel === 'runs' && canAbortFeature) {
+        requestFeatureAbort(selectedRun.pipelineId, selectedRun.featureId);
+      } else if (canAbortPipeline) {
+        abortPipeline(selectedRun.pipelineId);
+      }
+      return;
+    }
+
     if (focusPanel === 'gates' && gates.length > 0) {
       const gate = gates[selectedGateIndex];
       if (_input === 'a') {
@@ -221,6 +248,9 @@ export function App(): React.ReactElement {
         hasRuns={runs.length > 0}
         hasGates={gates.length > 0}
         hasPending={pendingFeatures.length > 0}
+        canPause={canPause}
+        canResume={canResume}
+        canAbort={canAbortFeature || canAbortPipeline}
         width={width}
       />
     </Box>

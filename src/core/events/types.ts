@@ -72,6 +72,7 @@ export interface BudgetAlertEvent {
 export interface TokensUpdateEvent {
   runId: number;
   input: number;
+  cachedInput?: number;
   output: number;
   total: number;
   featureId?: string;

@@ -92,7 +92,7 @@ describe('codexAdapter timeout observability', () => {
     expect(result.summary).toContain(
       'arquivos tocados: src/core/skills/registry.ts, tests/skills/registry.test.ts',
     );
-    expect(result.usage).toEqual({ input: 120, output: 40, total: 160 });
+    expect(result.usage).toEqual({ input: 100, cachedInput: 20, output: 40, total: 160 });
     expect(mockRunCli).toHaveBeenCalledWith(
       'codex',
       expect.any(Array),
@@ -109,9 +109,53 @@ describe('codexAdapter timeout observability', () => {
       runId: 7,
       featureId: 'feat-02',
       tool: 'codex',
-      input: 120,
+      input: 100,
+      cachedInput: 20,
       output: 40,
       total: 160,
+    });
+  });
+
+  it('summarizes completed command executions instead of opaque item ids', async () => {
+    mockRunCli.mockImplementation(async (_bin, _args, opts) => {
+      opts.onStdoutLine?.(JSON.stringify({
+        type: 'item.completed',
+        item: {
+          id: 'item_1',
+          type: 'command_execution',
+          command: '/bin/zsh -lc pwd',
+          aggregated_output: '/repo\n',
+          exit_code: 0,
+          status: 'completed',
+        },
+      }));
+      return {
+        code: 0,
+        stdout: JSON.stringify({
+          type: 'item.completed',
+          item: { id: 'item_2', type: 'agent_message', text: 'done' },
+        }),
+        stderr: '',
+      };
+    });
+
+    const { codexAdapter } = await import('../../src/core/adapters/codex.js');
+    await codexAdapter.runFeature({
+      id: 'feat-03',
+      title: 'Feature',
+      tool: 'codex',
+      effort: 'medium',
+      dependsOn: [],
+      tasks: [],
+    }, 'prompt', { cwd: '/repo', runId: 9 });
+
+    expect(mockEventEmit).toHaveBeenCalledWith('run:output', {
+      runId: 9,
+      featureId: 'feat-03',
+      tool: 'codex',
+      line: 'shell /bin/zsh -lc pwd -> /repo',
+      stream: 'stdout',
+      source: 'tool',
     });
   });
 });

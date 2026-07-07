@@ -36,9 +36,17 @@ export const NotificationChannelConfig = z.discriminatedUnion('type', [
 ]);
 export type NotificationChannelConfig = z.infer<typeof NotificationChannelConfig>;
 
+const DEFAULT_NOTIFICATION_EVENTS: NotificableEvent[] = [
+  'gate:created',
+  'run:failed',
+  'run:done',
+  'stage:approval',
+  'stage:input',
+];
+
 const NotificationsConfig = z.object({
   channels: z.array(NotificationChannelConfig).default([]),
-  events: z.array(z.enum(NOTIFICABLE_EVENTS)).default(['gate:created', 'run:failed']),
+  events: z.array(z.enum(NOTIFICABLE_EVENTS)).default(DEFAULT_NOTIFICATION_EVENTS),
 });
 
 const WorkflowConfig = z.object({
@@ -60,7 +68,7 @@ export type Config = z.infer<typeof ConfigSchema>;
 
 export function loadConfig(): Config {
   if (!existsSync(CONFIG_PATH)) return ConfigSchema.parse({});
-  return ConfigSchema.parse(JSON.parse(readFileSync(CONFIG_PATH, 'utf8')));
+  return ConfigSchema.parse(normalizeLegacyConfig(JSON.parse(readFileSync(CONFIG_PATH, 'utf8'))));
 }
 
 export function saveConfig(cfg: Config): void {
@@ -80,4 +88,35 @@ export function resolveDbPath(): string {
 
 export function ensureDataDir(dbPath = resolveDbPath()): void {
   mkdirSync(dirname(dbPath), { recursive: true });
+}
+
+function normalizeLegacyConfig(raw: unknown): unknown {
+  if (!raw || typeof raw !== 'object') return raw;
+  const cfg = structuredClone(raw) as {
+    telegramChatId?: string;
+    notifications?: {
+      channels?: Array<{ type: string; chatId?: string }>;
+      events?: string[];
+    };
+  };
+
+  if (cfg.telegramChatId && (!cfg.notifications?.channels || cfg.notifications.channels.length === 0)) {
+    cfg.notifications = {
+      ...cfg.notifications,
+      channels: [{ type: 'telegram', chatId: cfg.telegramChatId }],
+    };
+  }
+
+  const events = cfg.notifications?.events ?? [];
+  const isLegacyDefault = events.length === 2
+    && events.includes('gate:created')
+    && events.includes('run:failed');
+  if (isLegacyDefault) {
+    cfg.notifications = {
+      ...cfg.notifications,
+      events: DEFAULT_NOTIFICATION_EVENTS,
+    };
+  }
+
+  return cfg;
 }

@@ -4,6 +4,7 @@ export interface SpawnResult {
   code: number;
   stdout: string;
   stderr: string;
+  signal: NodeJS.Signals | null;
 }
 
 export class CliTimeoutError extends Error {
@@ -28,10 +29,33 @@ export class CliTimeoutError extends Error {
   }
 }
 
+export class CliAbortError extends Error {
+  readonly stdout: string;
+  readonly stderr: string;
+  readonly runtimeMs: number;
+  readonly signal: NodeJS.Signals | null;
+
+  constructor(
+    bin: string,
+    runtimeMs: number,
+    stdout: string,
+    stderr: string,
+    signal: NodeJS.Signals | null,
+  ) {
+    super(`${bin} abortado manualmente`);
+    this.name = 'CliAbortError';
+    this.stdout = stdout;
+    this.stderr = stderr;
+    this.runtimeMs = runtimeMs;
+    this.signal = signal;
+  }
+}
+
 export interface SpawnOptions {
   cwd: string;
   timeoutMs?: number; // default 10min
   env?: NodeJS.ProcessEnv;
+  signal?: AbortSignal;
   heartbeatMs?: number;
   logLabel?: string;
   heartbeatSuffix?: () => string | undefined;
@@ -61,10 +85,14 @@ export function runCli(
     const startedAt = Date.now();
     let lastOutputAt = startedAt;
     let settled = false;
+    let abortRequested = false;
+    let killTimer: NodeJS.Timeout | null = null;
     const heartbeatMs = opts.heartbeatMs ?? 0;
     const timer = setTimeout(() => {
       if (settled) return;
       settled = true;
+      if (killTimer) clearTimeout(killTimer);
+      if (opts.signal) opts.signal.removeEventListener('abort', onAbort);
       child.kill('SIGKILL');
       reject(new CliTimeoutError(bin, timeoutMs, Date.now() - startedAt, stdout, stderr));
     }, timeoutMs);
@@ -92,6 +120,31 @@ export function runCli(
       return rest;
     };
 
+    const cleanup = (): void => {
+      clearTimeout(timer);
+      if (heartbeat) clearInterval(heartbeat);
+      if (killTimer) clearTimeout(killTimer);
+      if (opts.signal) opts.signal.removeEventListener('abort', onAbort);
+    };
+
+    const onAbort = (): void => {
+      if (settled || abortRequested) return;
+      abortRequested = true;
+      child.kill('SIGTERM');
+      killTimer = setTimeout(() => {
+        if (settled) return;
+        child.kill('SIGKILL');
+      }, 2_000);
+    };
+
+    if (opts.signal) {
+      if (opts.signal.aborted) {
+        onAbort();
+      } else {
+        opts.signal.addEventListener('abort', onAbort, { once: true });
+      }
+    }
+
     child.stdout.on('data', (d) => {
       const chunk = d.toString();
       stdout += chunk;
@@ -107,18 +160,20 @@ export function runCli(
     child.on('error', (err) => {
       if (settled) return;
       settled = true;
-      clearTimeout(timer);
-      if (heartbeat) clearInterval(heartbeat);
+      cleanup();
       reject(err);
     });
-    child.on('close', (code) => {
+    child.on('close', (code, signal) => {
       if (settled) return;
       settled = true;
-      clearTimeout(timer);
-      if (heartbeat) clearInterval(heartbeat);
+      cleanup();
       if (stdoutPending) opts.onStdoutLine?.(stdoutPending);
       if (stderrPending) opts.onStderrLine?.(stderrPending);
-      resolve({ code: code ?? -1, stdout, stderr });
+      if (abortRequested) {
+        reject(new CliAbortError(bin, Date.now() - startedAt, stdout, stderr, signal));
+        return;
+      }
+      resolve({ code: code ?? -1, stdout, stderr, signal });
     });
   });
 }

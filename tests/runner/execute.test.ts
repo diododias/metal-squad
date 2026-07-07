@@ -11,8 +11,14 @@ const mockCreateGate = vi.fn();
 const mockCreateRetryRecord = vi.fn();
 const mockFinishRun = vi.fn();
 const mockFinishPipeline = vi.fn();
+const mockGetPipeline = vi.fn();
+const mockGetPipelineSnapshot = vi.fn();
 const mockGetStageRequest = vi.fn();
+const mockPausePipeline = vi.fn();
 const mockRecordUsage = vi.fn();
+const mockResumePipeline = vi.fn();
+const mockSetPipelineStatus = vi.fn();
+const mockUpdatePipelineSnapshot = vi.fn();
 const mockNotify = vi.fn();
 const mockRunFeature = vi.fn();
 const mockEventEmit = vi.fn();
@@ -20,6 +26,7 @@ const mockAttachDefaultEventLogger = vi.fn();
 const mockAttachEventNotifications = vi.fn();
 const mockAttachRunPersistence = vi.fn();
 const mockCreateSkillRegistry = vi.fn();
+let pipelineRow: any;
 
 vi.mock('../../src/core/repo.js', () => ({
   resolveRepo: mockResolveRepo,
@@ -35,9 +42,15 @@ vi.mock('../../src/db/repo.js', () => ({
   createRetryRecord: mockCreateRetryRecord,
   finishRun: mockFinishRun,
   finishPipeline: mockFinishPipeline,
+  getPipeline: mockGetPipeline,
+  getPipelineSnapshot: mockGetPipelineSnapshot,
   getStageRequest: mockGetStageRequest,
+  pausePipeline: mockPausePipeline,
   recordUsage: mockRecordUsage,
+  resumePipeline: mockResumePipeline,
+  setPipelineStatus: mockSetPipelineStatus,
   updatePipelineStage: vi.fn(),
+  updatePipelineSnapshot: mockUpdatePipelineSnapshot,
 }));
 
 vi.mock('../../src/core/adapters/index.js', () => ({
@@ -80,8 +93,14 @@ beforeEach(() => {
   mockCreateRetryRecord.mockReset();
   mockFinishRun.mockReset();
   mockFinishPipeline.mockReset();
+  mockGetPipeline.mockReset();
+  mockGetPipelineSnapshot.mockReset();
   mockGetStageRequest.mockReset();
+  mockPausePipeline.mockReset();
   mockRecordUsage.mockReset();
+  mockResumePipeline.mockReset();
+  mockSetPipelineStatus.mockReset();
+  mockUpdatePipelineSnapshot.mockReset();
   mockNotify.mockReset();
   mockRunFeature.mockReset();
   mockEventEmit.mockReset();
@@ -91,8 +110,63 @@ beforeEach(() => {
   mockCreateSkillRegistry.mockReset();
   mockResolveRepo.mockReturnValue({ repoId: 'repo-1', path: '/repo' });
   mockCreateRun.mockReturnValue(7);
-  mockCreatePipeline.mockReturnValue(9);
+  pipelineRow = {
+    id: 9,
+    repoId: 'repo-1',
+    featureId: 'feat-1',
+    status: 'running',
+    cwd: '/repo',
+    currentStage: null,
+    autoAdvance: 0,
+    planJson: '[]',
+    doneJson: '[]',
+    pendingJson: '[]',
+    activeJson: '[]',
+    abortedJson: '[]',
+    requestedAbortFeatureId: null,
+    resumeCount: 0,
+    resumeSummary: null,
+    createdAt: '2026-07-06T00:00:00Z',
+    updatedAt: '2026-07-06T00:00:00Z',
+    endedAt: null,
+  };
+  mockCreatePipeline.mockImplementation((_repoId, featureId, autoAdvance, opts) => {
+    pipelineRow = {
+      ...pipelineRow,
+      featureId,
+      autoAdvance: autoAdvance ? 1 : 0,
+      cwd: opts?.cwd ?? '/repo',
+      planJson: JSON.stringify(opts?.snapshot?.plan ?? []),
+      doneJson: JSON.stringify(opts?.snapshot?.done ?? []),
+      pendingJson: JSON.stringify(opts?.snapshot?.pending ?? []),
+      activeJson: JSON.stringify(opts?.snapshot?.active ?? []),
+      abortedJson: JSON.stringify(opts?.snapshot?.aborted ?? []),
+    };
+    return 9;
+  });
   mockCreateStageRequest.mockReturnValue(11);
+  mockGetPipeline.mockImplementation(() => pipelineRow);
+  mockGetPipelineSnapshot.mockImplementation((row) => ({
+    plan: JSON.parse(row.planJson),
+    done: JSON.parse(row.doneJson),
+    pending: JSON.parse(row.pendingJson),
+    active: JSON.parse(row.activeJson),
+    aborted: JSON.parse(row.abortedJson),
+  }));
+  mockUpdatePipelineSnapshot.mockImplementation((_pipelineId, patch, opts = {}) => {
+    const current = mockGetPipelineSnapshot(pipelineRow);
+    const next = { ...current, ...patch };
+    pipelineRow = {
+      ...pipelineRow,
+      planJson: JSON.stringify(next.plan),
+      doneJson: JSON.stringify(next.done),
+      pendingJson: JSON.stringify(next.pending),
+      activeJson: JSON.stringify(next.active),
+      abortedJson: JSON.stringify(next.aborted),
+      status: opts.status ?? pipelineRow.status,
+      requestedAbortFeatureId: opts.clearAbortRequest ? null : pipelineRow.requestedAbortFeatureId,
+    };
+  });
   mockAttachDefaultEventLogger.mockReturnValue(vi.fn());
   mockAttachEventNotifications.mockReturnValue(vi.fn());
   mockAttachRunPersistence.mockReturnValue(vi.fn());
@@ -157,7 +231,7 @@ describe('executeBacklog failure persistence', () => {
     expect(mockRunFeature).toHaveBeenCalledWith(
       expect.any(Object),
       expect.any(String),
-      { cwd: '/repo', runId: 7 },
+      { cwd: '/repo', runId: 7, signal: expect.any(AbortSignal) },
     );
     expect(mockAttachDefaultEventLogger).toHaveBeenCalled();
     expect(mockAttachEventNotifications).toHaveBeenCalled();
@@ -369,7 +443,12 @@ describe('executeBacklog failure persistence', () => {
       executeBacklog(backlog, { cwd: '/repo', concurrency: 1 }),
     ).resolves.toBeUndefined();
 
-    expect(mockCreatePipeline).toHaveBeenCalledWith('repo-1', 'feat-27', false);
+    expect(mockCreatePipeline).toHaveBeenCalledWith(
+      'repo-1',
+      'feat-27',
+      false,
+      expect.objectContaining({ cwd: '/repo' }),
+    );
     expect(mockCreateRun).toHaveBeenNthCalledWith(1, 'repo-1', 'feat-27', 'codex', {
       pipelineId: 9,
       stage: 'specify',
