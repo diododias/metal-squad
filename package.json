@@ -23,7 +23,7 @@
     "prepare": "husky"
   },
   "engines": {
-    "node": ">=20"
+    "node": ">=20.17.0"
   },
   "dependencies": {
     "@napi-rs/keyring": "^1.1.6",
