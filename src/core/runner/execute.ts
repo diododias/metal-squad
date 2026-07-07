@@ -52,7 +52,8 @@ import {
 
 const SYSTEM_STAGE_SKILLS: Record<string, string[]> = {
   specify: ['speckit-specify'],
-  plan: ['speckit-plan', 'speckit-tasks'],
+  plan: ['speckit-plan'],
+  tasks: ['speckit-tasks'],
   implement: ['speckit-implement', 'dev-flow'],
   validate: ['reviewr'],
 };
