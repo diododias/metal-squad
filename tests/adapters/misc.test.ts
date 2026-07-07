@@ -74,13 +74,16 @@ describe('claude adapter', () => {
     ).resolves.toEqual({ ok: false, summary: 'exit 1. stderr final: fatal' });
   });
 
-  it('parses successful JSON output and usage', async () => {
+  it('parses successful stream-json output and usage', async () => {
+    const resultLine = JSON.stringify({
+      type: 'result',
+      subtype: 'success',
+      result: 'done',
+      usage: { input_tokens: 2, output_tokens: 3 },
+    });
     mockRunCli.mockResolvedValue({
       code: 0,
-      stdout: JSON.stringify({
-        result: 'done',
-        usage: { input_tokens: 2, output_tokens: 3 },
-      }),
+      stdout: resultLine,
       stderr: '',
     });
     const { claudeAdapter } = await import('../../src/core/adapters/claude.js');
@@ -106,7 +109,7 @@ describe('claude adapter', () => {
     });
     expect(mockRunCli).toHaveBeenCalledWith(
       'claude',
-      ['--print', '--output-format', 'json', '--dangerously-skip-permissions', '--model', 'custom', '--', 'PROMPT'],
+      ['--print', '--output-format', 'stream-json', '--dangerously-skip-permissions', '--model', 'custom', '--', 'PROMPT'],
       expect.objectContaining({
         cwd: '/repo',
         heartbeatMs: 30_000,
@@ -133,7 +136,7 @@ describe('claude adapter', () => {
     expect(claudeAdapter.parseUsage?.('not-json')).toBeNull();
     mockRunCli.mockResolvedValue({
       code: 0,
-      stdout: JSON.stringify({ subtype: 'error_max_turns', result: 'partial' }),
+      stdout: JSON.stringify({ type: 'result', subtype: 'error_max_turns', result: 'partial' }),
       stderr: '',
     });
 
@@ -154,12 +157,24 @@ describe('claude adapter', () => {
   });
 
   it('emits incremental stdout and stderr snippets while the run is active', async () => {
+    const assistantLine = JSON.stringify({
+      type: 'assistant',
+      message: {
+        content: [{ type: 'text', text: 'Atualizando prompt builder agora.' }],
+      },
+    });
+    const resultLine = JSON.stringify({
+      type: 'result',
+      subtype: 'success',
+      result: 'done',
+      usage: { input_tokens: 1, output_tokens: 2 },
+    });
     mockRunCli.mockImplementation(async (_bin, _args, opts) => {
-      opts.onStdoutLine?.(JSON.stringify({ result: 'Atualizando prompt builder agora.' }));
+      opts.onStdoutLine?.(assistantLine);
       opts.onStderrLine?.('warning: still running');
       return {
         code: 0,
-        stdout: JSON.stringify({ result: 'done', usage: { input_tokens: 1, output_tokens: 2 } }),
+        stdout: resultLine,
         stderr: '',
       };
     });
@@ -218,6 +233,8 @@ describe('claude adapter', () => {
   it('returns timeout summary with partial output, touched files and parsed usage', async () => {
     const { CliTimeoutError } = await import('../../src/core/adapters/spawn.js');
     const transcript = JSON.stringify({
+      type: 'result',
+      subtype: 'success',
       result: 'Aplicando ajustes nos testes finais.',
       usage: { input_tokens: 8, output_tokens: 5 },
     });

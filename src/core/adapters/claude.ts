@@ -12,11 +12,21 @@ const EFFORT_MODEL: Record<Effort, string> = {
   high: 'opus',
 };
 
-interface ClaudeJson {
-  result?: string;
+type ContentBlock =
+  | { type: 'text'; text: string }
+  | { type: 'thinking'; thinking: string }
+  | { type: 'tool_use'; name: string; input: unknown };
+
+interface StreamJsonEvent {
+  type: string;
   subtype?: string;
-  total_cost_usd?: number;
-  usage?: { input_tokens?: number; output_tokens?: number };
+  message?: { content?: ContentBlock[] };
+  result?: string;
+  usage?: {
+    input_tokens?: number;
+    output_tokens?: number;
+    cache_read_input_tokens?: number;
+  };
 }
 
 export const claudeAdapter: ToolAdapter = {
@@ -30,7 +40,7 @@ export const claudeAdapter: ToolAdapter = {
     const model = feature.model ? ['--model', feature.model] : this.effortFlag(feature.effort);
     const args = [
       '--print',
-      '--output-format', 'json',
+      '--output-format', 'stream-json',
       '--dangerously-skip-permissions',
       ...model,
       '--',
@@ -57,14 +67,18 @@ export const claudeAdapter: ToolAdapter = {
         heartbeatSuffix: () => progress.heartbeatSuffix(),
         onHeartbeat: (message) => emitRunOutput(opts.runId, feature, message, 'stderr', 'heartbeat'),
         onStdoutLine: (line) => {
-          const update = progress.onStdoutLine(line);
-          if (update.output) emitRunOutput(opts.runId, feature, update.output.line, 'stdout', update.output.source);
-          if (update.usage) emitUsage(opts.runId, feature, update.usage);
-          if (update.stage) emitTaskStage(opts.runId, feature, update.stage);
+          const updates = progress.onStdoutLine(line);
+          for (const update of updates) {
+            if (update.output) emitRunOutput(opts.runId, feature, update.output.line, 'stdout', update.output.source);
+            if (update.usage) emitUsage(opts.runId, feature, update.usage);
+            if (update.stage) emitTaskStage(opts.runId, feature, update.stage);
+          }
         },
         onStderrLine: (line) => {
-          const update = progress.onStderrLine(line);
-          if (update.output) emitRunOutput(opts.runId, feature, update.output.line, 'stderr', update.output.source);
+          const updates = progress.onStderrLine(line);
+          for (const update of updates) {
+            if (update.output) emitRunOutput(opts.runId, feature, update.output.line, 'stderr', update.output.source);
+          }
         },
       }));
     } catch (error) {
@@ -87,22 +101,22 @@ export const claudeAdapter: ToolAdapter = {
       return { ok: false, summary: `exit ${code}. ${partial}` };
     }
 
-    const json = safeJson<ClaudeJson>(stdout);
+    const resultEvent = findResultEvent(stdout);
     const usage = this.parseUsage?.(stdout) ?? undefined;
     if (usage) emitUsage(opts.runId, feature, usage);
     return {
-      ok: json?.subtype !== 'error_max_turns' && code === 0,
-      summary: (json?.result ?? '').slice(0, 200),
+      ok: resultEvent?.subtype !== 'error_max_turns' && code === 0,
+      summary: (resultEvent?.result ?? '').slice(0, 200),
       usage,
-      control: parseControlSignal(json?.result ?? ''),
+      control: parseControlSignal(resultEvent?.result ?? ''),
     };
   },
 
   parseUsage(transcript: string): TokenUsage | null {
-    const json = safeJson<ClaudeJson>(transcript);
-    if (!json?.usage) return null;
-    const input = json.usage.input_tokens ?? 0;
-    const output = json.usage.output_tokens ?? 0;
+    const evt = findResultEvent(transcript);
+    if (!evt?.usage) return null;
+    const input = evt.usage.input_tokens ?? 0;
+    const output = evt.usage.output_tokens ?? 0;
     return { input, output, total: input + output };
   },
 };
@@ -115,8 +129,16 @@ function safeJson<T>(s: string): T | null {
   }
 }
 
+function findResultEvent(transcript: string): StreamJsonEvent | null {
+  for (const line of transcript.split('\n')) {
+    const evt = safeJson<StreamJsonEvent>(line);
+    if (evt?.type === 'result') return evt;
+  }
+  return null;
+}
+
 function lastAgentMessage(transcript: string): string {
-  return normalizeSnippet(safeJson<ClaudeJson>(transcript)?.result ?? '');
+  return normalizeSnippet(findResultEvent(transcript)?.result ?? '');
 }
 
 function summarizePartialOutput(stdout: string, stderr: string, touchedFiles: string[]): string {
@@ -190,11 +212,11 @@ interface ProgressUpdate {
 }
 
 function createClaudeProgress(): {
-  onStdoutLine: (line: string) => ProgressUpdate;
-  onStderrLine: (line: string) => ProgressUpdate;
+  onStdoutLine: (line: string) => ProgressUpdate[];
+  onStderrLine: (line: string) => ProgressUpdate[];
   heartbeatSuffix: () => string | undefined;
 } {
-  let stdoutCount = 0;
+  let eventCount = 0;
   let stderrCount = 0;
   let lastAgentSnippet = '';
   let lastToolSnippet = '';
@@ -202,28 +224,26 @@ function createClaudeProgress(): {
 
   return {
     onStdoutLine(line: string) {
-      const update = parseClaudeLine(line);
-      if (!update.output && !update.usage) return {};
-      stdoutCount += 1;
-      if (update.output?.source === 'tool') lastToolSnippet = update.output.line;
-      else if (update.output?.source === 'agent') lastAgentSnippet = update.output.line;
-      return update;
+      const updates = parseClaudeLine(line);
+      for (const u of updates) {
+        if (u.output) {
+          eventCount += 1;
+          if (u.output.source === 'tool') lastToolSnippet = u.output.line;
+          else if (u.output.source === 'agent') lastAgentSnippet = u.output.line;
+        }
+      }
+      return updates;
     },
     onStderrLine(line: string) {
       const text = normalizeSnippet(line);
-      if (!text) return {};
+      if (!text) return [];
       stderrCount += 1;
       lastStderrSnippet = text;
-      return {
-        output: {
-          line: text,
-          source: 'stderr',
-        },
-      };
+      return [{ output: { line: text, source: 'stderr' } }];
     },
     heartbeatSuffix() {
       const parts: string[] = [];
-      if (stdoutCount > 0) parts.push(`stdout=${stdoutCount}`);
+      if (eventCount > 0) parts.push(`eventos=${eventCount}`);
       if (stderrCount > 0) parts.push(`stderr=${stderrCount}`);
       if (lastAgentSnippet) parts.push(`agente="${lastAgentSnippet}"`);
       else if (lastToolSnippet) parts.push(`tool="${lastToolSnippet}"`);
@@ -233,56 +253,42 @@ function createClaudeProgress(): {
   };
 }
 
-function parseClaudeLine(line: string): ProgressUpdate {
-  const json = safeJson<ClaudeJson>(line);
-  if (json) {
-    if (json.usage) {
-      const input = json.usage.input_tokens ?? 0;
-      const output = json.usage.output_tokens ?? 0;
-      if (input > 0 || output > 0) {
-        return { usage: { input, output, total: input + output } };
+function parseClaudeLine(line: string): ProgressUpdate[] {
+  const evt = safeJson<StreamJsonEvent>(line);
+  if (!evt?.type) return [];
+
+  if (evt.type === 'result') {
+    if (!evt.usage) return [];
+    const input = evt.usage.input_tokens ?? 0;
+    const output = evt.usage.output_tokens ?? 0;
+    if (input === 0 && output === 0) return [];
+    return [{ usage: { input, output, total: input + output } }];
+  }
+
+  if (evt.type === 'assistant' && evt.message?.content) {
+    const updates: ProgressUpdate[] = [];
+    for (const block of evt.message.content) {
+      if (block.type === 'thinking') {
+        const text = normalizeSnippet(block.thinking);
+        if (text) updates.push({ output: { line: `[thinking] ${text}`, source: 'agent' } });
+      } else if (block.type === 'text') {
+        const text = normalizeSnippet(block.text);
+        if (text) updates.push({ output: { line: text, source: 'agent' } });
+      } else if (block.type === 'tool_use') {
+        const name = normalizeSnippet(block.name);
+        const input = normalizeSnippet(JSON.stringify(block.input ?? {}));
+        const stage = detectStageFromSkill(name);
+        const outputLine = normalizeSnippet(`tool ${name}${input && input !== '{}' ? ` ${input}` : ''}`);
+        updates.push({
+          output: { line: outputLine, source: 'tool' },
+          ...(stage ? { stage } : {}),
+        });
       }
     }
-    const record = json as Record<string, unknown>;
-    if (record.type === 'tool_use') {
-      const name = normalizeSnippet(String(record.name ?? 'tool'));
-      const input = normalizeSnippet(JSON.stringify(record.input ?? {}));
-      const stage = detectStageFromSkill(name);
-      return {
-        output: {
-          line: normalizeSnippet(`tool ${name}${input && input !== '{}' ? ` ${input}` : ''}`),
-          source: 'tool',
-        },
-        ...(stage ? { stage } : {}),
-      };
-    }
-    const result = normalizeSnippet(json.result ?? '');
-    if (result) {
-      return {
-        output: {
-          line: result,
-          source: 'agent',
-        },
-      };
-    }
-    const subtype = normalizeSnippet(json.subtype ?? '');
-    if (subtype) {
-      return {
-        output: {
-          line: subtype,
-          source: 'agent',
-        },
-      };
-    }
+    return updates;
   }
-  const text = normalizeSnippet(line);
-  if (!text) return {};
-  return {
-    output: {
-      line: text,
-      source: 'agent',
-    },
-  };
+
+  return [];
 }
 
 function emitRunOutput(
