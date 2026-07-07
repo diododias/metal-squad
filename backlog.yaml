@@ -23,8 +23,8 @@ epics:
     features:
       - id: feat-08
         title: F08 — Navegacao por Sessoes/Runs
-        tool: codex
-        model: gpt-5.4
+        tool: claude
+        model: claude-sonnet-4-6
         effort: high
         skills: [implement]
         specFile: docs/features/F08-session-navigation.md
