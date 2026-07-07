@@ -7,34 +7,65 @@ export function attachEventNotifications(
   eventBus: TypedEventBus<MsqEvents> = msqEventBus,
 ): () => void {
   const unsubscribers = [
-    eventBus.subscribe('run:start', ({ featureId, tool }) => {
-      void dispatch('run:start', `metal-squad: ${featureId} started with ${tool}`, {
+    eventBus.subscribe('run:start', ({ featureId, tool, stage }) => {
+      const stageLabel = stage ? ` · stage: ${stage}` : '';
+      void dispatch('run:start', `metal-squad: ${featureId} started with ${tool}${stageLabel}`, {
         featureId,
         tool,
+        stage,
       }).catch(() => {});
     }),
     eventBus.subscribe('gate:created', ({ gateId, featureId }) => {
       const message = [
         `metal-squad: gate ${gateId} created for ${featureId}`,
-        `Reply: gate:${gateId} approve | gate:${gateId} skip | gate:${gateId} retry`,
+        `Or reply: gate:${gateId} approve | gate:${gateId} skip | gate:${gateId} retry`,
       ].join('\n');
-      void dispatch('gate:created', message, { gateId, featureId }).catch(() => {});
+      void dispatch('gate:created', message, {
+        gateId,
+        featureId,
+        reply_markup: {
+          inline_keyboard: [[
+            { text: '✅ Approve', callback_data: `gate:${gateId} approve` },
+            { text: '⏭ Skip', callback_data: `gate:${gateId} skip` },
+            { text: '🔄 Retry', callback_data: `gate:${gateId} retry` },
+          ]],
+        },
+      }).catch(() => {});
     }),
     eventBus.subscribe('stage:request-created', ({ requestId, featureId, stage, kind, prompt, source }) => {
       if (kind === 'approval') {
-        const responseHint = source === 'auto'
-          ? `Auto-advance registered to proceed after ${stage}.`
-          : `Reply: stage:${requestId} advance | stage:${requestId} hold | stage:${requestId} retry`;
+        if (source === 'auto') {
+          const message = [
+            `metal-squad: ${featureId} completed stage ${stage}`,
+            prompt,
+            `Auto-advance registered to proceed after ${stage}.`,
+          ].join('\n');
+          void dispatch('stage:approval', message, {
+            requestId,
+            featureId,
+            stage,
+            source: 'auto',
+          }).catch(() => {});
+          return;
+        }
+
         const message = [
-          `metal-squad: ${featureId} completed stage ${stage}`,
+          `metal-squad: ${featureId} completed stage "${stage}"`,
           prompt,
-          responseHint,
+          `Or reply: stage:${requestId} advance | stage:${requestId} retry | stage:${requestId} hold`,
         ].join('\n');
         void dispatch('stage:approval', message, {
           requestId,
           featureId,
           stage,
-          source: source ?? 'manual',
+          source: 'manual',
+          reply_markup: {
+            inline_keyboard: [[
+              { text: '✅ Advance', callback_data: `stage:${requestId} advance` },
+              { text: '🔄 Retry', callback_data: `stage:${requestId} retry` },
+              { text: '⏸ Hold', callback_data: `stage:${requestId} hold` },
+            ]],
+          },
         }).catch(() => {});
         return;
       }

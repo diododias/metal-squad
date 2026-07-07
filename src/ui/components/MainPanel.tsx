@@ -291,9 +291,11 @@ export function MainPanel({
           )}
           {pendingFeatures.length > 0 && (
             <Box marginTop={1} flexDirection="column">
-              <Text bold color="yellow">Ready to start</Text>
+              <Text bold color={focusPanel === 'main' ? 'cyan' : 'yellow'}>
+                {focusPanel === 'main' ? '> ' : '  '}Ready to start
+              </Text>
               {pendingFeatures.slice(0, maxPending).map((feature, index) => {
-                const selected = index === selectedPendingIndex;
+                const selected = focusPanel === 'main' && index === selectedPendingIndex;
                 return (
                   <Box key={feature.id}>
                     <Text color={selected ? 'cyan' : undefined} bold={selected}>
@@ -308,7 +310,7 @@ export function MainPanel({
               {pendingFeatures.length > maxPending && (
                 <Text dimColor>  +{pendingFeatures.length - maxPending} more in backlog</Text>
               )}
-              <Text dimColor>  Press n to start the selected feature</Text>
+              <Text dimColor>  Tab to focus · j/k to select · Enter or n to start</Text>
             </Box>
           )}
         </Box>

@@ -172,7 +172,7 @@ export async function executeBacklog(
   ) => {
     const runId = createRun(repoId, feature.id, feature.tool, { pipelineId, stage });
     activeRunIds.add(runId);
-    msqEventBus.emit('run:start', { runId, featureId: feature.id, tool: feature.tool });
+    msqEventBus.emit('run:start', { runId, featureId: feature.id, tool: feature.tool, stage });
     if (stage) {
       msqEventBus.emit('task:started', {
         runId,
