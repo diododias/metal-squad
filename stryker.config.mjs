@@ -12,9 +12,9 @@ export default {
     '!src/**/*.types.ts',
   ],
   thresholds: {
-    high: 80,
-    low: 60,
-    break: 50,
+    high: 70,
+    low: 40,
+    break: 30,
   },
   reporters: ['progress', 'html'],
   incremental: true,

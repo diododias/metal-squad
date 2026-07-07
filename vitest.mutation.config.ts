@@ -6,15 +6,17 @@ import { defineConfig } from 'vitest/config';
 // which are the only directories mutated by Stryker.
 export default defineConfig({
   test: {
+    // Only include test files that are vmThreads-safe (no process.env.HOME
+    // mutations, no process.chdir, no mkdtempSync). Files with those patterns
+    // run fine in the normal npm test but conflict in Stryker's dry-run mode.
     include: [
       'tests/adapters/**/*.test.ts',
-      'tests/backlog/**/*.test.ts',
+      'tests/backlog/schema.test.ts',
       'tests/budget/**/*.test.ts',
       'tests/core/**/*.test.ts',
-      'tests/db/**/*.test.ts',
+      'tests/db/repo.test.ts',
       'tests/orchestrator/**/*.test.ts',
       'tests/runner/**/*.test.ts',
-      'tests/skills/**/*.test.ts',
     ],
     exclude: [
       '.claude/**',
