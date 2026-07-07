@@ -57,6 +57,13 @@ export interface UseCommandPaletteResult {
   executeSelected: () => void;
 }
 
+const CATEGORY_ORDER: Record<Command['category'], number> = {
+  run: 0,
+  gate: 1,
+  view: 2,
+  system: 3,
+};
+
 /**
  * Hook for managing command palette state.
  *
@@ -65,6 +72,10 @@ export interface UseCommandPaletteResult {
  */
 export function useCommandPalette(options: UseCommandPaletteOptions): UseCommandPaletteResult {
   const { commands, onClose, onExecute } = options;
+  const availableCommands = useMemo(
+    () => commands.filter((command) => command.available()),
+    [commands]
+  );
 
   const [isOpen, setIsOpen] = useState(false);
   const [query, setQueryState] = useState('');
@@ -76,10 +87,12 @@ export function useCommandPalette(options: UseCommandPaletteOptions): UseCommand
    */
   const filteredCommands = useMemo(() => {
     if (!query) {
-      return commands;
+      return availableCommands
+        .slice()
+        .sort((a, b) => CATEGORY_ORDER[a.category] - CATEGORY_ORDER[b.category] || a.name.localeCompare(b.name));
     }
 
-    const results = commands
+    const results = availableCommands
       .map((command) => {
         let bestScore = 0;
 
@@ -98,10 +111,15 @@ export function useCommandPalette(options: UseCommandPaletteOptions): UseCommand
         return { command, score: bestScore };
       })
       .filter((result) => result.score > 0)
-      .sort((a, b) => b.score - a.score);
+      .sort((a, b) => {
+        const categoryDelta = CATEGORY_ORDER[a.command.category] - CATEGORY_ORDER[b.command.category];
+        if (categoryDelta !== 0) return categoryDelta;
+        if (b.score !== a.score) return b.score - a.score;
+        return a.command.name.localeCompare(b.command.name);
+      });
 
     return results.map((result) => result.command);
-  }, [commands, query]);
+  }, [availableCommands, query]);
 
   /**
    * Open the command palette.

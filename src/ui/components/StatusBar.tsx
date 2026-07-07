@@ -23,6 +23,7 @@ interface Props {
   width: number;
   currentStage?: string;
   activeView?: ActiveView;
+  shortcutHints?: string[];
 }
 
 export function StatusBar({
@@ -34,6 +35,7 @@ export function StatusBar({
   width,
   currentStage,
   activeView = 'overview',
+  shortcutHints = [],
 }: Props): React.ReactElement {
   const progress = `${doneRuns}/${totalRuns} done`;
 
@@ -70,8 +72,11 @@ export function StatusBar({
     : `Idle | ${progress}${gateCount > 0 ? ` | ${gateCount} gates open` : ''}${activeView === 'notifications' ? ' | notifications view' : ''}`;
 
   return (
-    <Box borderStyle="single" borderColor={selectedRun ? STATUS_COLOR[selectedRun.status] : 'gray'} paddingX={1} marginTop={1}>
+    <Box borderStyle="single" borderColor={selectedRun ? STATUS_COLOR[selectedRun.status] : 'gray'} paddingX={1} marginTop={1} flexDirection="column">
       <Text>{truncateText(summary, Math.max(24, width - 4))}</Text>
+      {shortcutHints.length > 0 ? (
+        <Text dimColor>{truncateText(shortcutHints.join('  '), Math.max(24, width - 4))}</Text>
+      ) : null}
     </Box>
   );
 }

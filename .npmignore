@@ -1,0 +1,10 @@
+.agents/
+.claude/
+.specify/
+docs/
+specs/
+tests/
+src/
+node_modules/
+*.log
+.env*

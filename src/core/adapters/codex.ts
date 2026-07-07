@@ -25,6 +25,7 @@ export const codexAdapter: ToolAdapter = {
       'exec',
       '--json',
       '--skip-git-repo-check',
+      '--ask-for-approval', 'never',
       '--sandbox', 'workspace-write',
       ...(feature.model ? ['-m', feature.model] : []),
       ...this.effortFlag(feature.effort),

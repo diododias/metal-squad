@@ -141,18 +141,16 @@ This guide provides end-to-end validation scenarios to verify the command palett
    - **Expected**: Nothing happens (shortcuts are context-specific to gates panel)
 
 7. **Test run control shortcuts**:
-   - Select a running run (if available)
+   - Select a running run and press `Enter` to open run detail
    - Press `p` (pause)
    - **Expected**: Run pauses
-   - Press `r` (resume)
-   - **Expected**: Run resumes
    - Press `x` (abort)
    - **Expected**: Abort confirmation appears (or run aborts)
 
 ### Success Criteria
 
 - ✅ Gate shortcuts (`a`, `s`, `r`) work only in gates panel
-- ✅ Run shortcuts (`p`, `r`, `x`) work in runs/main panels
+- ✅ Run detail shortcuts (`p`, `x`) work in run detail view
 - ✅ Shortcuts do nothing when in wrong context
 
 ---

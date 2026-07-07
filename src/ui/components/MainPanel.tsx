@@ -27,10 +27,13 @@ interface Props {
   runs: RunSummary[];
   gates: PendingApproval[];
   selectedRun: RunSummary | null;
+  selectedRunIndex: number;
   selectedFeature: FeatureCatalogEntry | null;
   activeView: ActiveView;
   output: RunOutputRow[];
   outputPaused: boolean;
+  logsVisible: boolean;
+  focusPanel: 'runs' | 'gates' | 'main';
   mode: LayoutMode;
   width: number;
   pendingFeatures: FeatureCatalogEntry[];
@@ -68,10 +71,13 @@ export function MainPanel({
   runs,
   gates,
   selectedRun,
+  selectedRunIndex,
   selectedFeature,
   activeView,
   output,
   outputPaused,
+  logsVisible,
+  focusPanel,
   mode,
   width,
   pendingFeatures,
@@ -223,30 +229,36 @@ export function MainPanel({
             </Box>
             <Box flexDirection="column" width={rightColumnWidth}>
               <DetailSection title="Live Output" width={rightColumnWidth}>
-                <Text dimColor>
-                  {selectedRun.status === 'running'
-                    ? outputPaused
-                      ? 'Auto-scroll paused. Press Ctrl+S to resume live tailing.'
-                      : lastOutput?.source === 'heartbeat'
-                        ? 'Agent thinking... heartbeat received while waiting for the next visible event.'
-                        : 'Streaming latest run events in real time.'
-                    : 'Run finished. Tail below shows the latest captured output.'}
-                </Text>
-                <Box marginTop={1} flexDirection="column">
-                  {visibleOutput.length > 0 ? (
-                    visibleOutput.map((entry) => (
-                      <Text key={entry.id} color={getOutputColor(entry)} dimColor={entry.source === 'tool' || entry.source === 'heartbeat'}>
-                        {formatOutputPrefix(entry)} {truncateText(entry.line, Math.max(28, rightColumnWidth - 6))}
-                      </Text>
-                    ))
-                  ) : (
+                {logsVisible ? (
+                  <>
                     <Text dimColor>
                       {selectedRun.status === 'running'
-                        ? 'Agent thinking... waiting for the first streamed line.'
-                        : 'No output captured for this run yet.'}
+                        ? outputPaused
+                          ? 'Auto-scroll paused. Press Ctrl+S to resume live tailing.'
+                          : lastOutput?.source === 'heartbeat'
+                            ? 'Agent thinking... heartbeat received while waiting for the next visible event.'
+                            : 'Streaming latest run events in real time.'
+                        : 'Run finished. Tail below shows the latest captured output.'}
                     </Text>
-                  )}
-                </Box>
+                    <Box marginTop={1} flexDirection="column">
+                      {visibleOutput.length > 0 ? (
+                        visibleOutput.map((entry) => (
+                          <Text key={entry.id} color={getOutputColor(entry)} dimColor={entry.source === 'tool' || entry.source === 'heartbeat'}>
+                            {formatOutputPrefix(entry)} {truncateText(entry.line, Math.max(28, rightColumnWidth - 6))}
+                          </Text>
+                        ))
+                      ) : (
+                        <Text dimColor>
+                          {selectedRun.status === 'running'
+                            ? 'Agent thinking... waiting for the first streamed line.'
+                            : 'No output captured for this run yet.'}
+                        </Text>
+                      )}
+                    </Box>
+                  </>
+                ) : (
+                  <Text dimColor>Logs hidden. Press Ctrl+L to reopen the live output view.</Text>
+                )}
               </DetailSection>
             </Box>
           </Box>
@@ -261,7 +273,12 @@ export function MainPanel({
           )}
           {runs.length > 0 && (
             <Box marginTop={1}>
-              <RunTable runs={runs} width={innerWidth} />
+              <RunTable
+                runs={runs}
+                width={innerWidth}
+                selectedIndex={selectedRunIndex}
+                isFocused={focusPanel === 'runs'}
+              />
             </Box>
           )}
           {nextDemands.length > 0 && (

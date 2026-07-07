@@ -34,11 +34,11 @@
 
 **⚠️ CRITICAL**: No user story work can begin until this phase is complete
 
-- [ ] T004 Create command registry structure in src/ui/commands/registry.ts
-- [ ] T005 Implement useKeyboardShortcuts hook in src/ui/hooks/useKeyboardShortcuts.ts
-- [ ] T006 Implement useCommandPalette hook in src/ui/hooks/useCommandPalette.ts
-- [ ] T007 Integrate keyboard shortcut hook into App.tsx (refactor existing useInput logic)
-- [ ] T008 Define initial command set in src/ui/commands/definitions.ts (run, pause, resume, abort, stats, config, help)
+- [X] T004 Create command registry structure in src/ui/commands/registry.ts
+- [X] T005 Implement useKeyboardShortcuts hook in src/ui/hooks/useKeyboardShortcuts.ts
+- [X] T006 Implement useCommandPalette hook in src/ui/hooks/useCommandPalette.ts
+- [X] T007 Integrate keyboard shortcut hook into App.tsx (refactor existing useInput logic)
+- [X] T008 Define initial command set in src/ui/commands/definitions.ts (run, pause, resume, abort, stats, config, help)
 
 **Checkpoint**: Foundation ready - command infrastructure and hooks complete, user story implementation can now begin
 
@@ -52,13 +52,13 @@
 
 ### Implementation for User Story 1
 
-- [ ] T009 [US1] Create CommandPalette component in src/ui/components/CommandPalette.tsx
-- [ ] T010 [US1] Implement command filtering logic using fuzzyMatch utility in CommandPalette component
-- [ ] T011 [US1] Add keyboard event handlers for palette (Ctrl+P, :, Esc, Enter, arrows/j/k navigation)
-- [ ] T012 [US1] Integrate CommandPalette into App.tsx with state management
-- [ ] T013 [US1] Implement command availability filtering (hide unavailable commands)
-- [ ] T014 [US1] Add command category grouping display in palette UI
-- [ ] T015 [US1] Test command palette opening, filtering, and command execution per quickstart.md scenarios 1-2
+- [X] T009 [US1] Create CommandPalette component in src/ui/components/CommandPalette.tsx
+- [X] T010 [US1] Implement command filtering logic using fuzzyMatch utility in CommandPalette component
+- [X] T011 [US1] Add keyboard event handlers for palette (Ctrl+P, :, Esc, Enter, arrows/j/k navigation)
+- [X] T012 [US1] Integrate CommandPalette into App.tsx with state management
+- [X] T013 [US1] Implement command availability filtering (hide unavailable commands)
+- [X] T014 [US1] Add command category grouping display in palette UI
+- [X] T015 [US1] Test command palette opening, filtering, and command execution per quickstart.md scenarios 1-2
 
 **Checkpoint**: Command palette is fully functional - users can discover and execute any command via Ctrl+P or :
 
@@ -72,13 +72,13 @@
 
 ### Implementation for User Story 2
 
-- [ ] T016 [P] [US2] Define gates panel shortcuts in src/ui/commands/gatesShortcuts.ts (a, s, r)
-- [ ] T017 [P] [US2] Define run detail shortcuts in src/ui/commands/runShortcuts.ts (p, x)
-- [ ] T018 [US2] Implement focus context tracking in App.tsx (gates, runs, run-detail panels)
-- [ ] T019 [US2] Update useKeyboardShortcuts hook to filter active shortcuts by current context
+- [X] T016 [P] [US2] Define gates panel shortcuts in src/ui/commands/gatesShortcuts.ts (a, s, r)
+- [X] T017 [P] [US2] Define run detail shortcuts in src/ui/commands/runShortcuts.ts (p, x)
+- [X] T018 [US2] Implement focus context tracking in App.tsx (gates, runs, run-detail panels)
+- [X] T019 [US2] Update useKeyboardShortcuts hook to filter active shortcuts by current context
 - [ ] T020 [US2] Wire gate approval/skip/retry actions to shortcuts in GatePanel component
-- [ ] T021 [US2] Wire pause/abort actions to shortcuts in run detail panel
-- [ ] T022 [US2] Test context-aware shortcuts per quickstart.md scenario 3
+- [X] T021 [US2] Wire pause/abort actions to shortcuts in run detail panel
+- [X] T022 [US2] Test context-aware shortcuts per quickstart.md scenario 3
 
 **Checkpoint**: Context-specific shortcuts work only in their designated panels
 
@@ -92,15 +92,15 @@
 
 ### Implementation for User Story 3
 
-- [ ] T023 [P] [US3] Define global navigation shortcuts in src/ui/commands/globalShortcuts.ts (q, Tab, j/k, Enter, Esc)
-- [ ] T024 [P] [US3] Define global view shortcuts (Ctrl+L for log toggle, ? for help, 1-5 for tabs)
-- [ ] T025 [US3] Implement quit shortcut (q) with cleanup logic in App.tsx
-- [ ] T026 [US3] Implement Tab focus cycling logic across panels in App.tsx
+- [X] T023 [P] [US3] Define global navigation shortcuts in src/ui/commands/globalShortcuts.ts (q, Tab, j/k, Enter, Esc)
+- [X] T024 [P] [US3] Define global view shortcuts (Ctrl+L for log toggle, ? for help, 1-5 for tabs)
+- [X] T025 [US3] Implement quit shortcut (q) with cleanup logic in App.tsx
+- [X] T026 [US3] Implement Tab focus cycling logic across panels in App.tsx
 - [ ] T027 [US3] Implement j/k list navigation in RunTable and GatePanel components
-- [ ] T028 [US3] Implement Enter drill-down and Esc back navigation in App.tsx
-- [ ] T029 [US3] Implement Ctrl+L log toggle functionality
+- [X] T028 [US3] Implement Enter drill-down and Esc back navigation in App.tsx
+- [X] T029 [US3] Implement Ctrl+L log toggle functionality
 - [ ] T030 [US3] Implement number key tab switching (1-5) if tabs exist
-- [ ] T031 [US3] Test global navigation shortcuts per quickstart.md scenario 4
+- [X] T031 [US3] Test global navigation shortcuts per quickstart.md scenario 4
 
 **Checkpoint**: All global shortcuts work consistently from any screen
 
@@ -114,12 +114,12 @@
 
 ### Implementation for User Story 4
 
-- [ ] T032 [US4] Create HelpOverlay component in src/ui/components/HelpOverlay.tsx
-- [ ] T033 [US4] Implement help overlay state management (isOpen, current context)
-- [ ] T034 [US4] Generate help content from keyboard shortcut registry (global vs context-specific)
-- [ ] T035 [US4] Add context highlighting logic (highlight shortcuts relevant to current focus)
-- [ ] T036 [US4] Integrate HelpOverlay into App.tsx with ? key binding
-- [ ] T037 [US4] Implement help overlay close on ? or Esc
+- [X] T032 [US4] Create HelpOverlay component in src/ui/components/HelpOverlay.tsx
+- [X] T033 [US4] Implement help overlay state management (isOpen, current context)
+- [X] T034 [US4] Generate help content from keyboard shortcut registry (global vs context-specific)
+- [X] T035 [US4] Add context highlighting logic (highlight shortcuts relevant to current focus)
+- [X] T036 [US4] Integrate HelpOverlay into App.tsx with ? key binding
+- [X] T037 [US4] Implement help overlay close on ? or Esc
 - [ ] T038 [US4] Test help overlay per quickstart.md scenario 5
 
 **Checkpoint**: Help overlay provides complete shortcut reference with context awareness
@@ -134,11 +134,11 @@
 
 ### Implementation for User Story 5
 
-- [ ] T039 [US5] Update StatusBar component to accept dynamic shortcut hints prop
-- [ ] T040 [US5] Implement hint generation from active shortcuts for current context
-- [ ] T041 [US5] Wire status bar hints to focus context in App.tsx
-- [ ] T042 [US5] Format hints compactly for status bar display (e.g., "a:approve s:skip r:retry ?:help")
-- [ ] T043 [US5] Test status bar hints update per quickstart.md scenario 6
+- [X] T039 [US5] Update StatusBar component to accept dynamic shortcut hints prop
+- [X] T040 [US5] Implement hint generation from active shortcuts for current context
+- [X] T041 [US5] Wire status bar hints to focus context in App.tsx
+- [X] T042 [US5] Format hints compactly for status bar display (e.g., "a:approve s:skip r:retry ?:help")
+- [X] T043 [US5] Test status bar hints update per quickstart.md scenario 6
 
 **Checkpoint**: Status bar provides just-in-time shortcut reminders based on context
 
@@ -149,12 +149,12 @@
 **Purpose**: Improvements that affect multiple user stories
 
 - [ ] T044 [P] Test edge cases per quickstart.md (invalid commands, modal conflicts, shortcuts when palette open)
-- [ ] T045 [P] Ensure command palette and help overlay prevent shortcut propagation when open
+- [X] T045 [P] Ensure command palette and help overlay prevent shortcut propagation when open
 - [ ] T046 Verify all shortcuts work without conflicts across contexts
 - [ ] T047 Performance check: palette opens/closes instantly (<50ms), fuzzy search feels real-time (<100ms)
 - [ ] T048 Run full quickstart.md validation scenarios 1-6
-- [ ] T049 Verify no regressions in existing TUI functionality
-- [ ] T050 Code cleanup: remove old inline keyboard handling from App.tsx after hook refactor
+- [X] T049 Verify no regressions in existing TUI functionality
+- [X] T050 Code cleanup: remove old inline keyboard handling from App.tsx after hook refactor
 
 ---
 

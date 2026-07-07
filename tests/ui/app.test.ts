@@ -22,9 +22,18 @@ const mockMainPanel = vi.fn(() => React.createElement('main-panel'));
 const mockSidebar = vi.fn(() => React.createElement('sidebar-panel'));
 const mockStatusBar = vi.fn(() => React.createElement('status-bar'));
 const mockCommandBar = vi.fn(() => React.createElement('command-bar'));
+const mockCommandPalette = vi.fn(() => React.createElement('command-palette'));
+const mockHelpOverlay = vi.fn(() => React.createElement('help-overlay'));
 const mockUseInput = vi.fn();
 const mockGetPendingFeatures = vi.fn(() => []);
+const mockPaletteOpen = vi.fn();
+const mockPaletteClose = vi.fn();
+const mockPaletteSetQuery = vi.fn();
+const mockPaletteSelectPrevious = vi.fn();
+const mockPaletteSelectNext = vi.fn();
+const mockPaletteExecuteSelected = vi.fn();
 let setUi: ReturnType<typeof vi.fn>;
+let setHelpOpen: ReturnType<typeof vi.fn>;
 let stateValue: {
   selectedRun: number;
   selectedGate: number;
@@ -32,16 +41,29 @@ let stateValue: {
   focusPanel: 'runs' | 'gates' | 'main';
   activeView: 'overview' | 'run' | 'notifications';
   outputPaused: boolean;
+  logsVisible: boolean;
   dashboard?: boolean;
   dashboardPeriod?: number;
 };
+let helpOpenValue = false;
+let useStateCallIndex = 0;
 
 vi.mock('react', async () => {
   const actual = await vi.importActual<typeof import('react')>('react');
   return {
     ...actual,
     default: actual.default,
-    useState: vi.fn(() => [stateValue, setUi]),
+    useCallback: <T extends (...args: any[]) => any>(fn: T) => fn,
+    useEffect: (effect: () => void | (() => void)) => effect(),
+    useMemo: <T>(factory: () => T) => factory(),
+    useRef: <T>(value: T) => ({ current: value }),
+    useState: vi.fn((initialValue: unknown) => {
+      const callIndex = useStateCallIndex++;
+      if (callIndex === 0) return [stateValue, setUi];
+      if (callIndex === 1) return [helpOpenValue, setHelpOpen];
+      if (callIndex === 2) return [0, vi.fn()];
+      return [typeof initialValue === 'function' ? (initialValue as () => unknown)() : initialValue, vi.fn()];
+    }),
   };
 });
 
@@ -132,6 +154,31 @@ vi.mock('../../src/ui/components/CommandBar.js', () => ({
   CommandBar: mockCommandBar,
 }));
 
+vi.mock('../../src/ui/components/CommandPalette.js', () => ({
+  CommandPalette: mockCommandPalette,
+}));
+
+vi.mock('../../src/ui/components/HelpOverlay.js', () => ({
+  HelpOverlay: mockHelpOverlay,
+}));
+
+vi.mock('../../src/ui/hooks/useCommandPalette.js', () => ({
+  useCommandPalette: vi.fn(() => ({
+    state: {
+      isOpen: false,
+      query: '',
+      filteredCommands: [],
+      selectedIndex: 0,
+    },
+    open: mockPaletteOpen,
+    close: mockPaletteClose,
+    setQuery: mockPaletteSetQuery,
+    selectPrevious: mockPaletteSelectPrevious,
+    selectNext: mockPaletteSelectNext,
+    executeSelected: mockPaletteExecuteSelected,
+  })),
+}));
+
 vi.mock('ink', async () => {
   const actual = await vi.importActual<typeof import('ink')>('ink');
   return {
@@ -161,6 +208,9 @@ describe('App', () => {
     vi.resetModules();
     vi.clearAllMocks();
     setUi = vi.fn();
+    setHelpOpen = vi.fn();
+    helpOpenValue = false;
+    useStateCallIndex = 0;
     stateValue = {
       selectedRun: 0,
       selectedGate: 0,
@@ -168,6 +218,7 @@ describe('App', () => {
       focusPanel: 'runs',
       activeView: 'overview',
       outputPaused: false,
+      logsVisible: true,
     };
     mockUseTerminalWidth.mockReturnValue(88);
     mockUseRuns.mockReturnValue([]);
@@ -262,24 +313,75 @@ describe('App', () => {
     const handler = mockUseInput.mock.calls[0]?.[0] as (input: string, key: Record<string, boolean>) => void;
 
     handler('q', {});
-    handler('', { downArrow: true });
-    handler('', { tab: true });
-    handler('', { return: true });
+    handler('j', {});
     handler('', { escape: true });
 
     expect(exitSpy).toHaveBeenCalledWith(0);
-    expect(setUi).toHaveBeenCalledTimes(4);
+    expect(setUi).toHaveBeenCalledTimes(2);
 
     const moveRun = setUi.mock.calls[0]?.[0] as (state: typeof stateValue) => typeof stateValue;
-    const tabFocus = setUi.mock.calls[1]?.[0] as (state: typeof stateValue) => typeof stateValue;
-    const openRun = setUi.mock.calls[2]?.[0] as (state: typeof stateValue) => typeof stateValue;
-    const escapeRun = setUi.mock.calls[3]?.[0] as (state: typeof stateValue) => typeof stateValue;
+    const escapeRun = setUi.mock.calls[1]?.[0] as (state: typeof stateValue) => typeof stateValue;
 
     expect(moveRun(stateValue).selectedRun).toBe(1);
-    expect(tabFocus(stateValue).focusPanel).toBe('gates');
-    expect(openRun(stateValue)).toMatchObject({ activeView: 'run', focusPanel: 'main' });
     expect(escapeRun(stateValue)).toMatchObject({ activeView: 'overview', focusPanel: 'runs', outputPaused: false });
     expect(resolve).not.toHaveBeenCalled();
+  });
+
+  it('opens the command palette with ctrl+p and :', async () => {
+    mockUseRuns.mockReturnValue([{ runId: 1, featureId: 'feat-1' }]);
+    mockUseGates.mockReturnValue({ gates: [], resolve: vi.fn() });
+    const { App } = await import('../../src/ui/App.js');
+
+    App();
+    const handler = mockUseInput.mock.calls[0]?.[0] as (input: string, key: Record<string, boolean>) => void;
+
+    handler('p', { ctrl: true });
+    handler(':', {});
+
+    expect(mockPaletteOpen).toHaveBeenCalledTimes(2);
+  });
+
+  it('cycles focus with Tab and opens the selected run with Enter', async () => {
+    stateValue = {
+      selectedRun: 0,
+      selectedGate: 0,
+      selectedPending: 0,
+      focusPanel: 'runs',
+      activeView: 'overview',
+      outputPaused: false,
+      logsVisible: true,
+    };
+    mockUseRuns.mockReturnValue([{ runId: 1, featureId: 'feat-1' }]);
+    mockUseGates.mockReturnValue({
+      gates: [{ kind: 'gate', id: 7, featureId: 'feat-1', repoId: 'repo-1', prompt: '', createdAt: '' }],
+      resolve: vi.fn(),
+    });
+    const { App } = await import('../../src/ui/App.js');
+
+    App();
+    const handler = mockUseInput.mock.calls[0]?.[0] as (input: string, key: Record<string, boolean>) => void;
+
+    handler('', { tab: true });
+    handler('', { return: true });
+
+    expect(setUi).toHaveBeenCalledTimes(2);
+    const cycleFocus = setUi.mock.calls[0]?.[0] as (state: typeof stateValue) => typeof stateValue;
+    const openRun = setUi.mock.calls[1]?.[0] as (state: typeof stateValue) => typeof stateValue;
+    expect(cycleFocus(stateValue).focusPanel).toBe('gates');
+    expect(openRun(stateValue)).toMatchObject({ activeView: 'run', focusPanel: 'main' });
+  });
+
+  it('opens the help overlay with ? and closes the palette first', async () => {
+    mockUseRuns.mockReturnValue([{ runId: 1, featureId: 'feat-1' }]);
+    mockUseGates.mockReturnValue({ gates: [], resolve: vi.fn() });
+    const { App } = await import('../../src/ui/App.js');
+
+    App();
+    const handler = mockUseInput.mock.calls[0]?.[0] as (input: string, key: Record<string, boolean>) => void;
+    handler('?', {});
+
+    expect(mockPaletteClose).toHaveBeenCalledTimes(1);
+    expect(setHelpOpen).toHaveBeenCalledWith(true);
   });
 
   it('toggles log pause with ctrl+s while a run detail is open', async () => {
@@ -290,6 +392,7 @@ describe('App', () => {
       focusPanel: 'main',
       activeView: 'run',
       outputPaused: false,
+      logsVisible: true,
     };
     mockUseRuns.mockReturnValue([{ runId: 1, featureId: 'feat-1' }]);
     mockUseGates.mockReturnValue({ gates: [], resolve: vi.fn() });
@@ -304,6 +407,29 @@ describe('App', () => {
     expect(pauseLogs(stateValue).outputPaused).toBe(true);
   });
 
+  it('toggles log visibility with ctrl+l while a run detail is open', async () => {
+    stateValue = {
+      selectedRun: 0,
+      selectedGate: 0,
+      selectedPending: 0,
+      focusPanel: 'main',
+      activeView: 'run',
+      outputPaused: false,
+      logsVisible: true,
+    };
+    mockUseRuns.mockReturnValue([{ runId: 1, featureId: 'feat-1' }]);
+    mockUseGates.mockReturnValue({ gates: [], resolve: vi.fn() });
+    const { App } = await import('../../src/ui/App.js');
+
+    App();
+    const handler = mockUseInput.mock.calls[0]?.[0] as (input: string, key: Record<string, boolean>) => void;
+    handler('l', { ctrl: true });
+
+    expect(setUi).toHaveBeenCalledTimes(1);
+    const toggleLogs = setUi.mock.calls[0]?.[0] as (state: typeof stateValue) => typeof stateValue;
+    expect(toggleLogs(stateValue).logsVisible).toBe(false);
+  });
+
   it('toggles the cost dashboard with d', async () => {
     stateValue = {
       selectedRun: 0,
@@ -312,6 +438,7 @@ describe('App', () => {
       focusPanel: 'runs',
       activeView: 'overview',
       outputPaused: false,
+      logsVisible: true,
     };
     mockUseRuns.mockReturnValue([{ runId: 1, featureId: 'feat-1' }]);
     mockUseGates.mockReturnValue({ gates: [], resolve: vi.fn() });
@@ -334,6 +461,7 @@ describe('App', () => {
       focusPanel: 'runs',
       activeView: 'overview',
       outputPaused: false,
+      logsVisible: true,
     };
     mockUseRuns.mockReturnValue([{ runId: 1, featureId: 'feat-1' }]);
     mockUseGates.mockReturnValue({ gates: [], resolve: vi.fn() });
@@ -357,6 +485,7 @@ describe('App', () => {
       focusPanel: 'gates',
       activeView: 'overview',
       outputPaused: false,
+      logsVisible: true,
     };
     mockUseRuns.mockReturnValue([{ runId: 1, featureId: 'feat-1' }]);
     const gateApproval = { kind: 'gate' as const, id: 7, featureId: 'feat-1', repoId: 'repo-1', prompt: '', createdAt: '' };
@@ -378,7 +507,79 @@ describe('App', () => {
     expect(resolve).toHaveBeenCalledWith(gateApproval, 'retried');
   });
 
-  it('pauses and resumes the selected pipeline outside the gates panel', async () => {
+  it('ignores context shortcuts outside their active panels', async () => {
+    const resolve = vi.fn();
+    mockUseRuns.mockReturnValue([{
+      runId: 1,
+      pipelineId: 42,
+      pipelineStatus: 'running',
+      featureId: 'feat-1',
+      tool: 'codex',
+      status: 'running',
+      startedAt: '2026-07-06T10:00:00Z',
+      endedAt: null,
+      totalTokens: null,
+      inputTokens: null,
+      outputTokens: null,
+      gateId: null,
+      gateDecision: null,
+      repoId: 'repo-1',
+      pipelineResumeSummary: null,
+    }]);
+    mockUseGates.mockReturnValue({
+      gates: [{ kind: 'gate', id: 7, featureId: 'feat-1', repoId: 'repo-1', prompt: '', createdAt: '' }],
+      resolve,
+    });
+    const { App } = await import('../../src/ui/App.js');
+
+    App();
+    const handler = mockUseInput.mock.calls[0]?.[0] as (input: string, key: Record<string, boolean>) => void;
+    handler('a', {});
+    handler('s', {});
+    handler('r', {});
+    handler('p', {});
+    handler('x', {});
+
+    expect(resolve).not.toHaveBeenCalled();
+    expect(mockPausePipeline).not.toHaveBeenCalled();
+    expect(mockRequestFeatureAbort).not.toHaveBeenCalled();
+    expect(mockAbortPipeline).not.toHaveBeenCalled();
+  });
+
+  it('shows gate-focused shortcut hints in the status bar', async () => {
+    stateValue = {
+      selectedRun: 0,
+      selectedGate: 0,
+      selectedPending: 0,
+      focusPanel: 'gates',
+      activeView: 'overview',
+      outputPaused: false,
+      logsVisible: true,
+    };
+    mockUseRuns.mockReturnValue([{ runId: 1, featureId: 'feat-1' }]);
+    mockUseGates.mockReturnValue({
+      gates: [{ kind: 'gate', id: 7, featureId: 'feat-1', repoId: 'repo-1', prompt: '', createdAt: '' }],
+      resolve: vi.fn(),
+    });
+    const { App } = await import('../../src/ui/App.js');
+
+    const element = App();
+    const rootChildren = (element.props as { children: React.ReactNode }).children;
+    const statusBar = findElement(rootChildren, mockStatusBar);
+
+    expect(statusBar?.props.shortcutHints).toEqual(['a:approve', 's:skip', 'r:retry', 'tab:focus', 'esc:back', '?:help']);
+  });
+
+  it('pauses the selected pipeline from run detail context', async () => {
+    stateValue = {
+      selectedRun: 0,
+      selectedGate: 0,
+      selectedPending: 0,
+      focusPanel: 'main',
+      activeView: 'run',
+      outputPaused: false,
+      logsVisible: true,
+    };
     mockUseRuns.mockReturnValue([{
       runId: 1,
       pipelineId: 42,
@@ -403,15 +604,25 @@ describe('App', () => {
     const handler = mockUseInput.mock.calls[0]?.[0] as (input: string, key: Record<string, boolean>) => void;
     handler('p', {});
     expect(mockPausePipeline).toHaveBeenCalledWith(42);
+  });
 
-    mockUseInput.mockClear();
+  it('shows run detail shortcut hints in the status bar', async () => {
+    stateValue = {
+      selectedRun: 0,
+      selectedGate: 0,
+      selectedPending: 0,
+      focusPanel: 'main',
+      activeView: 'run',
+      outputPaused: false,
+      logsVisible: true,
+    };
     mockUseRuns.mockReturnValue([{
       runId: 1,
       pipelineId: 42,
-      pipelineStatus: 'paused',
+      pipelineStatus: 'running',
       featureId: 'feat-1',
       tool: 'codex',
-      status: 'done',
+      status: 'running',
       startedAt: '2026-07-06T10:00:00Z',
       endedAt: null,
       totalTokens: null,
@@ -422,19 +633,25 @@ describe('App', () => {
       repoId: 'repo-1',
       pipelineResumeSummary: null,
     }]);
-    App();
-    const resumeHandler = mockUseInput.mock.calls[0]?.[0] as (input: string, key: Record<string, boolean>) => void;
-    resumeHandler('r', {});
-    expect(mockResumePipeline).toHaveBeenCalledWith(42);
+    mockUseGates.mockReturnValue({ gates: [], resolve: vi.fn() });
+    const { App } = await import('../../src/ui/App.js');
+
+    const element = App();
+    const rootChildren = (element.props as { children: React.ReactNode }).children;
+    const statusBar = findElement(rootChildren, mockStatusBar);
+
+    expect(statusBar?.props.shortcutHints).toEqual(['p:pause', 'x:abort', '^l:logs', 'esc:back', '?:help', '^p:palette']);
   });
 
-  it('aborts the selected feature with x in the runs panel', async () => {
+  it('aborts the selected feature with x in run detail context', async () => {
     stateValue = {
       selectedRun: 0,
       selectedGate: 0,
-      focusPanel: 'runs',
-      activeView: 'overview',
+      selectedPending: 0,
+      focusPanel: 'main',
+      activeView: 'run',
       outputPaused: false,
+      logsVisible: true,
     };
     mockUseRuns.mockReturnValue([{
       runId: 1,
@@ -472,6 +689,7 @@ describe('App', () => {
       focusPanel: 'runs',
       activeView: 'overview',
       outputPaused: false,
+      logsVisible: true,
     };
     mockGetPendingFeatures.mockReturnValue([
       { id: 'feat-9', title: 'F09', tool: 'codex', effort: 'medium' },
