@@ -29,6 +29,8 @@ export function useRuns(intervalMs = 2000): RunSummary[] {
       msqEventBus.subscribe('tokens:update', refresh),
       msqEventBus.subscribe('gate:created', refresh),
       msqEventBus.subscribe('gate:resolved', refresh),
+      msqEventBus.subscribe('stage:request-created', refresh),
+      msqEventBus.subscribe('stage:request-resolved', refresh),
     ];
     return () => {
       clearInterval(timer);

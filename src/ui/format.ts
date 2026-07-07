@@ -31,6 +31,23 @@ export function formatElapsed(startedAt: string, endedAt: string | null): string
   return `${mins}m${secs % 60}s`;
 }
 
+export function getRunStatusLabel(run: RunSummary): string {
+  if (run.pendingStageRequestKind === 'approval') return 'awaiting approval';
+  if (run.pendingStageRequestKind === 'input') return 'awaiting input';
+  if (run.pipelineStatus === 'running' && run.rawStatus === 'done') return 'advancing';
+  return run.status;
+}
+
+export function getRunStageLabel(run: RunSummary): string | null {
+  const stage = run.pipelineCurrentStage ?? run.stage;
+  if (!stage) return null;
+  if (run.pendingStageRequestKind === 'approval') return `${stage} -> approval`;
+  if (run.pendingStageRequestKind === 'input') return `${stage} -> input`;
+  if (run.pipelineStatus === 'running' && run.rawStatus === 'running') return `${stage} active`;
+  if (run.pipelineStatus === 'done' && run.rawStatus === 'done') return `${stage} complete`;
+  return stage;
+}
+
 export function formatTokens(total: number | null): string {
   if (total === null) return '—';
   if (total >= 1000) return `${(total / 1000).toFixed(1)}k`;

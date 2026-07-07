@@ -9,6 +9,7 @@ import {
   formatCost,
   formatElapsed,
   formatTokensIO,
+  getRunStatusLabel,
   truncateText,
 } from '../format.js';
 
@@ -47,6 +48,7 @@ export function StatusBar({
         featureLabel,
         modelLabel,
         effortLabel,
+        selectedRun ? getRunStatusLabel(selectedRun) : null,
         formatTokensIO(selectedRun.inputTokens, selectedRun.cachedInputTokens ?? null, selectedRun.outputTokens),
         formatElapsed(selectedRun.startedAt, selectedRun.endedAt),
         formatCost(estimateCost(

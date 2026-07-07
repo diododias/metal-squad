@@ -1,5 +1,11 @@
 import type { Command } from 'commander';
-import { cleanupStaleRuns, getPipelineSnapshot, listResumablePipelines, listRuns } from '../db/repo.js';
+import {
+  cleanupStaleRuns,
+  getPipelineSnapshot,
+  listPipelineOverviews,
+  listResumablePipelines,
+  listRuns,
+} from '../db/repo.js';
 import { loadConfig } from '../config/index.js';
 
 export function registerStatus(program: Command): void {
@@ -37,12 +43,33 @@ export function registerStatus(program: Command): void {
           feature: r.feature_id,
           stage: r.stage ?? '-',
           tool: r.tool,
-          status: r.status,
+          run_status: r.status,
           tokens: r.total ?? '-',
           started: r.started_at,
           summary: r.summary ? r.summary.slice(0, 120) : '-',
         })),
       );
+
+      const visiblePipelines = listPipelineOverviews(Number(opts.limit));
+      if (visiblePipelines.length > 0) {
+        console.log('Pipelines ativas/pendentes:');
+        console.table(
+          visiblePipelines.map((pipeline) => ({
+            pipeline_id: pipeline.id,
+            repo_id: pipeline.repoId,
+            target: pipeline.featureId,
+            pipeline_status: pipeline.status,
+            stage: pipeline.currentStage ?? '-',
+            active: pipeline.activeFeature ?? '-',
+            pending: pipeline.pendingFeature ?? '-',
+            wait: pipeline.pendingStageRequestKind
+              ? `${pipeline.pendingStageRequestKind}:${pipeline.pendingStageRequestId ?? '-'}`
+              : '-',
+            prompt: pipeline.pendingStageRequestPrompt ?? '-',
+            summary: pipeline.resumeSummary ?? '-',
+          })),
+        );
+      }
 
       const resumable = listResumablePipelines();
       if (resumable.length === 0) return;

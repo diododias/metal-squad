@@ -127,7 +127,9 @@ export function App(): React.ReactElement {
   const selectedFeature = selectedRun ? featureCatalog[selectedRun.featureId] ?? null : null;
   const totalRuns = runs.length;
   const doneRuns = runs.filter((r) => r.status === 'done').length;
-  const currentStage = taskRuns.find((t) => t.status === 'running')?.stage ?? undefined;
+  const currentStage = taskRuns.find((t) => t.status === 'running')?.stage
+    ?? selectedRun?.pipelineCurrentStage
+    ?? undefined;
   const sidebarWidth = layoutMode === 'full' ? 34 : layoutMode === 'compact' ? 28 : width - 2;
   const mainWidth = layoutMode === 'stacked' ? width - 2 : Math.max(38, width - sidebarWidth - 5);
   const canPause = Boolean(selectedRun?.pipelineId && selectedRun.pipelineStatus === 'running');

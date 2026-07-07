@@ -13,6 +13,7 @@ const mockLoadConfig = vi.fn();
 const mockCreateSkillRegistry = vi.fn();
 const mockFormatSkillList = vi.fn();
 const mockListRuns = vi.fn();
+const mockListPipelineOverviews = vi.fn();
 const mockListResumablePipelines = vi.fn();
 const mockFindResumablePipeline = vi.fn();
 const mockGetPipelineSnapshot = vi.fn();
@@ -29,6 +30,7 @@ vi.mock('../../src/db/repo.js', () => ({
   findResumablePipeline: mockFindResumablePipeline,
   getPipelineSnapshot: mockGetPipelineSnapshot,
   listRuns: mockListRuns,
+  listPipelineOverviews: mockListPipelineOverviews,
   listResumablePipelines: mockListResumablePipelines,
   cleanupStaleRuns: mockCleanupStaleRuns,
 }));
@@ -89,6 +91,7 @@ describe('commands', () => {
     mockFormatSkillList.mockReturnValue('implement');
     mockAssertWritableDbPath.mockReturnValue(undefined);
     mockListResumablePipelines.mockReturnValue([]);
+    mockListPipelineOverviews.mockReturnValue([]);
     mockFindResumablePipeline.mockReturnValue(null);
     mockGetPipelineSnapshot.mockReturnValue({ plan: [], done: [], pending: [], active: [], aborted: [] });
   });
@@ -223,6 +226,23 @@ describe('commands', () => {
         summary: 'summary',
       },
     ]);
+    mockListPipelineOverviews.mockReturnValueOnce([
+      {
+        id: 9,
+        repoId: 'repo-1',
+        featureId: 'feat-12',
+        status: 'running',
+        currentStage: 'specify',
+        activeFeature: 'feat-12',
+        pendingFeature: null,
+        resumeSummary: '0/1 done · active feat-12',
+        pendingStageRequestId: 3,
+        pendingStageRequestKind: 'approval',
+        pendingStageRequestPrompt: 'Advance to stage plan?',
+        createdAt: '2026-07-06T10:00:00Z',
+        updatedAt: '2026-07-06T10:01:00Z',
+      },
+    ]);
     mockListResumablePipelines.mockReturnValueOnce([
       {
         id: 9,
@@ -247,6 +267,7 @@ describe('commands', () => {
     expect(log).toHaveBeenCalledWith(
       '[msq] 2 orphan run(s) marked as failed (30 min threshold).',
     );
+    expect(log).toHaveBeenCalledWith('Pipelines ativas/pendentes:');
     expect(log).toHaveBeenCalledWith('Pipelines retomáveis:');
   });
 

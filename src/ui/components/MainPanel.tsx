@@ -9,6 +9,8 @@ import {
   formatClock,
   formatElapsed,
   formatTokens,
+  getRunStageLabel,
+  getRunStatusLabel,
   truncateText,
 } from '../format.js';
 import { EmptyState } from './EmptyState.js';
@@ -75,6 +77,8 @@ export function MainPanel({
   const lastOutput = visibleOutput[visibleOutput.length - 1] ?? null;
   const maxPending = mode === 'stacked' ? 3 : 5;
   const nextDemands = collectNextDemands(runs);
+  const selectedRunStage = selectedRun ? getRunStageLabel(selectedRun) : null;
+  const selectedRunStatusLabel = selectedRun ? getRunStatusLabel(selectedRun) : null;
 
   return (
     <Box
@@ -97,11 +101,19 @@ export function MainPanel({
           <Text bold>{selectedFeature?.title ?? selectedRun.featureId}</Text>
           <Text dimColor>{selectedRun.featureId} · {selectedRun.repoId}</Text>
           <Box marginTop={1}>
-            <Text color={STATUS_COLOR[selectedRun.status]}>{STATUS_ICON[selectedRun.status]} {selectedRun.status}</Text>
+            <Text color={STATUS_COLOR[selectedRun.status]}>{STATUS_ICON[selectedRun.status]} {selectedRunStatusLabel}</Text>
             <Text dimColor> | tool {selectedFeature?.model ?? selectedRun.tool}</Text>
             {selectedFeature && <Text dimColor> | effort {selectedFeature.effort}</Text>}
             <Text dimColor> | duration {formatElapsed(selectedRun.startedAt, selectedRun.endedAt)}</Text>
           </Box>
+          {(selectedRunStage || selectedRun.pendingStageRequestPrompt) && (
+            <Box>
+              {selectedRunStage && <Text dimColor>stage {selectedRunStage}</Text>}
+              {selectedRun.pendingStageRequestPrompt && (
+                <Text dimColor> | wait {truncateText(selectedRun.pendingStageRequestPrompt, Math.max(16, innerWidth - 20))}</Text>
+              )}
+            </Box>
+          )}
           <Box>
             <Text dimColor>started {formatClock(selectedRun.startedAt)}</Text>
             <Text dimColor> | ended {formatClock(selectedRun.endedAt)}</Text>

@@ -14,6 +14,7 @@ const mockFinishPipeline = vi.fn();
 const mockGetPipeline = vi.fn();
 const mockGetPipelineSnapshot = vi.fn();
 const mockGetStageRequest = vi.fn();
+const mockListStageRequestsForFeature = vi.fn();
 const mockPausePipeline = vi.fn();
 const mockRecordUsage = vi.fn();
 const mockResumePipeline = vi.fn();
@@ -45,6 +46,7 @@ vi.mock('../../src/db/repo.js', () => ({
   getPipeline: mockGetPipeline,
   getPipelineSnapshot: mockGetPipelineSnapshot,
   getStageRequest: mockGetStageRequest,
+  listStageRequestsForFeature: mockListStageRequestsForFeature,
   pausePipeline: mockPausePipeline,
   recordUsage: mockRecordUsage,
   resumePipeline: mockResumePipeline,
@@ -96,6 +98,7 @@ beforeEach(() => {
   mockGetPipeline.mockReset();
   mockGetPipelineSnapshot.mockReset();
   mockGetStageRequest.mockReset();
+  mockListStageRequestsForFeature.mockReset();
   mockPausePipeline.mockReset();
   mockRecordUsage.mockReset();
   mockResumePipeline.mockReset();
@@ -167,6 +170,7 @@ beforeEach(() => {
       requestedAbortFeatureId: opts.clearAbortRequest ? null : pipelineRow.requestedAbortFeatureId,
     };
   });
+  mockListStageRequestsForFeature.mockReturnValue([]);
   mockAttachDefaultEventLogger.mockReturnValue(vi.fn());
   mockAttachEventNotifications.mockReturnValue(vi.fn());
   mockAttachRunPersistence.mockReturnValue(vi.fn());
@@ -465,6 +469,14 @@ describe('executeBacklog failure persistence', () => {
       'Advance to stage plan?',
       { runId: 7 },
     );
+    expect(mockRunFeature).toHaveBeenNthCalledWith(
+      1,
+      expect.any(Object),
+      expect.stringContaining('Treat the following block as the exact feature description passed to `/speckit-specify`:'),
+      { cwd: '/repo', runId: 7, signal: expect.any(AbortSignal) },
+    );
+    expect(mockRunFeature.mock.calls[0]?.[1]).toContain('Feature: Feature');
+    expect(mockRunFeature.mock.calls[0]?.[1]).toContain('Summary:\nspec');
     expect(mockFinishPipeline).toHaveBeenCalledWith(9, 'done');
   });
 
@@ -528,6 +540,84 @@ describe('executeBacklog failure persistence', () => {
       { runId: 7 },
     );
     expect(mockFinishPipeline).toHaveBeenCalledWith(9, 'done');
+  });
+
+  it('resumes a staged workflow from the next stage after an approved checkpoint', async () => {
+    const backlog: Backlog = {
+      version: 2,
+      repo: 'repo',
+      defaults: { tool: 'codex', effort: 'medium', skills: ['implement'] },
+      epics: [
+        {
+          id: 'epic-1',
+          title: 'Epic',
+          features: [
+            {
+              id: 'feat-27',
+              title: 'Feature',
+              spec: 'spec',
+              tasks: [],
+              tool: 'codex',
+              effort: 'medium',
+              dependsOn: [],
+              workflow: {
+                mode: 'staged',
+                stages: ['specify', 'plan', 'implement'],
+                approvals: { channel: 'telegram', autoAdvance: false },
+                syncTasksToBacklog: false,
+              },
+            },
+          ],
+        },
+      ],
+    };
+
+    pipelineRow = {
+      ...pipelineRow,
+      featureId: 'feat-27',
+      currentStage: 'specify',
+      planJson: JSON.stringify(['feat-27']),
+      doneJson: JSON.stringify([]),
+      pendingJson: JSON.stringify([]),
+      activeJson: JSON.stringify(['feat-27']),
+      abortedJson: JSON.stringify([]),
+    };
+    mockListStageRequestsForFeature.mockReturnValue([
+      {
+        id: 11,
+        pipelineId: 9,
+        runId: 7,
+        featureId: 'feat-27',
+        stage: 'specify',
+        kind: 'approval',
+        prompt: 'Advance to stage plan?',
+        status: 'resolved',
+        response: 'advance',
+        source: 'manual',
+        createdAt: '2026-07-07T10:30:19Z',
+        resolvedAt: '2026-07-07T10:31:00Z',
+      },
+    ]);
+    mockRunFeature
+      .mockResolvedValueOnce({ ok: true, summary: 'plan ok' })
+      .mockResolvedValueOnce({ ok: true, summary: 'implement ok' });
+    mockGetStageRequest.mockReturnValue({ status: 'resolved', response: 'advance' });
+
+    const { executeBacklog } = await import('../../src/core/runner/execute.js');
+
+    await expect(
+      executeBacklog(backlog, { cwd: '/repo', concurrency: 1, resumePipelineId: 9 }),
+    ).resolves.toBeUndefined();
+
+    expect(mockResumePipeline).toHaveBeenCalledWith(9);
+    expect(mockCreateRun).toHaveBeenNthCalledWith(1, 'repo-1', 'feat-27', 'codex', {
+      pipelineId: 9,
+      stage: 'plan',
+    });
+    expect(mockCreateRun).toHaveBeenNthCalledWith(2, 'repo-1', 'feat-27', 'codex', {
+      pipelineId: 9,
+      stage: 'implement',
+    });
   });
 
   it('returns jitter within the expected exponential interval', async () => {

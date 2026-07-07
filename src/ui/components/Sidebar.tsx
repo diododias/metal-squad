@@ -2,7 +2,7 @@ import React from 'react';
 import { Box, Text } from 'ink';
 import type { GateRow, RunSummary, TaskRun } from '../../db/repo.js';
 import type { LayoutMode } from '../format.js';
-import { STATUS_COLOR, STATUS_ICON, truncateText } from '../format.js';
+import { STATUS_COLOR, STATUS_ICON, getRunStageLabel, getRunStatusLabel, truncateText } from '../format.js';
 import type { NotificationEntry } from '../hooks/useNotifications.js';
 import { NotificationsFeed } from './NotificationsFeed.js';
 
@@ -76,6 +76,7 @@ export function Sidebar({
       {runs.slice(0, runLimit).map((run, index) => {
         const selected = index === selectedRunIndex;
         const color = STATUS_COLOR[run.status];
+        const stageLabel = getRunStageLabel(run);
         return (
           <Box key={run.runId} flexDirection="column">
             <Box>
@@ -87,8 +88,11 @@ export function Sidebar({
                   {' '}[{run.tool}]
                 </Text>
               )}
-              {mode !== 'stacked' && <Text color={color}> {run.status}</Text>}
+              {mode !== 'stacked' && <Text color={color}> {getRunStatusLabel(run)}</Text>}
             </Box>
+            {selected && stageLabel && (
+              <Text dimColor>   {truncateText(stageLabel, labelWidth)}</Text>
+            )}
             {selected && taskRuns.length > 0 && taskRuns.map((task) => (
               <Box key={task.taskId} marginLeft={3}>
                 <Text color={task.status === 'done' ? 'green' : task.status === 'running' ? 'cyan' : task.status === 'failed' ? 'red' : 'gray'}>

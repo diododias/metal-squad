@@ -18,6 +18,7 @@ import {
   getPipeline,
   getPipelineSnapshot,
   getStageRequest,
+  listStageRequestsForFeature,
   pausePipeline,
   recordUsage,
   requestFeatureAbort,
@@ -27,6 +28,7 @@ import {
   updatePipelineSnapshot,
   updatePipelineStage,
   type PipelineStatus,
+  type StageRequestRow,
 } from '../../db/repo.js';
 import { dispatch } from '../notify/manager.js';
 import { startTelegramPoller, stopTelegramPoller } from '../notify/telegram-poller.js';
@@ -502,10 +504,17 @@ async function executeStagedFeature(
     throw new Error(`Feature ${feature.id} configured as staged but workflow is missing.`);
   }
   const autoAdvance = opts.autoAdvanceStages || workflow.approvals.autoAdvance || config.workflow.autoAdvanceStages;
-  const stageInputs = new Map<string, string[]>();
   const stages = workflow.stages;
+  const persistedRequests = listStageRequestsForFeature(pipelineId, feature.id);
+  const stageInputs = loadPersistedStageInputs(persistedRequests);
+  const startIndex = determineStageStartIndex(
+    stages,
+    getPipeline(pipelineId)?.currentStage ?? null,
+    persistedRequests,
+    Boolean(opts.resumePipelineId),
+  );
 
-  for (let index = 0; index < stages.length; index += 1) {
+  for (let index = startIndex; index < stages.length; index += 1) {
     const stage = stages[index] ?? 'implement';
     updatePipelineStage(pipelineId, stage);
     const stageSkillList = resolveStageSkill(feature, stage, registry, opts.cwd, stageSkills);
@@ -626,11 +635,52 @@ function buildStagePrompt(
     'Do not continue to later stages after finishing the current stage.',
     'If you need admin input, end your final response with exactly: MSQ_INPUT_REQUIRED: <question>',
   ];
+  const stageContext: string[] = [];
+  if (stage === 'specify') {
+    const specifyDescription = buildSpecifyStageDescription(feature, cwd, maxContextChars);
+    if (specifyDescription) {
+      stageContext.push([
+        'Treat the following block as the exact feature description passed to `/speckit-specify`:',
+        specifyDescription,
+      ].join('\n'));
+    }
+  }
   if (adminInputs.length > 0) {
     stageNotes.push(`Admin inputs already collected for this stage:\n- ${adminInputs.join('\n- ')}`);
   }
 
-  return `${basePrompt}\n\n---\n\n${stageNotes.join('\n')}`.trim();
+  const appendedSections = [stageNotes.join('\n'), ...stageContext].filter((section) => section.trim().length > 0);
+  return `${basePrompt}\n\n---\n\n${appendedSections.join('\n\n')}`.trim();
+}
+
+function buildSpecifyStageDescription(
+  feature: Feature,
+  cwd: string,
+  maxContextChars: number,
+): string | null {
+  const parts = [`Feature: ${feature.title}`];
+
+  if (feature.spec?.trim()) {
+    parts.push(`Summary:\n${feature.spec.trim()}`);
+  }
+
+  if (feature.specFile && existsSync(resolve(cwd, feature.specFile))) {
+    const specFileContent = truncateForStageContext(readFileSync(resolve(cwd, feature.specFile), 'utf8'), maxContextChars);
+    if (specFileContent) {
+      parts.push(`Existing feature brief from ${feature.specFile}:\n${specFileContent}`);
+    }
+  }
+
+  return parts.join('\n\n').trim() || null;
+}
+
+function truncateForStageContext(content: string, maxChars: number): string | null {
+  if (!content) return null;
+  if (content.length <= maxChars) return content;
+
+  const notice = '\n\n[truncated to respect promptContextCharLimit]';
+  const sliceLength = Math.max(0, maxChars - notice.length);
+  return `${content.slice(0, sliceLength)}${notice}`.trim();
 }
 
 function resolveGeneratedTasksFile(feature: Feature, cwd: string): string {
@@ -689,6 +739,40 @@ async function waitForStageApproval(
       { runId },
     );
   }
+}
+
+function loadPersistedStageInputs(
+  requests: StageRequestRow[],
+): Map<string, string[]> {
+  const inputs = new Map<string, string[]>();
+  for (const request of requests) {
+    if (request.kind !== 'input' || request.status !== 'resolved' || !request.response) continue;
+    inputs.set(request.stage, [...(inputs.get(request.stage) ?? []), request.response]);
+  }
+  return inputs;
+}
+
+function determineStageStartIndex(
+  stages: string[],
+  currentStage: string | null,
+  requests: StageRequestRow[],
+  isResume: boolean,
+): number {
+  if (!isResume || !currentStage) return 0;
+  const currentIndex = stages.indexOf(currentStage);
+  if (currentIndex === -1) return 0;
+
+  const latestRequest = [...requests]
+    .filter((request) => request.stage === currentStage)
+    .at(-1);
+  if (!latestRequest) return currentIndex;
+
+  if (latestRequest.kind === 'approval' && latestRequest.status === 'resolved') {
+    if (latestRequest.response === 'advance') return Math.min(currentIndex + 1, stages.length - 1);
+    return currentIndex;
+  }
+
+  return currentIndex;
 }
 
 function getOnFailPolicy(feature: Feature): OnFail {

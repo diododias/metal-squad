@@ -166,6 +166,7 @@ export interface RunSummary {
   tool: 'claude' | 'codex' | 'opencode';
   pipelineId: number | null;
   stage: string | null;
+  rawStatus: RunStatus;
   status: RunStatus;
   startedAt: string;
   endedAt: string | null;
@@ -176,7 +177,12 @@ export interface RunSummary {
   gateId: number | null;
   gateDecision: string | null;
   pipelineStatus: PipelineStatus | null;
+  pipelineCurrentStage: string | null;
   pipelineResumeSummary: string | null;
+  pendingStageRequestId: number | null;
+  pendingStageRequestKind: StageRequestKind | null;
+  pendingStageRequestPrompt: string | null;
+  pendingStageRequestCreatedAt: string | null;
 }
 
 // T003: listRunsForTui — most recent run per feature per repo (US2 deduplication via CTE)
@@ -188,6 +194,16 @@ export function listRunsForTui(limit = 50): RunSummary[] {
          SELECT MAX(id) AS id
          FROM runs
          GROUP BY repo_id, feature_id
+       ),
+       pending_stage_requests AS (
+         SELECT sr.*
+         FROM stage_requests sr
+         JOIN (
+           SELECT MAX(id) AS id
+           FROM stage_requests
+           WHERE status = 'pending'
+           GROUP BY pipeline_id, feature_id
+         ) latest_pending ON latest_pending.id = sr.id
        )
        SELECT
          r.id          AS runId,
@@ -196,7 +212,15 @@ export function listRunsForTui(limit = 50): RunSummary[] {
          r.tool,
          r.pipeline_id AS pipelineId,
          r.stage       AS stage,
-         r.status,
+         r.status      AS rawStatus,
+         CASE
+           WHEN psr.id IS NOT NULL THEN 'blocked'
+           WHEN p.status IN ('paused', 'blocked') THEN 'blocked'
+           WHEN p.status IN ('aborting', 'aborted') THEN 'aborted'
+           WHEN p.status = 'failed' THEN 'failed'
+           WHEN p.status = 'running' AND r.status = 'done' THEN 'running'
+           ELSE r.status
+         END           AS status,
          r.started_at  AS startedAt,
          r.ended_at      AS endedAt,
          COALESCE(r.total_tokens, u.total) AS totalTokens,
@@ -206,16 +230,83 @@ export function listRunsForTui(limit = 50): RunSummary[] {
          g.id            AS gateId,
          g.decision    AS gateDecision,
          p.status      AS pipelineStatus,
-         p.resume_summary AS pipelineResumeSummary
+         p.current_stage AS pipelineCurrentStage,
+         p.resume_summary AS pipelineResumeSummary,
+         psr.id AS pendingStageRequestId,
+         psr.kind AS pendingStageRequestKind,
+         psr.prompt AS pendingStageRequestPrompt,
+         psr.created_at AS pendingStageRequestCreatedAt
        FROM runs r
        JOIN latest ON latest.id = r.id
        LEFT JOIN token_usage u ON u.run_id = r.id
        LEFT JOIN gates g ON g.run_id = r.id AND g.resolved_at IS NULL
        LEFT JOIN pipelines p ON p.id = r.pipeline_id
+       LEFT JOIN pending_stage_requests psr
+         ON psr.pipeline_id = r.pipeline_id
+        AND psr.feature_id = r.feature_id
        ORDER BY r.id DESC
        LIMIT ?`,
     )
     .all(limit) as RunSummary[];
+}
+
+export interface PipelineOverview {
+  id: number;
+  repoId: string;
+  featureId: string;
+  status: PipelineStatus;
+  currentStage: string | null;
+  activeFeature: string | null;
+  pendingFeature: string | null;
+  resumeSummary: string | null;
+  pendingStageRequestId: number | null;
+  pendingStageRequestKind: StageRequestKind | null;
+  pendingStageRequestPrompt: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export function listPipelineOverviews(limit = 20): PipelineOverview[] {
+  if (!hasDbFile()) return [];
+  return getDb('readonly')
+    .prepare(
+      `WITH pending_stage_requests AS (
+         SELECT sr.*
+         FROM stage_requests sr
+         JOIN (
+           SELECT MAX(id) AS id
+           FROM stage_requests
+           WHERE status = 'pending'
+           GROUP BY pipeline_id, feature_id
+         ) latest_pending ON latest_pending.id = sr.id
+       )
+       SELECT
+         p.id AS id,
+         p.repo_id AS repoId,
+         p.feature_id AS featureId,
+         p.status AS status,
+         p.current_stage AS currentStage,
+         json_extract(p.active_json, '$[0]') AS activeFeature,
+         COALESCE(json_extract(p.pending_json, '$[0]'), json_extract(p.aborted_json, '$[0]')) AS pendingFeature,
+         p.resume_summary AS resumeSummary,
+         psr.id AS pendingStageRequestId,
+         psr.kind AS pendingStageRequestKind,
+         psr.prompt AS pendingStageRequestPrompt,
+         p.created_at AS createdAt,
+         p.updated_at AS updatedAt
+       FROM pipelines p
+       LEFT JOIN pending_stage_requests psr
+         ON psr.pipeline_id = p.id
+        AND psr.feature_id = p.feature_id
+       WHERE p.status NOT IN ('done', 'failed', 'aborted')
+          OR psr.id IS NOT NULL
+          OR json_array_length(p.pending_json) > 0
+          OR json_array_length(p.active_json) > 0
+          OR json_array_length(p.aborted_json) > 0
+       ORDER BY p.id DESC
+       LIMIT ?`,
+    )
+    .all(limit) as PipelineOverview[];
 }
 
 // T004: GateRow and GateDecision types
@@ -836,6 +927,33 @@ export function getStageRequest(id: number): StageRequestRow | null {
        WHERE id = ?`,
     )
     .get(id) as StageRequestRow | undefined) ?? null;
+}
+
+export function listStageRequestsForFeature(
+  pipelineId: number,
+  featureId: string,
+): StageRequestRow[] {
+  if (!hasDbFile()) return [];
+  return getDb('readonly')
+    .prepare(
+      `SELECT
+         id,
+         pipeline_id AS pipelineId,
+         run_id AS runId,
+         feature_id AS featureId,
+         stage,
+         kind,
+         prompt,
+         status,
+         response,
+         source,
+         created_at AS createdAt,
+         resolved_at AS resolvedAt
+       FROM stage_requests
+       WHERE pipeline_id = ? AND feature_id = ?
+       ORDER BY id ASC`,
+    )
+    .all(pipelineId, featureId) as StageRequestRow[];
 }
 
 function encodeJson(value: string[]): string {
