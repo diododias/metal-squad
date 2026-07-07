@@ -337,8 +337,9 @@ describe('App', () => {
       outputPaused: false,
     };
     mockUseRuns.mockReturnValue([{ runId: 1, featureId: 'feat-1' }]);
+    const gateApproval = { kind: 'gate' as const, id: 7, featureId: 'feat-1', repoId: 'repo-1', prompt: '', createdAt: '' };
     mockUseGates.mockReturnValue({
-      gates: [{ id: 7, featureId: 'feat-1', repoId: 'repo-1' }],
+      gates: [gateApproval],
       resolve,
     });
     const { App } = await import('../../src/ui/App.js');
@@ -350,9 +351,9 @@ describe('App', () => {
     handler('s', {});
     handler('r', {});
 
-    expect(resolve).toHaveBeenCalledWith(7, 'approved');
-    expect(resolve).toHaveBeenCalledWith(7, 'skipped');
-    expect(resolve).toHaveBeenCalledWith(7, 'retried');
+    expect(resolve).toHaveBeenCalledWith(gateApproval, 'approved');
+    expect(resolve).toHaveBeenCalledWith(gateApproval, 'skipped');
+    expect(resolve).toHaveBeenCalledWith(gateApproval, 'retried');
   });
 
   it('pauses and resumes the selected pipeline outside the gates panel', async () => {

@@ -1,9 +1,10 @@
 import React from 'react';
 import { Box, Text } from 'ink';
-import type { GateRow, RunSummary, TaskRun } from '../../db/repo.js';
+import type { RunSummary, TaskRun } from '../../db/repo.js';
 import type { LayoutMode } from '../format.js';
 import { STATUS_COLOR, STATUS_ICON, getRunStageLabel, getRunStatusLabel, truncateText } from '../format.js';
 import type { NotificationEntry } from '../hooks/useNotifications.js';
+import type { PendingApproval } from '../hooks/useGates.js';
 import { NotificationsFeed } from './NotificationsFeed.js';
 
 export type FocusPanel = 'runs' | 'gates' | 'main';
@@ -19,7 +20,7 @@ const TASK_STATUS_ICON: Record<TaskRun['status'], string> = {
 
 interface Props {
   runs: RunSummary[];
-  gates: GateRow[];
+  gates: PendingApproval[];
   notifications: NotificationEntry[];
   selectedRunIndex: number;
   selectedGateIndex: number;
@@ -114,14 +115,18 @@ export function Sidebar({
       {gates.slice(0, gateLimit).map((gate, index) => {
         const selected = index === selectedGateIndex;
         return (
-          <Text key={gate.id} color={selected ? 'yellow' : undefined} bold={selected}>
-            {selected ? '>' : ' '} {truncateText(gate.featureId, labelWidth)}
-          </Text>
+          <Box key={`${gate.kind}:${gate.id}`} flexDirection="column">
+            <Text color={selected ? 'yellow' : undefined} bold={selected}>
+              {selected ? '>' : ' '} {truncateText(gate.featureId, labelWidth)}
+              {gate.kind === 'stage' ? ' [stage]' : ''}
+            </Text>
+            {selected && gate.prompt && (
+              <Text dimColor>   {truncateText(gate.prompt, labelWidth)}</Text>
+            )}
+          </Box>
         );
       })}
-      {gates.length > 0 && (
-        <Text dimColor>  [a]pprove [s]kip [r]etry</Text>
-      )}
+      <Text dimColor>  [a]pprove [s]kip [r]etry</Text>
     </>
   );
 

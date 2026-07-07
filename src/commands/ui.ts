@@ -8,6 +8,10 @@ export function registerUi(program: Command): void {
       const { render } = await import('ink');
       const { App } = await import('../ui/App.js');
       const React = (await import('react')).default;
-      render(React.createElement(App));
+      const { startTelegramPoller, stopTelegramPoller } = await import('../core/notify/telegram-poller.js');
+      startTelegramPoller();
+      const instance = render(React.createElement(App));
+      await instance.waitUntilExit();
+      stopTelegramPoller();
     });
 }

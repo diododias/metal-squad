@@ -68,7 +68,15 @@ vi.mock('../../src/db/index.js', () => ({
 }));
 
 vi.mock('ink', () => ({
-  render: mockRender,
+  render: (...args: unknown[]) => {
+    mockRender(...args);
+    return { waitUntilExit: () => Promise.resolve() };
+  },
+}));
+
+vi.mock('../../src/core/notify/telegram-poller.js', () => ({
+  startTelegramPoller: vi.fn(),
+  stopTelegramPoller: vi.fn(),
 }));
 
 describe('commands', () => {
