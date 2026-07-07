@@ -66,6 +66,7 @@ export const ConfigSchema = z.object({
   toolTimeoutMs: z.number().int().positive().default(600_000),
   staleRunThresholdMinutes: z.number().int().positive().default(120),
   promptContextCharLimit: z.number().int().positive().default(20_000),
+  theme: z.string().trim().min(1).optional(),
   telegramChatId: z.string().optional(),
   notifications: NotificationsConfig.default({}),
   workflow: WorkflowConfig.default({}),

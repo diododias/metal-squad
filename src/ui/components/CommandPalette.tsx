@@ -2,6 +2,8 @@ import React from 'react';
 import { Box, Text, useInput } from 'ink';
 import type { CommandCategory } from '../types/commands.js';
 import type { CommandPaletteState } from '../hooks/useCommandPalette.js';
+import { useTheme } from '../theme/context.js';
+import { getSurfaceBorderStyle, getSurfaceTitleStyle } from '../theme/styles.js';
 
 interface Props {
   state: CommandPaletteState;
@@ -35,6 +37,7 @@ export function CommandPalette({
   onSelectNext,
   onQueryChange,
 }: Props): React.ReactElement | null {
+  const theme = useTheme();
   useInput(
     (input, key) => {
       if (!state.isOpen) return;
@@ -88,12 +91,12 @@ export function CommandPalette({
 
   return (
     <Box position="absolute" flexDirection="column" marginTop={2} marginLeft={2}>
-      <Box borderStyle="round" borderColor="cyan" paddingX={1} width={paletteWidth} flexDirection="column">
-        <Text color="cyan" bold>Command Palette</Text>
-        <Text dimColor>{state.query ? `> ${state.query}` : '> Type to search commands'}</Text>
+      <Box borderStyle="round" {...getSurfaceBorderStyle(theme, { active: true })} paddingX={1} width={paletteWidth} flexDirection="column">
+        <Text {...getSurfaceTitleStyle(theme, true)}>Command Palette</Text>
+        <Text {...theme.role('muted')}>{state.query ? `> ${state.query}` : '> Type to search commands'}</Text>
         <Box marginTop={1} flexDirection="column">
           {state.filteredCommands.length === 0 ? (
-            <Text dimColor>No commands found for this query.</Text>
+            <Text {...theme.role('muted')}>No commands found for this query.</Text>
           ) : (
             CATEGORY_ORDER.map((category) => {
               const commands = categoryBuckets.get(category) ?? [];
@@ -101,15 +104,15 @@ export function CommandPalette({
 
               return (
                 <Box key={category} flexDirection="column" marginBottom={1}>
-                  <Text color="yellow">{CATEGORY_LABELS[category]}</Text>
+                  <Text {...theme.role('warning')}>{CATEGORY_LABELS[category]}</Text>
                   {commands.map((command) => {
                     const selected = state.filteredCommands[state.selectedIndex]?.id === command.id;
                     return (
                       <Box key={command.id}>
-                        <Text color={selected ? 'cyan' : undefined} bold={selected}>
+                        <Text {...(selected ? theme.role('focus') : theme.role('text'))} bold={selected}>
                           {selected ? '>' : ' '} {command.name}
                         </Text>
-                        {command.shortcut ? <Text dimColor>{`  [${command.shortcut}]`}</Text> : null}
+                        {command.shortcut ? <Text {...theme.role('muted')}>{`  [${command.shortcut}]`}</Text> : null}
                       </Box>
                     );
                   })}
@@ -118,7 +121,7 @@ export function CommandPalette({
             })
           )}
         </Box>
-        <Text dimColor>Ctrl+P or : open  Enter execute  Esc close  j/k navigate</Text>
+        <Text {...theme.role('muted')}>Ctrl+P or : open  Enter execute  Esc close  j/k navigate</Text>
       </Box>
     </Box>
   );

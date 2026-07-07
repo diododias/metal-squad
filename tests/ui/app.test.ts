@@ -260,6 +260,33 @@ describe('App', () => {
     expect(commandBar?.props.hasRuns).toBe(false);
   });
 
+  it('passes the resolved theme notice to the status bar when the configured theme is unknown', async () => {
+    mockLoadConfig.mockReturnValue({ concurrency: 3, theme: 'solarized' });
+    const { App } = await import('../../src/ui/App.js');
+
+    const element = App();
+    const rootChildren = (element.props as { children: React.ReactNode }).children;
+    const statusBar = findElement(rootChildren, mockStatusBar);
+
+    expect(statusBar?.props.themeNotice).toContain('solarized');
+    expect(statusBar?.props.themeNotice).toContain('default');
+    expect(mockEventBusEmit).toHaveBeenCalledWith('ui:notice', {
+      message: 'Theme "solarized" is not supported. Using "default".',
+    });
+  });
+
+  it('does not emit a fallback notice when the configured theme is supported', async () => {
+    mockLoadConfig.mockReturnValue({ concurrency: 3, theme: 'dark' });
+    const { App } = await import('../../src/ui/App.js');
+
+    const element = App();
+    const rootChildren = (element.props as { children: React.ReactNode }).children;
+    const statusBar = findElement(rootChildren, mockStatusBar);
+
+    expect(statusBar?.props.themeNotice).toBeNull();
+    expect(mockEventBusEmit).not.toHaveBeenCalledWith('ui:notice', expect.anything());
+  });
+
   it('passes selected run metadata to child panels', async () => {
     mockUseRuns.mockReturnValue([{
       runId: 1,

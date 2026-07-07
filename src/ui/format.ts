@@ -1,4 +1,5 @@
 import type { RunSummary } from '../db/repo.js';
+import type { RunStatusTone } from './theme/types.js';
 
 export { PRICING, estimateCost } from '../core/budget/pricing.js';
 
@@ -13,13 +14,17 @@ export const STATUS_ICON: Record<RunStatus, string> = {
   aborted: '■',
 };
 
-export const STATUS_COLOR: Record<RunStatus, string> = {
-  running: 'cyan',
-  done: 'green',
-  failed: 'red',
-  blocked: 'yellow',
-  aborted: 'magenta',
+export const STATUS_TONE: Record<RunStatus, RunStatusTone> = {
+  running: 'running',
+  done: 'done',
+  failed: 'failed',
+  blocked: 'blocked',
+  aborted: 'aborted',
 };
+
+export function getRunStatusTone(status: RunStatus): RunStatusTone {
+  return STATUS_TONE[status];
+}
 
 export function formatElapsed(startedAt: string, endedAt: string | null): string {
   const start = parseTimestampMs(startedAt);

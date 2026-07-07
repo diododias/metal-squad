@@ -542,6 +542,7 @@ It is created automatically on first run.
   "toolTimeoutMs": 600000,
   "staleRunThresholdMinutes": 120,
   "promptContextCharLimit": 20000,
+  "theme": "default",
   "telegramChatId": "123456789",
   "notifications": {
     "channels": [
@@ -583,6 +584,7 @@ It is created automatically on first run.
 - `toolTimeoutMs`: adapter timeout floor for tools that use it
 - `staleRunThresholdMinutes`: used by `msq status --repair-stale`
 - `promptContextCharLimit`: max chars per context section injected into prompts
+- `theme`: optional built-in TUI theme name: `default`, `dark`, `light`, or `minimal`
 - `telegramChatId`: legacy shortcut for a Telegram notification destination
 - `notifications.channels`: preferred notification routing
 - `notifications.events`: which events should be emitted
@@ -645,6 +647,10 @@ Start it with:
 ```bash
 msq ui
 ```
+
+The optional `theme` config changes the built-in TUI palette on the next
+startup. If the configured value is unknown, `msq ui` falls back to `default`
+and shows a notice in the UI instead of failing startup.
 
 Main capabilities:
 

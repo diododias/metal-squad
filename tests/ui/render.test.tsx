@@ -9,9 +9,19 @@ import { RunTable } from '../../src/ui/components/RunTable.js';
 import { NotificationsFeed } from '../../src/ui/components/NotificationsFeed.js';
 import { StatusBar } from '../../src/ui/components/StatusBar.js';
 import { CommandPalette } from '../../src/ui/components/CommandPalette.js';
+import { ThemeProvider } from '../../src/ui/theme/context.js';
+import { resolveThemePreference } from '../../src/ui/theme/resolve.js';
 import type { RunSummary } from '../../src/db/repo.js';
 
 afterEach(() => cleanup());
+
+function renderWithTheme(node: React.ReactElement, theme = 'default') {
+  return render(
+    <ThemeProvider resolution={resolveThemePreference(theme)}>
+      {node}
+    </ThemeProvider>,
+  );
+}
 
 // Ink uses useInput to attach stdin listeners; isolate by mocking it where the
 // component owns its own input handling (CommandPalette) so tests don't compete
@@ -49,7 +59,7 @@ const baseRun: RunSummary = {
 // ---------------------------------------------------------------------------
 describe('EmptyState', () => {
   it('renders the idle message', () => {
-    const { lastFrame } = render(<EmptyState />);
+    const { lastFrame } = renderWithTheme(<EmptyState />);
     expect(lastFrame()).toContain('No runs yet');
     expect(lastFrame()).toContain('msq run');
   });
@@ -72,19 +82,19 @@ describe('CommandBar', () => {
   };
 
   it('always shows tab and quit', () => {
-    const { lastFrame } = render(<CommandBar {...base} />);
+    const { lastFrame } = renderWithTheme(<CommandBar {...base} />);
     expect(lastFrame()).toContain('tab panel');
     expect(lastFrame()).toContain('q quit');
   });
 
   it('shows j/k and enter when there are runs', () => {
-    const { lastFrame } = render(<CommandBar {...base} hasRuns />);
+    const { lastFrame } = renderWithTheme(<CommandBar {...base} hasRuns />);
     expect(lastFrame()).toContain('j/k move');
     expect(lastFrame()).toContain('enter open');
   });
 
   it('shows gate actions when gates panel is focused', () => {
-    const { lastFrame } = render(
+    const { lastFrame } = renderWithTheme(
       <CommandBar {...base} hasRuns hasGates focusPanel="gates" />
     );
     expect(lastFrame()).toContain('a approve');
@@ -93,7 +103,7 @@ describe('CommandBar', () => {
   });
 
   it('shows run-detail shortcuts in run view', () => {
-    const { lastFrame } = render(
+    const { lastFrame } = renderWithTheme(
       <CommandBar {...base} hasRuns activeView="run" />
     );
     expect(lastFrame()).toContain('esc overview');
@@ -101,13 +111,13 @@ describe('CommandBar', () => {
   });
 
   it('shows dashboard shortcuts when dashboardOpen', () => {
-    const { lastFrame } = render(<CommandBar {...base} dashboardOpen />);
+    const { lastFrame } = renderWithTheme(<CommandBar {...base} dashboardOpen />);
     expect(lastFrame()).toContain('[/] period');
     expect(lastFrame()).toContain('d close');
   });
 
   it('shows notifications shortcuts in notifications view', () => {
-    const { lastFrame } = render(
+    const { lastFrame } = renderWithTheme(
       <CommandBar {...base} activeView="notifications" />
     );
     expect(lastFrame()).toContain('o close');
@@ -115,7 +125,7 @@ describe('CommandBar', () => {
   });
 
   it('shows pending shortcuts when hasPending', () => {
-    const { lastFrame } = render(<CommandBar {...base} hasPending />);
+    const { lastFrame } = renderWithTheme(<CommandBar {...base} hasPending />);
     expect(lastFrame()).toContain('n start');
     expect(lastFrame()).toContain('↑/↓ select');
   });
@@ -131,7 +141,7 @@ describe('GatePanel', () => {
   ];
 
   it('renders the header and shortcut hints', () => {
-    const { lastFrame } = render(<GatePanel gates={gates} selectedIndex={0} />);
+    const { lastFrame } = renderWithTheme(<GatePanel gates={gates} selectedIndex={0} />);
     expect(lastFrame()).toContain('Gates awaiting decision');
     expect(lastFrame()).toContain('[a]pprove');
     expect(lastFrame()).toContain('[s]kip');
@@ -139,18 +149,18 @@ describe('GatePanel', () => {
   });
 
   it('prefixes the selected gate with the ▶ indicator', () => {
-    const { lastFrame } = render(<GatePanel gates={gates} selectedIndex={0} />);
+    const { lastFrame } = renderWithTheme(<GatePanel gates={gates} selectedIndex={0} />);
     expect(lastFrame()).toContain('▶ feat-1');
   });
 
   it('moves the ▶ indicator when selection changes', () => {
-    const { lastFrame } = render(<GatePanel gates={gates} selectedIndex={1} />);
+    const { lastFrame } = renderWithTheme(<GatePanel gates={gates} selectedIndex={1} />);
     expect(lastFrame()).toContain('▶ feat-2');
     expect(lastFrame()).not.toContain('▶ feat-1');
   });
 
   it('renders all gate feature ids', () => {
-    const { lastFrame } = render(<GatePanel gates={gates} selectedIndex={0} />);
+    const { lastFrame } = renderWithTheme(<GatePanel gates={gates} selectedIndex={0} />);
     expect(lastFrame()).toContain('feat-1');
     expect(lastFrame()).toContain('feat-2');
   });
@@ -166,7 +176,7 @@ describe('RunTable', () => {
   ];
 
   it('renders full header row at wide width', () => {
-    const { lastFrame } = render(<RunTable runs={runs} width={120} />);
+    const { lastFrame } = renderWithTheme(<RunTable runs={runs} width={120} />);
     expect(lastFrame()).toContain('feature_id');
     expect(lastFrame()).toContain('tool');
     expect(lastFrame()).toContain('status');
@@ -175,7 +185,7 @@ describe('RunTable', () => {
   });
 
   it('renders compact header at narrow width', () => {
-    const { lastFrame } = render(<RunTable runs={runs} width={50} />);
+    const { lastFrame } = renderWithTheme(<RunTable runs={runs} width={50} />);
     expect(lastFrame()).toContain('feature_id');
     expect(lastFrame()).toContain('status');
     expect(lastFrame()).not.toContain('duration');
@@ -183,12 +193,12 @@ describe('RunTable', () => {
   });
 
   it('marks the selected row with > indicator', () => {
-    const { lastFrame } = render(<RunTable runs={runs} width={120} selectedIndex={0} isFocused />);
+    const { lastFrame } = renderWithTheme(<RunTable runs={runs} width={120} selectedIndex={0} isFocused />);
     expect(lastFrame()).toContain('> feat-alpha');
   });
 
   it('shows all feature ids', () => {
-    const { lastFrame } = render(<RunTable runs={runs} width={120} />);
+    const { lastFrame } = renderWithTheme(<RunTable runs={runs} width={120} />);
     expect(lastFrame()).toContain('feat-alpha');
     expect(lastFrame()).toContain('feat-beta');
   });
@@ -205,7 +215,7 @@ describe('NotificationsFeed', () => {
   ];
 
   it('renders notification messages', () => {
-    const { lastFrame } = render(
+    const { lastFrame } = renderWithTheme(
       <NotificationsFeed notifications={notifications} width={80} />
     );
     expect(lastFrame()).toContain('feat-1 started');
@@ -213,21 +223,21 @@ describe('NotificationsFeed', () => {
   });
 
   it('shows empty state when no notifications', () => {
-    const { lastFrame } = render(
+    const { lastFrame } = renderWithTheme(
       <NotificationsFeed notifications={[]} width={80} />
     );
     expect(lastFrame()).toContain('No recent notifications');
   });
 
   it('truncates to maxVisible and shows overflow count in compact mode', () => {
-    const { lastFrame } = render(
+    const { lastFrame } = renderWithTheme(
       <NotificationsFeed notifications={notifications} maxVisible={1} width={80} compact />
     );
     expect(lastFrame()).toContain('+2 more');
   });
 
   it('shows event type labels', () => {
-    const { lastFrame } = render(
+    const { lastFrame } = renderWithTheme(
       <NotificationsFeed notifications={notifications} width={80} />
     );
     expect(lastFrame()).toContain('RUN');
@@ -249,13 +259,13 @@ describe('StatusBar', () => {
   };
 
   it('renders idle state with 0/0 progress', () => {
-    const { lastFrame } = render(<StatusBar {...base} />);
+    const { lastFrame } = renderWithTheme(<StatusBar {...base} />);
     expect(lastFrame()).toContain('Idle');
     expect(lastFrame()).toContain('0/0 done');
   });
 
   it('renders feature id and tool when a run is selected', () => {
-    const { lastFrame } = render(
+    const { lastFrame } = renderWithTheme(
       <StatusBar
         {...base}
         selectedRun={baseRun}
@@ -269,14 +279,14 @@ describe('StatusBar', () => {
   });
 
   it('renders gate count when gates are open', () => {
-    const { lastFrame } = render(
+    const { lastFrame } = renderWithTheme(
       <StatusBar {...base} gateCount={2} />
     );
     expect(lastFrame()).toContain('2 gates open');
   });
 
   it('renders shortcut hints when provided', () => {
-    const { lastFrame } = render(
+    const { lastFrame } = renderWithTheme(
       <StatusBar {...base} shortcutHints={['a:approve', 's:skip', 'esc:back']} />
     );
     expect(lastFrame()).toContain('a:approve');
@@ -285,10 +295,22 @@ describe('StatusBar', () => {
   });
 
   it('renders current stage next to feature id', () => {
-    const { lastFrame } = render(
+    const { lastFrame } = renderWithTheme(
       <StatusBar {...base} selectedRun={baseRun} currentStage="implement" />
     );
     expect(lastFrame()).toContain('feat-1 > implement');
+  });
+
+  it('renders the fallback theme notice when provided', () => {
+    const { lastFrame } = renderWithTheme(
+      <StatusBar
+        {...base}
+        themeNotice={'Theme "solarized" is not supported. Using "default".'}
+      />,
+      'minimal',
+    );
+    expect(lastFrame()).toContain('solarized');
+    expect(lastFrame()).toContain('default');
   });
 });
 
@@ -316,7 +338,7 @@ describe('CommandPalette', () => {
   };
 
   it('renders nothing when closed', () => {
-    const { lastFrame } = render(
+    const { lastFrame } = renderWithTheme(
       <CommandPalette state={closedState} width={120} {...noopHandlers} />
     );
     expect(lastFrame()).toBe('');

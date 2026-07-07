@@ -40,6 +40,7 @@ describe('config', () => {
       toolTimeoutMs: 600_000,
       staleRunThresholdMinutes: 120,
       promptContextCharLimit: 20_000,
+      theme: undefined,
       stageSkills: {},
       notifications: DEFAULT_NOTIFICATIONS,
       workflow: DEFAULT_WORKFLOW,
@@ -58,10 +59,12 @@ describe('config', () => {
       toolTimeoutMs: 1_000,
       staleRunThresholdMinutes: 30,
       promptContextCharLimit: 10_000,
+      theme: 'dark',
       telegramChatId: '123',
       notifications: DEFAULT_NOTIFICATIONS,
       workflow: DEFAULT_WORKFLOW,
       budget: DEFAULT_BUDGET,
+      stageSkills: {},
     });
 
     expect(existsSync(CONFIG_PATH)).toBe(true);
@@ -70,10 +73,12 @@ describe('config', () => {
       toolTimeoutMs: 1_000,
       staleRunThresholdMinutes: 30,
       promptContextCharLimit: 10_000,
+      theme: 'dark',
       telegramChatId: '123',
       notifications: DEFAULT_NOTIFICATIONS,
       workflow: DEFAULT_WORKFLOW,
       budget: DEFAULT_BUDGET,
+      stageSkills: {},
     });
   });
 
@@ -88,9 +93,11 @@ describe('config', () => {
       toolTimeoutMs: 999,
       staleRunThresholdMinutes: 45,
       promptContextCharLimit: 15_000,
+      theme: 'minimal',
       notifications: DEFAULT_NOTIFICATIONS,
       workflow: DEFAULT_WORKFLOW,
       budget: DEFAULT_BUDGET,
+      stageSkills: {},
     });
     ensureDataDir();
 
@@ -99,6 +106,7 @@ describe('config', () => {
       toolTimeoutMs: 999,
       staleRunThresholdMinutes: 45,
       promptContextCharLimit: 15_000,
+      theme: 'minimal',
       stageSkills: {},
       notifications: DEFAULT_NOTIFICATIONS,
       workflow: DEFAULT_WORKFLOW,
@@ -151,5 +159,40 @@ describe('config', () => {
     });
 
     expect(loadConfig().notifications.events).toEqual(DEFAULT_NOTIFICATIONS.events);
+  });
+
+  it('keeps theme undefined when the preference is missing', async () => {
+    home = mkdtempSync(join(tmpdir(), 'msq-config-'));
+    process.env.HOME = home;
+
+    const { loadConfig } = await import('../../src/config/index.js');
+
+    expect(loadConfig().theme).toBeUndefined();
+  });
+
+  it('loads a valid persisted theme preference', async () => {
+    home = mkdtempSync(join(tmpdir(), 'msq-config-'));
+    process.env.HOME = home;
+
+    const { CONFIG_PATH, loadConfig } = await import('../../src/config/index.js');
+    await import('node:fs').then(({ mkdirSync, writeFileSync }) => {
+      mkdirSync(join(home, '.config', 'metal-squad'), { recursive: true });
+      writeFileSync(CONFIG_PATH, JSON.stringify({ theme: 'dark' }));
+    });
+
+    expect(loadConfig().theme).toBe('dark');
+  });
+
+  it('preserves an unknown theme preference so startup can fall back safely', async () => {
+    home = mkdtempSync(join(tmpdir(), 'msq-config-'));
+    process.env.HOME = home;
+
+    const { CONFIG_PATH, loadConfig } = await import('../../src/config/index.js');
+    await import('node:fs').then(({ mkdirSync, writeFileSync }) => {
+      mkdirSync(join(home, '.config', 'metal-squad'), { recursive: true });
+      writeFileSync(CONFIG_PATH, JSON.stringify({ theme: 'solarized' }));
+    });
+
+    expect(loadConfig().theme).toBe('solarized');
   });
 });

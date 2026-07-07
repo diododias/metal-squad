@@ -1,6 +1,8 @@
 import React from 'react';
 import { Box, Text, useInput } from 'ink';
 import type { KeyboardShortcut } from '../types/shortcuts.js';
+import { useTheme } from '../theme/context.js';
+import { getSurfaceBorderStyle, getSurfaceTitleStyle, mergeInkStyles } from '../theme/styles.js';
 
 interface Props {
   isOpen: boolean;
@@ -11,13 +13,23 @@ interface Props {
   onOpenPalette: () => void;
 }
 
-function renderShortcutLine(shortcut: KeyboardShortcut, activeContext: string): React.ReactElement {
+function renderShortcutLine(
+  theme: ReturnType<typeof useTheme>,
+  shortcut: KeyboardShortcut,
+  activeContext: string,
+): React.ReactElement {
   const available = !shortcut.condition || shortcut.condition();
   const active = shortcut.scope === 'context' && shortcut.context === activeContext;
   const prefix = active ? '* ' : '  ';
 
   return (
-    <Text key={`${shortcut.scope}:${shortcut.context ?? 'global'}:${shortcut.key}`} color={active ? 'cyan' : undefined} dimColor={!available}>
+    <Text
+      key={`${shortcut.scope}:${shortcut.context ?? 'global'}:${shortcut.key}`}
+      {...mergeInkStyles(
+        active ? theme.role('focus') : theme.role('text'),
+        !available ? theme.role('muted') : undefined,
+      )}
+    >
       {prefix}
       {shortcut.key.padEnd(8)}
       {shortcut.label}
@@ -33,6 +45,7 @@ export function HelpOverlay({
   onClose,
   onOpenPalette,
 }: Props): React.ReactElement | null {
+  const theme = useTheme();
   useInput(
     (input, key) => {
       if (!isOpen) return;
@@ -60,30 +73,30 @@ export function HelpOverlay({
 
   return (
     <Box position="absolute" flexDirection="column" marginTop={2} marginLeft={4}>
-      <Box borderStyle="round" borderColor="yellow" paddingX={1} width={overlayWidth} flexDirection="column">
-        <Text color="yellow" bold>Keyboard Shortcuts</Text>
-        <Text dimColor>Current context: {currentContext}</Text>
+      <Box borderStyle="round" {...getSurfaceBorderStyle(theme, { active: true, role: 'warning' })} paddingX={1} width={overlayWidth} flexDirection="column">
+        <Text {...getSurfaceTitleStyle(theme, true)}>Keyboard Shortcuts</Text>
+        <Text {...theme.role('muted')}>Current context: {currentContext}</Text>
         <Box marginTop={1} flexDirection="column">
-          <Text bold>Global</Text>
-          {globalShortcuts.map((shortcut) => renderShortcutLine(shortcut, currentContext))}
+          <Text {...theme.role('text')} bold>Global</Text>
+          {globalShortcuts.map((shortcut) => renderShortcutLine(theme, shortcut, currentContext))}
         </Box>
         <Box marginTop={1} flexDirection="column">
-          <Text bold color="cyan">Context</Text>
+          <Text {...theme.role('primary')} bold>Context</Text>
           {activeContextShortcuts.length > 0 ? (
-            activeContextShortcuts.map((shortcut) => renderShortcutLine(shortcut, currentContext))
+            activeContextShortcuts.map((shortcut) => renderShortcutLine(theme, shortcut, currentContext))
           ) : (
-            <Text dimColor>  No context-specific shortcuts active here.</Text>
+            <Text {...theme.role('muted')}>  No context-specific shortcuts active here.</Text>
           )}
         </Box>
         {contextShortcuts.length > activeContextShortcuts.length ? (
           <Box marginTop={1} flexDirection="column">
-            <Text bold>Other contexts</Text>
+            <Text {...theme.role('text')} bold>Other contexts</Text>
             {contextShortcuts
               .filter((shortcut) => shortcut.context !== currentContext)
-              .map((shortcut) => renderShortcutLine(shortcut, currentContext))}
+              .map((shortcut) => renderShortcutLine(theme, shortcut, currentContext))}
           </Box>
         ) : null}
-        <Text dimColor>?: close help  Esc: close help  Ctrl+P or : open palette</Text>
+        <Text {...theme.role('muted')}>?: close help  Esc: close help  Ctrl+P or : open palette</Text>
       </Box>
     </Box>
   );
