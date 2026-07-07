@@ -21,9 +21,10 @@ import { MainPanel } from './components/MainPanel.js';
 import { Sidebar } from './components/Sidebar.js';
 import { StatusBar } from './components/StatusBar.js';
 import { getLayoutMode } from './format.js';
+import type { PendingApproval } from './hooks/useGates.js';
+import type { ActiveView } from './components/MainPanel.js';
 
 type FocusPanel = 'runs' | 'gates' | 'main';
-type ActiveView = 'overview' | 'run';
 
 interface UiState {
   selectedRun: number;
@@ -92,7 +93,7 @@ function launchFeatureRun(featureId: string): void {
 export function App(): React.ReactElement {
   const runs = useRuns(2000);
   const { gates, resolve } = useGates(2000);
-  const notifications = useNotifications(12);
+  const notifications = useNotifications(40);
   const width = useTerminalWidth();
   const [ui, setUi] = useState<UiState>({
     selectedRun: 0,
@@ -118,7 +119,11 @@ export function App(): React.ReactElement {
     selectedRun?.startedAt ?? null,
     selectedRun?.endedAt ?? null,
   );
-  const activeView: ActiveView = selectedRun ? ui.activeView : 'overview';
+  const activeView: ActiveView = ui.activeView === 'notifications'
+    ? 'notifications'
+    : selectedRun
+      ? ui.activeView
+      : 'overview';
   const dashboardOpen = Boolean(ui.dashboard);
   const dashboardPeriodIndex = Math.min(ui.dashboardPeriod ?? 1, DASHBOARD_PERIODS.length - 1);
   const dashboardPeriod = DASHBOARD_PERIODS[dashboardPeriodIndex] ?? DASHBOARD_PERIODS[1]!;
@@ -130,7 +135,7 @@ export function App(): React.ReactElement {
   const currentStage = taskRuns.find((t) => t.status === 'running')?.stage
     ?? selectedRun?.pipelineCurrentStage
     ?? undefined;
-  const sidebarWidth = layoutMode === 'full' ? 34 : layoutMode === 'compact' ? 28 : width - 2;
+  const sidebarWidth = layoutMode === 'full' ? 42 : layoutMode === 'compact' ? 36 : width - 2;
   const mainWidth = layoutMode === 'stacked' ? width - 2 : Math.max(38, width - sidebarWidth - 5);
   const canPause = Boolean(selectedRun?.pipelineId && selectedRun.pipelineStatus === 'running');
   const canResume = Boolean(selectedRun?.pipelineId && selectedRun.pipelineStatus === 'paused');
@@ -164,6 +169,15 @@ export function App(): React.ReactElement {
       return;
     }
 
+    if (_input === 'o') {
+      setUi((current) => ({
+        ...current,
+        activeView: current.activeView === 'notifications' ? 'overview' : 'notifications',
+        focusPanel: 'main',
+      }));
+      return;
+    }
+
     if (_input === 'd') {
       setUi((current) => ({ ...current, dashboard: !current.dashboard }));
       return;
@@ -179,6 +193,7 @@ export function App(): React.ReactElement {
     }
 
     if (dashboardOpen) return;
+    if (activeView === 'notifications') return;
 
     if (key.ctrl && _input.toLowerCase() === 's' && selectedRun && activeView === 'run') {
       setUi((current) => ({ ...current, outputPaused: !current.outputPaused }));
@@ -261,11 +276,20 @@ export function App(): React.ReactElement {
     if (focusPanel === 'gates' && gates.length > 0) {
       const gate = gates[selectedGateIndex];
       if (_input === 'a') {
-        if (gate) resolve(gate, gate.kind === 'stage' ? 'advance' : 'approved');
+        if (gate) {
+          resolve(gate, gate.kind === 'stage' ? 'advance' : 'approved');
+          announceGateDecision(gate, 'approved');
+        }
       } else if (_input === 's') {
-        if (gate) resolve(gate, gate.kind === 'stage' ? 'hold' : 'skipped');
+        if (gate) {
+          resolve(gate, gate.kind === 'stage' ? 'hold' : 'skipped');
+          announceGateDecision(gate, gate.kind === 'stage' ? 'hold' : 'skipped');
+        }
       } else if (_input === 'r') {
-        if (gate) resolve(gate, 'retried');
+        if (gate) {
+          resolve(gate, 'retried');
+          announceGateDecision(gate, 'retried');
+        }
       }
     }
   });
@@ -302,6 +326,8 @@ export function App(): React.ReactElement {
           pendingFeatures={pendingFeatures}
           selectedPendingIndex={selectedPendingIndex}
           breakdown={runBreakdown}
+          taskRuns={taskRuns}
+          notifications={notifications}
         />
         <Sidebar
           runs={runs}
@@ -310,6 +336,7 @@ export function App(): React.ReactElement {
           selectedRunIndex={selectedRunIndex}
           selectedGateIndex={selectedGateIndex}
           focusPanel={focusPanel}
+          activeView={activeView}
           skills={selectedFeature?.skills ?? []}
           taskRuns={taskRuns}
           width={sidebarWidth}
@@ -325,6 +352,7 @@ export function App(): React.ReactElement {
         doneRuns={doneRuns}
         width={width}
         currentStage={currentStage}
+        activeView={activeView}
       />
       <CommandBar
         activeView={activeView}
@@ -340,4 +368,18 @@ export function App(): React.ReactElement {
       />
     </Box>
   );
+}
+
+function announceGateDecision(gate: PendingApproval, decision: 'approved' | 'skipped' | 'retried' | 'hold'): void {
+  if (gate.kind === 'stage') {
+    const message = decision === 'approved'
+      ? `${gate.featureId} approval accepted`
+      : decision === 'hold'
+        ? `${gate.featureId} kept on hold; approval will remain pending`
+        : `${gate.featureId} approval ${decision}`;
+    msqEventBus.emit('ui:info', { message });
+    return;
+  }
+
+  msqEventBus.emit('ui:info', { message: `${gate.featureId} gate ${decision}` });
 }

@@ -31,6 +31,8 @@ export function CommandBar({
 }: Props): React.ReactElement {
   const actions = dashboardOpen
     ? ['[/] period', 'd close', 'esc close', 'q quit']
+    : activeView === 'notifications'
+      ? ['o close', 'esc overview', 'tab panel', 'q quit']
     : [
     'tab panel',
     hasRuns ? 'j/k move' : '',
@@ -45,6 +47,7 @@ export function CommandBar({
     hasGates && focusPanel === 'gates' ? 'a approve' : '',
     hasGates && focusPanel === 'gates' ? 's skip' : '',
     hasGates && focusPanel === 'gates' ? 'r retry' : '',
+    'o notifications',
     'd dashboard',
     'q quit',
   ].filter(Boolean);
