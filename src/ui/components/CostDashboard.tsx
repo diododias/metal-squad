@@ -1,12 +1,14 @@
 import React from 'react';
 import { Box, Text } from 'ink';
-import type { StatsRunRow } from '../../db/repo.js';
+import type { RunSummary, StatsRunRow } from '../../db/repo.js';
 import {
   aggregateCosts,
   formatTokensCompact,
   renderUsageBar,
 } from '../../core/stats.js';
-import { truncateText } from '../format.js';
+import { getRunStatusTone, truncateText } from '../format.js';
+import { useTheme } from '../theme/context.js';
+import { getSurfaceBorderStyle, getSurfaceTitleStyle } from '../theme/styles.js';
 
 interface Props {
   rows: StatsRunRow[];
@@ -17,6 +19,7 @@ interface Props {
 const MAX_FEATURES = 8;
 
 export function CostDashboard({ rows, periodLabel, width }: Props): React.ReactElement {
+  const theme = useTheme();
   const innerWidth = Math.max(40, width - 4);
   const aggregates = aggregateCosts(rows);
   const maxFeatureTokens = aggregates.byFeature[0]?.tokens ?? 0;
@@ -24,24 +27,24 @@ export function CostDashboard({ rows, periodLabel, width }: Props): React.ReactE
   return (
     <Box
       borderStyle="round"
-      borderColor="cyan"
+      {...getSurfaceBorderStyle(theme)}
       paddingX={1}
       flexDirection="column"
       width={width}
     >
-      <Text color="cyan" bold>Token Usage — {periodLabel}</Text>
-      <Text dimColor>Press [ and ] to change period, d or Esc to close.</Text>
+      <Text {...getSurfaceTitleStyle(theme)}>Token Usage — {periodLabel}</Text>
+      <Text {...theme.role('muted')}>Press [ and ] to change period, d or Esc to close.</Text>
 
       {rows.length === 0 ? (
         <Box marginTop={1}>
-          <Text dimColor>No runs recorded for this period.</Text>
+          <Text {...theme.role('muted')}>No runs recorded for this period.</Text>
         </Box>
       ) : (
         <>
           <Box marginTop={1} flexDirection="column">
-            <Text bold>{padColumns(['Repo', 'Tool', 'Runs', 'Tokens', 'Cost'], innerWidth)}</Text>
+            <Text {...theme.role('text')} bold>{padColumns(['Repo', 'Tool', 'Runs', 'Tokens', 'Cost'], innerWidth)}</Text>
             {aggregates.byRepoTool.map((line) => (
-              <Text key={`${line.repoId}-${line.tool}`}>
+              <Text key={`${line.repoId}-${line.tool}`} {...theme.role('text')}>
                 {padColumns([
                   truncateText(line.repoId, 18),
                   line.tool,
@@ -51,7 +54,7 @@ export function CostDashboard({ rows, periodLabel, width }: Props): React.ReactE
                 ], innerWidth)}
               </Text>
             ))}
-            <Text bold>
+            <Text {...theme.role('text')} bold>
               {padColumns([
                 'Total',
                 '',
@@ -63,10 +66,10 @@ export function CostDashboard({ rows, periodLabel, width }: Props): React.ReactE
           </Box>
 
           <Box marginTop={1} flexDirection="column">
-            <Text bold>By feature</Text>
+            <Text {...theme.role('text')} bold>By feature</Text>
             {aggregates.byFeature.slice(0, MAX_FEATURES).map((line) => (
-              <Text key={line.featureId}>
-                <Text color="cyan">{renderUsageBar(line.tokens, maxFeatureTokens)}</Text>
+              <Text key={line.featureId} {...theme.role('text')}>
+                <Text {...theme.role('primary')}>{renderUsageBar(line.tokens, maxFeatureTokens)}</Text>
                 {' '}
                 {truncateText(line.featureId, 22).padEnd(Math.min(22, innerWidth))}
                 {'  '}
@@ -76,14 +79,14 @@ export function CostDashboard({ rows, periodLabel, width }: Props): React.ReactE
               </Text>
             ))}
             {aggregates.byFeature.length > MAX_FEATURES && (
-              <Text dimColor>  +{aggregates.byFeature.length - MAX_FEATURES} more features</Text>
+              <Text {...theme.role('muted')}>  +{aggregates.byFeature.length - MAX_FEATURES} more features</Text>
             )}
           </Box>
 
           <Box marginTop={1} flexDirection="column">
-            <Text bold>By status</Text>
+            <Text {...theme.role('text')} bold>By status</Text>
             {aggregates.byStatus.map((line) => (
-              <Text key={line.status} dimColor>
+              <Text key={line.status} {...theme.statusTone(getRunStatusTone(line.status as RunSummary['status']))}>
                 {`${line.status}`.padEnd(9)} {String(line.runs).padStart(3)} runs
                 {'  '}{formatTokensCompact(line.tokens).padStart(8)}
                 {'  '}{`$${line.costUsd.toFixed(2)}`.padStart(7)}

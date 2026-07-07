@@ -2,19 +2,8 @@ import React from 'react';
 import { Box, Text } from 'ink';
 import { truncateText } from '../format.js';
 import type { NotificationEntry } from '../hooks/useNotifications.js';
-
-const EVENT_COLOR: Record<string, string> = {
-  'run:start': 'cyan',
-  'gate:created': 'yellow',
-  'gate:resolved': 'yellow',
-  'stage:request-created': 'magenta',
-  'stage:request-resolved': 'magenta',
-  'run:failed': 'red',
-  'budget:alert': 'magenta',
-  'run:done': 'green',
-  'ui:info': 'cyan',
-  'ui:notice': 'red',
-};
+import { useTheme } from '../theme/context.js';
+import { getNotificationTone } from '../theme/styles.js';
 
 const EVENT_LABEL: Record<string, string> = {
   'run:start': 'RUN',
@@ -42,6 +31,7 @@ export function NotificationsFeed({
   width,
   compact = false,
 }: Props): React.ReactElement {
+  const theme = useTheme();
   const visible = notifications.slice(0, maxVisible);
   const hiddenCount = Math.max(0, notifications.length - visible.length);
   const contentWidth = Math.max(18, width - 4);
@@ -49,7 +39,7 @@ export function NotificationsFeed({
   return (
     <Box flexDirection="column" width={width}>
       {visible.length === 0 ? (
-        <Text dimColor>No recent notifications.</Text>
+        <Text {...theme.role('muted')}>No recent notifications.</Text>
       ) : (
         visible.map((notification) => (
           <Box
@@ -58,17 +48,17 @@ export function NotificationsFeed({
             marginBottom={compact ? 0 : 1}
             width={width}
           >
-            <Text dimColor>
+            <Text {...theme.role('muted')}>
               {notification.ts}  {EVENT_LABEL[notification.event] ?? notification.event.toUpperCase()}
             </Text>
-            <Text color={EVENT_COLOR[notification.event] ?? 'white'}>
+            <Text {...theme.notificationTone(getNotificationTone(notification.event))}>
               {compact ? truncateText(notification.message, contentWidth) : notification.message}
             </Text>
           </Box>
         ))
       )}
       {compact && hiddenCount > 0 && (
-        <Text dimColor>+{hiddenCount} more. Press o to open the full feed.</Text>
+        <Text {...theme.role('muted')}>+{hiddenCount} more. Press o to open the full feed.</Text>
       )}
     </Box>
   );

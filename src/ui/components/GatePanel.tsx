@@ -1,6 +1,7 @@
 import React from 'react';
 import { Box, Text } from 'ink';
 import type { GateRow } from '../../db/repo.js';
+import { useTheme } from '../theme/context.js';
 
 interface Props {
   gates: GateRow[];
@@ -8,15 +9,16 @@ interface Props {
 }
 
 export function GatePanel({ gates, selectedIndex }: Props): React.ReactElement {
+  const theme = useTheme();
   return (
     <Box flexDirection="column" marginTop={1}>
-      <Text color="yellow" bold>⊘ Gates awaiting decision</Text>
-      <Text dimColor>  [a]pprove  [s]kip  [r]etry  ↑↓ navigate</Text>
+      <Text {...theme.role('warning')} bold>⊘ Gates awaiting decision</Text>
+      <Text {...theme.role('muted')}>  [a]pprove  [s]kip  [r]etry  ↑↓ navigate</Text>
       {gates.map((gate, i) => {
         const isSelected = i === selectedIndex;
         return (
           <Box key={gate.id} marginTop={0}>
-            <Text color={isSelected ? 'yellow' : undefined} bold={isSelected}>
+            <Text {...(isSelected ? theme.role('warning') : theme.role('text'))} bold={isSelected}>
               {isSelected ? '▶ ' : '  '}
               {gate.featureId} ({gate.repoId})
             </Text>

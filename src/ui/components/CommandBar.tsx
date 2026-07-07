@@ -3,6 +3,7 @@ import { Box, Text } from 'ink';
 import type { ActiveView } from './MainPanel.js';
 import type { FocusPanel } from './Sidebar.js';
 import { truncateText } from '../format.js';
+import { useTheme } from '../theme/context.js';
 
 interface Props {
   activeView: ActiveView;
@@ -29,6 +30,7 @@ export function CommandBar({
   dashboardOpen,
   width,
 }: Props): React.ReactElement {
+  const theme = useTheme();
   const actions = dashboardOpen
     ? ['[/] period', 'd close', 'esc close', 'q quit']
     : activeView === 'notifications'
@@ -54,7 +56,7 @@ export function CommandBar({
 
   return (
     <Box marginTop={1}>
-      <Text dimColor>{truncateText(actions.join('  |  '), Math.max(24, width - 2))}</Text>
+      <Text {...theme.role('muted')}>{truncateText(actions.join('  |  '), Math.max(24, width - 2))}</Text>
     </Box>
   );
 }

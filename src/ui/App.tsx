@@ -33,6 +33,9 @@ import { useRuns, useTaskRuns } from './hooks/useRuns.js';
 import { useStatsRows } from './hooks/useStatsRows.js';
 import { useTerminalWidth } from './hooks/useTerminalWidth.js';
 import type { ActiveView } from './components/MainPanel.js';
+import { ThemeProvider } from './theme/context.js';
+import { resolveThemePreference } from './theme/resolve.js';
+import { mergeInkStyles } from './theme/styles.js';
 
 type FocusPanel = 'runs' | 'gates' | 'main';
 type ShortcutContext = FocusPanel | 'run-detail';
@@ -103,6 +106,8 @@ function launchFeatureRun(featureId: string): void {
 }
 
 export function App(): React.ReactElement {
+  const config = useMemo(() => loadConfig(), []);
+  const themeResolution = useMemo(() => resolveThemePreference(config.theme), [config.theme]);
   const runs = useRuns(2000);
   const { gates, resolve } = useGates(2000);
   const notifications = useNotifications(40);
@@ -117,6 +122,11 @@ export function App(): React.ReactElement {
     logsVisible: true,
   });
   const [helpOpen, setHelpOpen] = useState(false);
+
+  useEffect(() => {
+    if (!themeResolution.message) return;
+    msqEventBus.emit('ui:notice', { message: themeResolution.message });
+  }, [themeResolution.message]);
 
   const layoutMode = getLayoutMode(width);
   const selectedRunIndex = clampIndex(ui.selectedRun, runs.length);
@@ -557,100 +567,106 @@ export function App(): React.ReactElement {
       ? ['type:search', 'enter:execute', 'esc:close', 'j/k:navigate']
       : getStatusBarHints();
 
+  const logoStyle = mergeInkStyles(themeResolution.profile.roles.primary, { bold: true });
+  const subtitleStyle = themeResolution.profile.roles.muted;
+
   return (
-    <Box flexDirection="column" padding={1}>
-      <Box>
-        <Text color="cyan" bold>
-          {'█▀▄▀█ █▀▀ ▀█▀ ▄▀█ █   ▀   █▀ █▀█ █ █ ▄▀█ █▀▄'}
-        </Text>
-      </Box>
-      <Box>
-        <Text color="cyan" bold>
-          {'█░▀░█ ██▄  █  █▀█ █▄▄     ▄█ ▀▀█ █▄█ █▀█ █▄▀'}
-        </Text>
-      </Box>
-      <Text dimColor>{layoutMode === 'stacked' ? 'single-column layout' : `${layoutMode} split layout`}</Text>
-      {dashboardOpen ? (
-        <Box marginTop={1}>
-          <CostDashboard rows={statsRows} periodLabel={dashboardPeriod.label} width={width - 2} />
+    <ThemeProvider resolution={themeResolution}>
+      <Box flexDirection="column" padding={1}>
+        <Box>
+          <Text {...logoStyle}>
+            {'█▀▄▀█ █▀▀ ▀█▀ ▄▀█ █   ▀   █▀ █▀█ █ █ ▄▀█ █▀▄'}
+          </Text>
         </Box>
-      ) : (
-        <Box flexDirection={layoutMode === 'stacked' ? 'column' : 'row'} marginTop={1}>
-          <MainPanel
-            runs={runs}
-            gates={gates}
-            selectedRun={selectedRun}
-            selectedRunIndex={selectedRunIndex}
-            selectedFeature={selectedFeature}
-            activeView={activeView}
-            output={liveOutput}
-            outputPaused={ui.outputPaused}
-            logsVisible={ui.logsVisible}
-            focusPanel={focusPanel}
-            mode={layoutMode}
-            width={mainWidth}
-            pendingFeatures={pendingFeatures}
-            selectedPendingIndex={selectedPendingIndex}
-            breakdown={runBreakdown}
-            taskRuns={taskRuns}
-            notifications={notifications}
-          />
-          <Sidebar
-            runs={runs}
-            gates={gates}
-            notifications={notifications}
-            selectedRunIndex={selectedRunIndex}
-            selectedGateIndex={selectedGateIndex}
-            focusPanel={focusPanel}
-            activeView={activeView}
-            skills={selectedFeature?.skills ?? []}
-            taskRuns={taskRuns}
-            width={sidebarWidth}
-            mode={layoutMode}
-          />
+        <Box>
+          <Text {...logoStyle}>
+            {'█░▀░█ ██▄  █  █▀█ █▄▄     ▄█ ▀▀█ █▄█ █▀█ █▄▀'}
+          </Text>
         </Box>
-      )}
-      <StatusBar
-        selectedRun={selectedRun}
-        selectedFeature={selectedFeature}
-        gateCount={gates.length}
-        totalRuns={totalRuns}
-        doneRuns={doneRuns}
-        width={width}
-        currentStage={currentStage}
-        activeView={activeView}
-        shortcutHints={shortcutHints}
-      />
-      <CommandBar
-        activeView={activeView}
-        focusPanel={focusPanel}
-        hasRuns={runs.length > 0}
-        hasGates={gates.length > 0}
-        hasPending={pendingFeatures.length > 0}
-        canPause={canPause}
-        canResume={canResume}
-        canAbort={canAbortFeature || canAbortPipeline}
-        dashboardOpen={dashboardOpen}
-        width={width}
-      />
-      <CommandPalette
-        state={paletteState}
-        width={width}
-        onClose={closePaletteState}
-        onExecute={executeSelectedPaletteCommand}
-        onSelectPrevious={selectPreviousPaletteCommand}
-        onSelectNext={selectNextPaletteCommand}
-        onQueryChange={setPaletteQuery}
-      />
-      <HelpOverlay
-        isOpen={helpOpen}
-        currentContext={focusContext}
-        shortcuts={getAllShortcuts()}
-        width={width}
-        onClose={() => setHelpOpen(false)}
-        onOpenPalette={openPalette}
-      />
-    </Box>
+        <Text {...subtitleStyle}>{layoutMode === 'stacked' ? 'single-column layout' : `${layoutMode} split layout`}</Text>
+        {dashboardOpen ? (
+          <Box marginTop={1}>
+            <CostDashboard rows={statsRows} periodLabel={dashboardPeriod.label} width={width - 2} />
+          </Box>
+        ) : (
+          <Box flexDirection={layoutMode === 'stacked' ? 'column' : 'row'} marginTop={1}>
+            <MainPanel
+              runs={runs}
+              gates={gates}
+              selectedRun={selectedRun}
+              selectedRunIndex={selectedRunIndex}
+              selectedFeature={selectedFeature}
+              activeView={activeView}
+              output={liveOutput}
+              outputPaused={ui.outputPaused}
+              logsVisible={ui.logsVisible}
+              focusPanel={focusPanel}
+              mode={layoutMode}
+              width={mainWidth}
+              pendingFeatures={pendingFeatures}
+              selectedPendingIndex={selectedPendingIndex}
+              breakdown={runBreakdown}
+              taskRuns={taskRuns}
+              notifications={notifications}
+            />
+            <Sidebar
+              runs={runs}
+              gates={gates}
+              notifications={notifications}
+              selectedRunIndex={selectedRunIndex}
+              selectedGateIndex={selectedGateIndex}
+              focusPanel={focusPanel}
+              activeView={activeView}
+              skills={selectedFeature?.skills ?? []}
+              taskRuns={taskRuns}
+              width={sidebarWidth}
+              mode={layoutMode}
+            />
+          </Box>
+        )}
+        <StatusBar
+          selectedRun={selectedRun}
+          selectedFeature={selectedFeature}
+          gateCount={gates.length}
+          totalRuns={totalRuns}
+          doneRuns={doneRuns}
+          width={width}
+          currentStage={currentStage}
+          activeView={activeView}
+          shortcutHints={shortcutHints}
+          themeNotice={themeResolution.message}
+        />
+        <CommandBar
+          activeView={activeView}
+          focusPanel={focusPanel}
+          hasRuns={runs.length > 0}
+          hasGates={gates.length > 0}
+          hasPending={pendingFeatures.length > 0}
+          canPause={canPause}
+          canResume={canResume}
+          canAbort={canAbortFeature || canAbortPipeline}
+          dashboardOpen={dashboardOpen}
+          width={width}
+        />
+        <CommandPalette
+          state={paletteState}
+          width={width}
+          onClose={closePaletteState}
+          onExecute={executeSelectedPaletteCommand}
+          onSelectPrevious={selectPreviousPaletteCommand}
+          onSelectNext={selectNextPaletteCommand}
+          onQueryChange={setPaletteQuery}
+        />
+        <HelpOverlay
+          isOpen={helpOpen}
+          currentContext={focusContext}
+          shortcuts={getAllShortcuts()}
+          width={width}
+          onClose={() => setHelpOpen(false)}
+          onOpenPalette={openPalette}
+        />
+      </Box>
+    </ThemeProvider>
   );
 }
 

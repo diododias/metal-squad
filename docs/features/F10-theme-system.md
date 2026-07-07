@@ -1,44 +1,60 @@
-# F10 — Theme System
+# F10 - Theme System
 
-**Epic**: [E02 — Modern TUI](../epics/E02-modern-tui.md)
-**Prioridade**: Baixa
-**Esforco**: Low
+**Epic**: [E02 - Modern TUI](../epics/E02-modern-tui.md)  
+**Priority**: Low  
+**Effort**: Medium
 
-## Problema
+## Problem
 
-Cores sao hardcoded nos componentes. Nao ha como customizar a aparencia.
+The TUI used hardcoded colors and border styling across multiple components.
+That made the interface inconsistent, difficult to adapt to different terminal
+backgrounds, and impossible to configure centrally.
 
-## Solucao
+## Outcome
 
-### Theme object centralizado
+The TUI now uses a centralized semantic theme system with four built-in themes:
 
-```typescript
-interface Theme {
-  primary: string;      // cyan
-  success: string;      // green
-  error: string;        // red
-  warning: string;      // yellow
-  muted: string;        // dim
-  accent: string;       // magenta
-  bg: string;           // (terminal default)
+- `default`
+- `dark`
+- `light`
+- `minimal`
+
+Theme selection is persisted in `~/.config/metal-squad/config.json` through the
+optional `theme` field. Unknown theme names no longer break startup; the app
+falls back to `default` and surfaces a visible notice in the status bar and the
+notifications feed.
+
+## Theme Model
+
+Each built-in theme defines:
+
+- semantic text roles: `text`, `primary`, `success`, `warning`, `error`, `muted`, `accent`, `focus`
+- shared surface styling for borders and panel emphasis
+- run-status tone mapping
+- notification tone mapping
+
+Components consume those semantic roles instead of hardcoded colors.
+
+## Configuration
+
+```json
+{
+  "theme": "dark"
 }
 ```
 
-### Temas built-in
+Valid values are `default`, `dark`, `light`, and `minimal`.
 
-- `default` — cores atuais
-- `dark` — otimizado para terminais escuros
-- `light` — otimizado para terminais claros
-- `minimal` — monocromatico (para terminais limitados)
+## Validation Notes
 
-### Config
+- Missing `theme` uses `default`
+- Invalid `theme` uses `default` and emits a user-facing warning
+- The `minimal` theme keeps warnings, failures, focus, and muted content
+  distinguishable without depending on a broad color palette
 
-```json
-{ "theme": "dark" }
-```
+## Acceptance Criteria
 
-## Criterios de aceite
-
-- [ ] Componentes usam theme object, nao cores hardcoded
-- [ ] Pelo menos 2 temas built-in
-- [ ] Tema configuravel via config
+- [x] TUI components use shared semantic theme roles instead of fixed colors
+- [x] Four built-in themes are available: `default`, `dark`, `light`, `minimal`
+- [x] The theme can be configured through persistent config
+- [x] Invalid configured themes fall back safely with visible feedback

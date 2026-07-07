@@ -6,11 +6,11 @@ import type { NotificationEntry } from '../hooks/useNotifications.js';
 import type { FeatureCatalogEntry } from '../catalog.js';
 import type { LayoutMode } from '../format.js';
 import {
-  STATUS_COLOR,
   STATUS_ICON,
   formatClock,
   formatElapsed,
   formatTokens,
+  getRunStatusTone,
   getRunStageLabel,
   getRunStatusLabel,
   truncateText,
@@ -20,6 +20,14 @@ import { NotificationsFeed } from './NotificationsFeed.js';
 import { RunTable } from './RunTable.js';
 import { formatDurationMs, type RunBreakdown } from '../../core/stats.js';
 import { summarizeTaskRuns } from '../workflow.js';
+import { useTheme } from '../theme/context.js';
+import {
+  getOutputStyle,
+  getSurfaceBorderStyle,
+  getSurfaceTitleStyle,
+  getWorkflowRole,
+} from '../theme/styles.js';
+import type { ThemeRoleName } from '../theme/types.js';
 
 export type ActiveView = 'overview' | 'run' | 'notifications';
 
@@ -43,7 +51,11 @@ interface Props {
   notifications?: NotificationEntry[];
 }
 
-function overviewSummary(runs: RunSummary[], gates: PendingApproval[]): React.ReactElement {
+function overviewSummary(
+  theme: ReturnType<typeof useTheme>,
+  runs: RunSummary[],
+  gates: PendingApproval[],
+): React.ReactElement {
   const running = runs.filter((run) => run.status === 'running').length;
   const done = runs.filter((run) => run.status === 'done').length;
   const failed = runs.filter((run) => run.status === 'failed').length;
@@ -52,17 +64,17 @@ function overviewSummary(runs: RunSummary[], gates: PendingApproval[]): React.Re
 
   return (
     <Box marginBottom={1}>
-      <Text color="cyan">{running} running</Text>
-      <Text dimColor> | </Text>
-      <Text color="green">{done} done</Text>
-      <Text dimColor> | </Text>
-      <Text color="red">{failed} failed</Text>
-      <Text dimColor> | </Text>
-      <Text color="yellow">{blocked} blocked</Text>
-      <Text dimColor> | </Text>
-      <Text color="magenta">{aborted} aborted</Text>
-      <Text dimColor> | </Text>
-      <Text>{gates.length} open gates</Text>
+      <Text {...theme.statusTone('running')}>{running} running</Text>
+      <Text {...theme.role('muted')}> | </Text>
+      <Text {...theme.statusTone('done')}>{done} done</Text>
+      <Text {...theme.role('muted')}> | </Text>
+      <Text {...theme.statusTone('failed')}>{failed} failed</Text>
+      <Text {...theme.role('muted')}> | </Text>
+      <Text {...theme.statusTone('blocked')}>{blocked} blocked</Text>
+      <Text {...theme.role('muted')}> | </Text>
+      <Text {...theme.statusTone('aborted')}>{aborted} aborted</Text>
+      <Text {...theme.role('muted')}> | </Text>
+      <Text {...theme.role('text')}>{gates.length} open gates</Text>
     </Box>
   );
 }
@@ -86,6 +98,7 @@ export function MainPanel({
   taskRuns = [],
   notifications = [],
 }: Props): React.ReactElement {
+  const theme = useTheme();
   const innerWidth = Math.max(32, width - 4);
   const visibleOutput = output.slice(-(mode === 'stacked' ? 8 : 14));
   const lastOutput = visibleOutput[visibleOutput.length - 1] ?? null;
@@ -100,7 +113,7 @@ export function MainPanel({
   return (
     <Box
       borderStyle="round"
-      borderColor="cyan"
+      {...getSurfaceBorderStyle(theme)}
       paddingX={1}
       paddingY={0}
       flexDirection="column"
@@ -108,14 +121,14 @@ export function MainPanel({
       marginRight={mode === 'stacked' ? 0 : 1}
       marginBottom={mode === 'stacked' ? 1 : 0}
     >
-      <Text color="cyan" bold>
+      <Text {...getSurfaceTitleStyle(theme)}>
         {activeView === 'notifications' ? 'Notifications' : activeView === 'run' && selectedRun ? 'Run Detail' : 'Overview'}
       </Text>
       {runs.length === 0 && pendingFeatures.length === 0 ? (
         <EmptyState />
       ) : activeView === 'notifications' ? (
         <Box flexDirection="column" marginTop={1}>
-          <Text dimColor>
+          <Text {...theme.role('muted')}>
             Recent automation, gate, and stage events across the board.
           </Text>
           <Box marginTop={1}>
@@ -128,29 +141,33 @@ export function MainPanel({
         </Box>
       ) : activeView === 'run' && selectedRun ? (
         <Box flexDirection="column" marginTop={1}>
-          <Text bold>{selectedFeature?.title ?? selectedRun.featureId}</Text>
-          <Text dimColor>{selectedRun.featureId} · {selectedRun.repoId}</Text>
+          <Text {...theme.role('text')} bold>{selectedFeature?.title ?? selectedRun.featureId}</Text>
+          <Text {...theme.role('muted')}>{selectedRun.featureId} · {selectedRun.repoId}</Text>
           <Box
             marginTop={1}
             flexDirection={mode === 'stacked' ? 'column' : 'row'}
           >
             <DetailMetric
+              theme={theme}
               label="Status"
               value={`${STATUS_ICON[selectedRun.status]} ${selectedRunStatusLabel}`}
-              accent={STATUS_COLOR[selectedRun.status]}
+              accentRole={theme.resolution.profile.statusRoleByRun[getRunStatusTone(selectedRun.status)]}
               width={mode === 'stacked' ? innerWidth : Math.max(16, Math.floor(innerWidth / 4) - 1)}
             />
             <DetailMetric
+              theme={theme}
               label="Tool"
               value={selectedFeature?.model ?? selectedRun.tool}
               width={mode === 'stacked' ? innerWidth : Math.max(14, Math.floor(innerWidth / 4) - 1)}
             />
             <DetailMetric
+              theme={theme}
               label="Elapsed"
               value={formatElapsed(selectedRun.startedAt, selectedRun.endedAt)}
               width={mode === 'stacked' ? innerWidth : Math.max(14, Math.floor(innerWidth / 4) - 1)}
             />
             <DetailMetric
+              theme={theme}
               label="Tokens"
               value={formatTokens(selectedRun.totalTokens)}
               width={mode === 'stacked' ? innerWidth : Math.max(14, Math.floor(innerWidth / 4) - 1)}
@@ -161,34 +178,34 @@ export function MainPanel({
             flexDirection={mode === 'stacked' ? 'column' : 'row'}
           >
             <Box flexDirection="column" width={leftColumnWidth} marginRight={mode === 'stacked' ? 0 : 2}>
-              <DetailSection title="Run Summary" width={leftColumnWidth}>
-                <Text dimColor>started {formatClock(selectedRun.startedAt)}  ·  ended {formatClock(selectedRun.endedAt)}</Text>
-                {selectedFeature && <Text dimColor>effort {selectedFeature.effort}</Text>}
-                {selectedRunStage && <Text dimColor>stage {selectedRunStage}</Text>}
+              <DetailSection theme={theme} title="Run Summary" width={leftColumnWidth}>
+                <Text {...theme.role('muted')}>started {formatClock(selectedRun.startedAt)}  ·  ended {formatClock(selectedRun.endedAt)}</Text>
+                {selectedFeature && <Text {...theme.role('muted')}>effort {selectedFeature.effort}</Text>}
+                {selectedRunStage && <Text {...theme.role('muted')}>stage {selectedRunStage}</Text>}
                 {selectedRun.pendingStageRequestPrompt && (
-                  <Text dimColor>
+                  <Text {...theme.role('muted')}>
                     wait {truncateText(selectedRun.pendingStageRequestPrompt, Math.max(22, leftColumnWidth - 6))}
                   </Text>
                 )}
                 {breakdown && breakdown.wallMs !== null && (
                   <>
-                    <Text dimColor>agent {formatDurationMs(breakdown.agentMs)}</Text>
-                    {breakdown.gateWaitMs > 0 && <Text dimColor>gate wait {formatDurationMs(breakdown.gateWaitMs)}</Text>}
+                    <Text {...theme.role('muted')}>agent {formatDurationMs(breakdown.agentMs)}</Text>
+                    {breakdown.gateWaitMs > 0 && <Text {...theme.role('muted')}>gate wait {formatDurationMs(breakdown.gateWaitMs)}</Text>}
                     {breakdown.retryCount > 0 && (
-                      <Text dimColor>retry wait {formatDurationMs(breakdown.retryWaitMs)} ({breakdown.retryCount}x)</Text>
+                      <Text {...theme.role('muted')}>retry wait {formatDurationMs(breakdown.retryWaitMs)} ({breakdown.retryCount}x)</Text>
                     )}
                   </>
                 )}
               </DetailSection>
               <Box marginTop={1}>
-                <DetailSection title="Workflow" width={leftColumnWidth}>
+                <DetailSection theme={theme} title="Workflow" width={leftColumnWidth}>
                   {workflowStages.length > 0 ? (
                     workflowStages.map((stage) => (
                       <Box key={stage.stage} flexDirection="column" marginBottom={1}>
-                        <Text color={stage.running > 0 ? 'cyan' : stage.failed > 0 ? 'red' : stage.blocked > 0 ? 'yellow' : stage.done === stage.total ? 'green' : 'white'}>
+                        <Text {...theme.role(getWorkflowRole(stage))}>
                           {stage.stage}  {stage.done}/{stage.total} done
                         </Text>
-                        <Text dimColor>
+                        <Text {...theme.role('muted')}>
                           {[
                             stage.running > 0 ? `${stage.running} active` : null,
                             stage.pending > 0 ? `${stage.pending} pending` : null,
@@ -198,14 +215,14 @@ export function MainPanel({
                           ].filter(Boolean).join('  ·  ') || 'completed'}
                         </Text>
                         {stage.tasks.slice(0, 2).map((task) => (
-                          <Text key={task.taskId} dimColor>
+                          <Text key={task.taskId} {...theme.role('muted')}>
                             {task.status === 'running' ? '>' : '-'} {truncateText(task.title, Math.max(20, leftColumnWidth - 6))}
                           </Text>
                         ))}
                       </Box>
                     ))
                   ) : (
-                    <Text dimColor>
+                    <Text {...theme.role('muted')}>
                       {selectedRun.pipelineResumeSummary
                         ? truncateText(selectedRun.pipelineResumeSummary, Math.max(24, leftColumnWidth - 4))
                         : 'No workflow steps recorded for this run yet.'}
@@ -214,24 +231,24 @@ export function MainPanel({
                 </DetailSection>
               </Box>
               <Box marginTop={1}>
-                <DetailSection title="Declared Skills" width={leftColumnWidth}>
+                <DetailSection theme={theme} title="Declared Skills" width={leftColumnWidth}>
                   {selectedFeature?.skills?.length ? (
                     selectedFeature.skills.map((skill) => (
-                      <Text key={skill} color="green">
+                      <Text key={skill} {...theme.role('success')}>
                         - {skill}
                       </Text>
                     ))
                   ) : (
-                    <Text dimColor>No backlog skill metadata found for this run.</Text>
+                    <Text {...theme.role('muted')}>No backlog skill metadata found for this run.</Text>
                   )}
                 </DetailSection>
               </Box>
             </Box>
             <Box flexDirection="column" width={rightColumnWidth}>
-              <DetailSection title="Live Output" width={rightColumnWidth}>
+              <DetailSection theme={theme} title="Live Output" width={rightColumnWidth}>
                 {logsVisible ? (
                   <>
-                    <Text dimColor>
+                    <Text {...theme.role('muted')}>
                       {selectedRun.status === 'running'
                         ? outputPaused
                           ? 'Auto-scroll paused. Press Ctrl+S to resume live tailing.'
@@ -243,12 +260,12 @@ export function MainPanel({
                     <Box marginTop={1} flexDirection="column">
                       {visibleOutput.length > 0 ? (
                         visibleOutput.map((entry) => (
-                          <Text key={entry.id} color={getOutputColor(entry)} dimColor={entry.source === 'tool' || entry.source === 'heartbeat'}>
+                          <Text key={entry.id} {...getOutputStyle(theme, entry.source)}>
                             {formatOutputPrefix(entry)} {truncateText(entry.line, Math.max(28, rightColumnWidth - 6))}
                           </Text>
                         ))
                       ) : (
-                        <Text dimColor>
+                        <Text {...theme.role('muted')}>
                           {selectedRun.status === 'running'
                             ? 'Agent thinking... waiting for the first streamed line.'
                             : 'No output captured for this run yet.'}
@@ -257,7 +274,7 @@ export function MainPanel({
                     </Box>
                   </>
                 ) : (
-                  <Text dimColor>Logs hidden. Press Ctrl+L to reopen the live output view.</Text>
+                  <Text {...theme.role('muted')}>Logs hidden. Press Ctrl+L to reopen the live output view.</Text>
                 )}
               </DetailSection>
             </Box>
@@ -265,9 +282,9 @@ export function MainPanel({
         </Box>
       ) : (
         <Box flexDirection="column" marginTop={1}>
-          {runs.length > 0 && overviewSummary(runs, gates)}
+          {runs.length > 0 && overviewSummary(theme, runs, gates)}
           {runs.length > 0 && (
-            <Text dimColor>
+            <Text {...theme.role('muted')}>
               Select a run with arrows or j/k, then press Enter to inspect it. Esc returns here.
             </Text>
           )}
@@ -283,34 +300,34 @@ export function MainPanel({
           )}
           {nextDemands.length > 0 && (
             <Box marginTop={1} flexDirection="column">
-              <Text bold>Next demands</Text>
+              <Text {...theme.role('text')} bold>Next demands</Text>
               {nextDemands.slice(0, mode === 'stacked' ? 3 : 5).map((entry) => (
-                <Text key={entry} dimColor>{truncateText(entry, Math.max(24, innerWidth - 2))}</Text>
+                <Text key={entry} {...theme.role('muted')}>{truncateText(entry, Math.max(24, innerWidth - 2))}</Text>
               ))}
             </Box>
           )}
           {pendingFeatures.length > 0 && (
             <Box marginTop={1} flexDirection="column">
-              <Text bold color={focusPanel === 'main' ? 'cyan' : 'yellow'}>
+              <Text {...(focusPanel === 'main' ? theme.role('focus') : theme.role('warning'))} bold>
                 {focusPanel === 'main' ? '> ' : '  '}Ready to start
               </Text>
               {pendingFeatures.slice(0, maxPending).map((feature, index) => {
                 const selected = focusPanel === 'main' && index === selectedPendingIndex;
                 return (
                   <Box key={feature.id}>
-                    <Text color={selected ? 'cyan' : undefined} bold={selected}>
+                    <Text {...(selected ? theme.role('focus') : theme.role('text'))} bold={selected}>
                       {selected ? '>' : ' '} {truncateText(`${feature.id}  ${feature.title}`, Math.max(24, innerWidth - 4))}
                     </Text>
                     {selected && (
-                      <Text dimColor> [{feature.model ?? feature.tool} / {feature.effort}]</Text>
+                      <Text {...theme.role('muted')}> [{feature.model ?? feature.tool} / {feature.effort}]</Text>
                     )}
                   </Box>
                 );
               })}
               {pendingFeatures.length > maxPending && (
-                <Text dimColor>  +{pendingFeatures.length - maxPending} more in backlog</Text>
+                <Text {...theme.role('muted')}>  +{pendingFeatures.length - maxPending} more in backlog</Text>
               )}
-              <Text dimColor>  Tab to focus · j/k to select · Enter or n to start</Text>
+              <Text {...theme.role('muted')}>  Tab to focus · j/k to select · Enter or n to start</Text>
             </Box>
           )}
         </Box>
@@ -320,44 +337,49 @@ export function MainPanel({
 }
 
 function DetailMetric({
+  theme,
   label,
   value,
   width,
-  accent,
+  accentRole,
 }: {
+  theme: ReturnType<typeof useTheme>;
   label: string;
   value: string;
   width: number;
-  accent?: string;
+  accentRole?: ThemeRoleName;
 }): React.ReactElement {
+  const accentStyle = accentRole ? theme.role(accentRole) : theme.role('text');
   return (
     <Box
       borderStyle="round"
-      borderColor={accent ?? 'gray'}
+      borderColor={accentStyle.color ?? theme.surface.borderColor}
       flexDirection="column"
       paddingX={1}
       width={width}
       marginRight={1}
       marginBottom={1}
     >
-      <Text dimColor>{label}</Text>
-      <Text color={accent ?? 'white'}>{value}</Text>
+      <Text {...theme.role('muted')}>{label}</Text>
+      <Text {...accentStyle}>{value}</Text>
     </Box>
   );
 }
 
 function DetailSection({
+  theme,
   title,
   width,
   children,
 }: {
+  theme: ReturnType<typeof useTheme>;
   title: string;
   width: number;
   children: React.ReactNode;
 }): React.ReactElement {
   return (
-    <Box borderStyle="round" borderColor="gray" paddingX={1} flexDirection="column" width={width}>
-      <Text bold>{title}</Text>
+    <Box borderStyle="round" {...getSurfaceBorderStyle(theme, { role: 'muted' })} paddingX={1} flexDirection="column" width={width}>
+      <Text {...theme.role('text')} bold>{title}</Text>
       <Box marginTop={1} flexDirection="column">
         {children}
       </Box>
@@ -377,21 +399,6 @@ function formatOutputPrefix(entry: RunOutputRow): string {
       return 'ERR>';
     default:
       return 'OUT>';
-  }
-}
-
-function getOutputColor(entry: RunOutputRow): 'white' | 'cyan' | 'gray' | 'red' {
-  switch (entry.source) {
-    case 'agent':
-      return 'white';
-    case 'tool':
-      return 'cyan';
-    case 'heartbeat':
-      return 'gray';
-    case 'stderr':
-      return 'red';
-    default:
-      return 'white';
   }
 }
 
