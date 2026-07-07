@@ -150,9 +150,11 @@ describe('ui components', () => {
     expect(React.isValidElement(Sidebar({
       runs,
       gates,
+      notifications: [],
       selectedRunIndex: 0,
       selectedGateIndex: 0,
       focusPanel: 'runs',
+      activeView: 'overview',
       skills: selectedFeature.skills,
       width: 32,
       mode: 'full',
@@ -176,6 +178,9 @@ describe('ui components', () => {
       outputPaused: false,
       mode: 'full',
       width: 72,
+      pendingFeatures: [],
+      selectedPendingIndex: 0,
+      notifications: [],
     }))).toBe(true);
     expect(React.isValidElement(StatusBar({
       selectedRun: runs[0] ?? null,
@@ -184,6 +189,7 @@ describe('ui components', () => {
       totalRuns: runs.length,
       doneRuns: runs.filter((r) => r.status === 'done').length,
       width: 120,
+      activeView: 'overview',
     }))).toBe(true);
     expect(React.isValidElement(StatusBar({
       selectedRun: null,
@@ -192,6 +198,7 @@ describe('ui components', () => {
       totalRuns: 3,
       doneRuns: 2,
       width: 80,
+      activeView: 'overview',
     }))).toBe(true);
     expect(React.isValidElement(CommandBar({
       activeView: 'run',

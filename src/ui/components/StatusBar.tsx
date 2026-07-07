@@ -2,6 +2,7 @@ import React from 'react';
 import { Box, Text } from 'ink';
 import type { RunSummary } from '../../db/repo.js';
 import type { FeatureCatalogEntry } from '../catalog.js';
+import type { ActiveView } from './MainPanel.js';
 import {
   STATUS_COLOR,
   STATUS_ICON,
@@ -21,6 +22,7 @@ interface Props {
   doneRuns: number;
   width: number;
   currentStage?: string;
+  activeView?: ActiveView;
 }
 
 export function StatusBar({
@@ -31,6 +33,7 @@ export function StatusBar({
   doneRuns,
   width,
   currentStage,
+  activeView = 'overview',
 }: Props): React.ReactElement {
   const progress = `${doneRuns}/${totalRuns} done`;
 
@@ -60,10 +63,11 @@ export function StatusBar({
         progress,
         selectedRun.pipelineResumeSummary ?? null,
         gateCount > 0 ? `${gateCount} gates` : null,
+        activeView === 'notifications' ? 'notifications view' : null,
       ]
         .filter(Boolean)
         .join(' | ')
-    : `Idle | ${progress}${gateCount > 0 ? ` | ${gateCount} gates open` : ''}`;
+    : `Idle | ${progress}${gateCount > 0 ? ` | ${gateCount} gates open` : ''}${activeView === 'notifications' ? ' | notifications view' : ''}`;
 
   return (
     <Box borderStyle="single" borderColor={selectedRun ? STATUS_COLOR[selectedRun.status] : 'gray'} paddingX={1} marginTop={1}>
