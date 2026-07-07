@@ -40,7 +40,7 @@ export const WorkflowApprovalsSchema = z.object({
 
 export const WorkflowSchema = z.object({
   mode: WorkflowModeSchema.default('staged'),
-  stages: z.array(z.string()).min(1).default(['specify', 'plan', 'implement', 'validate']),
+  stages: z.array(z.string()).min(1).default(['specify', 'plan', 'tasks', 'implement', 'validate']),
   approvals: WorkflowApprovalsSchema.default({}),
   syncTasksToBacklog: z.boolean().default(true),
 });
