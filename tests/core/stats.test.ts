@@ -1,10 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import {
+  aggregateCosts,
   computeRunBreakdown,
   computeStats,
   formatBreakdown,
   formatDurationMs,
   formatTokensCompact,
+  renderUsageBar,
 } from '../../src/core/stats.js';
 import { parsePeriodDays } from '../../src/commands/stats.js';
 import type { RunEventRow, StatsRunRow } from '../../src/db/repo.js';
@@ -136,5 +138,42 @@ describe('parsePeriodDays', () => {
   it('rejects invalid formats', () => {
     expect(() => parsePeriodDays('abc')).toThrow(/Invalid --period/);
     expect(() => parsePeriodDays('7m')).toThrow(/Invalid --period/);
+  });
+});
+
+describe('aggregateCosts', () => {
+  const rows: StatsRunRow[] = [
+    run({ id: 1, repoId: 'repo-1', tool: 'claude', featureId: 'feat-1', status: 'done', inputTokens: 1000, outputTokens: 500, totalTokens: 1500 }),
+    run({ id: 2, repoId: 'repo-1', tool: 'codex', featureId: 'feat-2', status: 'failed', inputTokens: 2000, cachedInputTokens: 0, outputTokens: 1000, totalTokens: 3000 }),
+    run({ id: 3, repoId: 'repo-1', tool: 'claude', featureId: 'feat-1', status: 'done', inputTokens: 500, outputTokens: 500, totalTokens: 1000 }),
+  ];
+
+  it('aggregates by repo/tool, feature and status', () => {
+    const agg = aggregateCosts(rows);
+    expect(agg.totalTokens).toBe(5500);
+    const repoClaude = agg.byRepoTool.find((line) => line.tool === 'claude');
+    expect(repoClaude).toMatchObject({ repoId: 'repo-1', runs: 2, tokens: 2500 });
+    const feat1 = agg.byFeature.find((line) => line.featureId === 'feat-1');
+    expect(feat1).toMatchObject({ runs: 2, tokens: 2500 });
+    const failed = agg.byStatus.find((line) => line.status === 'failed');
+    expect(failed).toMatchObject({ runs: 1, tokens: 3000 });
+  });
+
+  it('handles empty rows', () => {
+    const agg = aggregateCosts([]);
+    expect(agg.totalTokens).toBe(0);
+    expect(agg.byFeature).toEqual([]);
+  });
+});
+
+describe('renderUsageBar', () => {
+  it('renders proportional filled bars', () => {
+    expect(renderUsageBar(0, 100, 10)).toBe('░'.repeat(10));
+    expect(renderUsageBar(100, 100, 10)).toBe('█'.repeat(10));
+    expect(renderUsageBar(50, 100, 10)).toBe('█'.repeat(5) + '░'.repeat(5));
+  });
+
+  it('is safe when max is zero', () => {
+    expect(renderUsageBar(5, 0, 8)).toBe('░'.repeat(8));
   });
 });

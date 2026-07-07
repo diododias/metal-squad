@@ -25,6 +25,8 @@ let stateValue: {
   focusPanel: 'runs' | 'gates' | 'main';
   activeView: 'overview' | 'run';
   outputPaused: boolean;
+  dashboard?: boolean;
+  dashboardPeriod?: number;
 };
 
 vi.mock('react', async () => {
@@ -51,6 +53,10 @@ vi.mock('../../src/ui/hooks/useRunOutput.js', () => ({
 
 vi.mock('../../src/ui/hooks/useRunBreakdown.js', () => ({
   useRunBreakdown: vi.fn(() => null),
+}));
+
+vi.mock('../../src/ui/hooks/useStatsRows.js', () => ({
+  useStatsRows: vi.fn(() => []),
 }));
 
 vi.mock('../../src/ui/hooks/useTerminalWidth.js', () => ({
@@ -252,6 +258,28 @@ describe('App', () => {
     expect(setUi).toHaveBeenCalledTimes(1);
     const pauseLogs = setUi.mock.calls[0]?.[0] as (state: typeof stateValue) => typeof stateValue;
     expect(pauseLogs(stateValue).outputPaused).toBe(true);
+  });
+
+  it('toggles the cost dashboard with d', async () => {
+    stateValue = {
+      selectedRun: 0,
+      selectedGate: 0,
+      selectedPending: 0,
+      focusPanel: 'runs',
+      activeView: 'overview',
+      outputPaused: false,
+    };
+    mockUseRuns.mockReturnValue([{ runId: 1, featureId: 'feat-1' }]);
+    mockUseGates.mockReturnValue({ gates: [], resolve: vi.fn() });
+    const { App } = await import('../../src/ui/App.js');
+
+    App();
+    const handler = mockUseInput.mock.calls[0]?.[0] as (input: string, key: Record<string, boolean>) => void;
+    handler('d', {});
+
+    expect(setUi).toHaveBeenCalledTimes(1);
+    const toggle = setUi.mock.calls[0]?.[0] as (state: typeof stateValue) => typeof stateValue;
+    expect(toggle(stateValue).dashboard).toBe(true);
   });
 
   it('handles gate decisions when the gates panel is focused', async () => {

@@ -173,6 +173,76 @@ function durationMs(startedAt: string, endedAt: string | null): number | null {
   return Math.max(0, (end ?? Date.now()) - start);
 }
 
+export interface CostLine {
+  tokens: number;
+  costUsd: number;
+  runs: number;
+}
+
+export interface CostAggregates {
+  byRepoTool: Array<CostLine & { repoId: string; tool: string }>;
+  byFeature: Array<CostLine & { featureId: string }>;
+  byStatus: Array<CostLine & { status: string }>;
+  totalTokens: number;
+  totalCostUsd: number;
+}
+
+export function aggregateCosts(rows: StatsRunRow[]): CostAggregates {
+  const byRepoTool = new Map<string, CostLine & { repoId: string; tool: string }>();
+  const byFeature = new Map<string, CostLine & { featureId: string }>();
+  const byStatus = new Map<string, CostLine & { status: string }>();
+  let totalTokens = 0;
+  let totalCostUsd = 0;
+
+  for (const row of rows) {
+    const tokens = row.totalTokens ?? 0;
+    const costUsd = estimateCost(
+      row.inputTokens,
+      row.cachedInputTokens,
+      row.outputTokens,
+      row.tool,
+    ) ?? 0;
+    totalTokens += tokens;
+    totalCostUsd += costUsd;
+
+    const repoToolKey = `${row.repoId} ${row.tool}`;
+    const repoTool = byRepoTool.get(repoToolKey)
+      ?? { repoId: row.repoId, tool: row.tool, tokens: 0, costUsd: 0, runs: 0 };
+    repoTool.tokens += tokens;
+    repoTool.costUsd += costUsd;
+    repoTool.runs += 1;
+    byRepoTool.set(repoToolKey, repoTool);
+
+    const feature = byFeature.get(row.featureId)
+      ?? { featureId: row.featureId, tokens: 0, costUsd: 0, runs: 0 };
+    feature.tokens += tokens;
+    feature.costUsd += costUsd;
+    feature.runs += 1;
+    byFeature.set(row.featureId, feature);
+
+    const status = byStatus.get(row.status)
+      ?? { status: row.status, tokens: 0, costUsd: 0, runs: 0 };
+    status.tokens += tokens;
+    status.costUsd += costUsd;
+    status.runs += 1;
+    byStatus.set(row.status, status);
+  }
+
+  return {
+    byRepoTool: [...byRepoTool.values()].sort((a, b) => b.costUsd - a.costUsd),
+    byFeature: [...byFeature.values()].sort((a, b) => b.tokens - a.tokens),
+    byStatus: [...byStatus.values()].sort((a, b) => b.costUsd - a.costUsd),
+    totalTokens,
+    totalCostUsd,
+  };
+}
+
+export function renderUsageBar(value: number, max: number, width = 16): string {
+  if (max <= 0 || width <= 0) return '░'.repeat(Math.max(0, width));
+  const filled = Math.max(0, Math.min(width, Math.round((value / max) * width)));
+  return '█'.repeat(filled) + '░'.repeat(width - filled);
+}
+
 function parseTimestampMs(value: string | null): number | null {
   if (!value) return null;
   const trimmed = value.trim();
