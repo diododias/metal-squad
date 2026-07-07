@@ -19,6 +19,17 @@ export interface CreateRunOptions {
   stage?: string;
 }
 
+export type RunStatus = 'running' | 'done' | 'failed' | 'blocked' | 'aborted';
+export type PipelineStatus = 'running' | 'paused' | 'aborting' | 'aborted' | 'done' | 'failed' | 'blocked';
+
+export interface PipelineSnapshot {
+  plan: string[];
+  done: string[];
+  pending: string[];
+  active: string[];
+  aborted: string[];
+}
+
 export function createRun(
   repoId: string,
   featureId: string,
@@ -36,7 +47,7 @@ export function createRun(
 
 export function finishRun(
   runId: number,
-  status: 'done' | 'failed' | 'blocked',
+  status: RunStatus,
   summary?: string,
 ): void {
   getDb('readwrite')
@@ -152,7 +163,7 @@ export interface RunSummary {
   tool: 'claude' | 'codex' | 'opencode';
   pipelineId: number | null;
   stage: string | null;
-  status: 'running' | 'done' | 'failed' | 'blocked';
+  status: RunStatus;
   startedAt: string;
   endedAt: string | null;
   totalTokens: number | null;
@@ -160,6 +171,8 @@ export interface RunSummary {
   outputTokens: number | null;
   gateId: number | null;
   gateDecision: string | null;
+  pipelineStatus: PipelineStatus | null;
+  pipelineResumeSummary: string | null;
 }
 
 // T003: listRunsForTui — most recent run per feature per repo (US2 deduplication via CTE)
@@ -186,11 +199,14 @@ export function listRunsForTui(limit = 50): RunSummary[] {
          r.input_tokens  AS inputTokens,
          r.output_tokens AS outputTokens,
          g.id            AS gateId,
-         g.decision    AS gateDecision
+         g.decision    AS gateDecision,
+         p.status      AS pipelineStatus,
+         p.resume_summary AS pipelineResumeSummary
        FROM runs r
        JOIN latest ON latest.id = r.id
        LEFT JOIN token_usage u ON u.run_id = r.id
        LEFT JOIN gates g ON g.run_id = r.id AND g.resolved_at IS NULL
+       LEFT JOIN pipelines p ON p.id = r.pipeline_id
        ORDER BY r.id DESC
        LIMIT ?`,
     )
@@ -324,9 +340,18 @@ export interface PipelineRow {
   id: number;
   repoId: string;
   featureId: string;
-  status: 'running' | 'done' | 'failed' | 'blocked';
+  status: PipelineStatus;
+  cwd: string | null;
   currentStage: string | null;
   autoAdvance: number;
+  planJson: string;
+  doneJson: string;
+  pendingJson: string;
+  activeJson: string;
+  abortedJson: string;
+  requestedAbortFeatureId: string | null;
+  resumeCount: number;
+  resumeSummary: string | null;
   createdAt: string;
   updatedAt: string;
   endedAt: string | null;
@@ -350,13 +375,41 @@ export interface StageRequestRow {
   resolvedAt: string | null;
 }
 
-export function createPipeline(repoId: string, featureId: string, autoAdvance: boolean): number {
+export function createPipeline(
+  repoId: string,
+  featureId: string,
+  autoAdvance: boolean,
+  opts: {
+    cwd?: string;
+    snapshot?: PipelineSnapshot;
+    resumeSummary?: string;
+  } = {},
+): number {
+  const snapshot = opts.snapshot ?? {
+    plan: [],
+    done: [],
+    pending: [],
+    active: [],
+    aborted: [],
+  };
   const info = getDb('readwrite')
     .prepare(
-      `INSERT INTO pipelines (repo_id, feature_id, auto_advance)
-       VALUES (?, ?, ?)`,
+      `INSERT INTO pipelines
+         (repo_id, feature_id, auto_advance, cwd, plan_json, done_json, pending_json, active_json, aborted_json, resume_summary)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     )
-    .run(repoId, featureId, autoAdvance ? 1 : 0);
+    .run(
+      repoId,
+      featureId,
+      autoAdvance ? 1 : 0,
+      opts.cwd ?? null,
+      encodeJson(snapshot.plan),
+      encodeJson(snapshot.done),
+      encodeJson(snapshot.pending),
+      encodeJson(snapshot.active),
+      encodeJson(snapshot.aborted),
+      opts.resumeSummary ?? summarizeSnapshot(snapshot),
+    );
   return Number(info.lastInsertRowid);
 }
 
@@ -372,7 +425,7 @@ export function updatePipelineStage(pipelineId: number, stage: string): void {
 
 export function finishPipeline(
   pipelineId: number,
-  status: PipelineRow['status'],
+  status: PipelineStatus,
 ): void {
   getDb('readwrite')
     .prepare(
@@ -381,6 +434,200 @@ export function finishPipeline(
        WHERE id = ?`,
     )
     .run(status, pipelineId);
+}
+
+export function setPipelineStatus(
+  pipelineId: number,
+  status: PipelineStatus,
+  opts: { ended?: boolean; clearAbortRequest?: boolean } = {},
+): void {
+  const endedAt = opts.ended ? `datetime('now')` : 'NULL';
+  getDb('readwrite')
+    .prepare(
+      `UPDATE pipelines
+       SET status = ?,
+           updated_at = datetime('now'),
+           ended_at = ${endedAt},
+           requested_abort_feature_id = CASE WHEN ? THEN NULL ELSE requested_abort_feature_id END
+       WHERE id = ?`,
+    )
+    .run(status, opts.clearAbortRequest ? 1 : 0, pipelineId);
+}
+
+export function pausePipeline(pipelineId: number): void {
+  setPipelineStatus(pipelineId, 'paused');
+}
+
+export function abortPipeline(pipelineId: number): void {
+  setPipelineStatus(pipelineId, 'aborting');
+}
+
+export function requestFeatureAbort(pipelineId: number, featureId: string): void {
+  getDb('readwrite')
+    .prepare(
+      `UPDATE pipelines
+       SET status = 'paused',
+           requested_abort_feature_id = ?,
+           updated_at = datetime('now')
+       WHERE id = ?`,
+    )
+    .run(featureId, pipelineId);
+}
+
+export function resumePipeline(pipelineId: number): void {
+  const row = getPipeline(pipelineId);
+  if (!row) return;
+  const snapshot = getPipelineSnapshot(row);
+  const rerunnable = uniquePreserveOrder([
+    ...snapshot.pending,
+    ...snapshot.active,
+    ...snapshot.aborted,
+  ], snapshot.plan);
+  updatePipelineSnapshot(pipelineId, {
+    pending: rerunnable,
+    active: [],
+    aborted: [],
+  }, {
+    status: 'running',
+    ended: false,
+    clearAbortRequest: true,
+    resumeCount: row.resumeCount + 1,
+  });
+}
+
+export function updatePipelineSnapshot(
+  pipelineId: number,
+  patch: Partial<PipelineSnapshot>,
+  opts: {
+    status?: PipelineStatus;
+    ended?: boolean;
+    clearAbortRequest?: boolean;
+    requestedAbortFeatureId?: string | null;
+    resumeCount?: number;
+    resumeSummary?: string | null;
+  } = {},
+): void {
+  const row = getPipeline(pipelineId);
+  if (!row) return;
+  const snapshot = {
+    ...getPipelineSnapshot(row),
+    ...patch,
+  };
+  const status = opts.status ?? row.status;
+  const endedAt = opts.ended ? `datetime('now')` : 'NULL';
+  getDb('readwrite')
+    .prepare(
+      `UPDATE pipelines
+       SET status = ?,
+           plan_json = ?,
+           done_json = ?,
+           pending_json = ?,
+           active_json = ?,
+           aborted_json = ?,
+           resume_summary = ?,
+           requested_abort_feature_id = ?,
+           resume_count = ?,
+           updated_at = datetime('now'),
+           ended_at = ${endedAt}
+       WHERE id = ?`,
+    )
+    .run(
+      status,
+      encodeJson(snapshot.plan),
+      encodeJson(snapshot.done),
+      encodeJson(snapshot.pending),
+      encodeJson(snapshot.active),
+      encodeJson(snapshot.aborted),
+      opts.resumeSummary ?? summarizeSnapshot(snapshot),
+      opts.clearAbortRequest ? null : (opts.requestedAbortFeatureId ?? row.requestedAbortFeatureId),
+      opts.resumeCount ?? row.resumeCount,
+      pipelineId,
+    );
+}
+
+export function getPipeline(id: number): PipelineRow | null {
+  if (!hasDbFile()) return null;
+  return (getDb('readonly')
+    .prepare(
+      `SELECT
+         id,
+         repo_id AS repoId,
+         feature_id AS featureId,
+         status,
+         cwd,
+         current_stage AS currentStage,
+         auto_advance AS autoAdvance,
+         plan_json AS planJson,
+         done_json AS doneJson,
+         pending_json AS pendingJson,
+         active_json AS activeJson,
+         aborted_json AS abortedJson,
+         requested_abort_feature_id AS requestedAbortFeatureId,
+         resume_count AS resumeCount,
+         resume_summary AS resumeSummary,
+         created_at AS createdAt,
+         updated_at AS updatedAt,
+         ended_at AS endedAt
+       FROM pipelines
+       WHERE id = ?`,
+    )
+    .get(id) as PipelineRow | undefined) ?? null;
+}
+
+export function listResumablePipelines(): PipelineRow[] {
+  if (!hasDbFile()) return [];
+  return getDb('readonly')
+    .prepare(
+      `SELECT
+         id,
+         repo_id AS repoId,
+         feature_id AS featureId,
+         status,
+         cwd,
+         current_stage AS currentStage,
+         auto_advance AS autoAdvance,
+         plan_json AS planJson,
+         done_json AS doneJson,
+         pending_json AS pendingJson,
+         active_json AS activeJson,
+         aborted_json AS abortedJson,
+         requested_abort_feature_id AS requestedAbortFeatureId,
+         resume_count AS resumeCount,
+         resume_summary AS resumeSummary,
+         created_at AS createdAt,
+         updated_at AS updatedAt,
+         ended_at AS endedAt
+       FROM pipelines
+       WHERE status IN ('paused', 'aborted')
+          OR json_array_length(pending_json) > 0
+          OR json_array_length(aborted_json) > 0
+       ORDER BY id DESC`,
+    )
+    .all() as PipelineRow[];
+}
+
+export function findResumablePipeline(target: string): PipelineRow | null {
+  const numeric = Number(target);
+  const resumable = listResumablePipelines();
+  if (Number.isInteger(numeric)) {
+    const byPipeline = resumable.find((row) => row.id === numeric);
+    if (byPipeline) return byPipeline;
+    const run = listRuns(500).find((row) => row.id === numeric || row.feature_id === target || row.repo_id === target);
+    if (run?.pipeline_id) {
+      return resumable.find((row) => row.id === run.pipeline_id) ?? getPipeline(run.pipeline_id);
+    }
+  }
+  return resumable.find((row) => row.featureId === target || row.repoId === target) ?? null;
+}
+
+export function getPipelineSnapshot(row: PipelineRow): PipelineSnapshot {
+  return {
+    plan: decodeJsonArray(row.planJson),
+    done: decodeJsonArray(row.doneJson),
+    pending: decodeJsonArray(row.pendingJson),
+    active: decodeJsonArray(row.activeJson),
+    aborted: decodeJsonArray(row.abortedJson),
+  };
 }
 
 export function createStageRequest(
@@ -468,4 +715,38 @@ export function getStageRequest(id: number): StageRequestRow | null {
        WHERE id = ?`,
     )
     .get(id) as StageRequestRow | undefined) ?? null;
+}
+
+function encodeJson(value: string[]): string {
+  return JSON.stringify(value);
+}
+
+function decodeJsonArray(value: string | null | undefined): string[] {
+  if (!value) return [];
+  try {
+    const parsed = JSON.parse(value) as unknown;
+    return Array.isArray(parsed) ? parsed.filter((entry): entry is string => typeof entry === 'string') : [];
+  } catch {
+    return [];
+  }
+}
+
+function uniquePreserveOrder(values: string[], plan: string[]): string[] {
+  const seen = new Set<string>();
+  const ordered = values.filter((value) => {
+    if (seen.has(value)) return false;
+    seen.add(value);
+    return true;
+  });
+  return plan.filter((featureId) => seen.has(featureId) && ordered.includes(featureId));
+}
+
+function summarizeSnapshot(snapshot: PipelineSnapshot): string {
+  const total = snapshot.plan.length;
+  const done = snapshot.done.length;
+  const active = snapshot.active[0];
+  const pending = snapshot.pending[0] ?? snapshot.aborted[0] ?? null;
+  if (active) return `${done}/${total} done · active ${active}`;
+  if (pending) return `${done}/${total} done · next ${pending}`;
+  return `${done}/${total} done`;
 }

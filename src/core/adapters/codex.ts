@@ -2,7 +2,7 @@ import type { ToolAdapter, RunResult, RunFeatureOptions, TokenUsage } from './ty
 import type { Effort, Feature } from '../backlog/schema.js';
 import { execFileSync } from 'node:child_process';
 import { loadConfig } from '../../config/index.js';
-import { CliTimeoutError, runCli } from './spawn.js';
+import { CliAbortError, CliTimeoutError, runCli } from './spawn.js';
 import { msqEventBus } from '../events/index.js';
 import { parseControlSignal } from './control.js';
 
@@ -42,6 +42,7 @@ export const codexAdapter: ToolAdapter = {
       ({ code, stdout, stderr } = await runCli('codex', args, {
         cwd: opts.cwd,
         timeoutMs,
+        signal: opts.signal,
         heartbeatMs: 30_000,
         logLabel: `codex ${feature.id}`,
         heartbeatSuffix: () => progress.heartbeatSuffix(),
@@ -65,6 +66,16 @@ export const codexAdapter: ToolAdapter = {
         return {
           ok: false,
           summary: `timeout após ${Math.round(error.runtimeMs / 1000)}s. ${partial}`,
+          usage,
+        };
+      }
+      if (error instanceof CliAbortError) {
+        const usage = this.parseUsage?.(error.stdout) ?? undefined;
+        if (usage) emitUsage(opts.runId, feature, usage);
+        return {
+          ok: false,
+          aborted: true,
+          summary: `abortado manualmente após ${Math.round(error.runtimeMs / 1000)}s`,
           usage,
         };
       }

@@ -33,6 +33,7 @@ function overviewSummary(runs: RunSummary[], gates: GateRow[]): React.ReactEleme
   const done = runs.filter((run) => run.status === 'done').length;
   const failed = runs.filter((run) => run.status === 'failed').length;
   const blocked = runs.filter((run) => run.status === 'blocked').length;
+  const aborted = runs.filter((run) => run.status === 'aborted').length;
 
   return (
     <Box marginBottom={1}>
@@ -43,6 +44,8 @@ function overviewSummary(runs: RunSummary[], gates: GateRow[]): React.ReactEleme
       <Text color="red">{failed} failed</Text>
       <Text dimColor> | </Text>
       <Text color="yellow">{blocked} blocked</Text>
+      <Text dimColor> | </Text>
+      <Text color="magenta">{aborted} aborted</Text>
       <Text dimColor> | </Text>
       <Text>{gates.length} open gates</Text>
     </Box>

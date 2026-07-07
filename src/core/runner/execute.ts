@@ -15,10 +15,18 @@ import {
   createRetryRecord,
   finishPipeline,
   finishRun,
+  getPipeline,
+  getPipelineSnapshot,
   getStageRequest,
+  pausePipeline,
   recordUsage,
+  requestFeatureAbort,
+  resumePipeline,
+  setPipelineStatus,
   cleanupStaleRuns,
+  updatePipelineSnapshot,
   updatePipelineStage,
+  type PipelineStatus,
 } from '../../db/repo.js';
 import { dispatch } from '../notify/manager.js';
 import { startTelegramPoller, stopTelegramPoller } from '../notify/telegram-poller.js';
@@ -39,6 +47,7 @@ export interface ExecuteOptions {
   concurrency: number;
   featureId?: string; // roda só uma feature
   autoAdvanceStages?: boolean;
+  resumePipelineId?: number;
 }
 
 export async function executeBacklog(
@@ -50,10 +59,44 @@ export async function executeBacklog(
   registerRepo(repoId, path);
   cleanupStaleRuns(config.staleRunThresholdMinutes);
   const activeRunIds = new Set<number>();
+  const activeControllers = new Map<string, AbortController>();
 
-  const ordered = opts.featureId
+  const resolvedPlan = opts.featureId
     ? selectFeaturePlan(backlog, opts.featureId)
     : topoOrder(backlog);
+  const initialSnapshot = {
+    plan: resolvedPlan.map((feature) => feature.id),
+    done: [] as string[],
+    pending: resolvedPlan.map((feature) => feature.id),
+    active: [] as string[],
+    aborted: [] as string[],
+  };
+
+  const pipelineId = opts.resumePipelineId
+    ? (() => {
+        const existing = getPipeline(opts.resumePipelineId);
+        if (!existing) throw new Error(`Pipeline ${opts.resumePipelineId} não encontrada para resume.`);
+        resumePipeline(existing.id);
+        return existing.id;
+      })()
+    : createPipeline(
+        repoId,
+        opts.featureId ?? resolvedPlan[resolvedPlan.length - 1]?.id ?? 'backlog',
+        Boolean(opts.autoAdvanceStages),
+        { cwd: opts.cwd, snapshot: initialSnapshot },
+      );
+  const persistedPipeline = getPipeline(pipelineId);
+  if (!persistedPipeline) {
+    throw new Error(`Pipeline ${pipelineId} não pôde ser carregada após criação.`);
+  }
+  const persistedSnapshot = getPipelineSnapshot(persistedPipeline);
+  const initialDone = new Set(persistedSnapshot.done);
+  const remainingIds = new Set([
+    ...persistedSnapshot.pending,
+    ...persistedSnapshot.active,
+    ...persistedSnapshot.aborted,
+  ]);
+  const ordered = resolvedPlan.filter((feature) => remainingIds.has(feature.id));
 
   const registry = createSkillRegistry();
   const detachPersistence = attachRunPersistence();
@@ -65,7 +108,7 @@ export async function executeBacklog(
     feature: Feature,
     prompt: string,
     stage?: string,
-    pipelineId?: number,
+    abortSignal?: AbortSignal,
   ) => {
     const runId = createRun(repoId, feature.id, feature.tool, { pipelineId, stage });
     activeRunIds.add(runId);
@@ -84,6 +127,7 @@ export async function executeBacklog(
         cwd: opts.cwd,
         runId,
         repoId,
+        signal: abortSignal,
       });
       if (res.usage) recordUsage(runId, res.usage);
 
@@ -99,6 +143,28 @@ export async function executeBacklog(
             endedAt: new Date().toISOString(),
           });
         }
+        activeRunIds.delete(runId);
+        return { runId, res };
+      }
+
+      if (res.aborted) {
+        finishRun(runId, 'aborted', res.summary);
+        if (stage) {
+          msqEventBus.emit('task:updated', {
+            runId,
+            featureId: feature.id,
+            taskId: stage,
+            status: 'failed',
+            stage,
+            endedAt: new Date().toISOString(),
+          });
+        }
+        msqEventBus.emit('run:failed', {
+          runId,
+          featureId: feature.id,
+          tool: feature.tool,
+          error: res.summary,
+        });
         activeRunIds.delete(runId);
         return { runId, res };
       }
@@ -158,45 +224,134 @@ export async function executeBacklog(
   };
 
   const execute = async (feature: Feature) => {
+    const controller = new AbortController();
+    activeControllers.set(feature.id, controller);
     if (feature.workflow?.mode === 'staged') {
-      return executeStagedFeature(
-        feature,
-        repoId,
-        registry,
-        config,
-        opts,
-        executeStageRun,
-      );
+      try {
+        return await executeStagedFeature(
+          feature,
+          pipelineId,
+          registry,
+          config,
+          opts,
+          executeStageRun,
+          controller.signal,
+        );
+      } finally {
+        activeControllers.delete(feature.id);
+      }
     }
 
     const skills = registry.resolve(feature.skills ?? [], opts.cwd);
     const prompt = buildPrompt(feature, skills, opts.cwd, {
       maxContextChars: config.promptContextCharLimit,
     });
-    const { res } = await executeStageRun(feature, prompt);
-    return res;
+    try {
+      const { res } = await executeStageRun(feature, prompt, undefined, controller.signal);
+      return res;
+    } finally {
+      activeControllers.delete(feature.id);
+    }
   };
 
   const handleSignal = (signal: NodeJS.Signals): void => {
-    for (const runId of activeRunIds) finishRun(runId, 'failed');
+    setPipelineStatus(pipelineId, 'aborting');
+    for (const controller of activeControllers.values()) controller.abort();
+    for (const runId of activeRunIds) finishRun(runId, 'aborted');
     throw new Error(`Execução interrompida por ${signal}`);
   };
 
   process.once('SIGINT', handleSignal);
   process.once('SIGTERM', handleSignal);
 
+  const scheduler = schedule(ordered, {
+    concurrency: opts.concurrency,
+    initialDone,
+    execute,
+    onStateChange: (state) => {
+      if (state === 'paused') pausePipeline(pipelineId);
+      if (state === 'running') setPipelineStatus(pipelineId, 'running');
+      if (state === 'aborting') setPipelineStatus(pipelineId, 'aborting');
+    },
+    onAbortFeature: (featureId) => {
+      activeControllers.get(featureId)?.abort();
+    },
+    onStart: (feature) => {
+      const current = getPipeline(pipelineId);
+      if (!current) return;
+      const snapshot = getPipelineSnapshot(current);
+      updatePipelineSnapshot(pipelineId, {
+        pending: snapshot.pending.filter((item) => item !== feature.id),
+        active: [...snapshot.active.filter((item) => item !== feature.id), feature.id],
+        aborted: snapshot.aborted.filter((item) => item !== feature.id),
+      }, {
+        status: current.status === 'paused' ? 'paused' : 'running',
+      });
+    },
+    onDone: (feature, result) => {
+      const current = getPipeline(pipelineId);
+      if (!current) return;
+      const snapshot = getPipelineSnapshot(current);
+      const withoutActive = snapshot.active.filter((item) => item !== feature.id);
+      if (result.aborted) {
+        updatePipelineSnapshot(pipelineId, {
+          active: withoutActive,
+          aborted: [...snapshot.aborted.filter((item) => item !== feature.id), feature.id],
+        }, {
+          status: current.status === 'aborting' ? 'aborting' : 'paused',
+          clearAbortRequest: true,
+        });
+        return;
+      }
+      const shouldCountAsDone = result.ok || getOnFailPolicy(feature) === 'continue';
+      updatePipelineSnapshot(pipelineId, {
+        active: withoutActive,
+        done: shouldCountAsDone
+          ? [...snapshot.done.filter((item) => item !== feature.id), feature.id]
+          : snapshot.done,
+        pending: snapshot.pending.filter((item) => item !== feature.id),
+        aborted: snapshot.aborted.filter((item) => item !== feature.id),
+      }, {
+        clearAbortRequest: true,
+      });
+    },
+  });
+
+  const controlPoller = setInterval(() => {
+    const current = getPipeline(pipelineId);
+    if (!current) return;
+    if (current.status === 'paused') {
+      scheduler.pause();
+    } else if (current.status === 'running') {
+      scheduler.resume();
+    } else if (current.status === 'aborting') {
+      scheduler.abortAll();
+    }
+    if (current.requestedAbortFeatureId) {
+      const aborted = scheduler.abortFeature(current.requestedAbortFeatureId);
+      if (!aborted) {
+        updatePipelineSnapshot(pipelineId, {}, { clearAbortRequest: true });
+      }
+    }
+  }, 250);
+
   try {
-    await schedule(ordered, {
-      concurrency: opts.concurrency,
-      execute,
-    });
+    const outcome = await scheduler.result;
+    if (outcome === 'completed') {
+      finishPipeline(pipelineId, 'done');
+      return;
+    }
+    finishPipeline(pipelineId, 'aborted');
   } catch (err) {
+    const pipelineStatus = derivePipelineFailureStatus(err);
+    finishPipeline(pipelineId, pipelineStatus);
     const msg = err instanceof Error ? err.message : String(err);
     if (!msg.startsWith('Feature ')) {
       void dispatch('run:failed', `metal-squad: execução parada — ${msg}`).catch(() => {});
     }
     throw err;
   } finally {
+    clearInterval(controlPoller);
     stopTelegramPoller();
     detachNotifications();
     detachLogger();
@@ -210,7 +365,7 @@ type StageExecutor = (
   feature: Feature,
   prompt: string,
   stage?: string,
-  pipelineId?: number,
+  abortSignal?: AbortSignal,
 ) => Promise<{
   runId: number;
   res: RunResult;
@@ -220,6 +375,7 @@ interface RetryRunOptions {
   cwd: string;
   runId: number;
   repoId: string;
+  signal?: AbortSignal;
 }
 
 async function runWithRetry(
@@ -236,6 +392,7 @@ async function runWithRetry(
     const res = await adapter.runFeature(feature, prompt, {
       cwd: opts.cwd,
       runId: opts.runId,
+      signal: opts.signal,
     });
 
     if (res.ok || res.control?.type === 'needs_input') return res;
@@ -261,11 +418,12 @@ async function runWithRetry(
 
 async function executeStagedFeature(
   feature: Feature,
-  repoId: string,
+  pipelineId: number,
   registry: ReturnType<typeof createSkillRegistry>,
   config: ReturnType<typeof loadConfig>,
   opts: ExecuteOptions,
   executeStageRun: StageExecutor,
+  abortSignal?: AbortSignal,
 ) {
   const workflow = feature.workflow;
   if (!workflow) {
@@ -273,7 +431,6 @@ async function executeStagedFeature(
   }
 
   const autoAdvance = opts.autoAdvanceStages || workflow.approvals.autoAdvance || config.workflow.autoAdvanceStages;
-  const pipelineId = createPipeline(repoId, feature.id, autoAdvance);
   const stageInputs = new Map<string, string[]>();
   const stages = workflow.stages;
 
@@ -282,7 +439,7 @@ async function executeStagedFeature(
     updatePipelineStage(pipelineId, stage);
     const stageSkill = resolveStageSkill(feature, stage, registry, opts.cwd);
     const prompt = buildStagePrompt(feature, stage, stageSkill, opts.cwd, config.promptContextCharLimit, stageInputs.get(stage) ?? []);
-    const { runId, res } = await executeStageRun(feature, prompt, stage, pipelineId);
+    const { runId, res } = await executeStageRun(feature, prompt, stage, abortSignal);
 
     if (res.control?.type === 'needs_input') {
       const requestId = createStageRequest(
@@ -300,7 +457,6 @@ async function executeStagedFeature(
     }
 
     if (!res.ok) {
-      finishPipeline(pipelineId, getOnFailPolicy(feature) === 'gate' ? 'blocked' : 'failed');
       return {
         ...res,
         summary: `${stage}: ${res.summary}`,
@@ -354,7 +510,6 @@ async function executeStagedFeature(
     }
   }
 
-  finishPipeline(pipelineId, 'done');
   return {
     ok: true,
     summary: `workflow staged concluido (${stages.join(' -> ')})`,
@@ -455,6 +610,13 @@ async function waitForStageApproval(
 
 function getOnFailPolicy(feature: Feature): OnFail {
   return feature.retry?.onFail ?? 'stop';
+}
+
+function derivePipelineFailureStatus(error: unknown): PipelineStatus {
+  const message = error instanceof Error ? error.message : String(error);
+  if (message.includes('abort')) return 'aborted';
+  if (message.includes('blocked')) return 'blocked';
+  return 'failed';
 }
 
 export function backoffWithJitter(baseMs: number, attempt: number): number {

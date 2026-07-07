@@ -22,6 +22,8 @@ export function useGates(intervalMs = 2000): { gates: GateRow[]; resolve: Resolv
   }, []);
 
   useEffect(() => {
+    void intervalMs;
+
     const unsubscribers = [
       msqEventBus.subscribe('gate:created', poll),
       msqEventBus.subscribe('gate:resolved', poll),
@@ -29,9 +31,7 @@ export function useGates(intervalMs = 2000): { gates: GateRow[]; resolve: Resolv
       msqEventBus.subscribe('run:done', poll),
       msqEventBus.subscribe('run:failed', poll),
     ];
-    const id = setInterval(poll, intervalMs);
     return () => {
-      clearInterval(id);
       for (const unsubscribe of unsubscribers) unsubscribe();
     };
   }, [intervalMs, poll]);

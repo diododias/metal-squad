@@ -8,6 +8,7 @@ export const STATUS_ICON: Record<RunStatus, string> = {
   done: '✓',
   failed: '✗',
   blocked: '⊘',
+  aborted: '■',
 };
 
 export const STATUS_COLOR: Record<RunStatus, string> = {
@@ -15,6 +16,7 @@ export const STATUS_COLOR: Record<RunStatus, string> = {
   done: 'green',
   failed: 'red',
   blocked: 'yellow',
+  aborted: 'magenta',
 };
 
 export function formatElapsed(startedAt: string, endedAt: string | null): string {

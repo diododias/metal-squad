@@ -8,6 +8,10 @@ const mockUseRunOutput = vi.fn();
 const mockUseTerminalWidth = vi.fn();
 const mockUseNotifications = vi.fn();
 const mockGetFeatureCatalog = vi.fn();
+const mockPausePipeline = vi.fn();
+const mockResumePipeline = vi.fn();
+const mockRequestFeatureAbort = vi.fn();
+const mockAbortPipeline = vi.fn();
 const mockMainPanel = vi.fn(() => React.createElement('main-panel'));
 const mockSidebar = vi.fn(() => React.createElement('sidebar-panel'));
 const mockStatusBar = vi.fn(() => React.createElement('status-bar'));
@@ -54,6 +58,13 @@ vi.mock('../../src/ui/hooks/useNotifications.js', () => ({
 
 vi.mock('../../src/ui/catalog.js', () => ({
   getFeatureCatalog: mockGetFeatureCatalog,
+}));
+
+vi.mock('../../src/db/repo.js', () => ({
+  pausePipeline: mockPausePipeline,
+  resumePipeline: mockResumePipeline,
+  requestFeatureAbort: mockRequestFeatureAbort,
+  abortPipeline: mockAbortPipeline,
 }));
 
 vi.mock('../../src/ui/components/MainPanel.js', () => ({
@@ -114,6 +125,10 @@ describe('App', () => {
     mockUseRunOutput.mockReturnValue([]);
     mockUseNotifications.mockReturnValue([]);
     mockGetFeatureCatalog.mockReturnValue({});
+    mockPausePipeline.mockReset();
+    mockResumePipeline.mockReset();
+    mockRequestFeatureAbort.mockReset();
+    mockAbortPipeline.mockReset();
   });
 
   afterEach(() => {
@@ -257,5 +272,91 @@ describe('App', () => {
     expect(resolve).toHaveBeenCalledWith(7, 'approved');
     expect(resolve).toHaveBeenCalledWith(7, 'skipped');
     expect(resolve).toHaveBeenCalledWith(7, 'retried');
+  });
+
+  it('pauses and resumes the selected pipeline outside the gates panel', async () => {
+    mockUseRuns.mockReturnValue([{
+      runId: 1,
+      pipelineId: 42,
+      pipelineStatus: 'running',
+      featureId: 'feat-1',
+      tool: 'codex',
+      status: 'running',
+      startedAt: '2026-07-06T10:00:00Z',
+      endedAt: null,
+      totalTokens: null,
+      inputTokens: null,
+      outputTokens: null,
+      gateId: null,
+      gateDecision: null,
+      repoId: 'repo-1',
+      pipelineResumeSummary: null,
+    }]);
+    mockUseGates.mockReturnValue({ gates: [], resolve: vi.fn() });
+    const { App } = await import('../../src/ui/App.js');
+
+    App();
+    const handler = mockUseInput.mock.calls[0]?.[0] as (input: string, key: Record<string, boolean>) => void;
+    handler('p', {});
+    expect(mockPausePipeline).toHaveBeenCalledWith(42);
+
+    mockUseInput.mockClear();
+    mockUseRuns.mockReturnValue([{
+      runId: 1,
+      pipelineId: 42,
+      pipelineStatus: 'paused',
+      featureId: 'feat-1',
+      tool: 'codex',
+      status: 'done',
+      startedAt: '2026-07-06T10:00:00Z',
+      endedAt: null,
+      totalTokens: null,
+      inputTokens: null,
+      outputTokens: null,
+      gateId: null,
+      gateDecision: null,
+      repoId: 'repo-1',
+      pipelineResumeSummary: null,
+    }]);
+    App();
+    const resumeHandler = mockUseInput.mock.calls[0]?.[0] as (input: string, key: Record<string, boolean>) => void;
+    resumeHandler('r', {});
+    expect(mockResumePipeline).toHaveBeenCalledWith(42);
+  });
+
+  it('aborts the selected feature with x in the runs panel', async () => {
+    stateValue = {
+      selectedRun: 0,
+      selectedGate: 0,
+      focusPanel: 'runs',
+      activeView: 'overview',
+      outputPaused: false,
+    };
+    mockUseRuns.mockReturnValue([{
+      runId: 1,
+      pipelineId: 42,
+      pipelineStatus: 'running',
+      featureId: 'feat-1',
+      tool: 'codex',
+      status: 'running',
+      startedAt: '2026-07-06T10:00:00Z',
+      endedAt: null,
+      totalTokens: null,
+      inputTokens: null,
+      outputTokens: null,
+      gateId: null,
+      gateDecision: null,
+      repoId: 'repo-1',
+      pipelineResumeSummary: null,
+    }]);
+    mockUseGates.mockReturnValue({ gates: [], resolve: vi.fn() });
+    const { App } = await import('../../src/ui/App.js');
+
+    App();
+    const handler = mockUseInput.mock.calls[0]?.[0] as (input: string, key: Record<string, boolean>) => void;
+    handler('x', {});
+
+    expect(mockRequestFeatureAbort).toHaveBeenCalledWith(42, 'feat-1');
+    expect(mockAbortPipeline).not.toHaveBeenCalled();
   });
 });

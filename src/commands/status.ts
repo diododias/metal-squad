@@ -1,5 +1,5 @@
 import type { Command } from 'commander';
-import { cleanupStaleRuns, listRuns } from '../db/repo.js';
+import { cleanupStaleRuns, getPipelineSnapshot, listResumablePipelines, listRuns } from '../db/repo.js';
 import { loadConfig } from '../config/index.js';
 
 export function registerStatus(program: Command): void {
@@ -33,6 +33,7 @@ export function registerStatus(program: Command): void {
       console.table(
         rows.map((r) => ({
           id: r.id,
+          pipeline_id: r.pipeline_id ?? '-',
           feature: r.feature_id,
           stage: r.stage ?? '-',
           tool: r.tool,
@@ -41,6 +42,25 @@ export function registerStatus(program: Command): void {
           started: r.started_at,
           summary: r.summary ? r.summary.slice(0, 120) : '-',
         })),
+      );
+
+      const resumable = listResumablePipelines();
+      if (resumable.length === 0) return;
+      console.log('Pipelines retomáveis:');
+      console.table(
+        resumable.map((pipeline) => {
+          const snapshot = getPipelineSnapshot(pipeline);
+          return {
+            pipeline_id: pipeline.id,
+            repo_id: pipeline.repoId,
+            target: pipeline.featureId,
+            status: pipeline.status,
+            stage: pipeline.currentStage ?? '-',
+            active: snapshot.active[0] ?? '-',
+            pending: snapshot.pending[0] ?? snapshot.aborted[0] ?? '-',
+            summary: pipeline.resumeSummary ?? '-',
+          };
+        }),
       );
     });
 }

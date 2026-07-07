@@ -1,7 +1,7 @@
 import { execFileSync } from 'node:child_process';
 import type { ToolAdapter, RunResult, RunFeatureOptions, TokenUsage } from './types.js';
 import type { Effort, Feature } from '../backlog/schema.js';
-import { CliTimeoutError, runCli } from './spawn.js';
+import { CliAbortError, CliTimeoutError, runCli } from './spawn.js';
 import { msqEventBus } from '../events/index.js';
 import { parseControlSignal } from './control.js';
 
@@ -56,6 +56,7 @@ export const claudeAdapter: ToolAdapter = {
         logLabel: `claude ${feature.id}`,
         heartbeatSuffix: () => progress.heartbeatSuffix(),
         onHeartbeat: (message) => emitRunOutput(opts.runId, feature, message, 'stderr', 'heartbeat'),
+        signal: opts.signal,
         onStdoutLine: (line) => {
           const update = progress.onStdoutLine(line);
           if (update.output) emitRunOutput(opts.runId, feature, update.output.line, 'stdout', update.output.source);
@@ -76,6 +77,16 @@ export const claudeAdapter: ToolAdapter = {
         return {
           ok: false,
           summary: `timeout após ${Math.round(error.runtimeMs / 1000)}s. ${partial}`,
+          usage,
+        };
+      }
+      if (error instanceof CliAbortError) {
+        const usage = this.parseUsage?.(error.stdout) ?? undefined;
+        if (usage) emitUsage(opts.runId, feature, usage);
+        return {
+          ok: false,
+          aborted: true,
+          summary: `abortado manualmente após ${Math.round(error.runtimeMs / 1000)}s`,
           usage,
         };
       }

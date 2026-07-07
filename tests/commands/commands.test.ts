@@ -13,6 +13,9 @@ const mockLoadConfig = vi.fn();
 const mockCreateSkillRegistry = vi.fn();
 const mockFormatSkillList = vi.fn();
 const mockListRuns = vi.fn();
+const mockListResumablePipelines = vi.fn();
+const mockFindResumablePipeline = vi.fn();
+const mockGetPipelineSnapshot = vi.fn();
 const mockCleanupStaleRuns = vi.fn();
 const mockRender = vi.fn();
 const mockAssertWritableDbPath = vi.fn();
@@ -23,7 +26,10 @@ vi.mock('../../src/core/repo.js', () => ({
 
 vi.mock('../../src/db/repo.js', () => ({
   registerRepo: mockRegisterRepo,
+  findResumablePipeline: mockFindResumablePipeline,
+  getPipelineSnapshot: mockGetPipelineSnapshot,
   listRuns: mockListRuns,
+  listResumablePipelines: mockListResumablePipelines,
   cleanupStaleRuns: mockCleanupStaleRuns,
 }));
 
@@ -82,6 +88,9 @@ describe('commands', () => {
     mockCreateSkillRegistry.mockReturnValue({ discover: vi.fn(() => ['implement']) });
     mockFormatSkillList.mockReturnValue('implement');
     mockAssertWritableDbPath.mockReturnValue(undefined);
+    mockListResumablePipelines.mockReturnValue([]);
+    mockFindResumablePipeline.mockReturnValue(null);
+    mockGetPipelineSnapshot.mockReturnValue({ plan: [], done: [], pending: [], active: [], aborted: [] });
   });
 
   afterEach(() => {
@@ -214,6 +223,23 @@ describe('commands', () => {
         summary: 'summary',
       },
     ]);
+    mockListResumablePipelines.mockReturnValueOnce([
+      {
+        id: 9,
+        repoId: 'repo-1',
+        featureId: 'feat-12',
+        status: 'paused',
+        currentStage: 'implement',
+        resumeSummary: '1/2 done · next feat-12',
+      },
+    ]);
+    mockGetPipelineSnapshot.mockReturnValueOnce({
+      plan: ['feat-11', 'feat-12'],
+      done: ['feat-11'],
+      pending: ['feat-12'],
+      active: [],
+      aborted: [],
+    });
     await program.parseAsync(['node', 'msq', 'status', '--repair-stale', '--stale-minutes', '30', '--limit', '10']);
 
     expect(mockCleanupStaleRuns).toHaveBeenCalledWith(30);
@@ -221,6 +247,7 @@ describe('commands', () => {
     expect(log).toHaveBeenCalledWith(
       '[msq] 2 run(s) órfãos marcados como failed (30 min de tolerância).',
     );
+    expect(log).toHaveBeenCalledWith('Pipelines retomáveis:');
   });
 
   it('ui dynamically imports and renders the app', async () => {
@@ -231,5 +258,46 @@ describe('commands', () => {
     await program.parseAsync(['node', 'msq', 'ui']);
 
     expect(mockRender).toHaveBeenCalledTimes(1);
+  });
+
+  it('resume locates a resumable pipeline and reuses its cwd', async () => {
+    const backlog = { version: 2, repo: 'demo', defaults: { tool: 'codex', effort: 'medium', skills: ['implement'] }, epics: [] };
+    mockLoadBacklog.mockReturnValue(backlog);
+    mockFindResumablePipeline.mockReturnValue({
+      id: 9,
+      cwd: '/tmp/resume-repo',
+      autoAdvance: 0,
+    });
+    mockGetPipelineSnapshot.mockReturnValue({
+      plan: ['feat-11', 'feat-12'],
+      done: ['feat-11'],
+      pending: ['feat-12'],
+      active: [],
+      aborted: [],
+    });
+
+    const { registerResume } = await import('../../src/commands/resume.js');
+    const program = new Command();
+    registerResume(program);
+
+    await program.parseAsync(['node', 'msq', 'resume', '9']);
+
+    expect(mockExecuteBacklog).toHaveBeenCalledWith(backlog, {
+      cwd: '/tmp/resume-repo',
+      concurrency: 3,
+      resumePipelineId: 9,
+      autoAdvanceStages: false,
+    });
+  });
+
+  it('resume fails clearly when no pipeline is resumable', async () => {
+    mockFindResumablePipeline.mockReturnValue(null);
+    const { registerResume } = await import('../../src/commands/resume.js');
+    const program = new Command();
+    registerResume(program);
+
+    await expect(
+      program.parseAsync(['node', 'msq', 'resume', 'missing']),
+    ).rejects.toThrow('Nenhuma pipeline retomável encontrada para "missing".');
   });
 });

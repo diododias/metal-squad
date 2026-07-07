@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { listRunsForTui, type RunSummary, type TaskRun } from '../../db/repo.js';
+import { listRunsForTui, listTaskRunsForRun, type RunSummary, type TaskRun } from '../../db/repo.js';
 import { msqEventBus } from '../../core/events/index.js';
 
 export function useRuns(intervalMs = 2000): RunSummary[] {
@@ -12,6 +12,8 @@ export function useRuns(intervalMs = 2000): RunSummary[] {
   });
 
   useEffect(() => {
+    void intervalMs;
+
     const refresh = (): void => {
       try {
         setRuns(listRunsForTui());
@@ -28,9 +30,7 @@ export function useRuns(intervalMs = 2000): RunSummary[] {
       msqEventBus.subscribe('gate:created', refresh),
       msqEventBus.subscribe('gate:resolved', refresh),
     ];
-    const id = setInterval(refresh, intervalMs);
     return () => {
-      clearInterval(id);
       for (const unsubscribe of unsubscribers) unsubscribe();
     };
   }, [intervalMs]);
@@ -39,12 +39,25 @@ export function useRuns(intervalMs = 2000): RunSummary[] {
 }
 
 export function useTaskRuns(runId: number | null): TaskRun[] {
-  const [taskRuns, setTaskRuns] = useState<TaskRun[]>([]);
+  const [taskRuns, setTaskRuns] = useState<TaskRun[]>(() => {
+    if (runId === null) return [];
+    try {
+      return listTaskRunsForRun(runId);
+    } catch {
+      return [];
+    }
+  });
 
   useEffect(() => {
     if (runId === null) {
       setTaskRuns([]);
       return;
+    }
+
+    try {
+      setTaskRuns(listTaskRunsForRun(runId));
+    } catch {
+      setTaskRuns([]);
     }
 
     const unsub1 = msqEventBus.subscribe('task:started', (event) => {
