@@ -43,7 +43,19 @@ budget:
 
 ## Criterios de aceite
 
-- [ ] Budget configuravel no YAML e config global
-- [ ] Pausa automatica quando budget excedido
-- [ ] Alerta quando atinge threshold configuravel
-- [ ] Custo estimado visivel na TUI
+- [x] Budget configuravel no YAML e config global
+- [x] Pausa automatica quando budget excedido
+- [x] Alerta quando atinge threshold configuravel
+- [x] Custo estimado visivel na TUI
+
+## Implementacao (2026-07-07)
+
+- `BudgetSchema` no backlog (`budget:` na raiz, v1 e v2): `maxTokens`, `maxCostUsd`, `perFeatureMaxTokens`.
+- `budget` no `config.json`: `defaultMaxCostUsd` (fallback quando o backlog nao define `maxCostUsd`) e `alertAtPercent` (default 80).
+- Pricing extraido de `src/ui/format.ts` para `src/core/pricing.ts` (compartilhado entre TUI e orquestrador; a UI re-exporta).
+- `src/core/orchestrator/budget.ts`: `resolveBudgetLimits` + `createBudgetTracker` — acumula tokens/custo por pipeline e por feature, emite `budget:alert` uma vez ao cruzar o threshold e outra ao exceder (ja roteado para Telegram/TUI via event bus).
+- Scheduler ganhou hook `beforeDispatch`: quando o budget global esta esgotado, o scheduler entra em `paused` (persiste `pausePipeline`) em vez de despachar; `resume` re-checa o budget.
+- Runs subsequentes de uma feature que excedeu `perFeatureMaxTokens` (fluxo staged) sao bloqueadas com gate para decisao humana.
+- Custo estimado na TUI ja existia via `estimateCost` na StatusBar.
+
+Testes: `tests/orchestrator/budget.test.ts` (tracker, limites, alertas, pausa via `beforeDispatch`), `tests/backlog/schema.test.ts` (parse do bloco budget), `tests/config/index.test.ts` (defaults).

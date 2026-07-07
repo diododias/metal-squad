@@ -8,6 +8,7 @@ const DEFAULT_NOTIFICATIONS = {
   events: ['gate:created', 'run:failed', 'run:done', 'stage:approval', 'stage:input'],
 };
 const DEFAULT_WORKFLOW = { autoAdvanceStages: false, pollIntervalMs: 2_000 };
+const DEFAULT_BUDGET = { alertAtPercent: 80 };
 
 describe('config', () => {
   const previousHome = process.env.HOME;
@@ -42,6 +43,7 @@ describe('config', () => {
       stageSkills: {},
       notifications: DEFAULT_NOTIFICATIONS,
       workflow: DEFAULT_WORKFLOW,
+      budget: DEFAULT_BUDGET,
     });
   });
 
@@ -97,6 +99,7 @@ describe('config', () => {
       stageSkills: {},
       notifications: DEFAULT_NOTIFICATIONS,
       workflow: DEFAULT_WORKFLOW,
+      budget: DEFAULT_BUDGET,
     });
     expect(existsSync(DB_PATH.replace(/\/app\.db$/, ''))).toBe(true);
   });

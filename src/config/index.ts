@@ -54,6 +54,11 @@ const WorkflowConfig = z.object({
   pollIntervalMs: z.number().int().positive().default(2_000),
 });
 
+const BudgetConfig = z.object({
+  defaultMaxCostUsd: z.number().positive().optional(),
+  alertAtPercent: z.number().int().min(1).max(100).default(80),
+});
+
 export const ConfigSchema = z.object({
   concurrency: z.number().int().positive().default(3),
   toolTimeoutMs: z.number().int().positive().default(600_000),
@@ -62,6 +67,7 @@ export const ConfigSchema = z.object({
   telegramChatId: z.string().optional(),
   notifications: NotificationsConfig.default({}),
   workflow: WorkflowConfig.default({}),
+  budget: BudgetConfig.default({}),
   stageSkills: z.record(z.string(), z.array(z.string())).default({}),
 });
 export type Config = z.infer<typeof ConfigSchema>;

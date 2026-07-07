@@ -13,6 +13,11 @@ export interface SchedulerOptions {
   onDone?: (feature: Feature, result: RunResult) => void;
   onAbortFeature?: (featureId: string) => void;
   onStateChange?: (state: SchedulerState) => void;
+  /**
+   * Called before dispatching each ready feature. Returning false pauses the
+   * scheduler instead of dispatching (e.g. budget exhausted). Resuming re-checks.
+   */
+  beforeDispatch?: (feature: Feature) => boolean;
 }
 
 export interface SchedulerController {
@@ -89,6 +94,10 @@ export function schedule(
 
     for (const feature of readyFeatures) {
       if (active.size >= opts.concurrency || state !== 'running') break;
+      if (opts.beforeDispatch && !opts.beforeDispatch(feature)) {
+        setState('paused');
+        break;
+      }
       remaining.splice(remaining.indexOf(feature), 1);
       active.set(feature.id, feature);
       opts.onStart?.(feature);

@@ -11,6 +11,12 @@ export const RetrySchema = z.object({
   onFail: OnFailSchema.default('stop'),
 });
 
+export const BudgetSchema = z.object({
+  maxTokens: z.number().int().positive().optional(),
+  maxCostUsd: z.number().positive().optional(),
+  perFeatureMaxTokens: z.number().int().positive().optional(),
+});
+
 export const DefaultsSchema = z.object({
   tool: ToolSchema.default('claude'),
   effort: EffortSchema.default('medium'),
@@ -64,6 +70,7 @@ export const EpicSchema = z.object({
 export const BacklogV1Schema = z.object({
   version: z.literal(1).default(1 as const),
   repo: z.string(),
+  budget: BudgetSchema.optional(),
   epics: z.array(EpicSchema).default([]),
 });
 
@@ -71,6 +78,7 @@ export const BacklogV2Schema = z.object({
   version: z.literal(2),
   repo: z.string(),
   defaults: DefaultsSchema.default({}),
+  budget: BudgetSchema.optional(),
   epics: z.array(EpicSchema).default([]),
 });
 
@@ -80,6 +88,7 @@ export type Tool = z.infer<typeof ToolSchema>;
 export type Effort = z.infer<typeof EffortSchema>;
 export type OnFail = z.infer<typeof OnFailSchema>;
 export type Retry = z.infer<typeof RetrySchema>;
+export type Budget = z.infer<typeof BudgetSchema>;
 export type Defaults = z.infer<typeof DefaultsSchema>;
 export type Task = z.infer<typeof TaskSchema>;
 export type WorkflowApprovals = z.infer<typeof WorkflowApprovalsSchema>;

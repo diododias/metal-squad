@@ -32,6 +32,7 @@ import { dispatch } from '../notify/manager.js';
 import { startTelegramPoller, stopTelegramPoller } from '../notify/telegram-poller.js';
 import { loadConfig } from '../../config/index.js';
 import { buildPrompt } from '../backlog/prompt.js';
+import { createBudgetTracker, resolveBudgetLimits } from '../orchestrator/budget.js';
 import { createSkillRegistry } from '../skills/index.js';
 import { syncFeatureTasksToBacklog } from '../backlog/sync.js';
 import type { Skill } from '../skills/types.js';
@@ -67,6 +68,11 @@ export async function executeBacklog(
   cleanupStaleRuns(config.staleRunThresholdMinutes);
   const activeRunIds = new Set<number>();
   const activeControllers = new Map<string, AbortController>();
+
+  const budgetLimits = resolveBudgetLimits(backlog.budget, config.budget?.defaultMaxCostUsd);
+  const budgetTracker = budgetLimits
+    ? createBudgetTracker(budgetLimits, { alertAtPercent: config.budget?.alertAtPercent })
+    : null;
 
   const repoStageSkills = backlog.version === 2 ? backlog.defaults.stageSkills : {};
   const effectiveStageSkills: Record<string, string[]> = {
@@ -124,6 +130,13 @@ export async function executeBacklog(
     stage?: string,
     abortSignal?: AbortSignal,
   ) => {
+    if (budgetTracker?.featureExceeded(feature.id)) {
+      const summary = `feature ${feature.id} exceeded per-feature token budget (${budgetLimits?.perFeatureMaxTokens} tokens); gate created`;
+      const runId = createRun(repoId, feature.id, feature.tool, { pipelineId, stage });
+      finishRun(runId, 'blocked', summary);
+      createGate(runId, feature.id, repoId);
+      return { runId, res: { ok: false, summary } satisfies RunResult };
+    }
     const runId = createRun(repoId, feature.id, feature.tool, { pipelineId, stage });
     activeRunIds.add(runId);
     msqEventBus.emit('run:start', { runId, featureId: feature.id, tool: feature.tool });
@@ -143,7 +156,10 @@ export async function executeBacklog(
         repoId,
         signal: abortSignal,
       });
-      if (res.usage) recordUsage(runId, res.usage);
+      if (res.usage) {
+        recordUsage(runId, res.usage);
+        budgetTracker?.recordUsage(feature.id, res.usage, feature.model ?? feature.tool);
+      }
 
       if (res.control?.type === 'needs_input') {
         finishRun(runId, 'blocked', res.summary);
@@ -283,6 +299,7 @@ export async function executeBacklog(
     concurrency: opts.concurrency,
     initialDone,
     execute,
+    beforeDispatch: budgetTracker ? () => !budgetTracker.exceeded() : undefined,
     onStateChange: (state) => {
       if (state === 'paused') pausePipeline(pipelineId);
       if (state === 'running') setPipelineStatus(pipelineId, 'running');

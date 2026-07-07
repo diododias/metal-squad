@@ -158,6 +158,29 @@ describe('BacklogV2Schema', () => {
       });
     }
   });
+
+  it('parses a budget block on the backlog root', () => {
+    const result = BacklogV2Schema.safeParse({
+      ...V2_YAML_OBJ,
+      budget: { maxTokens: 500_000, maxCostUsd: 10, perFeatureMaxTokens: 100_000 },
+    });
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.budget).toEqual({
+        maxTokens: 500_000,
+        maxCostUsd: 10,
+        perFeatureMaxTokens: 100_000,
+      });
+    }
+  });
+
+  it('rejects non-positive budget values', () => {
+    const result = BacklogV2Schema.safeParse({
+      ...V2_YAML_OBJ,
+      budget: { maxTokens: 0 },
+    });
+    expect(result.success).toBe(false);
+  });
 });
 
 describe('BacklogSchema (union)', () => {
