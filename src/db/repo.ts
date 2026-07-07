@@ -42,7 +42,9 @@ export function createRun(
        VALUES (?, ?, ?, ?, ?)`,
     )
     .run(repoId, featureId, tool, opts.pipelineId ?? null, opts.stage ?? null);
-  return Number(info.lastInsertRowid);
+  const runId = Number(info.lastInsertRowid);
+  recordRunEvent(runId, 'started', opts.stage ? { stage: opts.stage } : undefined);
+  return runId;
 }
 
 export function finishRun(
@@ -53,6 +55,7 @@ export function finishRun(
   getDb('readwrite')
     .prepare(`UPDATE runs SET status = ?, summary = ?, ended_at = datetime('now') WHERE id = ?`)
     .run(status, summary ?? null, runId);
+  recordRunEvent(runId, status, summary ? { summary } : undefined);
 }
 
 export function cleanupStaleRuns(olderThanMinutes: number): number {
@@ -258,6 +261,10 @@ export function resolveGate(id: number, decision: GateDecision): void {
     )
     .run(decision, id);
   if (info.changes > 0) {
+    const gate = getDb('readonly')
+      .prepare(`SELECT run_id AS runId FROM gates WHERE id = ?`)
+      .get(id) as { runId: number } | undefined;
+    if (gate) recordRunEvent(gate.runId, 'gate_resolved', { gateId: id, decision });
     msqEventBus.emit('gate:resolved', { gateId: id, decision });
   }
 }
@@ -270,17 +277,129 @@ export function createGate(runId: number, featureId: string, repoId: string): nu
     )
     .run(runId, featureId, repoId);
   const gateId = Number(info.lastInsertRowid);
+  recordRunEvent(runId, 'gate_wait', { gateId });
   msqEventBus.emit('gate:created', { gateId, runId, featureId, repoId });
   return gateId;
 }
 
-export function createRetryRecord(runId: number, attempt: number, error?: string): void {
+export function createRetryRecord(
+  runId: number,
+  attempt: number,
+  error?: string,
+  waitMs?: number,
+): void {
   getDb('readwrite')
     .prepare(
       `INSERT INTO retry_history (run_id, attempt, error)
        VALUES (?, ?, ?)`,
     )
     .run(runId, attempt, error ?? null);
+  recordRunEvent(runId, 'retry', {
+    attempt,
+    ...(waitMs !== undefined ? { waitMs } : {}),
+  });
+}
+
+export interface RunEventRow {
+  id: number;
+  runId: number;
+  event: string;
+  metadata: Record<string, unknown> | null;
+  createdAt: string;
+}
+
+export function recordRunEvent(
+  runId: number,
+  event: string,
+  metadata?: Record<string, unknown>,
+): void {
+  getDb('readwrite')
+    .prepare(`INSERT INTO run_events (run_id, event, metadata) VALUES (?, ?, ?)`)
+    .run(runId, event, metadata ? JSON.stringify(metadata) : null);
+}
+
+export function listRunEvents(runId: number): RunEventRow[] {
+  if (!hasDbFile()) return [];
+  const rows = getDb('readonly')
+    .prepare(
+      `SELECT id, run_id AS runId, event, metadata, created_at AS createdAt
+       FROM run_events
+       WHERE run_id = ?
+       ORDER BY id ASC`,
+    )
+    .all(runId) as Array<Omit<RunEventRow, 'metadata'> & { metadata: string | null }>;
+  return rows.map((row) => ({
+    ...row,
+    metadata: row.metadata ? safeJsonParse(row.metadata) : null,
+  }));
+}
+
+function safeJsonParse(value: string): Record<string, unknown> | null {
+  try {
+    const parsed = JSON.parse(value) as unknown;
+    return parsed && typeof parsed === 'object' ? parsed as Record<string, unknown> : null;
+  } catch {
+    return null;
+  }
+}
+
+export interface StatsRunRow {
+  id: number;
+  repoId: string;
+  featureId: string;
+  tool: string;
+  status: string;
+  startedAt: string;
+  endedAt: string | null;
+  inputTokens: number | null;
+  cachedInputTokens: number | null;
+  outputTokens: number | null;
+  totalTokens: number | null;
+}
+
+export interface StatsFilters {
+  sinceDays?: number;
+  repoId?: string;
+  tool?: string;
+}
+
+export function listRunsForStats(filters: StatsFilters = {}): StatsRunRow[] {
+  if (!hasDbFile()) return [];
+  const clauses: string[] = [];
+  const params: Array<string | number> = [];
+  if (filters.sinceDays !== undefined) {
+    clauses.push(`r.started_at >= datetime('now', '-' || ? || ' days')`);
+    params.push(filters.sinceDays);
+  }
+  if (filters.repoId) {
+    clauses.push('r.repo_id = ?');
+    params.push(filters.repoId);
+  }
+  if (filters.tool) {
+    clauses.push('r.tool = ?');
+    params.push(filters.tool);
+  }
+  const where = clauses.length > 0 ? `WHERE ${clauses.join(' AND ')}` : '';
+  return getDb('readonly')
+    .prepare(
+      `SELECT
+         r.id,
+         r.repo_id AS repoId,
+         r.feature_id AS featureId,
+         r.tool,
+         r.status,
+         r.started_at AS startedAt,
+         r.ended_at AS endedAt,
+         COALESCE(r.input_tokens, u.input) AS inputTokens,
+         COALESCE(r.cached_input_tokens, u.cached_input) AS cachedInputTokens,
+         COALESCE(r.output_tokens, u.output) AS outputTokens,
+         COALESCE(r.total_tokens, u.total) AS totalTokens
+       FROM runs r
+       LEFT JOIN token_usage u ON u.run_id = r.id
+       ${where}
+       ORDER BY r.id DESC`,
+    )
+    .all(...params) as StatsRunRow[];
 }
 
 export interface TaskRun {

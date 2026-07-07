@@ -5,6 +5,7 @@ import { abortPipeline, pausePipeline, requestFeatureAbort, resumePipeline } fro
 import { useRuns, useTaskRuns } from './hooks/useRuns.js';
 import { useGates } from './hooks/useGates.js';
 import { useRunOutput } from './hooks/useRunOutput.js';
+import { useRunBreakdown } from './hooks/useRunBreakdown.js';
 import { useTerminalWidth } from './hooks/useTerminalWidth.js';
 import { useNotifications } from './hooks/useNotifications.js';
 import { getFeatureCatalog, getPendingFeatures } from './catalog.js';
@@ -63,6 +64,11 @@ export function App(): React.ReactElement {
     ui.outputPaused ? 1_500 : 350,
   );
   const taskRuns = useTaskRuns(selectedRun ? selectedRun.runId : null);
+  const runBreakdown = useRunBreakdown(
+    selectedRun ? selectedRun.runId : null,
+    selectedRun?.startedAt ?? null,
+    selectedRun?.endedAt ?? null,
+  );
   const activeView: ActiveView = selectedRun ? ui.activeView : 'overview';
   const featureCatalog = getFeatureCatalog();
   const selectedFeature = selectedRun ? featureCatalog[selectedRun.featureId] ?? null : null;
@@ -219,6 +225,7 @@ export function App(): React.ReactElement {
           width={mainWidth}
           pendingFeatures={pendingFeatures}
           selectedPendingIndex={selectedPendingIndex}
+          breakdown={runBreakdown}
         />
         <Sidebar
           runs={runs}

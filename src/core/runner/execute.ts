@@ -470,8 +470,9 @@ async function runWithRetry(
     lastResult = res;
 
     if (attempt < maxAttempts) {
-      createRetryRecord(opts.runId, attempt, res.summary);
-      await sleep(backoffWithJitter(backoffMs, attempt));
+      const waitMs = backoffWithJitter(backoffMs, attempt);
+      createRetryRecord(opts.runId, attempt, res.summary, waitMs);
+      await sleep(waitMs);
     }
   }
 

@@ -293,8 +293,8 @@ describe('executeBacklog failure persistence', () => {
 
     await rejection;
     expect(mockRunFeature).toHaveBeenCalledTimes(3);
-    expect(mockCreateRetryRecord).toHaveBeenNthCalledWith(1, 7, 1, 'falha 1');
-    expect(mockCreateRetryRecord).toHaveBeenNthCalledWith(2, 7, 2, 'falha 2');
+    expect(mockCreateRetryRecord).toHaveBeenNthCalledWith(1, 7, 1, 'falha 1', expect.any(Number));
+    expect(mockCreateRetryRecord).toHaveBeenNthCalledWith(2, 7, 2, 'falha 2', expect.any(Number));
     expect(mockCreateRetryRecord).toHaveBeenCalledTimes(2);
     expect(mockFinishRun).toHaveBeenCalledWith(7, 'failed', 'falha 3');
 

@@ -49,6 +49,10 @@ vi.mock('../../src/ui/hooks/useRunOutput.js', () => ({
   useRunOutput: mockUseRunOutput,
 }));
 
+vi.mock('../../src/ui/hooks/useRunBreakdown.js', () => ({
+  useRunBreakdown: vi.fn(() => null),
+}));
+
 vi.mock('../../src/ui/hooks/useTerminalWidth.js', () => ({
   useTerminalWidth: mockUseTerminalWidth,
 }));
