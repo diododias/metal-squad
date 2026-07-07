@@ -3,10 +3,12 @@ import { Box, Text } from 'ink';
 import type { NotificationEntry } from '../hooks/useNotifications.js';
 
 const EVENT_COLOR: Record<string, string> = {
+  'run:start': 'cyan',
   'gate:created': 'yellow',
   'run:failed': 'red',
   'budget:alert': 'magenta',
   'run:done': 'green',
+  'ui:info': 'cyan',
   'ui:notice': 'red',
 };
 

@@ -281,8 +281,6 @@ epics:
     features:
       - id: feat-1
         title: Feature
-        tool: codex
-        effort: medium
         dependsOn: []
         specFile: specs/feat.md
         tasks:
@@ -294,6 +292,8 @@ epics:
     const { loadBacklog } = await import('../../src/core/backlog/load.js');
     const backlog = loadBacklog(undefined, cwd);
 
+    expect(backlog.epics[0]?.features[0]?.tool).toBe('codex');
+    expect(backlog.epics[0]?.features[0]?.effort).toBe('medium');
     expect(backlog.epics[0]?.features[0]?.skills).toEqual(['implement', 'test']);
     expect(backlog.epics[0]?.features[0]?.tasks[0]?.skills).toEqual(['implement', 'test']);
   });

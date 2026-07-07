@@ -7,6 +7,12 @@ export function attachEventNotifications(
   eventBus: TypedEventBus<MsqEvents> = msqEventBus,
 ): () => void {
   const unsubscribers = [
+    eventBus.subscribe('run:start', ({ featureId, tool }) => {
+      void dispatch('run:start', `metal-squad: ${featureId} started with ${tool}`, {
+        featureId,
+        tool,
+      }).catch(() => {});
+    }),
     eventBus.subscribe('gate:created', ({ gateId, featureId }) => {
       const message = [
         `metal-squad: gate ${gateId} created for ${featureId}`,

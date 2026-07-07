@@ -12,8 +12,6 @@ export function useRuns(intervalMs = 2000): RunSummary[] {
   });
 
   useEffect(() => {
-    void intervalMs;
-
     const refresh = (): void => {
       try {
         setRuns(listRunsForTui());
@@ -21,6 +19,8 @@ export function useRuns(intervalMs = 2000): RunSummary[] {
         // DB locked or unavailable — keep stale data
       }
     };
+
+    const timer = setInterval(refresh, intervalMs);
 
     const unsubscribers = [
       msqEventBus.subscribe('run:start', refresh),
@@ -31,6 +31,7 @@ export function useRuns(intervalMs = 2000): RunSummary[] {
       msqEventBus.subscribe('gate:resolved', refresh),
     ];
     return () => {
+      clearInterval(timer);
       for (const unsubscribe of unsubscribers) unsubscribe();
     };
   }, [intervalMs]);
@@ -59,6 +60,16 @@ export function useTaskRuns(runId: number | null): TaskRun[] {
     } catch {
       setTaskRuns([]);
     }
+
+    const refresh = (): void => {
+      try {
+        setTaskRuns(listTaskRunsForRun(runId));
+      } catch {
+        // DB locked or unavailable — keep stale data
+      }
+    };
+
+    const timer = setInterval(refresh, 2000);
 
     const unsub1 = msqEventBus.subscribe('task:started', (event) => {
       if (event.runId !== runId) return;
@@ -95,6 +106,7 @@ export function useTaskRuns(runId: number | null): TaskRun[] {
     });
 
     return () => {
+      clearInterval(timer);
       unsub1();
       unsub2();
     };

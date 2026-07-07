@@ -4,6 +4,15 @@ defaults:
   tool: codex
   effort: high
   skills: [implement]
+  stageSkills:
+    specify: [speckit-specify]
+    plan: [speckit-plan, speckit-tasks]
+    implement: [speckit-implement, dev-flow]
+    validate: [reviewr]
+budget:
+  maxTokens: 5000000
+  maxCostUsd: 100
+  perFeatureMaxTokens: 500000
 
 # Backlog normalizado para o estado atual da branch develop.
 # Dependencias para features ja entregues foram removidas para manter
@@ -14,13 +23,21 @@ epics:
     features:
       - id: feat-08
         title: F08 — Navegacao por Sessoes/Runs
+        tool: codex
         model: gpt-5.4
+        effort: high
+        skills: [implement]
         specFile: docs/features/F08-session-navigation.md
         context:
           - docs/ROADMAP.md
         dependsOn: []
         tasks: []
+        retry:
+          maxAttempts: 1
+          backoffMs: 5000
+          onFail: stop
         workflow:
+          mode: staged
           stages: [specify, plan, implement]
           approvals:
             channel: telegram
@@ -28,13 +45,21 @@ epics:
           syncTasksToBacklog: true
       - id: feat-09
         title: F09 — Command Palette & Shortcuts
+        tool: codex
         model: gpt-5.4
+        effort: high
+        skills: [implement]
         specFile: docs/features/F09-command-palette.md
         context:
           - docs/ROADMAP.md
         dependsOn: []
         tasks: []
+        retry:
+          maxAttempts: 1
+          backoffMs: 5000
+          onFail: stop
         workflow:
+          mode: staged
           stages: [specify, plan, implement]
           approvals:
             channel: telegram
@@ -42,13 +67,21 @@ epics:
           syncTasksToBacklog: true
       - id: feat-10
         title: F10 — Theme System
+        tool: codex
         model: gpt-5.4
+        effort: high
+        skills: [implement]
         specFile: docs/features/F10-theme-system.md
         context:
           - docs/ROADMAP.md
         dependsOn: []
         tasks: []
+        retry:
+          maxAttempts: 1
+          backoffMs: 5000
+          onFail: stop
         workflow:
+          mode: staged
           stages: [specify, plan, implement]
           approvals:
             channel: telegram
@@ -60,13 +93,21 @@ epics:
     features:
       - id: feat-13
         title: F13 — Execution Graph Visualization
+        tool: codex
         model: gpt-5.4
+        effort: high
+        skills: [implement]
         specFile: docs/features/F13-execution-graph.md
         context:
           - docs/ROADMAP.md
         dependsOn: []
         tasks: []
+        retry:
+          maxAttempts: 1
+          backoffMs: 5000
+          onFail: stop
         workflow:
+          mode: staged
           stages: [specify, plan, implement]
           approvals:
             channel: telegram
@@ -74,13 +115,21 @@ epics:
           syncTasksToBacklog: true
       - id: feat-15
         title: F15 — Event System (pub/sub interno)
+        tool: codex
         model: gpt-5.4
+        effort: high
+        skills: [implement]
         specFile: docs/features/F15-event-system.md
         context:
           - docs/ROADMAP.md
         dependsOn: []
         tasks: []
+        retry:
+          maxAttempts: 1
+          backoffMs: 5000
+          onFail: stop
         workflow:
+          mode: staged
           stages: [specify, plan, implement]
           approvals:
             channel: telegram
@@ -88,13 +137,21 @@ epics:
           syncTasksToBacklog: true
       - id: feat-26
         title: F26 — Resume de pipeline a partir do estado persistido
+        tool: codex
         model: gpt-5.4
+        effort: high
+        skills: [implement]
         specFile: docs/features/F26-resume-pipeline-from-state.md
         context:
           - docs/ROADMAP.md
         dependsOn: []
         tasks: []
+        retry:
+          maxAttempts: 1
+          backoffMs: 5000
+          onFail: stop
         workflow:
+          mode: staged
           stages: [specify, plan, implement]
           approvals:
             channel: telegram
@@ -106,13 +163,21 @@ epics:
     features:
       - id: feat-20
         title: F20 — Plugin System para Adapters
+        tool: codex
         model: gpt-5.4
+        effort: high
+        skills: [implement]
         specFile: docs/features/F20-plugin-adapters.md
         context:
           - docs/ROADMAP.md
         dependsOn: []
         tasks: []
+        retry:
+          maxAttempts: 1
+          backoffMs: 5000
+          onFail: stop
         workflow:
+          mode: staged
           stages: [specify, plan, implement]
           approvals:
             channel: telegram
@@ -120,13 +185,21 @@ epics:
           syncTasksToBacklog: true
       - id: feat-21
         title: F21 — Interactive Setup Wizard
+        tool: codex
         model: gpt-5.4
+        effort: high
+        skills: [implement]
         specFile: docs/features/F21-setup-wizard.md
         context:
           - docs/ROADMAP.md
         dependsOn: []
         tasks: []
+        retry:
+          maxAttempts: 1
+          backoffMs: 5000
+          onFail: stop
         workflow:
+          mode: staged
           stages: [specify, plan, implement]
           approvals:
             channel: telegram
@@ -134,13 +207,21 @@ epics:
           syncTasksToBacklog: true
       - id: feat-22
         title: F22 — Per-Repo Config Overrides
+        tool: codex
         model: gpt-5.4
+        effort: high
+        skills: [implement]
         specFile: docs/features/F22-per-repo-config.md
         context:
           - docs/ROADMAP.md
         dependsOn: []
         tasks: []
+        retry:
+          maxAttempts: 1
+          backoffMs: 5000
+          onFail: stop
         workflow:
+          mode: staged
           stages: [specify, plan, implement]
           approvals:
             channel: telegram
@@ -148,13 +229,21 @@ epics:
           syncTasksToBacklog: true
       - id: feat-23
         title: F23 — CLAUDE.md / Agent Config Generation
+        tool: codex
         model: gpt-5.4
+        effort: high
+        skills: [implement]
         specFile: docs/features/F23-agent-config-gen.md
         context:
           - docs/ROADMAP.md
         dependsOn: []
         tasks: []
+        retry:
+          maxAttempts: 1
+          backoffMs: 5000
+          onFail: stop
         workflow:
+          mode: staged
           stages: [specify, plan, implement]
           approvals:
             channel: telegram
@@ -162,13 +251,21 @@ epics:
           syncTasksToBacklog: true
       - id: feat-25
         title: F25 — Hardening do fluxo msq-develop
+        tool: codex
         model: gpt-5.4
+        effort: high
+        skills: [implement]
         specFile: docs/features/F25-msq-develop-harness-hardening.md
         context:
           - docs/ROADMAP.md
         dependsOn: []
         tasks: []
+        retry:
+          maxAttempts: 1
+          backoffMs: 5000
+          onFail: stop
         workflow:
+          mode: staged
           stages: [specify, plan, implement]
           approvals:
             channel: telegram

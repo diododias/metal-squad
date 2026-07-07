@@ -28,6 +28,8 @@ export function useNotifications(maxItems = 12): NotificationEntry[] {
     };
 
     const unsubscribers = [
+      msqEventBus.subscribe('run:start', ({ featureId }) =>
+        push('run:start', `${featureId} started`)),
       msqEventBus.subscribe('gate:created', ({ gateId, featureId }) =>
         push('gate:created', `gate ${gateId} → ${featureId}`)),
       msqEventBus.subscribe('run:failed', ({ featureId }) =>
@@ -36,6 +38,8 @@ export function useNotifications(maxItems = 12): NotificationEntry[] {
         push('budget:alert', `budget ${percent}% reached`)),
       msqEventBus.subscribe('run:done', ({ featureId }) =>
         push('run:done', `${featureId} done`)),
+      msqEventBus.subscribe('ui:info', ({ message }) =>
+        push('ui:info', message)),
       msqEventBus.subscribe('ui:notice', ({ message }) =>
         push('ui:notice', message)),
     ];

@@ -4,35 +4,113 @@ defaults:
   tool: claude
   effort: medium
   skills: [implement]
+  stageSkills:
+    specify: [speckit-specify]
+    plan: [speckit-plan, speckit-tasks]
+    implement: [speckit-implement, dev-flow]
+    validate: [reviewr]
+budget:
+  maxTokens: 500000
+  maxCostUsd: 10
+  perFeatureMaxTokens: 100000
 
 epics:
   - id: epic-core
-    title: Núcleo de orquestração
+    title: Core orchestration
     features:
       - id: feat-scheduler
-        title: Scheduler com concorrência global
+        title: Scheduler with global concurrency
+        spec: Keep dependency execution deterministic and observable.
         tool: claude
+        model: claude-sonnet-4-5
         effort: high
+        dependsOn: []
         skills: [specify, plan, implement]
         specFile: docs/features/F01-yaml-schema-v2.md
         context:
           - src/core/backlog/schema.ts
-        dependsOn: []
+          - docs/epics/E01-skills-system.md
         tasks:
           - id: t-graph
-            title: Ordenação topológica do backlog
+            title: Topological ordering for backlog features
+            status: done
+            dependsOn: []
+            taskFile: specs/examples/task-graph.md
             skills: [implement]
           - id: t-run
-            title: Loop de execução com limite de concorrência
-            skills: [implement]
+            title: Execution loop with concurrency cap
+            status: todo
             dependsOn: [t-graph]
+            taskFile: specs/examples/task-run.md
+            skills: [implement, test]
+        workflow:
+          mode: staged
+          stages: [specify, plan, implement, validate]
+          approvals:
+            channel: telegram
+            autoAdvance: false
+          syncTasksToBacklog: true
+        retry:
+          maxAttempts: 2
+          backoffMs: 5000
+          onFail: continue
+
       - id: feat-telegram
-        title: Notificação em gates via Telegram
+        title: Gate notifications via Telegram
+        spec: Notify humans when a run is blocked and needs intervention.
         tool: codex
+        model: gpt-5.4
         effort: medium
-        skills: [implement]
         dependsOn: [feat-scheduler]
+        skills: [implement]
+        specFile: docs/features/F19-notifications-v2.md
+        context:
+          - docs/features/F15-event-system.md
         tasks:
           - id: t-notify
-            title: Integração Telegram Bot API
+            title: Telegram Bot API integration
+            status: blocked
+            dependsOn: []
+            taskFile: specs/examples/task-notify.md
             skills: [implement]
+        workflow:
+          mode: single
+          stages: [implement]
+          approvals:
+            channel: telegram
+            autoAdvance: true
+          syncTasksToBacklog: false
+        retry:
+          maxAttempts: 3
+          backoffMs: 10000
+          onFail: gate
+
+      - id: feat-local-provider
+        title: Local provider smoke flow
+        spec: Exercise a provider/model string that targets opencode.
+        tool: opencode
+        model: anthropic/claude-sonnet-4-5
+        effort: low
+        dependsOn: []
+        skills: [implement, review]
+        specFile: docs/features/F20-plugin-adapters.md
+        context:
+          - src/core/adapters/opencode.ts
+        tasks:
+          - id: t-config
+            title: Configure provider/model wiring
+            status: running
+            dependsOn: []
+            taskFile: specs/examples/task-config.md
+            skills: [implement]
+        workflow:
+          mode: staged
+          stages: [implement, validate]
+          approvals:
+            channel: telegram
+            autoAdvance: false
+          syncTasksToBacklog: true
+        retry:
+          maxAttempts: 1
+          backoffMs: 2000
+          onFail: stop

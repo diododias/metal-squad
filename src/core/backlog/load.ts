@@ -10,6 +10,8 @@ import {
 
 export const BACKLOG_FILE = 'backlog.yaml';
 
+type RawYamlMap = Record<string, unknown>;
+
 function normalizeV1(backlog: BacklogV1): BacklogV2 {
   const defaults: Defaults = { tool: 'claude', effort: 'medium', skills: [], stageSkills: {} };
   return {
@@ -70,11 +72,53 @@ function validateFiles(backlog: BacklogV2, root: string): void {
   }
 }
 
+function applyDefaultsBeforeParse(raw: unknown): unknown {
+  if (!isRecord(raw) || raw.version !== 2) return raw;
+
+  const defaults = isRecord(raw.defaults) ? raw.defaults : {};
+  const defaultTool = typeof defaults.tool === 'string' ? defaults.tool : undefined;
+  const defaultEffort = typeof defaults.effort === 'string' ? defaults.effort : undefined;
+  const defaultSkills = Array.isArray(defaults.skills) ? defaults.skills : undefined;
+  const epics = Array.isArray(raw.epics) ? raw.epics : [];
+
+  return {
+    ...raw,
+    epics: epics.map((epic) => {
+      if (!isRecord(epic)) return epic;
+      const features = Array.isArray(epic.features) ? epic.features : [];
+      return {
+        ...epic,
+        features: features.map((feature) => {
+          if (!isRecord(feature)) return feature;
+          const tasks = Array.isArray(feature.tasks) ? feature.tasks : [];
+          return {
+            ...feature,
+            ...(feature.tool === undefined && defaultTool ? { tool: defaultTool } : {}),
+            ...(feature.effort === undefined && defaultEffort ? { effort: defaultEffort } : {}),
+            ...(feature.skills === undefined && defaultSkills ? { skills: [...defaultSkills] } : {}),
+            tasks: tasks.map((task) => {
+              if (!isRecord(task)) return task;
+              return {
+                ...task,
+                ...(task.skills === undefined && defaultSkills ? { skills: [...defaultSkills] } : {}),
+              };
+            }),
+          };
+        }),
+      };
+    }),
+  };
+}
+
+function isRecord(value: unknown): value is RawYamlMap {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
 export function loadBacklog(path = BACKLOG_FILE, cwd = process.cwd()): BacklogV2 {
   const absPath = isAbsolute(path) ? path : resolve(cwd, path);
   const root = dirname(absPath);
   const raw = readFileSync(absPath, 'utf8');
-  const parsed = BacklogSchema.parse(parse(raw));
+  const parsed = BacklogSchema.parse(applyDefaultsBeforeParse(parse(raw)));
 
   let v2: BacklogV2;
   if (parsed.version === 1) {

@@ -9,6 +9,8 @@ describe('ui hooks', () => {
   it('useRuns loads initial rows and refreshes on event', async () => {
     const setRuns = vi.fn();
     const listeners = new Map<string, Array<() => void>>();
+    const setIntervalSpy = vi.spyOn(globalThis, 'setInterval').mockReturnValue(1 as unknown as ReturnType<typeof setInterval>);
+    vi.spyOn(globalThis, 'clearInterval').mockImplementation(() => {});
 
     vi.doMock('react', () => ({
       useState: (value: unknown) => [typeof value === 'function' ? (value as () => unknown)() : value, setRuns],
@@ -39,6 +41,7 @@ describe('ui hooks', () => {
     const runs = useRuns(1234);
 
     expect(runs).toEqual([{ runId: 1 }]);
+    expect(setIntervalSpy).toHaveBeenCalledWith(expect.any(Function), 1234);
     listeners.get('run:start')?.[0]?.();
     expect(setRuns).toHaveBeenCalledWith([{ runId: 2 }]);
   });
@@ -46,6 +49,8 @@ describe('ui hooks', () => {
   it('useRuns keeps stale data when db refresh throws', async () => {
     const setRuns = vi.fn();
     const listeners = new Map<string, Array<() => void>>();
+    vi.spyOn(globalThis, 'setInterval').mockReturnValue(1 as unknown as ReturnType<typeof setInterval>);
+    vi.spyOn(globalThis, 'clearInterval').mockImplementation(() => {});
 
     vi.doMock('react', () => ({
       useState: (value: unknown) => [typeof value === 'function' ? (value as () => unknown)() : value, setRuns],
@@ -80,6 +85,8 @@ describe('ui hooks', () => {
   it('useRunOutput loads the current tail and refreshes on matching events', async () => {
     const setOutput = vi.fn();
     const listeners = new Map<string, Array<(event: { runId: number }) => void>>();
+    const setIntervalSpy = vi.spyOn(globalThis, 'setInterval').mockReturnValue(1 as unknown as ReturnType<typeof setInterval>);
+    vi.spyOn(globalThis, 'clearInterval').mockImplementation(() => {});
 
     vi.doMock('react', () => ({
       useState: () => [[], setOutput],
@@ -108,6 +115,7 @@ describe('ui hooks', () => {
     const { useRunOutput } = await import('../../src/ui/hooks/useRunOutput.js');
     expect(useRunOutput(7, 123, 5)).toEqual([]);
     expect(setOutput).toHaveBeenCalledWith([{ id: 1, line: 'one' }]);
+    expect(setIntervalSpy).toHaveBeenCalledWith(expect.any(Function), 123);
 
     listeners.get('run:output')?.[0]?.({ runId: 7 });
     await Promise.resolve();
@@ -124,6 +132,8 @@ describe('ui hooks', () => {
       });
     const resolveGate = vi.fn();
     const listeners = new Map<string, Array<() => void>>();
+    const setIntervalSpy = vi.spyOn(globalThis, 'setInterval').mockReturnValue(1 as unknown as ReturnType<typeof setInterval>);
+    vi.spyOn(globalThis, 'clearInterval').mockImplementation(() => {});
 
     vi.doMock('react', () => ({
       useState: (value: unknown) => [typeof value === 'function' ? (value as () => unknown)() : value, setGates],
@@ -151,6 +161,7 @@ describe('ui hooks', () => {
     const result = useGates();
 
     expect(result.gates).toEqual([{ id: 1 }]);
+    expect(setIntervalSpy).toHaveBeenCalledWith(expect.any(Function), 2000);
     result.resolve(1, 'approved');
     expect(resolveGate).toHaveBeenCalledWith(1, 'approved');
     expect(setGates).toHaveBeenCalledWith([{ id: 2 }]);
@@ -160,6 +171,8 @@ describe('ui hooks', () => {
   it('useTaskRuns loads persisted rows and updates matching run events', async () => {
     const setTaskRuns = vi.fn();
     const listeners = new Map<string, Array<(event: any) => void>>();
+    const setIntervalSpy = vi.spyOn(globalThis, 'setInterval').mockReturnValue(1 as unknown as ReturnType<typeof setInterval>);
+    vi.spyOn(globalThis, 'clearInterval').mockImplementation(() => {});
 
     vi.doMock('react', () => ({
       useState: (value: unknown) => [typeof value === 'function' ? (value as () => unknown)() : value, setTaskRuns],
@@ -184,6 +197,7 @@ describe('ui hooks', () => {
 
     const { useTaskRuns } = await import('../../src/ui/hooks/useRuns.js');
     expect(useTaskRuns(7)).toEqual([{ taskId: 'T1', status: 'running' }]);
+    expect(setIntervalSpy).toHaveBeenCalledWith(expect.any(Function), 2000);
 
     listeners.get('task:started')?.[0]?.({
       runId: 7,

@@ -27,8 +27,7 @@ export function useRunOutput(
 
   useEffect(() => {
     if (runId === null) return undefined;
-
-    void intervalMs;
+    const timer = setInterval(refresh, intervalMs);
 
     const maybeRefresh = (eventRunId: number): void => {
       if (eventRunId !== runId) return;
@@ -47,6 +46,7 @@ export function useRunOutput(
       }),
     ];
     return () => {
+      clearInterval(timer);
       for (const unsubscribe of unsubscribers) unsubscribe();
     };
   }, [intervalMs, refresh, runId]);

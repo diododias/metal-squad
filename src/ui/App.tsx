@@ -86,6 +86,7 @@ function launchFeatureRun(featureId: string): void {
     msqEventBus.emit('ui:notice', { message: formatStartError(featureId, error) });
   });
   child.unref();
+  msqEventBus.emit('ui:info', { message: `Starting ${featureId}...` });
 }
 
 export function App(): React.ReactElement {

@@ -12,6 +12,7 @@ export const DEFAULT_DB_PATH = join(DATA_DIR, 'app.db');
 export const DB_PATH = resolveDbPath();
 
 export const NOTIFICABLE_EVENTS = [
+  'run:start',
   'gate:created',
   'run:failed',
   'budget:alert',
@@ -37,6 +38,7 @@ export const NotificationChannelConfig = z.discriminatedUnion('type', [
 export type NotificationChannelConfig = z.infer<typeof NotificationChannelConfig>;
 
 const DEFAULT_NOTIFICATION_EVENTS: NotificableEvent[] = [
+  'run:start',
   'gate:created',
   'run:failed',
   'run:done',
@@ -119,9 +121,14 @@ function normalizeLegacyConfig(raw: unknown): unknown {
   }
 
   const events = cfg.notifications?.events ?? [];
-  const isLegacyDefault = events.length === 2
-    && events.includes('gate:created')
-    && events.includes('run:failed');
+  const legacyEventDefaults = [
+    ['gate:created', 'run:failed'],
+    ['gate:created', 'run:failed', 'run:done', 'stage:approval', 'stage:input'],
+  ];
+  const isLegacyDefault = legacyEventDefaults.some((candidate) =>
+    events.length === candidate.length
+    && candidate.every((event) => events.includes(event)),
+  );
   if (isLegacyDefault) {
     cfg.notifications = {
       ...cfg.notifications,

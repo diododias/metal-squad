@@ -5,7 +5,7 @@ import { join } from 'node:path';
 
 const DEFAULT_NOTIFICATIONS = {
   channels: [],
-  events: ['gate:created', 'run:failed', 'run:done', 'stage:approval', 'stage:input'],
+  events: ['run:start', 'gate:created', 'run:failed', 'run:done', 'stage:approval', 'stage:input'],
 };
 const DEFAULT_WORKFLOW = { autoAdvanceStages: false, pollIntervalMs: 2_000 };
 const DEFAULT_BUDGET = { alertAtPercent: 80 };
@@ -133,5 +133,23 @@ describe('config', () => {
     });
 
     expect(() => loadConfig()).toThrow(`Invalid metal-squad config at ${CONFIG_PATH}:`);
+  });
+
+  it('upgrades the previous default notification event set to include run:start', async () => {
+    home = mkdtempSync(join(tmpdir(), 'msq-config-'));
+    process.env.HOME = home;
+
+    const { CONFIG_PATH, loadConfig } = await import('../../src/config/index.js');
+    await import('node:fs').then(({ mkdirSync, writeFileSync }) => {
+      mkdirSync(join(home, '.config', 'metal-squad'), { recursive: true });
+      writeFileSync(CONFIG_PATH, JSON.stringify({
+        notifications: {
+          channels: [],
+          events: ['gate:created', 'run:failed', 'run:done', 'stage:approval', 'stage:input'],
+        },
+      }));
+    });
+
+    expect(loadConfig().notifications.events).toEqual(DEFAULT_NOTIFICATIONS.events);
   });
 });

@@ -17,6 +17,7 @@ const mockResumePipeline = vi.fn();
 const mockRequestFeatureAbort = vi.fn();
 const mockAbortPipeline = vi.fn();
 const mockSpawn = vi.fn(() => ({ once: vi.fn(), unref: vi.fn() }));
+const mockEventBusEmit = vi.fn();
 const mockMainPanel = vi.fn(() => React.createElement('main-panel'));
 const mockSidebar = vi.fn(() => React.createElement('sidebar-panel'));
 const mockStatusBar = vi.fn(() => React.createElement('status-bar'));
@@ -101,6 +102,12 @@ vi.mock('../../src/db/repo.js', () => ({
   abortPipeline: mockAbortPipeline,
 }));
 
+vi.mock('../../src/core/events/index.js', () => ({
+  msqEventBus: {
+    emit: mockEventBusEmit,
+  },
+}));
+
 vi.mock('node:child_process', async () => {
   const actual = await vi.importActual<typeof import('node:child_process')>('node:child_process');
   return {
@@ -178,6 +185,7 @@ describe('App', () => {
     mockRequestFeatureAbort.mockReset();
     mockAbortPipeline.mockReset();
     mockSpawn.mockClear();
+    mockEventBusEmit.mockReset();
   });
 
   afterEach(() => {
@@ -477,6 +485,9 @@ describe('App', () => {
         cwd: '/repo',
       }),
     );
+    expect(mockEventBusEmit).toHaveBeenCalledWith('ui:info', {
+      message: 'Starting feat-9...',
+    });
 
     argvSpy.mockRestore();
     execArgvSpy.mockRestore();
