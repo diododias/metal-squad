@@ -5,12 +5,12 @@ import { loadConfig } from '../config/index.js';
 export function registerStatus(program: Command): void {
   program
     .command('status')
-    .description('Estado dos runs e uso de tokens (todos os repos)')
-    .option('-n, --limit <n>', 'quantidade de runs', '20')
-    .option('--repair-stale', 'marca runs órfãos como failed antes de listar')
+    .description('Run status and token usage (all repos)')
+    .option('-n, --limit <n>', 'number of runs to display', '20')
+    .option('--repair-stale', 'mark orphan runs as failed before listing')
     .option(
       '--stale-minutes <n>',
-      'limiar em minutos para considerar um run running como órfão',
+      'threshold in minutes to consider a running run as orphan',
     )
     .action(async (opts: { limit: string; repairStale?: boolean; staleMinutes?: string }) => {
       const staleRunThresholdMinutes = opts.staleMinutes
@@ -21,13 +21,13 @@ export function registerStatus(program: Command): void {
         : 0;
       const rows = listRuns(Number(opts.limit));
       if (rows.length === 0) {
-        console.log('Nenhum run registrado.');
+        console.log('No runs recorded.');
         return;
       }
       if (repaired > 0) {
         console.log(
-          `[msq] ${repaired} run(s) órfãos marcados como failed `
-            + `(${staleRunThresholdMinutes} min de tolerância).`,
+          `[msq] ${repaired} orphan run(s) marked as failed `
+            + `(${staleRunThresholdMinutes} min threshold).`,
         );
       }
       console.table(

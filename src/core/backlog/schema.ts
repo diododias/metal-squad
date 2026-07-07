@@ -14,7 +14,8 @@ export const RetrySchema = z.object({
 export const DefaultsSchema = z.object({
   tool: ToolSchema.default('claude'),
   effort: EffortSchema.default('medium'),
-  skills: z.array(z.string()).default(['implement']),
+  skills: z.array(z.string()).default([]),
+  stageSkills: z.record(z.string(), z.array(z.string())).default({}),
 });
 
 export const TaskSchema = z.object({
@@ -32,10 +33,10 @@ export const WorkflowApprovalsSchema = z.object({
 });
 
 export const WorkflowSchema = z.object({
-  mode: WorkflowModeSchema.default('single'),
-  stages: z.array(z.string()).min(1).default(['implement']),
+  mode: WorkflowModeSchema.default('staged'),
+  stages: z.array(z.string()).min(1).default(['specify', 'plan', 'implement', 'validate']),
   approvals: WorkflowApprovalsSchema.default({}),
-  syncTasksToBacklog: z.boolean().default(false),
+  syncTasksToBacklog: z.boolean().default(true),
 });
 
 export const FeatureSchema = z.object({
@@ -50,7 +51,7 @@ export const FeatureSchema = z.object({
   skills: z.array(z.string()).optional(),
   specFile: z.string().optional(),
   context: z.array(z.string()).optional(),
-  workflow: WorkflowSchema.optional(),
+  workflow: WorkflowSchema.default({}),
   retry: RetrySchema.optional(),
 });
 

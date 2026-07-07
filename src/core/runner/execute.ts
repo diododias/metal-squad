@@ -34,10 +34,17 @@ import {
   msqEventBus,
 } from '../events/index.js';
 
+const SYSTEM_STAGE_SKILLS: Record<string, string[]> = {
+  specify: ['speckit-specify'],
+  plan: ['speckit-plan', 'speckit-tasks'],
+  implement: ['speckit-implement', 'dev-flow'],
+  validate: ['reviewr'],
+};
+
 export interface ExecuteOptions {
   cwd: string;
   concurrency: number;
-  featureId?: string; // roda só uma feature
+  featureId?: string;
   autoAdvanceStages?: boolean;
 }
 
@@ -50,6 +57,13 @@ export async function executeBacklog(
   registerRepo(repoId, path);
   cleanupStaleRuns(config.staleRunThresholdMinutes);
   const activeRunIds = new Set<number>();
+
+  const repoStageSkills = backlog.version === 2 ? backlog.defaults.stageSkills : {};
+  const effectiveStageSkills: Record<string, string[]> = {
+    ...SYSTEM_STAGE_SKILLS,
+    ...config.stageSkills,
+    ...repoStageSkills,
+  };
 
   const ordered = opts.featureId
     ? selectFeaturePlan(backlog, opts.featureId)
@@ -166,6 +180,7 @@ export async function executeBacklog(
         config,
         opts,
         executeStageRun,
+        effectiveStageSkills,
       );
     }
 
@@ -179,7 +194,7 @@ export async function executeBacklog(
 
   const handleSignal = (signal: NodeJS.Signals): void => {
     for (const runId of activeRunIds) finishRun(runId, 'failed');
-    throw new Error(`Execução interrompida por ${signal}`);
+    throw new Error(`Execution interrupted by ${signal}`);
   };
 
   process.once('SIGINT', handleSignal);
@@ -193,7 +208,7 @@ export async function executeBacklog(
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     if (!msg.startsWith('Feature ')) {
-      void dispatch('run:failed', `metal-squad: execução parada — ${msg}`).catch(() => {});
+      void dispatch('run:failed', `metal-squad: execution stopped — ${msg}`).catch(() => {});
     }
     throw err;
   } finally {
@@ -266,12 +281,9 @@ async function executeStagedFeature(
   config: ReturnType<typeof loadConfig>,
   opts: ExecuteOptions,
   executeStageRun: StageExecutor,
+  stageSkills: Record<string, string[]>,
 ) {
   const workflow = feature.workflow;
-  if (!workflow) {
-    throw new Error(`Feature ${feature.id} configured as staged but workflow is missing.`);
-  }
-
   const autoAdvance = opts.autoAdvanceStages || workflow.approvals.autoAdvance || config.workflow.autoAdvanceStages;
   const pipelineId = createPipeline(repoId, feature.id, autoAdvance);
   const stageInputs = new Map<string, string[]>();
@@ -280,8 +292,8 @@ async function executeStagedFeature(
   for (let index = 0; index < stages.length; index += 1) {
     const stage = stages[index] ?? 'implement';
     updatePipelineStage(pipelineId, stage);
-    const stageSkill = resolveStageSkill(feature, stage, registry, opts.cwd);
-    const prompt = buildStagePrompt(feature, stage, stageSkill, opts.cwd, config.promptContextCharLimit, stageInputs.get(stage) ?? []);
+    const stageSkillList = resolveStageSkill(feature, stage, registry, opts.cwd, stageSkills);
+    const prompt = buildStagePrompt(feature, stage, stageSkillList, opts.cwd, config.promptContextCharLimit, stageInputs.get(stage) ?? []);
     const { runId, res } = await executeStageRun(feature, prompt, stage, pipelineId);
 
     if (res.control?.type === 'needs_input') {
@@ -307,9 +319,14 @@ async function executeStagedFeature(
       };
     }
 
-    if (stage === 'tasks' && workflow.syncTasksToBacklog) {
-      const tasksFile = resolveGeneratedTasksFile(feature, opts.cwd);
-      syncFeatureTasksToBacklog(feature.id, tasksFile, opts.cwd);
+    const shouldSyncTasks = workflow.syncTasksToBacklog && (stage === 'tasks' || stage === 'plan');
+    if (shouldSyncTasks) {
+      try {
+        const tasksFile = resolveGeneratedTasksFile(feature, opts.cwd);
+        syncFeatureTasksToBacklog(feature.id, tasksFile, opts.cwd);
+      } catch {
+        // tasks file not yet generated — skip silently
+      }
     }
 
     const hasNextStage = index < stages.length - 1;
@@ -321,7 +338,7 @@ async function executeStagedFeature(
         feature.id,
         stage,
         'approval',
-        `Auto-advance habilitado; proxima etapa: ${stages[index + 1] ?? 'fim'}.`,
+        `Auto-advance enabled; next stage: ${stages[index + 1] ?? 'done'}.`,
         {
           runId,
           response: 'advance',
@@ -336,7 +353,7 @@ async function executeStagedFeature(
       feature.id,
       stage,
       'approval',
-      `Avancar para a etapa ${stages[index + 1] ?? 'fim'}?`,
+      `Advance to stage ${stages[index + 1] ?? 'done'}?`,
       { runId },
     );
     const decision = await waitForStageApproval(
@@ -344,7 +361,7 @@ async function executeStagedFeature(
       pipelineId,
       feature.id,
       stage,
-      stages[index + 1] ?? 'fim',
+      stages[index + 1] ?? 'done',
       config.workflow.pollIntervalMs,
       runId,
     );
@@ -357,7 +374,7 @@ async function executeStagedFeature(
   finishPipeline(pipelineId, 'done');
   return {
     ok: true,
-    summary: `workflow staged concluido (${stages.join(' -> ')})`,
+    summary: `staged workflow completed (${stages.join(' -> ')})`,
   };
 }
 
@@ -366,11 +383,18 @@ function resolveStageSkill(
   stage: string,
   registry: ReturnType<typeof createSkillRegistry>,
   cwd: string,
+  stageSkills: Record<string, string[]>,
 ): Skill[] {
-  const skills = registry.resolve([stage], cwd);
-  if (skills.length > 0) return skills;
-  if (stage === 'implement') return [];
-  throw new Error(`Stage skill not found for ${feature.id}: ${stage}`);
+  const mappedNames = stageSkills[stage];
+  if (mappedNames && mappedNames.length > 0) {
+    const resolved = registry.resolve(mappedNames, cwd);
+    if (resolved.length > 0) return resolved;
+  }
+
+  const byName = registry.resolve([stage], cwd);
+  if (byName.length > 0) return byName;
+
+  return [];
 }
 
 function buildStagePrompt(
@@ -417,7 +441,7 @@ function resolveGeneratedTasksFile(feature: Feature, cwd: string): string {
   const fallback = join(cwd, 'tasks.md');
   if (existsSync(fallback)) return fallback;
 
-  throw new Error(`Nao foi possivel localizar o tasks.md gerado para ${feature.id}`);
+  throw new Error(`Could not locate generated tasks.md for ${feature.id}`);
 }
 
 async function waitForStageRequestResponse(requestId: number, pollIntervalMs: number): Promise<string> {
@@ -447,7 +471,7 @@ async function waitForStageApproval(
       featureId,
       stage,
       'approval',
-      `Etapa ${stage} mantida em espera. Avancar para ${nextStage}?`,
+      `Stage ${stage} still pending. Advance to ${nextStage}?`,
       { runId },
     );
   }

@@ -7,6 +7,8 @@ export interface FeatureCatalogEntry {
   title: string;
   skills: string[];
   tool: string;
+  model?: string;
+  effort: string;
 }
 
 let cachedPath = '';
@@ -32,6 +34,8 @@ export function getFeatureCatalog(cwd = process.cwd()): Record<string, FeatureCa
             title: feature.title,
             skills: feature.skills ?? [],
             tool: feature.tool,
+            model: feature.model,
+            effort: feature.effort,
           } satisfies FeatureCatalogEntry,
         ]),
       ),
@@ -42,4 +46,11 @@ export function getFeatureCatalog(cwd = process.cwd()): Record<string, FeatureCa
 
   cachedPath = backlogPath;
   return cachedCatalog;
+}
+
+export function getPendingFeatures(
+  catalog: Record<string, FeatureCatalogEntry>,
+  activeFeatureIds: Set<string>,
+): FeatureCatalogEntry[] {
+  return Object.values(catalog).filter((f) => !activeFeatureIds.has(f.id));
 }

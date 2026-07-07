@@ -9,6 +9,7 @@ interface Props {
   focusPanel: FocusPanel;
   hasRuns: boolean;
   hasGates: boolean;
+  hasPending: boolean;
   width: number;
 }
 
@@ -17,6 +18,7 @@ export function CommandBar({
   focusPanel,
   hasRuns,
   hasGates,
+  hasPending,
   width,
 }: Props): React.ReactElement {
   const actions = [
@@ -25,6 +27,8 @@ export function CommandBar({
     hasRuns ? 'enter open' : '',
     activeView === 'run' ? 'esc overview' : '',
     activeView === 'run' ? 'ctrl+s pause logs' : '',
+    hasPending && activeView === 'overview' ? 'n start' : '',
+    hasPending && activeView === 'overview' ? '↑/↓ select' : '',
     hasGates && focusPanel === 'gates' ? 'a approve' : '',
     hasGates && focusPanel === 'gates' ? 's skip' : '',
     hasGates && focusPanel === 'gates' ? 'r retry' : '',

@@ -17,6 +17,7 @@ let setUi: ReturnType<typeof vi.fn>;
 let stateValue: {
   selectedRun: number;
   selectedGate: number;
+  selectedPending: number;
   focusPanel: 'runs' | 'gates' | 'main';
   activeView: 'overview' | 'run';
   outputPaused: boolean;
@@ -54,6 +55,7 @@ vi.mock('../../src/ui/hooks/useNotifications.js', () => ({
 
 vi.mock('../../src/ui/catalog.js', () => ({
   getFeatureCatalog: mockGetFeatureCatalog,
+  getPendingFeatures: vi.fn(() => []),
 }));
 
 vi.mock('../../src/ui/components/MainPanel.js', () => ({
@@ -104,6 +106,7 @@ describe('App', () => {
     stateValue = {
       selectedRun: 0,
       selectedGate: 0,
+      selectedPending: 0,
       focusPanel: 'runs',
       activeView: 'overview',
       outputPaused: false,
@@ -214,6 +217,7 @@ describe('App', () => {
     stateValue = {
       selectedRun: 0,
       selectedGate: 0,
+      selectedPending: 0,
       focusPanel: 'main',
       activeView: 'run',
       outputPaused: false,
@@ -236,6 +240,7 @@ describe('App', () => {
     stateValue = {
       selectedRun: 0,
       selectedGate: 0,
+      selectedPending: 0,
       focusPanel: 'gates',
       activeView: 'overview',
       outputPaused: false,

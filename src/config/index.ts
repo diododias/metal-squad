@@ -54,6 +54,7 @@ export const ConfigSchema = z.object({
   telegramChatId: z.string().optional(),
   notifications: NotificationsConfig.default({}),
   workflow: WorkflowConfig.default({}),
+  stageSkills: z.record(z.string(), z.array(z.string())).default({}),
 });
 export type Config = z.infer<typeof ConfigSchema>;
 
