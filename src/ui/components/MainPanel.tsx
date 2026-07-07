@@ -1,6 +1,7 @@
 import React from 'react';
 import { Box, Text } from 'ink';
-import type { GateRow, RunOutputRow, RunSummary } from '../../db/repo.js';
+import type { RunOutputRow, RunSummary } from '../../db/repo.js';
+import type { PendingApproval } from '../hooks/useGates.js';
 import type { FeatureCatalogEntry } from '../catalog.js';
 import type { LayoutMode } from '../format.js';
 import {
@@ -21,7 +22,7 @@ export type ActiveView = 'overview' | 'run';
 
 interface Props {
   runs: RunSummary[];
-  gates: GateRow[];
+  gates: PendingApproval[];
   selectedRun: RunSummary | null;
   selectedFeature: FeatureCatalogEntry | null;
   activeView: ActiveView;
@@ -34,7 +35,7 @@ interface Props {
   breakdown?: RunBreakdown | null;
 }
 
-function overviewSummary(runs: RunSummary[], gates: GateRow[]): React.ReactElement {
+function overviewSummary(runs: RunSummary[], gates: PendingApproval[]): React.ReactElement {
   const running = runs.filter((run) => run.status === 'running').length;
   const done = runs.filter((run) => run.status === 'done').length;
   const failed = runs.filter((run) => run.status === 'failed').length;

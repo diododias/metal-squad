@@ -261,11 +261,11 @@ export function App(): React.ReactElement {
     if (focusPanel === 'gates' && gates.length > 0) {
       const gate = gates[selectedGateIndex];
       if (_input === 'a') {
-        if (gate) resolve(gate.id, 'approved');
+        if (gate) resolve(gate, gate.kind === 'stage' ? 'advance' : 'approved');
       } else if (_input === 's') {
-        if (gate) resolve(gate.id, 'skipped');
+        if (gate) resolve(gate, gate.kind === 'stage' ? 'hold' : 'skipped');
       } else if (_input === 'r') {
-        if (gate) resolve(gate.id, 'retried');
+        if (gate) resolve(gate, 'retried');
       }
     }
   });

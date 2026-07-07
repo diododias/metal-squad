@@ -125,12 +125,12 @@ describe('ui hooks', () => {
   it('useGates loads gates, resolves them and tolerates refresh errors', async () => {
     const setGates = vi.fn();
     const openGates = vi.fn()
-      .mockReturnValueOnce([{ id: 1 }])
-      .mockReturnValueOnce([{ id: 2 }])
-      .mockImplementationOnce(() => {
-        throw new Error('db locked');
-      });
+      .mockReturnValueOnce([{ id: 1, featureId: 'feat-1', repoId: 'r', createdAt: '', resolvedAt: null, decision: null }])
+      .mockReturnValueOnce([{ id: 2, featureId: 'feat-2', repoId: 'r', createdAt: '', resolvedAt: null, decision: null }])
+      .mockImplementationOnce(() => { throw new Error('db locked'); });
+    const listPendingStageRequests = vi.fn().mockReturnValue([]);
     const resolveGate = vi.fn();
+    const resolveStageRequest = vi.fn();
     const listeners = new Map<string, Array<() => void>>();
     const setIntervalSpy = vi.spyOn(globalThis, 'setInterval').mockReturnValue(1 as unknown as ReturnType<typeof setInterval>);
     vi.spyOn(globalThis, 'clearInterval').mockImplementation(() => {});
@@ -144,6 +144,8 @@ describe('ui hooks', () => {
     vi.doMock('../../src/db/repo.js', () => ({
       openGates,
       resolveGate,
+      listPendingStageRequests,
+      resolveStageRequest,
     }));
 
     vi.doMock('../../src/core/events/index.js', () => ({
@@ -160,11 +162,14 @@ describe('ui hooks', () => {
     const { useGates } = await import('../../src/ui/hooks/useGates.js');
     const result = useGates();
 
-    expect(result.gates).toEqual([{ id: 1 }]);
+    expect(result.gates[0]).toMatchObject({ kind: 'gate', id: 1, featureId: 'feat-1' });
     expect(setIntervalSpy).toHaveBeenCalledWith(expect.any(Function), 2000);
-    result.resolve(1, 'approved');
+    const gateApproval = result.gates[0]!;
+    result.resolve(gateApproval, 'approved');
     expect(resolveGate).toHaveBeenCalledWith(1, 'approved');
-    expect(setGates).toHaveBeenCalledWith([{ id: 2 }]);
+    expect(setGates).toHaveBeenCalledWith(
+      expect.arrayContaining([expect.objectContaining({ id: 2 })]),
+    );
     expect(() => listeners.get('gate:created')?.[0]?.()).not.toThrow();
   });
 

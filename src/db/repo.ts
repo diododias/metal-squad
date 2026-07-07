@@ -929,6 +929,30 @@ export function getStageRequest(id: number): StageRequestRow | null {
     .get(id) as StageRequestRow | undefined) ?? null;
 }
 
+export function listPendingStageRequests(): StageRequestRow[] {
+  if (!hasDbFile()) return [];
+  return getDb('readonly')
+    .prepare(
+      `SELECT
+         id,
+         pipeline_id AS pipelineId,
+         run_id AS runId,
+         feature_id AS featureId,
+         stage,
+         kind,
+         prompt,
+         status,
+         response,
+         source,
+         created_at AS createdAt,
+         resolved_at AS resolvedAt
+       FROM stage_requests
+       WHERE status = 'pending'
+       ORDER BY id ASC`,
+    )
+    .all() as StageRequestRow[];
+}
+
 export function listStageRequestsForFeature(
   pipelineId: number,
   featureId: string,
