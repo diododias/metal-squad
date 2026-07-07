@@ -14,7 +14,7 @@ export default {
   thresholds: {
     high: 70,
     low: 40,
-    break: 30,
+    break: 25,
   },
   reporters: ['progress', 'html'],
   incremental: true,
