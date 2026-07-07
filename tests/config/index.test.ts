@@ -120,4 +120,18 @@ describe('config', () => {
     ensureDataDir();
     expect(existsSync(join(home, 'custom-db'))).toBe(true);
   });
+
+  it('reports the config path when config.json is invalid', async () => {
+    home = mkdtempSync(join(tmpdir(), 'msq-config-'));
+    process.env.HOME = home;
+
+    const { CONFIG_PATH, loadConfig } = await import('../../src/config/index.js');
+    rmSync(CONFIG_PATH, { force: true });
+    await import('node:fs').then(({ mkdirSync, writeFileSync }) => {
+      mkdirSync(join(home, '.config', 'metal-squad'), { recursive: true });
+      writeFileSync(CONFIG_PATH, '{"stageSkills":{"specify":[speckit-specify]}}');
+    });
+
+    expect(() => loadConfig()).toThrow(`Invalid metal-squad config at ${CONFIG_PATH}:`);
+  });
 });

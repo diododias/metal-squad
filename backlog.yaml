@@ -1,58 +1,176 @@
 version: 2
 repo: metal-squad
 defaults:
-  tool: claude
-  effort: medium
-  skills: []
+  tool: codex
+  effort: high
+  skills: [implement]
 
+# Backlog normalizado para o estado atual da branch develop.
+# Dependencias para features ja entregues foram removidas para manter
+# este backlog composto apenas pelo trabalho ainda pendente.
 epics:
-  - id: epic-orchestration-v2
+  - id: e02-modern-tui
+    title: E02 — Modern TUI
+    features:
+      - id: feat-08
+        title: F08 — Navegacao por Sessoes/Runs
+        model: gpt-5.4
+        specFile: docs/features/F08-session-navigation.md
+        context:
+          - docs/ROADMAP.md
+        dependsOn: []
+        tasks: []
+        workflow:
+          stages: [specify, plan, implement]
+          approvals:
+            channel: telegram
+            autoAdvance: false
+          syncTasksToBacklog: true
+      - id: feat-09
+        title: F09 — Command Palette & Shortcuts
+        model: gpt-5.4
+        specFile: docs/features/F09-command-palette.md
+        context:
+          - docs/ROADMAP.md
+        dependsOn: []
+        tasks: []
+        workflow:
+          stages: [specify, plan, implement]
+          approvals:
+            channel: telegram
+            autoAdvance: false
+          syncTasksToBacklog: true
+      - id: feat-10
+        title: F10 — Theme System
+        model: gpt-5.4
+        specFile: docs/features/F10-theme-system.md
+        context:
+          - docs/ROADMAP.md
+        dependsOn: []
+        tasks: []
+        workflow:
+          stages: [specify, plan, implement]
+          approvals:
+            channel: telegram
+            autoAdvance: false
+          syncTasksToBacklog: true
+
+  - id: e03-orchestration-v2
     title: E03 — Orchestration v2
     features:
-      - id: feat-11
-        title: F11 — Retry Policies
-        tool: codex
+      - id: feat-13
+        title: F13 — Execution Graph Visualization
         model: gpt-5.4
-        effort: medium
-        specFile: docs/features/F11-retry-policies.md
+        specFile: docs/features/F13-execution-graph.md
+        context:
+          - docs/ROADMAP.md
         dependsOn: []
-
+        tasks: []
+        workflow:
+          stages: [specify, plan, implement]
+          approvals:
+            channel: telegram
+            autoAdvance: false
+          syncTasksToBacklog: true
       - id: feat-15
-        title: F15 — Event System (pub/sub)
-        tool: codex
+        title: F15 — Event System (pub/sub interno)
         model: gpt-5.4
-        effort: medium
         specFile: docs/features/F15-event-system.md
         context:
-          - src/core/events/index.ts
-          - src/core/events/types.ts
-          - src/core/runner/execute.ts
-          - src/ui/hooks/useNotifications.ts
+          - docs/ROADMAP.md
         dependsOn: []
-
-      - id: feat-12
-        title: F12 — Pause / Resume / Abort
-        tool: codex
+        tasks: []
+        workflow:
+          stages: [specify, plan, implement]
+          approvals:
+            channel: telegram
+            autoAdvance: false
+          syncTasksToBacklog: true
+      - id: feat-26
+        title: F26 — Resume de pipeline a partir do estado persistido
         model: gpt-5.4
-        effort: medium
-        specFile: docs/features/F12-pause-resume-abort.md
+        specFile: docs/features/F26-resume-pipeline-from-state.md
         context:
-          - src/core/adapters/types.ts
-          - src/core/adapters/spawn.ts
-          - src/core/adapters/claude.ts
-          - src/core/adapters/codex.ts
-          - src/core/adapters/opencode.ts
-          - src/core/orchestrator/scheduler.ts
-          - src/core/runner/execute.ts
-          - src/core/events/types.ts
-          - src/db/index.ts
-          - src/db/repo.ts
-          - src/cli.ts
-          - src/commands/status.ts
-          - src/ui/App.tsx
-          - src/ui/components/CommandBar.tsx
-          - tests/orchestrator/scheduler.test.ts
-          - tests/commands/commands.test.ts
-          - tests/ui/app.test.ts
-        dependsOn:
-          - feat-15
+          - docs/ROADMAP.md
+        dependsOn: []
+        tasks: []
+        workflow:
+          stages: [specify, plan, implement]
+          approvals:
+            channel: telegram
+            autoAdvance: false
+          syncTasksToBacklog: true
+
+  - id: e05-developer-experience
+    title: E05 — Developer Experience
+    features:
+      - id: feat-20
+        title: F20 — Plugin System para Adapters
+        model: gpt-5.4
+        specFile: docs/features/F20-plugin-adapters.md
+        context:
+          - docs/ROADMAP.md
+        dependsOn: []
+        tasks: []
+        workflow:
+          stages: [specify, plan, implement]
+          approvals:
+            channel: telegram
+            autoAdvance: false
+          syncTasksToBacklog: true
+      - id: feat-21
+        title: F21 — Interactive Setup Wizard
+        model: gpt-5.4
+        specFile: docs/features/F21-setup-wizard.md
+        context:
+          - docs/ROADMAP.md
+        dependsOn: []
+        tasks: []
+        workflow:
+          stages: [specify, plan, implement]
+          approvals:
+            channel: telegram
+            autoAdvance: false
+          syncTasksToBacklog: true
+      - id: feat-22
+        title: F22 — Per-Repo Config Overrides
+        model: gpt-5.4
+        specFile: docs/features/F22-per-repo-config.md
+        context:
+          - docs/ROADMAP.md
+        dependsOn: []
+        tasks: []
+        workflow:
+          stages: [specify, plan, implement]
+          approvals:
+            channel: telegram
+            autoAdvance: false
+          syncTasksToBacklog: true
+      - id: feat-23
+        title: F23 — CLAUDE.md / Agent Config Generation
+        model: gpt-5.4
+        specFile: docs/features/F23-agent-config-gen.md
+        context:
+          - docs/ROADMAP.md
+        dependsOn: []
+        tasks: []
+        workflow:
+          stages: [specify, plan, implement]
+          approvals:
+            channel: telegram
+            autoAdvance: false
+          syncTasksToBacklog: true
+      - id: feat-25
+        title: F25 — Hardening do fluxo msq-develop
+        model: gpt-5.4
+        specFile: docs/features/F25-msq-develop-harness-hardening.md
+        context:
+          - docs/ROADMAP.md
+        dependsOn: []
+        tasks: []
+        workflow:
+          stages: [specify, plan, implement]
+          approvals:
+            channel: telegram
+            autoAdvance: false
+          syncTasksToBacklog: true

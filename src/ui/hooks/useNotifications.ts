@@ -36,6 +36,8 @@ export function useNotifications(maxItems = 12): NotificationEntry[] {
         push('budget:alert', `budget ${percent}% reached`)),
       msqEventBus.subscribe('run:done', ({ featureId }) =>
         push('run:done', `${featureId} done`)),
+      msqEventBus.subscribe('ui:notice', ({ message }) =>
+        push('ui:notice', message)),
     ];
 
     return () => { for (const u of unsubscribers) u(); };

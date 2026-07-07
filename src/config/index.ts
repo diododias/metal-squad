@@ -74,7 +74,12 @@ export type Config = z.infer<typeof ConfigSchema>;
 
 export function loadConfig(): Config {
   if (!existsSync(CONFIG_PATH)) return ConfigSchema.parse({});
-  return ConfigSchema.parse(normalizeLegacyConfig(JSON.parse(readFileSync(CONFIG_PATH, 'utf8'))));
+  try {
+    return ConfigSchema.parse(normalizeLegacyConfig(JSON.parse(readFileSync(CONFIG_PATH, 'utf8'))));
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    throw new Error(`Invalid metal-squad config at ${CONFIG_PATH}: ${message}`);
+  }
 }
 
 export function saveConfig(cfg: Config): void {

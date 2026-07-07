@@ -8,15 +8,21 @@ const mockUseRunOutput = vi.fn();
 const mockUseTerminalWidth = vi.fn();
 const mockUseNotifications = vi.fn();
 const mockGetFeatureCatalog = vi.fn();
+const mockLoadConfig = vi.fn(() => ({ concurrency: 3 }));
+const mockLoadBacklog = vi.fn(() => ({ epics: [] }));
+const mockValidateBacklogSkills = vi.fn();
+const mockAssertWritableDbPath = vi.fn();
 const mockPausePipeline = vi.fn();
 const mockResumePipeline = vi.fn();
 const mockRequestFeatureAbort = vi.fn();
 const mockAbortPipeline = vi.fn();
+const mockSpawn = vi.fn(() => ({ once: vi.fn(), unref: vi.fn() }));
 const mockMainPanel = vi.fn(() => React.createElement('main-panel'));
 const mockSidebar = vi.fn(() => React.createElement('sidebar-panel'));
 const mockStatusBar = vi.fn(() => React.createElement('status-bar'));
 const mockCommandBar = vi.fn(() => React.createElement('command-bar'));
 const mockUseInput = vi.fn();
+const mockGetPendingFeatures = vi.fn(() => []);
 let setUi: ReturnType<typeof vi.fn>;
 let stateValue: {
   selectedRun: number;
@@ -69,7 +75,23 @@ vi.mock('../../src/ui/hooks/useNotifications.js', () => ({
 
 vi.mock('../../src/ui/catalog.js', () => ({
   getFeatureCatalog: mockGetFeatureCatalog,
-  getPendingFeatures: vi.fn(() => []),
+  getPendingFeatures: mockGetPendingFeatures,
+}));
+
+vi.mock('../../src/config/index.js', () => ({
+  loadConfig: mockLoadConfig,
+}));
+
+vi.mock('../../src/core/backlog/load.js', () => ({
+  loadBacklog: mockLoadBacklog,
+}));
+
+vi.mock('../../src/core/skills/index.js', () => ({
+  validateBacklogSkills: mockValidateBacklogSkills,
+}));
+
+vi.mock('../../src/db/index.js', () => ({
+  assertWritableDbPath: mockAssertWritableDbPath,
 }));
 
 vi.mock('../../src/db/repo.js', () => ({
@@ -78,6 +100,14 @@ vi.mock('../../src/db/repo.js', () => ({
   requestFeatureAbort: mockRequestFeatureAbort,
   abortPipeline: mockAbortPipeline,
 }));
+
+vi.mock('node:child_process', async () => {
+  const actual = await vi.importActual<typeof import('node:child_process')>('node:child_process');
+  return {
+    ...actual,
+    spawn: mockSpawn,
+  };
+});
 
 vi.mock('../../src/ui/components/MainPanel.js', () => ({
   MainPanel: mockMainPanel,
@@ -138,10 +168,16 @@ describe('App', () => {
     mockUseRunOutput.mockReturnValue([]);
     mockUseNotifications.mockReturnValue([]);
     mockGetFeatureCatalog.mockReturnValue({});
+    mockGetPendingFeatures.mockReturnValue([]);
+    mockLoadConfig.mockClear();
+    mockLoadBacklog.mockClear();
+    mockValidateBacklogSkills.mockClear();
+    mockAssertWritableDbPath.mockClear();
     mockPausePipeline.mockReset();
     mockResumePipeline.mockReset();
     mockRequestFeatureAbort.mockReset();
     mockAbortPipeline.mockReset();
+    mockSpawn.mockClear();
   });
 
   afterEach(() => {
@@ -395,5 +431,55 @@ describe('App', () => {
 
     expect(mockRequestFeatureAbort).toHaveBeenCalledWith(42, 'feat-1');
     expect(mockAbortPipeline).not.toHaveBeenCalled();
+  });
+
+  it('starts the selected pending feature with the current runtime args', async () => {
+    stateValue = {
+      selectedRun: 0,
+      selectedGate: 0,
+      selectedPending: 0,
+      focusPanel: 'runs',
+      activeView: 'overview',
+      outputPaused: false,
+    };
+    mockGetPendingFeatures.mockReturnValue([
+      { id: 'feat-9', title: 'F09', tool: 'codex', effort: 'medium' },
+    ]);
+    const argvSpy = vi.spyOn(process, 'argv', 'get').mockReturnValue(['/usr/local/bin/node', '/repo/src/index.ts']);
+    const execArgvSpy = vi.spyOn(process, 'execArgv', 'get').mockReturnValue([
+      '--require',
+      '/repo/node_modules/tsx/dist/preflight.cjs',
+      '--import',
+      'file:///repo/node_modules/tsx/dist/loader.mjs',
+    ]);
+    const cwdSpy = vi.spyOn(process, 'cwd').mockReturnValue('/repo');
+    const { App } = await import('../../src/ui/App.js');
+
+    App();
+    const handler = mockUseInput.mock.calls[0]?.[0] as (input: string, key: Record<string, boolean>) => void;
+    handler('n', {});
+
+    expect(mockSpawn).toHaveBeenCalledWith(
+      process.execPath,
+      [
+        '--require',
+        '/repo/node_modules/tsx/dist/preflight.cjs',
+        '--import',
+        'file:///repo/node_modules/tsx/dist/loader.mjs',
+        '/repo/src/index.ts',
+        'run',
+        '--feature',
+        'feat-9',
+      ],
+      expect.objectContaining({
+        detached: true,
+        stdio: 'ignore',
+        cwd: '/repo',
+      }),
+    );
+
+    argvSpy.mockRestore();
+    execArgvSpy.mockRestore();
+    cwdSpy.mockRestore();
   });
 });

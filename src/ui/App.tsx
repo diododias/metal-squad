@@ -1,6 +1,11 @@
 import React, { useState } from 'react';
 import { Box, Text, useInput } from 'ink';
 import { spawn } from 'node:child_process';
+import { loadConfig } from '../config/index.js';
+import { loadBacklog } from '../core/backlog/load.js';
+import { msqEventBus } from '../core/events/index.js';
+import { validateBacklogSkills } from '../core/skills/index.js';
+import { assertWritableDbPath } from '../db/index.js';
 import { abortPipeline, pausePipeline, requestFeatureAbort, resumePipeline } from '../db/repo.js';
 import { useRuns, useTaskRuns } from './hooks/useRuns.js';
 import { useGates } from './hooks/useGates.js';
@@ -43,12 +48,44 @@ function clampIndex(index: number, size: number): number {
   return Math.max(0, Math.min(index, size - 1));
 }
 
+function formatStartError(featureId: string, error: unknown): string {
+  const message = error instanceof Error ? error.message : String(error);
+  return `Could not start ${featureId}: ${message}`;
+}
+
+function validateFeatureStart(cwd: string): void {
+  assertWritableDbPath();
+  loadConfig();
+  const backlog = loadBacklog(undefined, cwd);
+  validateBacklogSkills(backlog, cwd);
+}
+
 function launchFeatureRun(featureId: string): void {
-  spawn(process.execPath, [process.argv[1] ?? '', 'run', '--feature', featureId], {
+  const cwd = process.cwd();
+  try {
+    validateFeatureStart(cwd);
+  } catch (error) {
+    msqEventBus.emit('ui:notice', { message: formatStartError(featureId, error) });
+    return;
+  }
+
+  const entrypoint = process.argv[1];
+  if (!entrypoint) {
+    msqEventBus.emit('ui:notice', {
+      message: `Could not start ${featureId}: CLI entrypoint was not resolved.`,
+    });
+    return;
+  }
+
+  const child = spawn(process.execPath, [...process.execArgv, entrypoint, 'run', '--feature', featureId], {
     detached: true,
     stdio: 'ignore',
-    cwd: process.cwd(),
-  }).unref();
+    cwd,
+  });
+  child.once('error', (error) => {
+    msqEventBus.emit('ui:notice', { message: formatStartError(featureId, error) });
+  });
+  child.unref();
 }
 
 export function App(): React.ReactElement {

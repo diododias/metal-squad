@@ -96,6 +96,10 @@ export interface TaskUpdatedEvent {
   endedAt?: string;
 }
 
+export interface UiNoticeEvent {
+  message: string;
+}
+
 export interface MsqEvents {
   'run:start': RunStartEvent;
   'run:output': RunOutputEvent;
@@ -111,4 +115,5 @@ export interface MsqEvents {
   'tokens:update': TokensUpdateEvent;
   'task:started': TaskStartedEvent;
   'task:updated': TaskUpdatedEvent;
+  'ui:notice': UiNoticeEvent;
 }

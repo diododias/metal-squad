@@ -7,6 +7,7 @@ const EVENT_COLOR: Record<string, string> = {
   'run:failed': 'red',
   'budget:alert': 'magenta',
   'run:done': 'green',
+  'ui:notice': 'red',
 };
 
 interface Props {
