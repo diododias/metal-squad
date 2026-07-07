@@ -2,6 +2,7 @@ import type { Effort, Feature, Tool } from '../backlog/schema.js';
 
 export interface TokenUsage {
   input: number;
+  cachedInput?: number;
   output: number;
   total: number;
 }

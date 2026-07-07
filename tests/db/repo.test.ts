@@ -111,7 +111,7 @@ describe('live run persistence helpers', () => {
   it('updates live token columns on the run row', async () => {
     const { updateRunUsage } = await import('../../src/db/repo.js');
     updateRunUsage(9, { input: 10, output: 4, total: 14 });
-    expect(mockRun).toHaveBeenCalledWith(10, 4, 14, 9);
+    expect(mockRun).toHaveBeenCalledWith(10, null, 4, 14, 9);
   });
 
   it('appends streamed output rows', async () => {

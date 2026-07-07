@@ -24,7 +24,7 @@ interface Props {
 
 export function StatusBar({
   selectedRun,
-  selectedFeature: _selectedFeature,
+  selectedFeature,
   gateCount,
   totalRuns,
   doneRuns,
@@ -43,10 +43,16 @@ export function StatusBar({
     ? [
         featureLabel,
         selectedRun.tool,
-        formatTokensIO(selectedRun.inputTokens, selectedRun.outputTokens),
+        formatTokensIO(selectedRun.inputTokens, selectedRun.cachedInputTokens ?? null, selectedRun.outputTokens),
         formatElapsed(selectedRun.startedAt, selectedRun.endedAt),
-        formatCost(estimateCost(selectedRun.inputTokens, selectedRun.outputTokens, selectedRun.tool)),
+        formatCost(estimateCost(
+          selectedRun.inputTokens,
+          selectedRun.cachedInputTokens ?? null,
+          selectedRun.outputTokens,
+          selectedFeature?.model ?? selectedRun.tool,
+        )),
         progress,
+        selectedRun.pipelineResumeSummary ?? null,
         gateCount > 0 ? `${gateCount} gates` : null,
       ]
         .filter(Boolean)

@@ -39,6 +39,7 @@ describe('event persistence', () => {
       featureId: 'feat-15',
       tool: 'codex',
       input: 10,
+      cachedInput: 4,
       output: 5,
       total: 15,
     });
@@ -59,7 +60,7 @@ describe('event persistence', () => {
     });
 
     expect(appendRunOutput).toHaveBeenCalledWith(expect.objectContaining({ runId: 7, line: 'hello' }));
-    expect(updateRunUsage).toHaveBeenCalledWith(7, expect.objectContaining({ total: 15 }));
+    expect(updateRunUsage).toHaveBeenCalledWith(7, expect.objectContaining({ cachedInput: 4, total: 15 }));
     expect(upsertTaskRun).toHaveBeenNthCalledWith(
       1,
       7,

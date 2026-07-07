@@ -70,18 +70,18 @@ export function cleanupStaleRuns(olderThanMinutes: number): number {
 export function recordUsage(runId: number, usage: TokenUsage): void {
   updateRunUsage(runId, usage);
   getDb('readwrite')
-    .prepare(`INSERT INTO token_usage (run_id, input, output, total) VALUES (?, ?, ?, ?)`)
-    .run(runId, usage.input, usage.output, usage.total);
+    .prepare(`INSERT INTO token_usage (run_id, input, cached_input, output, total) VALUES (?, ?, ?, ?, ?)`)
+    .run(runId, usage.input, usage.cachedInput ?? 0, usage.output, usage.total);
 }
 
 export function updateRunUsage(runId: number, usage: TokenUsage | TokensUpdateEvent): void {
   getDb('readwrite')
     .prepare(
       `UPDATE runs
-       SET input_tokens = ?, output_tokens = ?, total_tokens = ?
+       SET input_tokens = ?, cached_input_tokens = ?, output_tokens = ?, total_tokens = ?
        WHERE id = ?`,
     )
-    .run(usage.input, usage.output, usage.total, runId);
+    .run(usage.input, usage.cachedInput ?? null, usage.output, usage.total, runId);
 }
 
 export interface RunOutputRow {
@@ -168,6 +168,7 @@ export interface RunSummary {
   endedAt: string | null;
   totalTokens: number | null;
   inputTokens: number | null;
+  cachedInputTokens?: number | null;
   outputTokens: number | null;
   gateId: number | null;
   gateDecision: string | null;
@@ -197,6 +198,7 @@ export function listRunsForTui(limit = 50): RunSummary[] {
          r.ended_at      AS endedAt,
          COALESCE(r.total_tokens, u.total) AS totalTokens,
          r.input_tokens  AS inputTokens,
+         r.cached_input_tokens AS cachedInputTokens,
          r.output_tokens AS outputTokens,
          g.id            AS gateId,
          g.decision    AS gateDecision,

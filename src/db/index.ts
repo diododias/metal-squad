@@ -114,6 +114,7 @@ function migrate(d: Database.Database): void {
       started_at TEXT NOT NULL DEFAULT (datetime('now')),
       ended_at   TEXT,
       input_tokens INTEGER,
+      cached_input_tokens INTEGER,
       output_tokens INTEGER,
       total_tokens INTEGER
     );
@@ -122,6 +123,7 @@ function migrate(d: Database.Database): void {
       id        INTEGER PRIMARY KEY AUTOINCREMENT,
       run_id    INTEGER NOT NULL REFERENCES runs(id),
       input     INTEGER NOT NULL DEFAULT 0,
+      cached_input INTEGER NOT NULL DEFAULT 0,
       output    INTEGER NOT NULL DEFAULT 0,
       total     INTEGER NOT NULL DEFAULT 0
     );
@@ -218,6 +220,10 @@ function migrate(d: Database.Database): void {
   if (!hasOutputTokens) {
     d.exec(`ALTER TABLE runs ADD COLUMN output_tokens INTEGER`);
   }
+  const hasCachedInputTokens = runColumns.some((column) => column.name === 'cached_input_tokens');
+  if (!hasCachedInputTokens) {
+    d.exec(`ALTER TABLE runs ADD COLUMN cached_input_tokens INTEGER`);
+  }
   const hasTotalTokens = runColumns.some((column) => column.name === 'total_tokens');
   if (!hasTotalTokens) {
     d.exec(`ALTER TABLE runs ADD COLUMN total_tokens INTEGER`);
@@ -229,6 +235,14 @@ function migrate(d: Database.Database): void {
   const hasStage = runColumns.some((column) => column.name === 'stage');
   if (!hasStage) {
     d.exec(`ALTER TABLE runs ADD COLUMN stage TEXT`);
+  }
+
+  const usageColumns = (d
+    .prepare(`PRAGMA table_info(token_usage)`)
+    .all() ?? []) as Array<{ name?: string }>;
+  const hasCachedInputUsage = usageColumns.some((column) => column.name === 'cached_input');
+  if (!hasCachedInputUsage) {
+    d.exec(`ALTER TABLE token_usage ADD COLUMN cached_input INTEGER NOT NULL DEFAULT 0`);
   }
 
   const pipelineColumns = (d

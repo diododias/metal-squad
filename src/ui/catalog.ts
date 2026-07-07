@@ -7,6 +7,7 @@ export interface FeatureCatalogEntry {
   title: string;
   skills: string[];
   tool: string;
+  model?: string;
 }
 
 let cachedPath = '';
@@ -32,6 +33,7 @@ export function getFeatureCatalog(cwd = process.cwd()): Record<string, FeatureCa
             title: feature.title,
             skills: feature.skills ?? [],
             tool: feature.tool,
+            model: feature.model,
           } satisfies FeatureCatalogEntry,
         ]),
       ),

@@ -154,5 +154,6 @@ function emitUsage(runId: number, feature: Feature, usage: TokenUsage): void {
     input: usage.input,
     output: usage.output,
     total: usage.total,
+    ...(usage.cachedInput !== undefined ? { cachedInput: usage.cachedInput } : {}),
   });
 }

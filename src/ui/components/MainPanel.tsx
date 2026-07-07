@@ -66,6 +66,7 @@ export function MainPanel({
   const innerWidth = Math.max(32, width - 4);
   const visibleOutput = output.slice(-(mode === 'stacked' ? 8 : 14));
   const lastOutput = visibleOutput[visibleOutput.length - 1] ?? null;
+  const nextDemands = collectNextDemands(runs);
 
   return (
     <Box
@@ -110,6 +111,14 @@ export function MainPanel({
             )}
           </Box>
           <Box marginTop={1} flexDirection="column">
+            <Text bold>Pipeline</Text>
+            <Text dimColor>
+              {selectedRun.pipelineResumeSummary
+                ? truncateText(selectedRun.pipelineResumeSummary, Math.max(24, innerWidth - 2))
+                : 'No pending pipeline demands recorded for this run.'}
+            </Text>
+          </Box>
+          <Box marginTop={1} flexDirection="column">
             <Text bold>Live output</Text>
             <Text dimColor>
               {selectedRun.status === 'running'
@@ -147,13 +156,14 @@ export function MainPanel({
             <RunTable runs={runs} width={innerWidth} />
           </Box>
           <Box marginTop={1} flexDirection="column">
-            <Text bold>Command deck</Text>
-            <Text dimColor>
-              {truncateText(
-                'The multi-panel shell is ready for F06 log streaming, F07 status refinements, and richer keyboard navigation in F08/F09.',
-                Math.max(24, innerWidth - 2),
-              )}
-            </Text>
+            <Text bold>Next demands</Text>
+            {nextDemands.length > 0 ? (
+              nextDemands.slice(0, mode === 'stacked' ? 3 : 5).map((entry) => (
+                <Text key={entry} dimColor>{truncateText(entry, Math.max(24, innerWidth - 2))}</Text>
+              ))
+            ) : (
+              <Text dimColor>No pending pipeline demands detected.</Text>
+            )}
           </Box>
         </Box>
       )}
@@ -189,4 +199,21 @@ function getOutputColor(entry: RunOutputRow): 'white' | 'cyan' | 'gray' | 'red' 
     default:
       return 'white';
   }
+}
+
+function collectNextDemands(runs: RunSummary[]): string[] {
+  const seen = new Set<string>();
+  const next = runs
+    .map((run) => {
+      const summary = run.pipelineResumeSummary?.trim();
+      if (!summary || !summary.includes('next ')) return null;
+      return `${run.featureId}: ${summary}`;
+    })
+    .filter((entry): entry is string => Boolean(entry))
+    .filter((entry) => {
+      if (seen.has(entry)) return false;
+      seen.add(entry);
+      return true;
+    });
+  return next;
 }

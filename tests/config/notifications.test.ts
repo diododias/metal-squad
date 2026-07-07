@@ -2,10 +2,16 @@ import { describe, it, expect } from 'vitest';
 import { ConfigSchema, NOTIFICABLE_EVENTS } from '../../src/config/index.js';
 
 describe('ConfigSchema notifications defaults', () => {
-  it('defaults to empty channels and two events when no config provided', () => {
+  it('defaults to empty channels and the expanded event set when no config provided', () => {
     const cfg = ConfigSchema.parse({});
     expect(cfg.notifications.channels).toEqual([]);
-    expect(cfg.notifications.events).toEqual(['gate:created', 'run:failed']);
+    expect(cfg.notifications.events).toEqual([
+      'gate:created',
+      'run:failed',
+      'run:done',
+      'stage:approval',
+      'stage:input',
+    ]);
   });
 
   it('accepts all valid channel types', () => {

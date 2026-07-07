@@ -101,9 +101,10 @@ export const codexAdapter: ToolAdapter = {
     for (const line of transcript.split('\n')) {
       const evt = safeJson<any>(line);
       if (evt?.type === 'turn.completed' && evt.usage) {
-        const input = (evt.usage.input_tokens ?? 0) + (evt.usage.cached_input_tokens ?? 0);
+        const input = evt.usage.input_tokens ?? 0;
+        const cachedInput = evt.usage.cached_input_tokens ?? 0;
         const output = (evt.usage.output_tokens ?? 0) + (evt.usage.reasoning_output_tokens ?? 0);
-        usage = { input, output, total: input + output };
+        usage = { input, cachedInput, output, total: input + cachedInput + output };
       }
     }
     return usage;
@@ -213,9 +214,10 @@ function createCodexProgress(): {
       lastEventType = evt.type;
 
       if (evt.type === 'turn.completed' && evt.usage) {
-        const input = (evt.usage.input_tokens ?? 0) + (evt.usage.cached_input_tokens ?? 0);
+        const input = evt.usage.input_tokens ?? 0;
+        const cachedInput = evt.usage.cached_input_tokens ?? 0;
         const output = (evt.usage.output_tokens ?? 0) + (evt.usage.reasoning_output_tokens ?? 0);
-        return { usage: { input, output, total: input + output } };
+        return { usage: { input, cachedInput, output, total: input + cachedInput + output } };
       }
 
       if (evt.type === 'item.completed' && evt.item?.type === 'agent_message') {
@@ -271,24 +273,41 @@ function normalizeSnippet(text: unknown): string {
 }
 
 function summarizeCodexToolEvent(evt: any): string | null {
+  if (evt?.type !== 'item.completed') return null;
   const item = evt?.item;
   if (!item || item.type === 'agent_message') return null;
-  const itemType = normalizeSnippet(item.type);
-  if (!itemType) return null;
-  const name = normalizeSnippet(item.name ?? item.tool_name ?? item.call_id ?? item.id ?? itemType);
-  const payload = normalizeSnippet(
-    typeof item.arguments === 'string'
-      ? item.arguments
-      : item.arguments
-        ? JSON.stringify(item.arguments)
-        : item.input
-          ? JSON.stringify(item.input)
-          : item.output
-            ? JSON.stringify(item.output)
-            : '',
-  );
-  const detail = payload ? ` ${payload}` : '';
-  return normalizeSnippet(`tool ${name}${detail}`);
+  if (item.type === 'command_execution') {
+    return summarizeCommandExecution(item);
+  }
+
+  const label = normalizeSnippet(item.name ?? item.tool_name ?? item.type ?? '');
+  const payload = serializeToolPayload(item.arguments ?? item.input ?? item.output ?? item.result);
+  if (!label && !payload) return null;
+  return normalizeSnippet(payload ? `tool ${label || item.type} ${payload}` : `tool ${label}`);
+}
+
+function summarizeCommandExecution(item: Record<string, unknown>): string | null {
+  const command = normalizeSnippet(String(item.command ?? ''));
+  const output = normalizeSnippet(String(item.aggregated_output ?? ''));
+  const exitCode = typeof item.exit_code === 'number' ? item.exit_code : null;
+  if (!command && !output) return null;
+  if (output) {
+    return normalizeSnippet(`shell ${command} -> ${output}`);
+  }
+  if (exitCode !== null) {
+    return normalizeSnippet(`shell ${command} (exit ${exitCode})`);
+  }
+  return normalizeSnippet(`shell ${command}`);
+}
+
+function serializeToolPayload(payload: unknown): string {
+  if (typeof payload === 'string') return normalizeSnippet(payload);
+  if (!payload) return '';
+  try {
+    return normalizeSnippet(JSON.stringify(payload));
+  } catch {
+    return normalizeSnippet(String(payload));
+  }
 }
 
 function emitRunOutput(
@@ -316,5 +335,6 @@ function emitUsage(runId: number, feature: Feature, usage: TokenUsage): void {
     input: usage.input,
     output: usage.output,
     total: usage.total,
+    ...(usage.cachedInput !== undefined ? { cachedInput: usage.cachedInput } : {}),
   });
 }
