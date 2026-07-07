@@ -43,7 +43,7 @@ budget:
 
 ## Criterios de aceite
 
-- [ ] Budget configuravel no YAML e config global
-- [ ] Pausa automatica quando budget excedido
-- [ ] Alerta quando atinge threshold configuravel
-- [ ] Custo estimado visivel na TUI
+- [x] Budget configuravel no YAML e config global
+- [x] Pausa automatica quando budget excedido
+- [x] Alerta quando atinge threshold configuravel
+- [x] Custo estimado visivel na TUI

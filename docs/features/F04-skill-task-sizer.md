@@ -62,8 +62,8 @@ tasks:
 
 ## Criterios de aceite
 
-- [ ] Skill `decompose` disponivel como built-in
-- [ ] `msq decompose <feature-id>` funciona standalone
-- [ ] Output YAML valido e importavel no backlog
-- [ ] Estimativas baseadas em heuristicas documentadas
-- [ ] `--apply` atualiza o backlog.yaml automaticamente
+- [x] Skill `decompose` disponivel como built-in
+- [x] `msq decompose <feature-id>` funciona standalone
+- [x] Output YAML valido e importavel no backlog
+- [x] Estimativas baseadas em heuristicas documentadas
+- [x] `--apply` atualiza o backlog.yaml automaticamente
