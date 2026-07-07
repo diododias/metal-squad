@@ -11,35 +11,34 @@ repo: ${repo}
 defaults:
   tool: claude
   effort: medium
-  skills: [implement]
+  skills: []
 epics:
   - id: epic-1
-    title: Primeiro épico
+    title: First epic
     features:
       - id: feat-1
-        title: Primeira feature
+        title: First feature
         tool: claude
         effort: medium
-        skills: [implement]
+        specFile: docs/features/feat-1.md
         dependsOn: []
-        tasks: []
 `;
 
 export function registerInit(program: Command): void {
   program
     .command('init')
-    .description('Cria backlog.yaml no repo atual e registra o repo no DB global')
+    .description('Create backlog.yaml in the current repo and register it in the global DB')
     .action(async () => {
       assertWritableDbPath();
       const cwd = process.cwd();
       if (existsSync(BACKLOG_FILE)) {
-        console.log(`${BACKLOG_FILE} já existe — nada a fazer.`);
+        console.log(`${BACKLOG_FILE} already exists — nothing to do.`);
       } else {
         writeFileSync(BACKLOG_FILE, TEMPLATE(basename(cwd)));
-        console.log(`Criado ${BACKLOG_FILE}`);
+        console.log(`Created ${BACKLOG_FILE}`);
       }
       const { repoId, path } = resolveRepo(cwd);
       registerRepo(repoId, path);
-      console.log(`Repo registrado: ${repoId}`);
+      console.log(`Repo registered: ${repoId}`);
     });
 }

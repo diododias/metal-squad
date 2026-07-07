@@ -9,6 +9,7 @@ interface Props {
   focusPanel: FocusPanel;
   hasRuns: boolean;
   hasGates: boolean;
+  hasPending: boolean;
   canPause: boolean;
   canResume: boolean;
   canAbort: boolean;
@@ -20,6 +21,7 @@ export function CommandBar({
   focusPanel,
   hasRuns,
   hasGates,
+  hasPending,
   canPause,
   canResume,
   canAbort,
@@ -31,6 +33,8 @@ export function CommandBar({
     hasRuns ? 'enter open' : '',
     activeView === 'run' ? 'esc overview' : '',
     activeView === 'run' ? 'ctrl+s pause logs' : '',
+    hasPending && activeView === 'overview' ? 'n start' : '',
+    hasPending && activeView === 'overview' ? '↑/↓ select' : '',
     focusPanel !== 'gates' && canPause ? 'p pause' : '',
     focusPanel !== 'gates' && canResume ? 'r resume' : '',
     canAbort ? 'x abort' : '',

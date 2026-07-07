@@ -1,12 +1,13 @@
 import React, { useState } from 'react';
 import { Box, Text, useInput } from 'ink';
+import { spawn } from 'node:child_process';
 import { abortPipeline, pausePipeline, requestFeatureAbort, resumePipeline } from '../db/repo.js';
 import { useRuns, useTaskRuns } from './hooks/useRuns.js';
 import { useGates } from './hooks/useGates.js';
 import { useRunOutput } from './hooks/useRunOutput.js';
 import { useTerminalWidth } from './hooks/useTerminalWidth.js';
 import { useNotifications } from './hooks/useNotifications.js';
-import { getFeatureCatalog } from './catalog.js';
+import { getFeatureCatalog, getPendingFeatures } from './catalog.js';
 import { CommandBar } from './components/CommandBar.js';
 import { MainPanel } from './components/MainPanel.js';
 import { Sidebar } from './components/Sidebar.js';
@@ -19,6 +20,7 @@ type ActiveView = 'overview' | 'run';
 interface UiState {
   selectedRun: number;
   selectedGate: number;
+  selectedPending: number;
   focusPanel: FocusPanel;
   activeView: ActiveView;
   outputPaused: boolean;
@@ -29,6 +31,14 @@ function clampIndex(index: number, size: number): number {
   return Math.max(0, Math.min(index, size - 1));
 }
 
+function launchFeatureRun(featureId: string): void {
+  spawn(process.execPath, [process.argv[1] ?? '', 'run', '--feature', featureId], {
+    detached: true,
+    stdio: 'ignore',
+    cwd: process.cwd(),
+  }).unref();
+}
+
 export function App(): React.ReactElement {
   const runs = useRuns(2000);
   const { gates, resolve } = useGates(2000);
@@ -37,6 +47,7 @@ export function App(): React.ReactElement {
   const [ui, setUi] = useState<UiState>({
     selectedRun: 0,
     selectedGate: 0,
+    selectedPending: 0,
     focusPanel: 'runs',
     activeView: 'overview',
     outputPaused: false,
@@ -68,6 +79,12 @@ export function App(): React.ReactElement {
       && (selectedRun.pipelineStatus === 'running' || selectedRun.pipelineStatus === 'paused'),
   );
 
+  const activeFeatureIds = new Set(
+    runs.filter((r) => r.status === 'running' || r.status === 'done').map((r) => r.featureId),
+  );
+  const pendingFeatures = getPendingFeatures(featureCatalog, activeFeatureIds);
+  const selectedPendingIndex = clampIndex(ui.selectedPending, pendingFeatures.length);
+
   useInput((_input, key) => {
     if (_input === 'q') {
       process.exit(0);
@@ -91,11 +108,22 @@ export function App(): React.ReactElement {
       return;
     }
 
+    if (_input === 'n' && activeView === 'overview' && pendingFeatures.length > 0) {
+      const target = pendingFeatures[selectedPendingIndex];
+      if (target) launchFeatureRun(target.id);
+      return;
+    }
+
     const movePrev = key.upArrow || _input === 'k';
     const moveNext = key.downArrow || _input === 'j';
 
     if (movePrev) {
-      if (focusPanel === 'runs') {
+      if (activeView === 'overview' && pendingFeatures.length > 0 && focusPanel === 'runs') {
+        setUi((current) => ({
+          ...current,
+          selectedPending: clampIndex(selectedPendingIndex - 1, pendingFeatures.length),
+        }));
+      } else if (focusPanel === 'runs') {
         setUi((current) => ({
           ...current,
           selectedRun: clampIndex(selectedRunIndex - 1, runs.length),
@@ -110,7 +138,12 @@ export function App(): React.ReactElement {
     }
 
     if (moveNext) {
-      if (focusPanel === 'runs') {
+      if (activeView === 'overview' && pendingFeatures.length > 0 && focusPanel === 'runs') {
+        setUi((current) => ({
+          ...current,
+          selectedPending: clampIndex(selectedPendingIndex + 1, pendingFeatures.length),
+        }));
+      } else if (focusPanel === 'runs') {
         setUi((current) => ({
           ...current,
           selectedRun: clampIndex(selectedRunIndex + 1, runs.length),
@@ -162,9 +195,16 @@ export function App(): React.ReactElement {
 
   return (
     <Box flexDirection="column" padding={1}>
-      <Text color="cyan" bold>
-        metal-squad / command deck
-      </Text>
+      <Box>
+        <Text color="cyan" bold>
+          {'█▀▄▀█ █▀▀ ▀█▀ ▄▀█ █   ▀   █▀ █▀█ █ █ ▄▀█ █▀▄'}
+        </Text>
+      </Box>
+      <Box>
+        <Text color="cyan" bold>
+          {'█░▀░█ ██▄  █  █▀█ █▄▄     ▄█ ▀▀█ █▄█ █▀█ █▄▀'}
+        </Text>
+      </Box>
       <Text dimColor>{layoutMode === 'stacked' ? 'single-column layout' : `${layoutMode} split layout`}</Text>
       <Box flexDirection={layoutMode === 'stacked' ? 'column' : 'row'} marginTop={1}>
         <MainPanel
@@ -177,6 +217,8 @@ export function App(): React.ReactElement {
           outputPaused={ui.outputPaused}
           mode={layoutMode}
           width={mainWidth}
+          pendingFeatures={pendingFeatures}
+          selectedPendingIndex={selectedPendingIndex}
         />
         <Sidebar
           runs={runs}
@@ -205,6 +247,7 @@ export function App(): React.ReactElement {
         focusPanel={focusPanel}
         hasRuns={runs.length > 0}
         hasGates={gates.length > 0}
+        hasPending={pendingFeatures.length > 0}
         canPause={canPause}
         canResume={canResume}
         canAbort={canAbortFeature || canAbortPipeline}

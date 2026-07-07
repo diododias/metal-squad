@@ -13,10 +13,10 @@ export class DbAccessError extends Error {
   ) {
     super(
       [
-        `Banco SQLite sem escrita em: ${dbPath}`,
+        `SQLite database not writable at: ${dbPath}`,
         detail,
-        `Corrija as permissões do arquivo/diretório ou defina ${DB_PATH_ENV} para um caminho gravável.`,
-        `Exemplo: ${DB_PATH_ENV}=$(pwd)/.metal-squad/app.db msq run --feature feat-1`,
+        `Fix file/directory permissions or set ${DB_PATH_ENV} to a writable path.`,
+        `Example: ${DB_PATH_ENV}=$(pwd)/.metal-squad/app.db msq run --feature feat-1`,
       ].join('\n'),
     );
     this.name = 'DbAccessError';

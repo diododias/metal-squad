@@ -18,7 +18,7 @@ export function useNotifications(maxItems = 12): NotificationEntry[] {
         id: ++counter.current,
         event,
         message,
-        ts: new Date().toLocaleTimeString('pt-BR', {
+        ts: new Date().toLocaleTimeString('en-US', {
           hour: '2-digit',
           minute: '2-digit',
           second: '2-digit',
@@ -31,11 +31,11 @@ export function useNotifications(maxItems = 12): NotificationEntry[] {
       msqEventBus.subscribe('gate:created', ({ gateId, featureId }) =>
         push('gate:created', `gate ${gateId} → ${featureId}`)),
       msqEventBus.subscribe('run:failed', ({ featureId }) =>
-        push('run:failed', `${featureId} falhou`)),
+        push('run:failed', `${featureId} failed`)),
       msqEventBus.subscribe('budget:alert', ({ percent }) =>
-        push('budget:alert', `budget ${percent}% atingido`)),
+        push('budget:alert', `budget ${percent}% reached`)),
       msqEventBus.subscribe('run:done', ({ featureId }) =>
-        push('run:done', `${featureId} concluido`)),
+        push('run:done', `${featureId} done`)),
     ];
 
     return () => { for (const u of unsubscribers) u(); };

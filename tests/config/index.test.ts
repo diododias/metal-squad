@@ -39,6 +39,7 @@ describe('config', () => {
       toolTimeoutMs: 600_000,
       staleRunThresholdMinutes: 120,
       promptContextCharLimit: 20_000,
+      stageSkills: {},
       notifications: DEFAULT_NOTIFICATIONS,
       workflow: DEFAULT_WORKFLOW,
     });
@@ -93,6 +94,7 @@ describe('config', () => {
       toolTimeoutMs: 999,
       staleRunThresholdMinutes: 45,
       promptContextCharLimit: 15_000,
+      stageSkills: {},
       notifications: DEFAULT_NOTIFICATIONS,
       workflow: DEFAULT_WORKFLOW,
     });

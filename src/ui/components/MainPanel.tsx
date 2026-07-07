@@ -26,6 +26,8 @@ interface Props {
   outputPaused: boolean;
   mode: LayoutMode;
   width: number;
+  pendingFeatures: FeatureCatalogEntry[];
+  selectedPendingIndex: number;
 }
 
 function overviewSummary(runs: RunSummary[], gates: GateRow[]): React.ReactElement {
@@ -62,10 +64,13 @@ export function MainPanel({
   outputPaused,
   mode,
   width,
+  pendingFeatures,
+  selectedPendingIndex,
 }: Props): React.ReactElement {
   const innerWidth = Math.max(32, width - 4);
   const visibleOutput = output.slice(-(mode === 'stacked' ? 8 : 14));
   const lastOutput = visibleOutput[visibleOutput.length - 1] ?? null;
+  const maxPending = mode === 'stacked' ? 3 : 5;
   const nextDemands = collectNextDemands(runs);
 
   return (
@@ -82,7 +87,7 @@ export function MainPanel({
       <Text color="cyan" bold>
         {activeView === 'run' && selectedRun ? 'Run Detail' : 'Overview'}
       </Text>
-      {runs.length === 0 ? (
+      {runs.length === 0 && pendingFeatures.length === 0 ? (
         <EmptyState />
       ) : activeView === 'run' && selectedRun ? (
         <Box flexDirection="column" marginTop={1}>
@@ -90,7 +95,8 @@ export function MainPanel({
           <Text dimColor>{selectedRun.featureId} · {selectedRun.repoId}</Text>
           <Box marginTop={1}>
             <Text color={STATUS_COLOR[selectedRun.status]}>{STATUS_ICON[selectedRun.status]} {selectedRun.status}</Text>
-            <Text dimColor> | tool {selectedRun.tool}</Text>
+            <Text dimColor> | tool {selectedFeature?.model ?? selectedRun.tool}</Text>
+            {selectedFeature && <Text dimColor> | effort {selectedFeature.effort}</Text>}
             <Text dimColor> | duration {formatElapsed(selectedRun.startedAt, selectedRun.endedAt)}</Text>
           </Box>
           <Box>
@@ -148,23 +154,47 @@ export function MainPanel({
         </Box>
       ) : (
         <Box flexDirection="column" marginTop={1}>
-          {overviewSummary(runs, gates)}
-          <Text dimColor>
-            Select a run with arrows or j/k, then press Enter to inspect it. Esc returns here.
-          </Text>
-          <Box marginTop={1}>
-            <RunTable runs={runs} width={innerWidth} />
-          </Box>
-          <Box marginTop={1} flexDirection="column">
-            <Text bold>Next demands</Text>
-            {nextDemands.length > 0 ? (
-              nextDemands.slice(0, mode === 'stacked' ? 3 : 5).map((entry) => (
+          {runs.length > 0 && overviewSummary(runs, gates)}
+          {runs.length > 0 && (
+            <Text dimColor>
+              Select a run with arrows or j/k, then press Enter to inspect it. Esc returns here.
+            </Text>
+          )}
+          {runs.length > 0 && (
+            <Box marginTop={1}>
+              <RunTable runs={runs} width={innerWidth} />
+            </Box>
+          )}
+          {nextDemands.length > 0 && (
+            <Box marginTop={1} flexDirection="column">
+              <Text bold>Next demands</Text>
+              {nextDemands.slice(0, mode === 'stacked' ? 3 : 5).map((entry) => (
                 <Text key={entry} dimColor>{truncateText(entry, Math.max(24, innerWidth - 2))}</Text>
-              ))
-            ) : (
-              <Text dimColor>No pending pipeline demands detected.</Text>
-            )}
-          </Box>
+              ))}
+            </Box>
+          )}
+          {pendingFeatures.length > 0 && (
+            <Box marginTop={1} flexDirection="column">
+              <Text bold color="yellow">Ready to start</Text>
+              {pendingFeatures.slice(0, maxPending).map((feature, index) => {
+                const selected = index === selectedPendingIndex;
+                return (
+                  <Box key={feature.id}>
+                    <Text color={selected ? 'cyan' : undefined} bold={selected}>
+                      {selected ? '>' : ' '} {truncateText(`${feature.id}  ${feature.title}`, Math.max(24, innerWidth - 4))}
+                    </Text>
+                    {selected && (
+                      <Text dimColor> [{feature.model ?? feature.tool} / {feature.effort}]</Text>
+                    )}
+                  </Box>
+                );
+              })}
+              {pendingFeatures.length > maxPending && (
+                <Text dimColor>  +{pendingFeatures.length - maxPending} more in backlog</Text>
+              )}
+              <Text dimColor>  Press n to start the selected feature</Text>
+            </Box>
+          )}
         </Box>
       )}
     </Box>

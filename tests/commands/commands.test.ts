@@ -108,7 +108,7 @@ describe('commands', () => {
     expect(existsSync(join(cwd, 'backlog.yaml'))).toBe(true);
     expect(readFileSync(join(cwd, 'backlog.yaml'), 'utf8')).toContain(`repo: ${cwd.split('/').pop()}`);
     expect(mockRegisterRepo).toHaveBeenCalledWith('repo-1', cwd);
-    expect(log).toHaveBeenCalledWith('Criado backlog.yaml');
+    expect(log).toHaveBeenCalledWith('Created backlog.yaml');
   });
 
   it('init does not overwrite an existing backlog', async () => {
@@ -123,7 +123,7 @@ describe('commands', () => {
     await program.parseAsync(['node', 'msq', 'init']);
 
     expect(readFileSync(backlogPath, 'utf8')).toBe(original);
-    expect(log).toHaveBeenCalledWith('backlog.yaml já existe — nada a fazer.');
+    expect(log).toHaveBeenCalledWith('backlog.yaml already exists — nothing to do.');
   });
 
   it('run validates skills and uses explicit concurrency', async () => {
@@ -184,7 +184,7 @@ describe('commands', () => {
     await expect(
       program.parseAsync(['node', 'msq', 'run']),
     ).rejects.toThrow(
-      'Nenhum adapter foi executado porque a persistência da run falhou antes do primeiro spawn.',
+      'No adapter was executed because run persistence failed before the first spawn.',
     );
 
     expect(mockLoadBacklog).not.toHaveBeenCalled();
@@ -209,7 +209,7 @@ describe('commands', () => {
 
     mockListRuns.mockReturnValueOnce([]);
     await program.parseAsync(['node', 'msq', 'status']);
-    expect(log).toHaveBeenCalledWith('Nenhum run registrado.');
+    expect(log).toHaveBeenCalledWith('No runs recorded.');
 
     mockCleanupStaleRuns.mockReturnValue(2);
     mockListRuns.mockReturnValueOnce([
@@ -245,7 +245,7 @@ describe('commands', () => {
     expect(mockCleanupStaleRuns).toHaveBeenCalledWith(30);
     expect(table).toHaveBeenCalled();
     expect(log).toHaveBeenCalledWith(
-      '[msq] 2 run(s) órfãos marcados como failed (30 min de tolerância).',
+      '[msq] 2 orphan run(s) marked as failed (30 min threshold).',
     );
     expect(log).toHaveBeenCalledWith('Pipelines retomáveis:');
   });

@@ -462,7 +462,7 @@ describe('executeBacklog failure persistence', () => {
       'feat-27',
       'specify',
       'approval',
-      'Avancar para a etapa plan?',
+      'Advance to stage plan?',
       { runId: 7 },
     );
     expect(mockFinishPipeline).toHaveBeenCalledWith(9, 'done');

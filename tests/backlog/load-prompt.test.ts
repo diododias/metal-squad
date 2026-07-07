@@ -255,12 +255,12 @@ epics:
     const backlog = loadBacklog(undefined, cwd);
 
     expect(warn).toHaveBeenCalledWith(
-      '[msq] backlog.yaml está em formato v1 — considere atualizar para version: 2',
+      '[msq] backlog.yaml is in v1 format — consider upgrading to version: 2',
     );
     expect(backlog.version).toBe(2);
-    expect(backlog.defaults.skills).toEqual(['implement']);
-    expect(backlog.epics[0]?.features[0]?.skills).toEqual(['implement']);
-    expect(backlog.epics[0]?.features[0]?.tasks[0]?.skills).toEqual(['implement']);
+    expect(backlog.defaults.skills).toEqual([]);
+    expect(backlog.epics[0]?.features[0]?.skills).toEqual([]);
+    expect(backlog.epics[0]?.features[0]?.tasks[0]?.skills).toEqual([]);
   });
 
   it('propagates defaults in v2 and validates referenced files', async () => {

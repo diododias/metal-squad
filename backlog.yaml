@@ -7,14 +7,21 @@ defaults:
 
 epics:
   - id: epic-orchestration-v2
-    title: E03 - Orchestration v2
+    title: E03 — Orchestration v2
     features:
-      - id: feat-15
-        title: F15 - Event System (pub/sub interno)
+      - id: feat-11
+        title: F11 — Retry Policies
         tool: codex
         model: gpt-5.4
         effort: medium
-        skills: []
+        specFile: docs/features/F11-retry-policies.md
+        dependsOn: []
+
+      - id: feat-15
+        title: F15 — Event System (pub/sub)
+        tool: codex
+        model: gpt-5.4
+        effort: medium
         specFile: docs/features/F15-event-system.md
         context:
           - src/core/events/index.ts
@@ -22,14 +29,12 @@ epics:
           - src/core/runner/execute.ts
           - src/ui/hooks/useNotifications.ts
         dependsOn: []
-        tasks: []
 
       - id: feat-12
-        title: F12 - Pause / Resume / Abort
+        title: F12 — Pause / Resume / Abort
         tool: codex
         model: gpt-5.4
         effort: medium
-        skills: []
         specFile: docs/features/F12-pause-resume-abort.md
         context:
           - src/core/adapters/types.ts
@@ -51,240 +56,3 @@ epics:
           - tests/ui/app.test.ts
         dependsOn:
           - feat-15
-        spec: |
-          Implemente a feature F12 - Pause / Resume / Abort no repositorio metal-squad.
-
-          ## Contrato de execucao
-
-          - Nao invoque `msq`, `node dist/index.js run`, `npm run dev` ou qualquer nested runner.
-          - Trabalhe diretamente neste checkout, editando codigo, rodando testes e validando o comportamento aqui.
-          - Se precisar criar um novo comando CLI, registre-o em `src/cli.ts` e cubra com teste.
-
-          ## Porque esta e a proxima feature
-
-          - `F11` ja esta refletida no codigo atual: schema de `retry`, tabela `retry_history`,
-            politicas `onFail` e testes de retry ja existem no repo.
-          - `F12` depende apenas de `F15`, que tambem ja esta implementada no codigo atual.
-          - `F26` depende de `F12`, entao `F12` e o proximo passo que destrava o roadmap.
-
-          ## Contexto atual
-
-          O scheduler em `src/core/orchestrator/scheduler.ts` ainda e um loop local sem estado
-          externo controlavel. Ele executa `pump()` ate terminar ou falhar, mas nao oferece:
-
-          - pausa do despacho de novas features
-          - retomada posterior
-          - cancelamento seletivo da feature ativa
-          - cancelamento total do pipeline
-
-          O runner em `src/core/runner/execute.ts` ja persiste `runs`, `pipelines` e
-          `stage_requests`, mas ainda nao persiste um estado de controle retomavel para
-          pause/resume/abort de features normais.
-
-          A camada de adapter hoje so expone `runFeature(...): Promise<RunResult>`.
-          `runCli()` em `src/core/adapters/spawn.ts` cria o child process internamente e
-          nao devolve handle de cancelamento. Portanto, a parte de `abort` exige extensao
-          explicita desse contrato para matar o processo do agente ativo de forma segura.
-
-          A CLI atual registra apenas `init`, `run`, `skills`, `status` e `ui`.
-          O requisito da spec pede `msq resume`.
-
-          A TUI em `src/ui/App.tsx` hoje usa:
-          - `q` para sair
-          - `tab` para trocar painel
-          - `j/k` ou setas para navegar
-          - `enter` para abrir run
-          - `esc` para voltar
-          - `ctrl+s` para pausar o tail do log
-          - `a/s/r` apenas no painel de gates
-
-          Os atalhos `p`, `r` e `x` ainda nao controlam o pipeline.
-
-          ## Mudancas necessarias por arquivo
-
-          ### src/core/adapters/types.ts
-
-          Evolua o contrato do adapter para suportar cancelamento.
-
-          Uma forma aceitavel:
-
-          - adicionar `signal?: AbortSignal` em `RunFeatureOptions`, ou
-          - introduzir um handle de execucao com `abort()` que o runner possa guardar.
-
-          O importante e que o runner consiga abortar uma feature ativa sem matar o
-          processo inteiro do `msq`.
-
-          ### src/core/adapters/spawn.ts
-
-          Permita que `runCli()` seja interrompido externamente:
-
-          - aceite um `AbortSignal` em `SpawnOptions`
-          - ao abortar, envie `SIGTERM` primeiro
-          - se o processo nao encerrar rapidamente, force `SIGKILL`
-          - retorne erro/sinalizacao distinguindo timeout de abort manual
-
-          Preserve a captura de stdout/stderr e nao perca as ultimas linhas emitidas.
-
-          ### src/core/adapters/claude.ts
-          ### src/core/adapters/codex.ts
-          ### src/core/adapters/opencode.ts
-
-          Propague o cancelamento ate `runCli()`.
-
-          Quando a run for abortada manualmente, retorne um `RunResult` coerente para o runner
-          registrar estado `aborted` ou equivalente, sem mascarar isso como timeout.
-
-          Se houver uso parcial de tokens disponivel no transcript, mantenha a telemetria.
-
-          ### src/core/orchestrator/scheduler.ts
-
-          Transforme o scheduler em uma estrutura controlavel.
-
-          Requisitos minimos:
-
-          - estado `running | paused | aborting`
-          - `pause()`: para de despachar novas features, mas deixa as ativas terminarem
-          - `resume()`: retoma o despacho das pendentes
-          - `abortFeature(featureId)`: cancela a feature ativa especifica
-          - `abortAll()`: cancela todas as ativas e impede novos despachos
-
-          O contrato pode virar um controller retornado por `schedule(...)` ou um modulo
-          com callbacks de controle; escolha a forma mais simples que encaixe no codigo atual.
-
-          Ao pausar, o scheduler nao pode gerar deadlock falso so porque nenhuma feature nova
-          foi despachada naquele instante.
-
-          ### src/core/runner/execute.ts
-
-          Integrar o controle do scheduler com a persistencia da pipeline:
-
-          - guardar referencias das execucoes ativas para poder aborta-las
-          - registrar quando a pipeline entra em `paused`, `running`, `aborting` e `aborted`
-          - distinguir pipeline pausada de pipeline falha
-          - ao retomar, reconstruir o subconjunto restante sem reexecutar `done`
-          - reaproveitar `pipelineId`/`runs` ja existentes quando o resume for da mesma pipeline
-
-          Para a primeira entrega, aceite retomar features interrompidas reexecutando a feature
-          ativa desde o inicio, desde que:
-
-          - features `done` nao rodem de novo
-          - a feature interrompida seja claramente marcada como retomada
-          - o status deixe visivel o ponto de retomada
-
-          ### src/db/index.ts
-
-          Ajuste o schema para persistir controle de pipeline entre sessoes.
-
-          Solucao aceitavel:
-
-          - expandir `pipelines.status` para incluir ao menos `paused` e `aborted`
-          - persistir metadados suficientes para o resume:
-            - repo / cwd original
-            - feature alvo principal
-            - snapshot do plano resolvido ou lista de features concluidas
-            - feature ativa no momento da pausa/abort
-          - criar tabela auxiliar se necessario, por exemplo `pipeline_state` ou `pipeline_features`
-
-          Evite depender apenas do worktree para decidir o que precisa ser retomado.
-
-          ### src/db/repo.ts
-
-          Adicione helpers para:
-
-          - pausar pipeline
-          - retomar pipeline
-          - abortar pipeline
-          - listar pipelines retomaveis
-          - salvar/restaurar o estado minimo do plano
-
-          Atualize tambem os readers usados por `status` e pela TUI para expor esse estado.
-
-          ### src/commands/status.ts
-
-          O `status` deve deixar claro quando uma pipeline esta:
-
-          - `paused`
-          - `aborted`
-          - retomavel
-
-          Mostre, quando possivel:
-
-          - `pipeline_id`
-          - feature alvo
-          - stage atual (se houver)
-          - resumo do ponto de retomada
-
-          ### src/commands/resume.ts
-
-          Criar novo comando:
-
-          ```bash
-          msq resume <run-id|feature-id|repo-id>
-          ```
-
-          Comportamento esperado:
-
-          - localizar a pipeline ou run retomavel
-          - reconstruir o plano restante a partir do estado persistido
-          - imprimir o que sera reaproveitado e o que sera reexecutado
-          - falhar com mensagem clara quando nao houver estado retomavel
-
-          ### src/cli.ts
-
-          Registrar `registerResume(program)`.
-
-          ### src/ui/App.tsx
-          ### src/ui/components/CommandBar.tsx
-
-          Expor os atalhos pedidos pela spec:
-
-          - `p`: pausa o pipeline
-          - `r`: retoma o pipeline quando houver uma pipeline pausada
-          - `x`: aborta a feature selecionada ou a pipeline ativa, conforme o foco atual
-
-          Preserve os atalhos ja existentes:
-
-          - `r` continua valendo "retry gate" apenas no painel de gates
-          - fora do painel de gates, `r` deve significar resume
-
-          O command bar deve refletir o estado real das acoes disponiveis.
-
-          ### tests/orchestrator/scheduler.test.ts
-
-          Adicionar cobertura para:
-
-          - pause impede novos despachos e deixa as ativas terminarem
-          - resume volta a despachar a DAG
-          - abort de feature cancela apenas a ativa selecionada
-          - abort all cancela o pipeline inteiro
-
-          ### tests/commands/commands.test.ts
-
-          Adicionar cobertura para:
-
-          - registro do novo comando `resume`
-          - `status` exibindo pipelines retomaveis/pausadas
-          - `resume` chamando a camada correta com ids validos
-          - erro claro quando nao houver pipeline retomavel
-
-          ### tests/ui/app.test.ts
-
-          Adicionar testes de atalho para:
-
-          - `p` pausar pipeline
-          - `r` retomar pipeline fora do painel de gates
-          - `x` abortar a feature selecionada
-
-          ## Criterios de aceite
-
-          - [ ] `p` na TUI pausa o pipeline
-          - [ ] `r` na TUI retoma o pipeline
-          - [ ] `x` aborta a feature selecionada ou a pipeline ativa de forma controlada
-          - [ ] Estado de pause/resume/abort fica persistido entre sessoes
-          - [ ] `msq resume` existe via CLI e retoma sem reexecutar features `done`
-          - [ ] Features interrompidas podem ser reexecutadas a partir do estado salvo da pipeline
-          - [ ] `status` identifica claramente pipelines retomaveis
-          - [ ] Abort manual nao aparece como timeout
-          - [ ] Todos os testes passam: `npx vitest run`
-          - [ ] Sem erros de tipo: `npx tsc --noEmit`
-        tasks: []

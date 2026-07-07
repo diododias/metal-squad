@@ -11,7 +11,7 @@ import {
 export const BACKLOG_FILE = 'backlog.yaml';
 
 function normalizeV1(backlog: BacklogV1): BacklogV2 {
-  const defaults: Defaults = { tool: 'claude', effort: 'medium', skills: ['implement'] };
+  const defaults: Defaults = { tool: 'claude', effort: 'medium', skills: [], stageSkills: {} };
   return {
     version: 2,
     repo: backlog.repo,
@@ -77,9 +77,7 @@ export function loadBacklog(path = BACKLOG_FILE, cwd = process.cwd()): BacklogV2
 
   let v2: BacklogV2;
   if (parsed.version === 1) {
-    console.warn(
-      '[msq] backlog.yaml está em formato v1 — considere atualizar para version: 2',
-    );
+    console.warn('[msq] backlog.yaml is in v1 format — consider upgrading to version: 2');
     v2 = normalizeV1(parsed);
   } else {
     v2 = propagateDefaults(parsed);

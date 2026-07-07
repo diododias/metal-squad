@@ -39,10 +39,14 @@ export function StatusBar({
       : `${STATUS_ICON[selectedRun.status]} ${selectedRun.featureId}`
     : null;
 
+  const modelLabel = selectedFeature?.model ?? selectedRun?.tool ?? null;
+  const effortLabel = selectedFeature ? `effort:${selectedFeature.effort}` : null;
+
   const summary = selectedRun
     ? [
         featureLabel,
-        selectedRun.tool,
+        modelLabel,
+        effortLabel,
         formatTokensIO(selectedRun.inputTokens, selectedRun.cachedInputTokens ?? null, selectedRun.outputTokens),
         formatElapsed(selectedRun.startedAt, selectedRun.endedAt),
         formatCost(estimateCost(
