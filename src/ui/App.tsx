@@ -288,7 +288,7 @@ export function App(): React.ReactElement {
   const movePrevious = useCallback(() => {
     if (dashboardOpen || activeView === 'notifications') return;
 
-    if (activeView === 'overview' && pendingFeatures.length > 0 && focusPanel === 'runs') {
+    if (activeView === 'overview' && pendingFeatures.length > 0 && focusPanel === 'main') {
       setUi((current) => ({
         ...current,
         selectedPending: clampIndex(selectedPendingIndex - 1, pendingFeatures.length),
@@ -325,7 +325,7 @@ export function App(): React.ReactElement {
   const moveNext = useCallback(() => {
     if (dashboardOpen || activeView === 'notifications') return;
 
-    if (activeView === 'overview' && pendingFeatures.length > 0 && focusPanel === 'runs') {
+    if (activeView === 'overview' && pendingFeatures.length > 0 && focusPanel === 'main') {
       setUi((current) => ({
         ...current,
         selectedPending: clampIndex(selectedPendingIndex + 1, pendingFeatures.length),
@@ -363,8 +363,12 @@ export function App(): React.ReactElement {
     if (dashboardOpen || activeView === 'notifications') return;
     if (selectedRun && focusPanel === 'runs') {
       setUi((current) => ({ ...current, activeView: 'run', focusPanel: 'main' }));
+      return;
     }
-  }, [activeView, dashboardOpen, focusPanel, selectedRun]);
+    if (focusPanel === 'main' && activeView === 'overview' && selectedPending) {
+      startSelectedFeature();
+    }
+  }, [activeView, dashboardOpen, focusPanel, selectedRun, selectedPending, startSelectedFeature]);
 
   const switchToTab = useCallback((_tabIndex: number) => {
     // The current TUI does not expose numbered tabs yet.
@@ -457,9 +461,9 @@ export function App(): React.ReactElement {
 
   const globalShortcuts = useMemo(
     () => createGlobalShortcuts({
-      canNavigateRuns: focusPanel === 'runs' && (runs.length > 0 || (activeView === 'overview' && pendingFeatures.length > 0)),
+      canNavigateRuns: focusPanel === 'runs' && runs.length > 0,
       canNavigateGates: focusPanel === 'gates' && gates.length > 0,
-      canMovePending: activeView === 'overview' && focusPanel === 'runs' && pendingFeatures.length > 0,
+      canMovePending: activeView === 'overview' && focusPanel === 'main' && pendingFeatures.length > 0,
       movePrevious,
       moveNext,
       enter: openSelection,

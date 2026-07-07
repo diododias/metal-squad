@@ -58,7 +58,7 @@ export function createGlobalShortcuts(options: GlobalShortcutOptions): KeyboardS
       key: 'enter',
       scope: 'global',
       label: 'Select',
-      condition: () => canNavigateRuns,
+      condition: () => canNavigateRuns || canMovePending,
       action: enter,
     },
     {
