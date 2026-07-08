@@ -19,8 +19,9 @@ import {
 } from '../format.js';
 import { DASHBOARD_GROUP_LABEL, DASHBOARD_GROUP_ORDER, getRunGroup, type DashboardGroupId } from '../dashboardGroups.js';
 import { EmptyState } from './EmptyState.js';
+import { KanbanCard } from './KanbanCard.js';
+import { KanbanColumn } from './KanbanColumn.js';
 import { NotificationsFeed } from './NotificationsFeed.js';
-import { RunTable } from './RunTable.js';
 import { formatDurationMs, type RunBreakdown } from '../../core/stats.js';
 import { summarizeTaskRuns, type WorkflowStageSummary } from '../workflow.js';
 import { useTheme } from '../theme/context.js';
@@ -48,6 +49,8 @@ interface Props {
   selectedRun: RunSummary | null;
   selectedRunIndex: number;
   selectedFeature: FeatureCatalogEntry | null;
+  /** F31 section 3: resolves model/effort per-row for every kanban card, not just the selected run. */
+  featureCatalog?: Record<string, FeatureCatalogEntry>;
   activeView: ActiveView;
   output: RunOutputRow[];
   outputPaused: boolean;
@@ -94,75 +97,12 @@ function stageStatusLabel(stage: WorkflowStageSummary): string {
   return 'pending';
 }
 
-function localSelectedIndex(slice: RunSummary[], selectedRun: RunSummary | null): number {
-  if (!selectedRun) return -1;
-  return slice.findIndex((run) => run.runId === selectedRun.runId);
-}
-
-// C1 + C2: one ordered block per dashboard group. EXECUTION/BLOCKED renders
-// its own rows (rather than reusing RunTable) so the currently selected
-// running item can expand inline into its workflow stage tree right under
-// that row; DONE/CANCELED reuse RunTable for visual consistency with the
-// rest of the app.
-function DashboardBlock({
-  theme,
-  groupId,
-  groupRuns,
-  selectedRun,
-  isRunsFocused,
-  innerWidth,
-  workflowStages,
-}: {
-  theme: ReturnType<typeof useTheme>;
-  groupId: DashboardGroupId;
-  groupRuns: RunSummary[];
-  selectedRun: RunSummary | null;
-  isRunsFocused: boolean;
-  innerWidth: number;
-  workflowStages: WorkflowStageSummary[];
-}): React.ReactElement {
-  return (
-    <Box marginTop={1} flexDirection="column">
-      <Text {...theme.role('text')} bold>{DASHBOARD_GROUP_LABEL[groupId]}</Text>
-      {groupId === 'execution' ? (
-        <Box flexDirection="column">
-          {groupRuns.map((run) => {
-            const isSelected = selectedRun?.runId === run.runId;
-            const statusStyle = theme.statusTone(getRunStatusTone(run.status));
-            const stageLabel = getRunStageLabel(run);
-            return (
-              <Box key={run.runId} flexDirection="column" marginBottom={1}>
-                <Box>
-                  <Text {...(isSelected && isRunsFocused ? theme.role('focus') : theme.role('text'))} bold={isSelected}>
-                    {isSelected ? '> ' : '  '}{STATUS_ICON[run.status]} {truncateText(run.featureId, Math.max(16, innerWidth - 30))}
-                  </Text>
-                  <Text {...statusStyle}>  {run.tool}{stageLabel ? `  ·  ${stageLabel}` : ''}</Text>
-                </Box>
-                {isSelected && run.status === 'running' && workflowStages.length > 0 && (
-                  <Box flexDirection="column" marginLeft={2}>
-                    <Text {...theme.role('muted')}>{run.featureId} {'>'}</Text>
-                    {workflowStages.map((stage) => (
-                      <Text key={stage.stage} {...theme.role(getWorkflowRole(stage))}>
-                        {'  |_ '}{stage.stage} {stageStatusLabel(stage)}
-                      </Text>
-                    ))}
-                  </Box>
-                )}
-              </Box>
-            );
-          })}
-        </Box>
-      ) : (
-        <RunTable
-          runs={groupRuns}
-          width={innerWidth}
-          selectedIndex={localSelectedIndex(groupRuns, selectedRun)}
-          isFocused={isRunsFocused}
-        />
-      )}
-    </Box>
-  );
-}
+const COLUMN_EMPTY_LABEL: Record<DashboardGroupId, string> = {
+  execution: 'nenhuma em execução',
+  todo: 'backlog vazio',
+  done: 'nenhuma concluída',
+  canceled: 'sem falhas',
+};
 
 export function MainPanel({
   runs,
@@ -170,6 +110,7 @@ export function MainPanel({
   selectedRun,
   selectedRunIndex,
   selectedFeature,
+  featureCatalog = {},
   activeView,
   output,
   outputPaused,
@@ -187,7 +128,11 @@ export function MainPanel({
   const theme = useTheme();
   const innerWidth = Math.max(32, width - 4);
   const visibleOutput = output.slice(-(mode === 'stacked' ? 8 : 14));
-  const maxPending = mode === 'stacked' ? 3 : 5;
+  const maxPerColumn = mode === 'stacked' ? 3 : 5;
+  const columnGap = mode === 'stacked' ? 0 : 1;
+  const columnWidth = mode === 'stacked'
+    ? innerWidth
+    : Math.max(18, Math.floor((innerWidth - columnGap * (DASHBOARD_GROUP_ORDER.length - 1)) / DASHBOARD_GROUP_ORDER.length));
   const nextDemands = collectNextDemands(runs);
   const selectedRunStage = selectedRun ? getRunStageLabel(selectedRun) : null;
   const selectedRunStatusLabel = selectedRun ? getRunStatusLabel(selectedRun) : null;
@@ -458,54 +403,80 @@ export function MainPanel({
               Select a run with arrows or j/k, then press Enter to inspect it. Esc returns here.
             </Text>
           )}
-          {/* C1: rigid ordered blocks — EXECUTION/BLOCKED, TODO, DONE,
-              CANCELED — instead of one flat table plus a disconnected
-              "Ready to start" list. Empty blocks are skipped rather than
-              shown as empty headers. */}
-          {DASHBOARD_GROUP_ORDER.map((groupId) => {
-            if (groupId === 'todo') {
-              if (pendingFeatures.length === 0) return null;
+          {/* F31 section 3 + "componente de card unico": columns render
+              side-by-side in full/compact layout, stacked in narrow
+              terminals — every group always renders (EmptyState instead of
+              being skipped), and every card is the same KanbanCard whether
+              it's a pending feature (TODO) or an actual run. */}
+          <Box flexDirection={mode === 'stacked' ? 'column' : 'row'}>
+            {DASHBOARD_GROUP_ORDER.map((groupId) => {
+              if (groupId === 'todo') {
+                const visiblePending = pendingFeatures.slice(0, maxPerColumn);
+                return (
+                  <KanbanColumn
+                    key={groupId}
+                    label={DASHBOARD_GROUP_LABEL.todo}
+                    count={pendingFeatures.length}
+                    focused={focusPanel === 'main'}
+                    width={columnWidth}
+                    stacked={mode === 'stacked'}
+                    emptyLabel={COLUMN_EMPTY_LABEL.todo}
+                    overflowCount={Math.max(0, pendingFeatures.length - maxPerColumn)}
+                  >
+                    {visiblePending.map((feature, index) => (
+                      <KanbanCard
+                        key={feature.id}
+                        width={columnWidth}
+                        selected={focusPanel === 'main' && index === selectedPendingIndex}
+                        focused={focusPanel === 'main'}
+                        pendingFeature={feature}
+                      />
+                    ))}
+                  </KanbanColumn>
+                );
+              }
+
+              const groupRuns = runs.filter((run) => getRunGroup(run.status) === groupId);
+              const visibleRuns = groupRuns.slice(0, maxPerColumn);
               return (
-                <Box key={groupId} marginTop={1} flexDirection="column">
-                  <Text {...(focusPanel === 'main' ? theme.role('focus') : theme.role('text'))} bold>
-                    {focusPanel === 'main' ? '> ' : '  '}{DASHBOARD_GROUP_LABEL.todo}
-                  </Text>
-                  {pendingFeatures.slice(0, maxPending).map((feature, index) => {
-                    const selected = focusPanel === 'main' && index === selectedPendingIndex;
+                <KanbanColumn
+                  key={groupId}
+                  label={DASHBOARD_GROUP_LABEL[groupId]}
+                  count={groupRuns.length}
+                  focused={focusPanel === 'runs'}
+                  width={columnWidth}
+                  stacked={mode === 'stacked'}
+                  emptyLabel={COLUMN_EMPTY_LABEL[groupId]}
+                  overflowCount={Math.max(0, groupRuns.length - maxPerColumn)}
+                >
+                  {visibleRuns.map((run) => {
+                    const isSelected = selectedRun?.runId === run.runId;
                     return (
-                      <Box key={feature.id}>
-                        <Text {...(selected ? theme.role('focus') : theme.role('text'))} bold={selected}>
-                          {selected ? '>' : ' '} {truncateText(`${feature.id}  ${feature.title}`, Math.max(24, innerWidth - 4))}
-                        </Text>
-                        {selected && (
-                          <Text {...theme.role('muted')}> [{feature.model ?? feature.tool} / {feature.effort}]</Text>
+                      <KanbanCard
+                        key={run.runId}
+                        width={columnWidth}
+                        selected={isSelected}
+                        focused={focusPanel === 'runs'}
+                        run={run}
+                        feature={featureCatalog[run.featureId] ?? null}
+                      >
+                        {groupId === 'execution' && isSelected && run.status === 'running' && workflowStages.length > 0 && (
+                          <Box flexDirection="column" marginLeft={2}>
+                            <Text {...theme.role('muted')}>{run.featureId} {'>'}</Text>
+                            {workflowStages.map((stage) => (
+                              <Text key={stage.stage} {...theme.role(getWorkflowRole(stage))}>
+                                {'  |_ '}{stage.stage} {stageStatusLabel(stage)}
+                              </Text>
+                            ))}
+                          </Box>
                         )}
-                      </Box>
+                      </KanbanCard>
                     );
                   })}
-                  {pendingFeatures.length > maxPending && (
-                    <Text {...theme.role('muted')}>  +{pendingFeatures.length - maxPending} more in backlog</Text>
-                  )}
-                  <Text {...theme.role('muted')}>  Tab to focus · j/k to select · Enter or n to start</Text>
-                </Box>
+                </KanbanColumn>
               );
-            }
-
-            const groupRuns = runs.filter((run) => getRunGroup(run.status) === groupId);
-            if (groupRuns.length === 0) return null;
-            return (
-              <DashboardBlock
-                key={groupId}
-                theme={theme}
-                groupId={groupId}
-                groupRuns={groupRuns}
-                selectedRun={selectedRun}
-                isRunsFocused={focusPanel === 'runs'}
-                innerWidth={innerWidth}
-                workflowStages={workflowStages}
-              />
-            );
-          })}
+            })}
+          </Box>
           {nextDemands.length > 0 && (
             <Box marginTop={1} flexDirection="column">
               <Text {...theme.role('text')} bold>Next demands</Text>

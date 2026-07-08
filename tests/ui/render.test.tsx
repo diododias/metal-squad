@@ -6,7 +6,7 @@ import { EmptyState } from '../../src/ui/components/EmptyState.js';
 import { CommandBar } from '../../src/ui/components/CommandBar.js';
 import { HeaderBar } from '../../src/ui/components/HeaderBar.js';
 import { StatsBar } from '../../src/ui/components/StatsBar.js';
-import { RunTable } from '../../src/ui/components/RunTable.js';
+import { KanbanCard } from '../../src/ui/components/KanbanCard.js';
 import { NotificationsFeed } from '../../src/ui/components/NotificationsFeed.js';
 import { StatusBar } from '../../src/ui/components/StatusBar.js';
 import { CommandPalette } from '../../src/ui/components/CommandPalette.js';
@@ -198,40 +198,49 @@ describe('CommandBar', () => {
 });
 
 // ---------------------------------------------------------------------------
-// RunTable
+// KanbanCard (F31 section 3 + "componente de card unico": absorbs RunTable)
 // ---------------------------------------------------------------------------
-describe('RunTable', () => {
-  const runs: RunSummary[] = [
-    { ...baseRun, runId: 1, featureId: 'feat-alpha', status: 'running', rawStatus: 'running' },
-    { ...baseRun, runId: 2, featureId: 'feat-beta', status: 'done', rawStatus: 'done', totalTokens: 2000, endedAt: '2026-01-01T00:05:00Z' },
-  ];
+describe('KanbanCard', () => {
+  const run: RunSummary = { ...baseRun, runId: 1, featureId: 'feat-alpha', status: 'running', rawStatus: 'running' };
+  const feature = {
+    id: 'feat-alpha',
+    title: 'Alpha',
+    skills: [],
+    tool: 'codex',
+    model: 'gpt-5',
+    effort: 'high' as const,
+  };
 
-  it('renders full header row at wide width', () => {
-    const { lastFrame } = renderWithTheme(<RunTable runs={runs} width={120} />);
-    expect(lastFrame()).toContain('feature_id');
-    expect(lastFrame()).toContain('tool');
-    expect(lastFrame()).toContain('status');
-    expect(lastFrame()).toContain('duration');
-    expect(lastFrame()).toContain('tokens');
-  });
-
-  it('renders compact header at narrow width', () => {
-    const { lastFrame } = renderWithTheme(<RunTable runs={runs} width={50} />);
-    expect(lastFrame()).toContain('feature_id');
-    expect(lastFrame()).toContain('status');
-    expect(lastFrame()).not.toContain('duration');
-    expect(lastFrame()).not.toContain('tokens');
-  });
-
-  it('marks the selected row with > indicator', () => {
-    const { lastFrame } = renderWithTheme(<RunTable runs={runs} width={120} selectedIndex={0} isFocused />);
-    expect(lastFrame()).toContain('> feat-alpha');
-  });
-
-  it('shows all feature ids', () => {
-    const { lastFrame } = renderWithTheme(<RunTable runs={runs} width={120} />);
+  it('shows tool · model · effort for a run row, not just the tool', () => {
+    const { lastFrame } = renderWithTheme(
+      <KanbanCard width={40} selected={false} focused={false} run={run} feature={feature} />,
+    );
     expect(lastFrame()).toContain('feat-alpha');
-    expect(lastFrame()).toContain('feat-beta');
+    // The tool is the run's own adapter (baseRun.tool === 'claude'), while
+    // model/effort resolve from the feature catalog entry passed in.
+    expect(lastFrame()).toContain('claude · gpt-5 · high');
+  });
+
+  it('falls back to the tool name when no model is configured', () => {
+    const { lastFrame } = renderWithTheme(
+      <KanbanCard width={40} selected={false} focused={false} run={run} feature={{ ...feature, model: undefined }} />,
+    );
+    expect(lastFrame()).toContain('claude · claude · high');
+  });
+
+  it('marks the selected row with the > indicator', () => {
+    const { lastFrame } = renderWithTheme(
+      <KanbanCard width={40} selected focused run={run} feature={feature} />,
+    );
+    expect(lastFrame()).toContain('> ');
+  });
+
+  it('renders a pending (TODO) feature without a run', () => {
+    const { lastFrame } = renderWithTheme(
+      <KanbanCard width={40} selected={false} focused={false} pendingFeature={feature} />,
+    );
+    expect(lastFrame()).toContain('feat-alpha');
+    expect(lastFrame()).toContain('codex · gpt-5 · high');
   });
 });
 

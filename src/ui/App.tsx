@@ -633,6 +633,7 @@ export function App(): React.ReactElement {
               selectedRun={selectedRun}
               selectedRunIndex={selectedRunIndex}
               selectedFeature={selectedFeature}
+              featureCatalog={featureCatalog}
               activeView={activeView}
               output={liveOutput}
               outputPaused={ui.outputPaused}

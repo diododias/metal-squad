@@ -84,17 +84,17 @@ describe('listRunsForTui', () => {
 // T017: token formatting + deduplication
 describe('formatTokens', () => {
   it('formats null as dash', async () => {
-    const { formatTokens } = await import('../../src/ui/components/RunTable.js');
+    const { formatTokens } = await import('../../src/ui/format.js');
     expect(formatTokens(null)).toBe('—');
   });
 
   it('formats small numbers as-is', async () => {
-    const { formatTokens } = await import('../../src/ui/components/RunTable.js');
+    const { formatTokens } = await import('../../src/ui/format.js');
     expect(formatTokens(500)).toBe('500');
   });
 
   it('formats thousands as Xk', async () => {
-    const { formatTokens } = await import('../../src/ui/components/RunTable.js');
+    const { formatTokens } = await import('../../src/ui/format.js');
     expect(formatTokens(1200)).toBe('1.2k');
     expect(formatTokens(5000)).toBe('5.0k');
   });
