@@ -88,6 +88,12 @@ export function useTaskRuns(runId: number | null): TaskRun[] {
           stage: event.stage ?? null,
           startedAt: new Date().toISOString(),
           endedAt: null,
+          inputTokens: 0,
+          cachedInputTokens: 0,
+          outputTokens: 0,
+          totalTokens: 0,
+          contextWindowTokens: null,
+          contextWindowPercent: null,
         };
         return [...prev, entry];
       });

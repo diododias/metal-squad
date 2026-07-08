@@ -5,9 +5,9 @@ import type { FeatureCatalogEntry } from '../catalog.js';
 import type { ActiveView } from './MainPanel.js';
 import {
   STATUS_ICON,
-  estimateCost,
-  formatCost,
   formatElapsed,
+  formatPercent,
+  formatTokens,
   formatTokensIO,
   getRunStatusTone,
   getRunStatusLabel,
@@ -52,6 +52,10 @@ export function StatusBar({
 
   const modelLabel = selectedFeature?.model ?? selectedRun?.tool ?? null;
   const effortLabel = selectedFeature ? `effort:${selectedFeature.effort}` : null;
+  const pipelineTokens = selectedRun?.pipelineTotalTokens ?? selectedRun?.totalTokens ?? null;
+  const contextLabel = selectedRun?.contextWindowTokens
+    ? `ctx:${formatPercent(selectedRun.contextWindowPercent)}`
+    : null;
 
   const summary = selectedRun
     ? [
@@ -60,13 +64,9 @@ export function StatusBar({
         effortLabel,
         selectedRun ? getRunStatusLabel(selectedRun) : null,
         formatTokensIO(selectedRun.inputTokens, selectedRun.cachedInputTokens ?? null, selectedRun.outputTokens),
+        pipelineTokens !== null ? `pipeline:${formatTokens(pipelineTokens)}` : null,
+        contextLabel,
         formatElapsed(selectedRun.startedAt, selectedRun.endedAt),
-        formatCost(estimateCost(
-          selectedRun.inputTokens,
-          selectedRun.cachedInputTokens ?? null,
-          selectedRun.outputTokens,
-          selectedFeature?.model ?? selectedRun.tool,
-        )),
         progress,
         selectedRun.pipelineResumeSummary ?? null,
         gateCount > 0 ? `${gateCount} gates` : null,

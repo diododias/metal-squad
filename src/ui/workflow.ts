@@ -6,6 +6,8 @@ export interface WorkflowStageSummary {
   stage: string;
   tasks: TaskRun[];
   total: number;
+  totalTokens: number;
+  maxContextPercent: number | null;
   done: number;
   running: number;
   failed: number;
@@ -62,6 +64,12 @@ export function summarizeTaskRuns(taskRuns: TaskRun[]): WorkflowStageSummary[] {
         stage,
         tasks: orderedTasks,
         total: orderedTasks.length,
+        totalTokens: orderedTasks.reduce((sum, task) => sum + (task.totalTokens ?? 0), 0),
+        maxContextPercent: orderedTasks.reduce<number | null>((max, task) => {
+          const value = task.contextWindowPercent ?? null;
+          if (value === null) return max;
+          return max === null ? value : Math.max(max, value);
+        }, null),
         done: orderedTasks.filter((task) => task.status === 'done').length,
         running: orderedTasks.filter((task) => task.status === 'running').length,
         failed: orderedTasks.filter((task) => task.status === 'failed').length,

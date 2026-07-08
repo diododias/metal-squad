@@ -146,8 +146,8 @@ export function Sidebar({
       <Text {...theme.role('muted')}>Select a run to inspect workflow or declared skills.</Text>
     ) : (
       <>
-        {skills.slice(0, skillLimit).map((skill) => (
-          <Text key={skill} {...theme.role('success')}>
+        {skills.slice(0, skillLimit).map((skill, index) => (
+          <Text key={`${skill}:${index}`} {...theme.role('success')}>
             - {truncateText(skill, labelWidth)}
           </Text>
         ))}

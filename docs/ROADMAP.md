@@ -23,10 +23,11 @@ O que ja funciona:
 
 O que ainda falta:
 - Acoplado ao spec-kit (prompt hardcoded) → F01/F02/F03
-- TUI muito simples vs opencode/claude-code/codex → F05/F08/F24
+- TUI ainda precisa de mais capacidade estrutural em streaming e navegacao → F05/F06/F08/F24
 - Adapters hardcoded (3 tools fixos) → F20
 - Sem streaming de output em tempo real → F06
 - Sem arquivos associados a features/tasks → F01
+- Telemetria ainda precisa evoluir no empacotamento/blocos de execucao → F28
 
 ---
 
@@ -35,9 +36,9 @@ O que ainda falta:
 | Fase | Total | Entregues | Pendentes |
 |------|-------|-----------|-----------|
 | Fase 1 — Fundacao | 4 | 1 | 3 |
-| Fase 2 — TUI moderna | 6 | 1 | 5 |
+| Fase 2 — TUI moderna | 7 | 2 | 5 |
 | Fase 3 — Orquestracao robusta | 5 | 5 | 0 |
-| Fase 4 — Observability & DX | 6 | 4 | 2 |
+| Fase 4 — Observability & DX | 7 | 5 | 2 |
 | Fase 5 — Extensibilidade | 4 | 0 | 4 |
 | Backlog operacional | 3 | 2 | 1 |
 
@@ -70,8 +71,10 @@ O que ainda falta:
 | [F08 — Session Navigation](features/F08-session-navigation.md) | Medium | Media | Pendente |
 | [F09 — Command Palette](features/F09-command-palette.md) | Medium | Media | Entregue |
 | [F24 — Task & Stage Progress](features/F24-task-stage-progress.md) | Medium | Alta | Pendente |
+| [F29 — TUI Shell Polish](features/F29-tui-shell-polish.md) | Medium | Alta | Entregue |
 
-**Entrega**: TUI multi-painel com streaming, status bar, navegacao rica, e progresso granular por task/stage.
+**Entrega**: TUI multi-painel com streaming, status bar, navegacao rica,
+progresso granular por task/stage e casca operacional mais polida.
 
 ---
 
@@ -103,8 +106,10 @@ O que ainda falta:
 | [F19 — Notifications v2](features/F19-notifications-v2.md) | Medium | Media | Pendente |
 | [F13 — Execution Graph](features/F13-execution-graph.md) | Medium | Media | Pendente |
 | [F10 — Theme System](features/F10-theme-system.md) | Low | Baixa | Entregue |
+| [F30 — Token & Context Telemetry Refinement](features/F30-token-context-telemetry.md) | Medium | Alta | Entregue |
 
-**Entrega**: dashboard de custos, analytics CLI, multi-channel notifications, theme system.
+**Entrega**: analytics de tokens/duracao, notificacoes multi-canal e leitura de
+contexto por sessao/step.
 
 ---
 
@@ -135,6 +140,7 @@ O que ainda falta:
 | [H06 — adapter `claude` usa `-p` com contrato incorreto e quebra prompts com front matter](hotfixes/H06-claude-adapter-print-flag-contract.md) | Resolvido | Critica |
 | [H07 — adapter `codex` passa o prompt antes das opcoes e a CLI aborta o parse](hotfixes/H07-codex-exec-prompt-order.md) | Resolvido | Critica |
 | [H08 — `dev-flow` SKILL.md sem YAML frontmatter quebra `codex exec` no startup](hotfixes/H08-codex-dev-flow-skill-missing-frontmatter.md) | Resolvido | Alta |
+| [H09 — TUI com chaves duplicadas provoca trepidacao visual e warnings do React/Ink](hotfixes/H09-ui-duplicate-keys-screen-jitter.md) | Resolvido | Critica |
 
 ---
 
@@ -170,10 +176,17 @@ F05 (layout multi-panel)
  ├→ F09 (command palette) ✅
  ├→ F13 (execution graph)
  ├→ F16 (cost dashboard) ✅
- └→ F24 (task & stage progress)
+ ├→ F24 (task & stage progress)
+ └→ F29 (tui shell polish)
 
 F07 (status bar)
  └→ F16 (cost dashboard) ✅
+
+F24 (task & stage progress)
+ └→ F30 (token/context telemetry)
+
+F28 (task context blocks)
+ └→ F30 (token/context telemetry)
 
 Independentes:
  F10 (theme) ✅, F11 (retry) ✅, F17 (analytics) ✅, F18 (duration) ✅,

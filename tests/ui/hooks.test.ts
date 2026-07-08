@@ -256,7 +256,12 @@ describe('ui hooks', () => {
     expect(startedUpdater([{ taskId: 'T1', title: 'Task 1', status: 'running', stage: null, endedAt: null }])).toEqual([
       { taskId: 'T1', title: 'Task 1', status: 'running', stage: null, endedAt: null },
       {
+        cachedInputTokens: 0,
+        contextWindowPercent: null,
+        contextWindowTokens: null,
         id: 0,
+        inputTokens: 0,
+        outputTokens: 0,
         runId: 7,
         taskId: 'T2',
         title: 'Task 2',
@@ -264,6 +269,7 @@ describe('ui hooks', () => {
         stage: 'implement',
         startedAt: expect.any(String),
         endedAt: null,
+        totalTokens: 0,
       },
     ]);
 

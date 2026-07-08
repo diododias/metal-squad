@@ -1,12 +1,12 @@
 import React from 'react';
 import { Box, Text } from 'ink';
-import type { RunSummary, StatsRunRow } from '../../db/repo.js';
+import type { StatsRunRow } from '../../db/repo.js';
 import {
   aggregateCosts,
   formatTokensCompact,
   renderUsageBar,
 } from '../../core/stats.js';
-import { getRunStatusTone, truncateText } from '../format.js';
+import { formatPercent, truncateText } from '../format.js';
 import { useTheme } from '../theme/context.js';
 import { getSurfaceBorderStyle, getSurfaceTitleStyle } from '../theme/styles.js';
 
@@ -23,6 +23,7 @@ export function CostDashboard({ rows, periodLabel, width }: Props): React.ReactE
   const innerWidth = Math.max(40, width - 4);
   const aggregates = aggregateCosts(rows);
   const maxFeatureTokens = aggregates.byFeature[0]?.tokens ?? 0;
+  const averageContextPercent = summarizeContext(rows);
 
   return (
     <Box
@@ -32,7 +33,7 @@ export function CostDashboard({ rows, periodLabel, width }: Props): React.ReactE
       flexDirection="column"
       width={width}
     >
-      <Text {...getSurfaceTitleStyle(theme)}>Token Usage — {periodLabel}</Text>
+      <Text {...getSurfaceTitleStyle(theme)}>Usage Telemetry — {periodLabel}</Text>
       <Text {...theme.role('muted')}>Press [ and ] to change period, d or Esc to close.</Text>
 
       {rows.length === 0 ? (
@@ -42,7 +43,7 @@ export function CostDashboard({ rows, periodLabel, width }: Props): React.ReactE
       ) : (
         <>
           <Box marginTop={1} flexDirection="column">
-            <Text {...theme.role('text')} bold>{padColumns(['Repo', 'Tool', 'Runs', 'Tokens', 'Cost'], innerWidth)}</Text>
+            <Text {...theme.role('text')} bold>{padColumns(['Repo', 'Tool', 'Runs', 'Tokens', 'Ctx%'], innerWidth)}</Text>
             {aggregates.byRepoTool.map((line) => (
               <Text key={`${line.repoId}-${line.tool}`} {...theme.role('text')}>
                 {padColumns([
@@ -50,7 +51,7 @@ export function CostDashboard({ rows, periodLabel, width }: Props): React.ReactE
                   line.tool,
                   String(line.runs),
                   formatTokensCompact(line.tokens),
-                  `$${line.costUsd.toFixed(2)}`,
+                  formatPercent(line.maxContextPercent),
                 ], innerWidth)}
               </Text>
             ))}
@@ -60,7 +61,7 @@ export function CostDashboard({ rows, periodLabel, width }: Props): React.ReactE
                 '',
                 String(rows.length),
                 formatTokensCompact(aggregates.totalTokens),
-                `$${aggregates.totalCostUsd.toFixed(2)}`,
+                formatPercent(averageContextPercent),
               ], innerWidth)}
             </Text>
           </Box>
@@ -75,7 +76,7 @@ export function CostDashboard({ rows, periodLabel, width }: Props): React.ReactE
                 {'  '}
                 {formatTokensCompact(line.tokens).padStart(8)}
                 {'  '}
-                {`$${line.costUsd.toFixed(2)}`.padStart(7)}
+                {formatPercent(line.maxContextPercent).padStart(7)}
               </Text>
             ))}
             {aggregates.byFeature.length > MAX_FEATURES && (
@@ -86,10 +87,10 @@ export function CostDashboard({ rows, periodLabel, width }: Props): React.ReactE
           <Box marginTop={1} flexDirection="column">
             <Text {...theme.role('text')} bold>By status</Text>
             {aggregates.byStatus.map((line) => (
-              <Text key={line.status} {...theme.statusTone(getRunStatusTone(line.status as RunSummary['status']))}>
+              <Text key={line.status} {...theme.role('text')}>
                 {`${line.status}`.padEnd(9)} {String(line.runs).padStart(3)} runs
                 {'  '}{formatTokensCompact(line.tokens).padStart(8)}
-                {'  '}{`$${line.costUsd.toFixed(2)}`.padStart(7)}
+                {'  '}{formatPercent(line.maxContextPercent).padStart(7)}
               </Text>
             ))}
           </Box>
@@ -105,4 +106,12 @@ function padColumns(columns: string[], width: number): string {
     .map((column, index) => column.padEnd(widths[index] ?? 8))
     .join(' ');
   return truncateText(line, width);
+}
+
+function summarizeContext(rows: StatsRunRow[]): number | null {
+  const valid = rows
+    .map((row) => row.contextWindowPercent)
+    .filter((value): value is number => value !== null && value !== undefined);
+  if (valid.length === 0) return null;
+  return valid.reduce((sum, value) => sum + value, 0) / valid.length;
 }

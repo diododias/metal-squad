@@ -16,6 +16,10 @@ export interface RunStats {
     cachedInput: number;
     output: number;
   };
+  context: {
+    avgPercent: number | null;
+    maxPercent: number | null;
+  };
   costUsd: number;
   avgDurationMs: number | null;
   successRatePercent: number | null;
@@ -25,6 +29,9 @@ export interface RunStats {
 export function computeStats(rows: StatsRunRow[], topN = 5): RunStats {
   const runs = { total: rows.length, done: 0, failed: 0, running: 0, blocked: 0, aborted: 0 };
   const tokens = { total: 0, input: 0, cachedInput: 0, output: 0 };
+  let contextPercentTotal = 0;
+  let contextPercentCount = 0;
+  let contextPercentMax: number | null = null;
   let costUsd = 0;
   let durationTotal = 0;
   let durationCount = 0;
@@ -36,6 +43,13 @@ export function computeStats(rows: StatsRunRow[], topN = 5): RunStats {
     tokens.input += row.inputTokens ?? 0;
     tokens.cachedInput += row.cachedInputTokens ?? 0;
     tokens.output += row.outputTokens ?? 0;
+    if (row.contextWindowPercent !== null && row.contextWindowPercent !== undefined) {
+      contextPercentTotal += row.contextWindowPercent;
+      contextPercentCount += 1;
+      contextPercentMax = contextPercentMax === null
+        ? row.contextWindowPercent
+        : Math.max(contextPercentMax, row.contextWindowPercent);
+    }
 
     const cost = estimateCost(
       row.inputTokens,
@@ -61,6 +75,10 @@ export function computeStats(rows: StatsRunRow[], topN = 5): RunStats {
   return {
     runs,
     tokens,
+    context: {
+      avgPercent: contextPercentCount > 0 ? contextPercentTotal / contextPercentCount : null,
+      maxPercent: contextPercentMax,
+    },
     costUsd,
     avgDurationMs: durationCount > 0 ? durationTotal / durationCount : null,
     successRatePercent: finished > 0 ? Math.round((runs.done / finished) * 100) : null,
@@ -177,6 +195,7 @@ export interface CostLine {
   tokens: number;
   costUsd: number;
   runs: number;
+  maxContextPercent: number | null;
 }
 
 export interface CostAggregates {
@@ -207,24 +226,27 @@ export function aggregateCosts(rows: StatsRunRow[]): CostAggregates {
 
     const repoToolKey = `${row.repoId} ${row.tool}`;
     const repoTool = byRepoTool.get(repoToolKey)
-      ?? { repoId: row.repoId, tool: row.tool, tokens: 0, costUsd: 0, runs: 0 };
+      ?? { repoId: row.repoId, tool: row.tool, tokens: 0, costUsd: 0, runs: 0, maxContextPercent: null };
     repoTool.tokens += tokens;
     repoTool.costUsd += costUsd;
     repoTool.runs += 1;
+    repoTool.maxContextPercent = maxContext(repoTool.maxContextPercent, row.contextWindowPercent ?? null);
     byRepoTool.set(repoToolKey, repoTool);
 
     const feature = byFeature.get(row.featureId)
-      ?? { featureId: row.featureId, tokens: 0, costUsd: 0, runs: 0 };
+      ?? { featureId: row.featureId, tokens: 0, costUsd: 0, runs: 0, maxContextPercent: null };
     feature.tokens += tokens;
     feature.costUsd += costUsd;
     feature.runs += 1;
+    feature.maxContextPercent = maxContext(feature.maxContextPercent, row.contextWindowPercent ?? null);
     byFeature.set(row.featureId, feature);
 
     const status = byStatus.get(row.status)
-      ?? { status: row.status, tokens: 0, costUsd: 0, runs: 0 };
+      ?? { status: row.status, tokens: 0, costUsd: 0, runs: 0, maxContextPercent: null };
     status.tokens += tokens;
     status.costUsd += costUsd;
     status.runs += 1;
+    status.maxContextPercent = maxContext(status.maxContextPercent, row.contextWindowPercent ?? null);
     byStatus.set(row.status, status);
   }
 
@@ -251,4 +273,9 @@ function parseTimestampMs(value: string | null): number | null {
     : trimmed;
   const parsed = Date.parse(normalized);
   return Number.isFinite(parsed) ? parsed : null;
+}
+
+function maxContext(current: number | null, next: number | null): number | null {
+  if (next === null) return current;
+  return current === null ? next : Math.max(current, next);
 }

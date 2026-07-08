@@ -59,6 +59,12 @@ export function formatTokens(total: number | null): string {
   return String(total);
 }
 
+export function formatPercent(value: number | null | undefined): string {
+  if (value === null || value === undefined || !Number.isFinite(value)) return '—';
+  const rounded = Math.round(value * 10) / 10;
+  return Number.isInteger(rounded) ? `${rounded}%` : `${rounded.toFixed(1)}%`;
+}
+
 export function formatClock(iso: string | null): string {
   if (!iso) return '--:--';
   const ms = parseTimestampMs(iso);

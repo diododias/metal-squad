@@ -24,7 +24,7 @@ function renderShortcutLine(
 
   return (
     <Text
-      key={`${shortcut.scope}:${shortcut.context ?? 'global'}:${shortcut.key}`}
+      key={`${shortcut.scope}:${shortcut.context ?? 'global'}:${shortcut.key}:${shortcut.label}`}
       {...mergeInkStyles(
         active ? theme.role('focus') : theme.role('text'),
         !available ? theme.role('muted') : undefined,
