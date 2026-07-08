@@ -16,15 +16,16 @@ O que ja funciona:
 - ~~Controle de budget~~ (F14 entregue)
 - ~~Decomposicao automatica de tasks~~ (F04 entregue)
 - ~~Workflow por etapas com sessoes isoladas~~ (F27 entregue)
+- ~~Event system interno (pub/sub)~~ (F15 entregue)
+- ~~Command palette & shortcuts~~ (F09 entregue)
+- ~~Resume de pipeline a partir do estado persistido~~ (F26 entregue)
 
 O que ainda falta:
 - Acoplado ao spec-kit (prompt hardcoded) → F01/F02/F03
-- TUI muito simples vs opencode/claude-code/codex → F05–F09/F24
+- TUI muito simples vs opencode/claude-code/codex → F05/F08/F24
 - Adapters hardcoded (3 tools fixos) → F20
 - Sem streaming de output em tempo real → F06
 - Sem arquivos associados a features/tasks → F01
-- Sem event system interno → F15
-- Resume de pipeline a partir do estado persistido → F26
 - Hardening do fluxo `msq-develop` → F25
 
 ---
@@ -33,12 +34,12 @@ O que ainda falta:
 
 | Fase | Total | Entregues | Pendentes |
 |------|-------|-----------|-----------|
-| Fase 1 — Fundacao | 4 | 0 | 4 |
-| Fase 2 — TUI moderna | 6 | 0 | 6 |
+| Fase 1 — Fundacao | 4 | 1 | 3 |
+| Fase 2 — TUI moderna | 6 | 1 | 5 |
 | Fase 3 — Orquestracao robusta | 5 | 5 | 0 |
-| Fase 4 — Observability & DX | 6 | 3 | 3 |
+| Fase 4 — Observability & DX | 6 | 4 | 2 |
 | Fase 5 — Extensibilidade | 4 | 0 | 4 |
-| Backlog operacional | 2 | 0 | 2 |
+| Backlog operacional | 3 | 1 | 2 |
 
 ---
 
@@ -51,7 +52,7 @@ O que ainda falta:
 | [F01 — YAML Schema v2](features/F01-yaml-schema-v2.md) | Medium | Critica | Pendente |
 | [F02 — Skill Registry](features/F02-skill-registry.md) | Medium | Critica | Pendente |
 | [F03 — Dynamic Prompt Builder](features/F03-dynamic-prompt-builder.md) | Medium | Critica | Pendente |
-| [F15 — Event System](features/F15-event-system.md) | Medium | Critica | Pendente |
+| [F15 — Event System](features/F15-event-system.md) | Medium | Critica | Entregue |
 
 **Entrega**: msq funciona com skills parametrizadas, arquivos associados, e emite eventos internos.
 
@@ -67,7 +68,7 @@ O que ainda falta:
 | [F06 — Log Streaming](features/F06-log-streaming.md) | High | Alta | Pendente |
 | [F07 — Status Bar](features/F07-status-bar.md) | Low | Alta | Pendente |
 | [F08 — Session Navigation](features/F08-session-navigation.md) | Medium | Media | Pendente |
-| [F09 — Command Palette](features/F09-command-palette.md) | Medium | Media | Pendente |
+| [F09 — Command Palette](features/F09-command-palette.md) | Medium | Media | Entregue |
 | [F24 — Task & Stage Progress](features/F24-task-stage-progress.md) | Medium | Alta | Pendente |
 
 **Entrega**: TUI multi-painel com streaming, status bar, navegacao rica, e progresso granular por task/stage.
@@ -142,7 +143,7 @@ O que ainda falta:
 | Item | Tipo | Prioridade | Status |
 |------|------|------------|--------|
 | [F25 — Hardening do fluxo `msq-develop`](features/F25-msq-develop-harness-hardening.md) | Feature | Alta | Pendente |
-| [F26 — Resume de pipeline a partir do estado persistido](features/F26-resume-pipeline-from-state.md) | Feature | Alta | Pendente |
+| [F26 — Resume de pipeline a partir do estado persistido](features/F26-resume-pipeline-from-state.md) | Feature | Alta | Entregue |
 | [F28 — Task Context Blocks (packing + token analytics)](features/F28-task-context-blocks.md) | Feature | Alta | Em progresso |
 
 ---
@@ -156,7 +157,7 @@ F01 (schema v2)
  │   └→ F04 (task sizer) ✅
  └→ F22 (per-repo config)
 
-F15 (event system)
+F15 (event system) ✅
  ├→ F06 (log streaming)
  ├→ F12 (pause/resume) ✅
  ├→ F14 (budget caps) ✅
@@ -166,7 +167,7 @@ F05 (layout multi-panel)
  ├→ F06 (log streaming)
  ├→ F07 (status bar)
  ├→ F08 (session nav)
- ├→ F09 (command palette)
+ ├→ F09 (command palette) ✅
  ├→ F13 (execution graph)
  ├→ F16 (cost dashboard) ✅
  └→ F24 (task & stage progress)
@@ -175,6 +176,7 @@ F07 (status bar)
  └→ F16 (cost dashboard) ✅
 
 Independentes:
- F10 (theme), F11 (retry) ✅, F17 (analytics) ✅, F18 (duration) ✅,
- F20 (plugins), F21 (wizard), F23 (config gen), F27 (stage sessions) ✅
+ F10 (theme) ✅, F11 (retry) ✅, F17 (analytics) ✅, F18 (duration) ✅,
+ F20 (plugins), F21 (wizard), F23 (config gen), F27 (stage sessions) ✅,
+ F26 (resume pipeline) ✅
 ```
