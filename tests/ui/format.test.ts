@@ -5,6 +5,7 @@ import {
   formatElapsed,
   formatTokensIO,
   getRunStatusTone,
+  getVerticalBudget,
 } from '../../src/ui/format.js';
 import { getNotificationTone } from '../../src/ui/theme/styles.js';
 
@@ -32,5 +33,14 @@ describe('ui format helpers', () => {
     expect(getNotificationTone('gate:created')).toBe('warning');
     expect(getNotificationTone('run:failed')).toBe('error');
     expect(getNotificationTone('stage:request-created')).toBe('accent');
+  });
+
+  it('splits terminal height into short/regular/tall vertical budgets (F31 item 1)', () => {
+    expect(getVerticalBudget(20)).toBe('short');
+    expect(getVerticalBudget(23)).toBe('short');
+    expect(getVerticalBudget(24)).toBe('regular');
+    expect(getVerticalBudget(40)).toBe('regular');
+    expect(getVerticalBudget(41)).toBe('tall');
+    expect(getVerticalBudget(80)).toBe('tall');
   });
 });

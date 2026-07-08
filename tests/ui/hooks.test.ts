@@ -317,6 +317,31 @@ describe('ui hooks', () => {
     expect(off).toHaveBeenCalledWith('resize', expect.any(Function));
   });
 
+  it('useTerminalHeight subscribes to resize events (F31 vertical budget)', async () => {
+    const setHeight = vi.fn();
+    let cleanup: (() => void) | void;
+    const on = vi.spyOn(process.stdout, 'on');
+    const off = vi.spyOn(process.stdout, 'off');
+
+    vi.doMock('react', () => ({
+      useState: (value: unknown) => [typeof value === 'function' ? (value as () => unknown)() : value, setHeight],
+      useEffect: (effect: () => (() => void) | void) => {
+        cleanup = effect();
+      },
+    }));
+
+    const { useTerminalHeight } = await import('../../src/ui/hooks/useTerminalHeight.js');
+    const height = useTerminalHeight();
+
+    expect(height).toBe(process.stdout.rows ?? 24);
+    expect(on).toHaveBeenCalledWith('resize', expect.any(Function));
+    const listener = on.mock.calls[0]?.[1] as (() => void);
+    listener();
+    expect(setHeight).toHaveBeenCalledWith(process.stdout.rows ?? 24);
+    cleanup?.();
+    expect(off).toHaveBeenCalledWith('resize', expect.any(Function));
+  });
+
   it('useCommandPalette filters available commands, fuzzy matches queries, and executes the selection', async () => {
     const pause = vi.fn();
     const quit = vi.fn();
