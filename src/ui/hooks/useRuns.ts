@@ -1,11 +1,13 @@
 import { useState, useEffect } from 'react';
 import { listRunsForTui, listTaskRunsForRun, type RunSummary, type TaskRun } from '../../db/repo.js';
 import { msqEventBus } from '../../core/events/index.js';
+import { resolveRepo } from '../../core/repo.js';
 
 export function useRuns(intervalMs = 2000): RunSummary[] {
+  const repoId = resolveRepo().repoId;
   const [runs, setRuns] = useState<RunSummary[]>(() => {
     try {
-      return listRunsForTui();
+      return listRunsForTui(50, repoId);
     } catch {
       return [];
     }
@@ -14,7 +16,7 @@ export function useRuns(intervalMs = 2000): RunSummary[] {
   useEffect(() => {
     const refresh = (): void => {
       try {
-        setRuns(listRunsForTui());
+        setRuns(listRunsForTui(50, repoId));
       } catch {
         // DB locked or unavailable — keep stale data
       }
@@ -36,7 +38,7 @@ export function useRuns(intervalMs = 2000): RunSummary[] {
       clearInterval(timer);
       for (const unsubscribe of unsubscribers) unsubscribe();
     };
-  }, [intervalMs]);
+  }, [intervalMs, repoId]);
 
   return runs;
 }

@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import React from 'react';
 
 const mockUseRuns = vi.fn();
+const mockUseCompletedFeatures = vi.fn(() => new Set<string>());
 const mockUseTaskRuns = vi.fn(() => []);
 const mockUseGates = vi.fn();
 const mockUseRunOutput = vi.fn();
@@ -70,6 +71,10 @@ vi.mock('react', async () => {
 vi.mock('../../src/ui/hooks/useRuns.js', () => ({
   useRuns: mockUseRuns,
   useTaskRuns: mockUseTaskRuns,
+}));
+
+vi.mock('../../src/ui/hooks/useCompletedFeatures.js', () => ({
+  useCompletedFeatures: mockUseCompletedFeatures,
 }));
 
 vi.mock('../../src/ui/hooks/useGates.js', () => ({

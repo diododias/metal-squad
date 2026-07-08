@@ -35,7 +35,7 @@ import { startTelegramPoller, stopTelegramPoller } from '../notify/telegram-poll
 import { loadConfig } from '../../config/index.js';
 import { buildPrompt } from '../backlog/prompt.js';
 import { createSkillRegistry } from '../skills/index.js';
-import { syncFeatureTasksToBacklog, markFeatureStatus } from '../backlog/sync.js';
+import { syncFeatureTasksToBacklog } from '../backlog/sync.js';
 import type { Skill } from '../skills/types.js';
 import {
   createBudgetTracker,
@@ -387,11 +387,6 @@ export async function executeBacklog(
       }, {
         clearAbortRequest: true,
       });
-      try {
-        markFeatureStatus(feature.id, shouldCountAsDone ? 'done' : 'failed', opts.cwd);
-      } catch {
-        // backlog.yaml not writable or feature absent from a reduced/temp backlog — skip silently
-      }
     },
   });
 

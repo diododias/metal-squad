@@ -60,33 +60,3 @@ export function syncFeatureTasksToBacklog(
   writeFileSync(resolvedBacklogPath, stringify(backlog));
   return tasks.length;
 }
-
-/**
- * Persiste o resultado final de uma feature no backlog.yaml. Sem isso, features
- * concluidas continuam aparecendo como "Ready to start" na TUI indefinidamente,
- * pois o runs/SQLite (fonte usada para deduzir features ativas) e' path-dependente
- * (MSQ_DB_PATH) e nao versionado, enquanto o backlog.yaml e' a fonte de verdade
- * versionada consultada pelo catalogo da UI.
- */
-export function markFeatureStatus(
-  featureId: string,
-  status: 'done' | 'failed',
-  cwd = process.cwd(),
-  backlogPath = BACKLOG_FILE,
-): void {
-  const resolvedBacklogPath = resolve(cwd, backlogPath);
-  const backlog = parse(readFileSync(resolvedBacklogPath, 'utf8')) as BacklogV2;
-
-  let updated = false;
-  for (const epic of backlog.epics) {
-    for (const feature of epic.features) {
-      if (feature.id !== featureId) continue;
-      feature.status = status;
-      updated = true;
-    }
-  }
-
-  if (!updated) return;
-
-  writeFileSync(resolvedBacklogPath, stringify(backlog));
-}

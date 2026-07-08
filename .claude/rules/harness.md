@@ -11,17 +11,21 @@ Use estas regras sempre que a tarefa envolver:
 
 ## Banco local gravavel
 
-Neste repo, validacoes live podem falhar por banco global sem permissao de escrita. O caminho seguro para testes locais e:
+`msq` grava por padrao em um banco global unico (`~/.local/share/metal-squad/app.db`, XDG-style, definido em `src/config/index.ts`). Runs reais de features devem usar esse caminho default, sem override — e assim que o historico de conclusao de features (usado para "Ready to start" na TUI) se acumula em um unico lugar consultavel.
+
+`MSQ_DB_PATH` e um override reservado para sessoes de harness sandboxadas onde o caminho global genuinamente nao e gravavel (ex.: `attempt to write a readonly database`, ver `docs/hotfixes/H03-run-readonly-db-path.md`). So use-o depois de confirmar que o banco global falhou:
 
 ```bash
 MSQ_DB_PATH="$(pwd)/.metal-squad/app.db" rtk node dist/index.js run --feature feat-XX
 ```
 
-Use o mesmo override para `status` quando quiser inspecionar a mesma base local:
+O mesmo vale para `status`:
 
 ```bash
 MSQ_DB_PATH="$(pwd)/.metal-squad/app.db" rtk node dist/index.js status --limit 5
 ```
+
+Nao use esse override como padrao para desenvolvimento real de features — isso fragmenta o historico de runs por worktree e faz features ja concluidas reaparecerem como pendentes quando a TUI le o banco global.
 
 ## Anti-recursao
 

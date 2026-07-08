@@ -102,9 +102,8 @@ Se o usuario especificou uma feature (ex: "feat-02", "F03"), use essa. Caso cont
 
 ### 7. Atualizar backlog
 
-1. `msq run` agora marca `status: done` (ou `failed`) automaticamente na feature dentro do `backlog.yaml` usado na run, ao final do pipeline (`markFeatureStatus` em `src/core/backlog/sync.ts`, chamado no `onDone` do scheduler em `src/core/runner/execute.ts`). Isso evita que a feature volte a aparecer como "Ready to start" na TUI por falta de sync manual.
-2. Ainda assim, confirme manualmente que o `backlog.yaml` do branch develop reflete a feature como `done` (ou remova-a se ja entregue) — o backlog temporario montado no passo 2 roda na branch da feature, nao necessariamente no develop, entao o sync automatico so cobre o arquivo usado durante a run.
-3. Se houver novas features specs criadas durante o desenvolvimento, commite-as tambem
+1. `backlog.yaml` nao tem mais campo `status` de feature — nao edite manualmente esse arquivo para marcar uma feature como concluida. "Ready to start" na TUI/`msq status` e derivado em tempo de leitura a partir de `pipelines.done_json` no SQLite (`listCompletedFeatureIds` em `src/db/repo.ts`), populado automaticamente pelo scheduler ao final do pipeline (`src/core/runner/execute.ts`). Rodar `msq run` com o DB default (sem `MSQ_DB_PATH`, ver [`../../rules/harness.md`](../../rules/harness.md)) ja e suficiente para a feature parar de aparecer como pendente.
+2. Se houver novas features specs criadas durante o desenvolvimento, commite-as tambem
 
 ## Notas
 

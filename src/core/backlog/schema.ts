@@ -52,7 +52,6 @@ export const FeatureSchema = z.object({
   tool: ToolSchema.default('claude'),
   model: z.string().optional(),
   effort: EffortSchema.default('medium'),
-  status: z.enum(['todo', 'done', 'failed']).default('todo'),
   dependsOn: z.array(z.string()).default([]),
   tasks: z.array(TaskSchema).default([]),
   skills: z.array(z.string()).optional(),
