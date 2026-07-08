@@ -534,6 +534,7 @@ epics:
           syncTasksToBacklog: true
       - id: feat-25
         title: F25 — Hardening do fluxo msq-develop
+        status: done
         tool: claude
         model: claude-sonnet-4-5
         effort: high

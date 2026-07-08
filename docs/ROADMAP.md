@@ -19,6 +19,7 @@ O que ja funciona:
 - ~~Event system interno (pub/sub)~~ (F15 entregue)
 - ~~Command palette & shortcuts~~ (F09 entregue)
 - ~~Resume de pipeline a partir do estado persistido~~ (F26 entregue)
+- ~~Hardening do fluxo `msq-develop`~~ (F25 entregue)
 
 O que ainda falta:
 - Acoplado ao spec-kit (prompt hardcoded) → F01/F02/F03
@@ -26,7 +27,6 @@ O que ainda falta:
 - Adapters hardcoded (3 tools fixos) → F20
 - Sem streaming de output em tempo real → F06
 - Sem arquivos associados a features/tasks → F01
-- Hardening do fluxo `msq-develop` → F25
 
 ---
 
@@ -39,7 +39,7 @@ O que ainda falta:
 | Fase 3 — Orquestracao robusta | 5 | 5 | 0 |
 | Fase 4 — Observability & DX | 6 | 4 | 2 |
 | Fase 5 — Extensibilidade | 4 | 0 | 4 |
-| Backlog operacional | 3 | 1 | 2 |
+| Backlog operacional | 3 | 2 | 1 |
 
 ---
 
@@ -142,7 +142,7 @@ O que ainda falta:
 
 | Item | Tipo | Prioridade | Status |
 |------|------|------------|--------|
-| [F25 — Hardening do fluxo `msq-develop`](features/F25-msq-develop-harness-hardening.md) | Feature | Alta | Pendente |
+| [F25 — Hardening do fluxo `msq-develop`](features/F25-msq-develop-harness-hardening.md) | Feature | Alta | Entregue |
 | [F26 — Resume de pipeline a partir do estado persistido](features/F26-resume-pipeline-from-state.md) | Feature | Alta | Entregue |
 | [F28 — Task Context Blocks (packing + token analytics)](features/F28-task-context-blocks.md) | Feature | Alta | Em progresso |
 
@@ -178,5 +178,5 @@ F07 (status bar)
 Independentes:
  F10 (theme) ✅, F11 (retry) ✅, F17 (analytics) ✅, F18 (duration) ✅,
  F20 (plugins), F21 (wizard), F23 (config gen), F27 (stage sessions) ✅,
- F26 (resume pipeline) ✅
+ F26 (resume pipeline) ✅, F25 (msq-develop hardening) ✅
 ```
