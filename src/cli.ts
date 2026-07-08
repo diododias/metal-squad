@@ -1,8 +1,11 @@
 import { Command } from 'commander';
 import { registerInit } from './commands/init.js';
 import { registerRun } from './commands/run.js';
+import { registerDecompose } from './commands/decompose.js';
+import { registerResume } from './commands/resume.js';
 import { registerSkills } from './commands/skills.js';
 import { registerStatus } from './commands/status.js';
+import { registerStats } from './commands/stats.js';
 import { registerUi } from './commands/ui.js';
 import { initConfig } from './config/index.js';
 
@@ -18,8 +21,11 @@ export async function run(argv: string[]): Promise<void> {
 
   registerInit(program);
   registerRun(program);
+  registerDecompose(program);
+  registerResume(program);
   registerSkills(program);
   registerStatus(program);
+  registerStats(program);
   registerUi(program);
 
   await program.parseAsync(argv);

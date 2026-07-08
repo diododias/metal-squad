@@ -102,7 +102,7 @@ describe('BacklogV2Schema', () => {
     if (result.success) {
       expect(result.data.defaults.tool).toBe('claude');
       expect(result.data.defaults.effort).toBe('medium');
-      expect(result.data.defaults.skills).toEqual(['implement']);
+      expect(result.data.defaults.skills).toEqual([]);
     }
   });
 

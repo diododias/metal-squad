@@ -1,4 +1,4 @@
-import { existsSync } from 'node:fs';
+import { existsSync, statSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { BACKLOG_FILE, loadBacklog } from '../core/backlog/load.js';
 
@@ -7,19 +7,25 @@ export interface FeatureCatalogEntry {
   title: string;
   skills: string[];
   tool: string;
+  model?: string;
+  effort: string;
 }
 
 let cachedPath = '';
+let cachedMtimeMs = 0;
 let cachedCatalog: Record<string, FeatureCatalogEntry> = {};
 
 export function getFeatureCatalog(cwd = process.cwd()): Record<string, FeatureCatalogEntry> {
   const backlogPath = resolve(cwd, BACKLOG_FILE);
-  if (cachedPath === backlogPath) return cachedCatalog;
   if (!existsSync(backlogPath)) {
     cachedPath = backlogPath;
+    cachedMtimeMs = 0;
     cachedCatalog = {};
     return cachedCatalog;
   }
+
+  const mtimeMs = statSync(backlogPath).mtimeMs;
+  if (cachedPath === backlogPath && cachedMtimeMs === mtimeMs) return cachedCatalog;
 
   try {
     const backlog = loadBacklog(BACKLOG_FILE, cwd);
@@ -32,6 +38,8 @@ export function getFeatureCatalog(cwd = process.cwd()): Record<string, FeatureCa
             title: feature.title,
             skills: feature.skills ?? [],
             tool: feature.tool,
+            model: feature.model,
+            effort: feature.effort,
           } satisfies FeatureCatalogEntry,
         ]),
       ),
@@ -41,5 +49,14 @@ export function getFeatureCatalog(cwd = process.cwd()): Record<string, FeatureCa
   }
 
   cachedPath = backlogPath;
+  cachedMtimeMs = mtimeMs;
   return cachedCatalog;
+}
+
+export function getPendingFeatures(
+  catalog: Record<string, FeatureCatalogEntry>,
+  doneFeatureIds: Set<string>,
+  activeFeatureIds: Set<string>,
+): FeatureCatalogEntry[] {
+  return Object.values(catalog).filter((f) => !doneFeatureIds.has(f.id) && !activeFeatureIds.has(f.id));
 }

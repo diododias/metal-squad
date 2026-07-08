@@ -38,6 +38,8 @@ describe('skill registry', () => {
     process.env.HOME = home;
 
     createSkillDir(join(cwd, '.msq/skills'), 'decompose', '# repo\n', 'description: Repo skill\n');
+    createSkillDir(join(cwd, '.claude/skills'), 'dev-flow', '# claude repo\n', 'description: Claude repo skill\n');
+    createSkillDir(join(cwd, '.agents/skills'), 'msq-develop', '# legacy repo\n', 'description: Legacy repo skill\n');
     createSkillDir(
       join(home, '.config/metal-squad/skills'),
       'global-review',
@@ -57,6 +59,8 @@ describe('skill registry', () => {
 
     expect(skills.some((skill) => skill.name === 'review' && skill.source === 'builtin')).toBe(true);
     expect(skills.some((skill) => skill.name === 'decompose' && skill.source === 'repo')).toBe(true);
+    expect(skills.some((skill) => skill.name === 'dev-flow' && skill.source === 'repo')).toBe(true);
+    expect(skills.some((skill) => skill.name === 'msq-develop' && skill.source === 'repo')).toBe(true);
     expect(skills.some((skill) => skill.name === 'global-review' && skill.source === 'global')).toBe(true);
     expect(skills.some((skill) => skill.name === 'plan' && skill.source === 'external')).toBe(true);
     expect(skills.some((skill) => skill.name === 'tasks' && skill.source === 'external')).toBe(true);
@@ -92,6 +96,31 @@ describe('skill registry', () => {
 
     expect(skill?.source).toBe('repo');
     expect(skill?.metadata.description).toBe('Repo implement');
+  });
+
+  it('prefers canonical .claude skills over legacy .agents shims', () => {
+    cwd = mkdtempSync(join(tmpdir(), 'msq-skills-canonical-'));
+    home = mkdtempSync(join(tmpdir(), 'msq-skills-home-'));
+    process.env.HOME = home;
+
+    createSkillDir(
+      join(cwd, '.claude/skills'),
+      'dev-flow',
+      '# canonical\n',
+      'description: Canonical dev flow\n',
+    );
+    createSkillDir(
+      join(cwd, '.agents/skills'),
+      'dev-flow',
+      '# shim\n',
+      'description: Shim dev flow\n',
+    );
+
+    const registry = createSkillRegistry();
+    const [skill] = registry.resolve(['dev-flow'], cwd);
+
+    expect(skill?.source).toBe('repo');
+    expect(skill?.metadata.description).toBe('Canonical dev flow');
   });
 });
 

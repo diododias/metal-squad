@@ -1,16 +1,22 @@
 import type { Command } from 'commander';
-import { cleanupStaleRuns, listRuns } from '../db/repo.js';
+import {
+  cleanupStaleRuns,
+  getPipelineSnapshot,
+  listPipelineOverviews,
+  listResumablePipelines,
+  listRuns,
+} from '../db/repo.js';
 import { loadConfig } from '../config/index.js';
 
 export function registerStatus(program: Command): void {
   program
     .command('status')
-    .description('Estado dos runs e uso de tokens (todos os repos)')
-    .option('-n, --limit <n>', 'quantidade de runs', '20')
-    .option('--repair-stale', 'marca runs órfãos como failed antes de listar')
+    .description('Run status and token usage (all repos)')
+    .option('-n, --limit <n>', 'number of runs to display', '20')
+    .option('--repair-stale', 'mark orphan runs as failed before listing')
     .option(
       '--stale-minutes <n>',
-      'limiar em minutos para considerar um run running como órfão',
+      'threshold in minutes to consider a running run as orphan',
     )
     .action(async (opts: { limit: string; repairStale?: boolean; staleMinutes?: string }) => {
       const staleRunThresholdMinutes = opts.staleMinutes
@@ -21,26 +27,67 @@ export function registerStatus(program: Command): void {
         : 0;
       const rows = listRuns(Number(opts.limit));
       if (rows.length === 0) {
-        console.log('Nenhum run registrado.');
+        console.log('No runs recorded.');
         return;
       }
       if (repaired > 0) {
         console.log(
-          `[msq] ${repaired} run(s) órfãos marcados como failed `
-            + `(${staleRunThresholdMinutes} min de tolerância).`,
+          `[msq] ${repaired} orphan run(s) marked as failed `
+            + `(${staleRunThresholdMinutes} min threshold).`,
         );
       }
       console.table(
         rows.map((r) => ({
           id: r.id,
+          pipeline_id: r.pipeline_id ?? '-',
           feature: r.feature_id,
           stage: r.stage ?? '-',
           tool: r.tool,
-          status: r.status,
+          run_status: r.status,
           tokens: r.total ?? '-',
           started: r.started_at,
           summary: r.summary ? r.summary.slice(0, 120) : '-',
         })),
+      );
+
+      const visiblePipelines = listPipelineOverviews(Number(opts.limit));
+      if (visiblePipelines.length > 0) {
+        console.log('Pipelines ativas/pendentes:');
+        console.table(
+          visiblePipelines.map((pipeline) => ({
+            pipeline_id: pipeline.id,
+            repo_id: pipeline.repoId,
+            target: pipeline.featureId,
+            pipeline_status: pipeline.status,
+            stage: pipeline.currentStage ?? '-',
+            active: pipeline.activeFeature ?? '-',
+            pending: pipeline.pendingFeature ?? '-',
+            wait: pipeline.pendingStageRequestKind
+              ? `${pipeline.pendingStageRequestKind}:${pipeline.pendingStageRequestId ?? '-'}`
+              : '-',
+            prompt: pipeline.pendingStageRequestPrompt ?? '-',
+            summary: pipeline.resumeSummary ?? '-',
+          })),
+        );
+      }
+
+      const resumable = listResumablePipelines();
+      if (resumable.length === 0) return;
+      console.log('Pipelines retomáveis:');
+      console.table(
+        resumable.map((pipeline) => {
+          const snapshot = getPipelineSnapshot(pipeline);
+          return {
+            pipeline_id: pipeline.id,
+            repo_id: pipeline.repoId,
+            target: pipeline.featureId,
+            status: pipeline.status,
+            stage: pipeline.currentStage ?? '-',
+            active: snapshot.active[0] ?? '-',
+            pending: snapshot.pending[0] ?? snapshot.aborted[0] ?? '-',
+            summary: pipeline.resumeSummary ?? '-',
+          };
+        }),
       );
     });
 }

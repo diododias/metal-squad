@@ -10,7 +10,7 @@ export class TelegramChannel implements NotificationChannel {
     private readonly forumTopicId?: number,
   ) {}
 
-  async send(message: string): Promise<void> {
+  async send(message: string, metadata?: Record<string, unknown>): Promise<void> {
     const token = await getSecret('telegram-bot-token');
     if (!token) return;
 
@@ -20,6 +20,9 @@ export class TelegramChannel implements NotificationChannel {
     };
     if (this.forumTopicId !== undefined) {
       body.message_thread_id = this.forumTopicId;
+    }
+    if (metadata?.reply_markup) {
+      body.reply_markup = metadata.reply_markup;
     }
 
     await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {

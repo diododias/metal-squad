@@ -137,12 +137,12 @@ O arquivo real do repo hoje eh `backlog.yaml`; o fluxo deve atualizar esse camin
 
 ## Criterios de aceite
 
-- [ ] `specify`, `plan`, `tasks` e `implement` rodam em sessoes separadas, com registros distintos no estado persistido.
-- [ ] O fim de uma etapa nao continua automaticamente na mesma sessao do agent.
-- [ ] Quando o `specify` pedir iteracao humana, o pedido vai para o Telegram e a resposta do admin fica persistida e reutilizavel.
-- [ ] A retomada apos input humano acontece em uma nova sessao da etapa apropriada.
-- [ ] Existe aprovacao manual entre etapas via Telegram.
-- [ ] Existe bypass por flag/config para auto-advance entre etapas.
-- [ ] A etapa `tasks` atualiza automaticamente o `backlog.yaml` com as tasks geradas, sem duplicacao.
-- [ ] `msq status` e a TUI deixam claro em qual etapa a feature esta, se esta aguardando input humano, e se esta aguardando aprovacao para avancar.
-- [ ] Existem testes cobrindo isolamento de sessoes por etapa, aprovacao manual, auto-advance, captura de input do admin e sincronizacao de `tasks.md` para `backlog.yaml`.
+- [x] `specify`, `plan`, `tasks` e `implement` rodam em sessoes separadas, com registros distintos no estado persistido.
+- [x] O fim de uma etapa nao continua automaticamente na mesma sessao do agent.
+- [x] Quando o `specify` pedir iteracao humana, o pedido vai para o Telegram e a resposta do admin fica persistida e reutilizavel.
+- [x] A retomada apos input humano acontece em uma nova sessao da etapa apropriada.
+- [x] Existe aprovacao manual entre etapas via Telegram.
+- [x] Existe bypass por flag/config para auto-advance entre etapas.
+- [x] A etapa `tasks` atualiza automaticamente o `backlog.yaml` com as tasks geradas, sem duplicacao.
+- [x] `msq status` e a TUI deixam claro em qual etapa a feature esta, se esta aguardando input humano, e se esta aguardando aprovacao para avancar.
+- [x] Existem testes cobrindo isolamento de sessoes por etapa, aprovacao manual, auto-advance, captura de input do admin e sincronizacao de `tasks.md` para `backlog.yaml`.

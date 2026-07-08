@@ -74,13 +74,16 @@ describe('claude adapter', () => {
     ).resolves.toEqual({ ok: false, summary: 'exit 1. stderr final: fatal' });
   });
 
-  it('parses successful JSON output and usage', async () => {
+  it('parses successful stream-json output and usage', async () => {
+    const resultLine = JSON.stringify({
+      type: 'result',
+      subtype: 'success',
+      result: 'done',
+      usage: { input_tokens: 2, output_tokens: 3 },
+    });
     mockRunCli.mockResolvedValue({
       code: 0,
-      stdout: JSON.stringify({
-        result: 'done',
-        usage: { input_tokens: 2, output_tokens: 3 },
-      }),
+      stdout: resultLine,
       stderr: '',
     });
     const { claudeAdapter } = await import('../../src/core/adapters/claude.js');
@@ -106,7 +109,7 @@ describe('claude adapter', () => {
     });
     expect(mockRunCli).toHaveBeenCalledWith(
       'claude',
-      ['--print', '--output-format', 'json', '--dangerously-skip-permissions', '--model', 'custom', '--', 'PROMPT'],
+      ['--print', '--output-format', 'stream-json', '--dangerously-skip-permissions', '--model', 'custom', '--', 'PROMPT'],
       expect.objectContaining({
         cwd: '/repo',
         heartbeatMs: 30_000,
@@ -133,7 +136,7 @@ describe('claude adapter', () => {
     expect(claudeAdapter.parseUsage?.('not-json')).toBeNull();
     mockRunCli.mockResolvedValue({
       code: 0,
-      stdout: JSON.stringify({ subtype: 'error_max_turns', result: 'partial' }),
+      stdout: JSON.stringify({ type: 'result', subtype: 'error_max_turns', result: 'partial' }),
       stderr: '',
     });
 
@@ -154,12 +157,24 @@ describe('claude adapter', () => {
   });
 
   it('emits incremental stdout and stderr snippets while the run is active', async () => {
+    const assistantLine = JSON.stringify({
+      type: 'assistant',
+      message: {
+        content: [{ type: 'text', text: 'Atualizando prompt builder agora.' }],
+      },
+    });
+    const resultLine = JSON.stringify({
+      type: 'result',
+      subtype: 'success',
+      result: 'done',
+      usage: { input_tokens: 1, output_tokens: 2 },
+    });
     mockRunCli.mockImplementation(async (_bin, _args, opts) => {
-      opts.onStdoutLine?.(JSON.stringify({ result: 'Atualizando prompt builder agora.' }));
+      opts.onStdoutLine?.(assistantLine);
       opts.onStderrLine?.('warning: still running');
       return {
         code: 0,
-        stdout: JSON.stringify({ result: 'done', usage: { input_tokens: 1, output_tokens: 2 } }),
+        stdout: resultLine,
         stderr: '',
       };
     });
@@ -196,6 +211,50 @@ describe('claude adapter', () => {
     });
   });
 
+  it('emits cumulative tokens:update from per-message usage during the stream', async () => {
+    const assistant1 = JSON.stringify({
+      type: 'assistant',
+      message: {
+        content: [{ type: 'text', text: 'primeira etapa' }],
+        usage: { input_tokens: 100, output_tokens: 20 },
+      },
+    });
+    const assistant2 = JSON.stringify({
+      type: 'assistant',
+      message: {
+        content: [{ type: 'text', text: 'segunda etapa' }],
+        usage: { input_tokens: 150, output_tokens: 30 },
+      },
+    });
+    mockRunCli.mockImplementation(async (_bin, _args, opts) => {
+      opts.onStdoutLine?.(assistant1);
+      opts.onStdoutLine?.(assistant2);
+      return { code: 0, stdout: '', stderr: '' };
+    });
+    const { claudeAdapter } = await import('../../src/core/adapters/claude.js');
+
+    await claudeAdapter.runFeature(
+      { id: 'feat-1', title: 'F', tool: 'claude', effort: 'medium', dependsOn: [], tasks: [] },
+      'PROMPT',
+      { cwd: '/repo', runId: 7 },
+    );
+
+    // Primeiro assistant: output acumulado = 20.
+    expect(mockEventEmit).toHaveBeenCalledWith('tokens:update', expect.objectContaining({
+      runId: 7,
+      input: 100,
+      output: 20,
+      total: 120,
+    }));
+    // Segundo assistant: output acumula (20 + 30 = 50), input passa ao mais recente.
+    expect(mockEventEmit).toHaveBeenCalledWith('tokens:update', expect.objectContaining({
+      runId: 7,
+      input: 150,
+      output: 50,
+      total: 200,
+    }));
+  });
+
   it('passes --print as boolean flag and prompt as positional arg after --', async () => {
     mockRunCli.mockResolvedValue({ code: 0, stdout: JSON.stringify({ result: 'ok' }), stderr: '' });
     const { claudeAdapter } = await import('../../src/core/adapters/claude.js');
@@ -218,6 +277,8 @@ describe('claude adapter', () => {
   it('returns timeout summary with partial output, touched files and parsed usage', async () => {
     const { CliTimeoutError } = await import('../../src/core/adapters/spawn.js');
     const transcript = JSON.stringify({
+      type: 'result',
+      subtype: 'success',
       result: 'Aplicando ajustes nos testes finais.',
       usage: { input_tokens: 8, output_tokens: 5 },
     });
@@ -328,7 +389,7 @@ describe('opencode adapter', () => {
 });
 
 describe('codex adapter', () => {
-  it('places all options before the prompt positional arg, separated by --', async () => {
+  it('places supported options before the prompt positional arg, separated by --', async () => {
     mockRunCli.mockResolvedValue({ code: 0, stdout: '', stderr: '' });
     const { codexAdapter } = await import('../../src/core/adapters/codex.js');
     const frontMatterPrompt = '---\nname: "speckit-specify"\n---\nprompt body';
@@ -348,8 +409,10 @@ describe('codex adapter', () => {
     const optionArgs = args.slice(0, doubleDashIdx);
     expect(optionArgs).toContain('--json');
     expect(optionArgs).toContain('--skip-git-repo-check');
-    expect(optionArgs).toContain('--full-auto');
+    expect(optionArgs).toContain('--sandbox');
+    expect(optionArgs).toContain('workspace-write');
     expect(optionArgs).toContain('-m');
+    expect(optionArgs).not.toContain('--ask-for-approval');
   });
 
   it('maps effort tiers via -c config flag', async () => {

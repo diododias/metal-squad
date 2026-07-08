@@ -45,7 +45,7 @@ Token Usage — last 7 days
 
 ## Criterios de aceite
 
-- [ ] Dashboard com breakdown por repo, tool, feature
-- [ ] Custos estimados em USD
-- [ ] Filtro por periodo
-- [ ] Barra de progresso visual por feature
+- [x] Dashboard com breakdown por repo, tool, feature
+- [x] Custos estimados em USD
+- [x] Filtro por periodo
+- [x] Barra de progresso visual por feature

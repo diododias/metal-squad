@@ -1,11 +1,13 @@
 import { useState, useEffect } from 'react';
-import { listRunsForTui, type RunSummary, type TaskRun } from '../../db/repo.js';
+import { listRunsForTui, listTaskRunsForRun, type RunSummary, type TaskRun } from '../../db/repo.js';
 import { msqEventBus } from '../../core/events/index.js';
+import { resolveRepo } from '../../core/repo.js';
 
 export function useRuns(intervalMs = 2000): RunSummary[] {
+  const repoId = resolveRepo().repoId;
   const [runs, setRuns] = useState<RunSummary[]>(() => {
     try {
-      return listRunsForTui();
+      return listRunsForTui(50, repoId);
     } catch {
       return [];
     }
@@ -14,11 +16,13 @@ export function useRuns(intervalMs = 2000): RunSummary[] {
   useEffect(() => {
     const refresh = (): void => {
       try {
-        setRuns(listRunsForTui());
+        setRuns(listRunsForTui(50, repoId));
       } catch {
         // DB locked or unavailable — keep stale data
       }
     };
+
+    const timer = setInterval(refresh, intervalMs);
 
     const unsubscribers = [
       msqEventBus.subscribe('run:start', refresh),
@@ -27,25 +31,49 @@ export function useRuns(intervalMs = 2000): RunSummary[] {
       msqEventBus.subscribe('tokens:update', refresh),
       msqEventBus.subscribe('gate:created', refresh),
       msqEventBus.subscribe('gate:resolved', refresh),
+      msqEventBus.subscribe('stage:request-created', refresh),
+      msqEventBus.subscribe('stage:request-resolved', refresh),
     ];
-    const id = setInterval(refresh, intervalMs);
     return () => {
-      clearInterval(id);
+      clearInterval(timer);
       for (const unsubscribe of unsubscribers) unsubscribe();
     };
-  }, [intervalMs]);
+  }, [intervalMs, repoId]);
 
   return runs;
 }
 
 export function useTaskRuns(runId: number | null): TaskRun[] {
-  const [taskRuns, setTaskRuns] = useState<TaskRun[]>([]);
+  const [taskRuns, setTaskRuns] = useState<TaskRun[]>(() => {
+    if (runId === null) return [];
+    try {
+      return listTaskRunsForRun(runId);
+    } catch {
+      return [];
+    }
+  });
 
   useEffect(() => {
     if (runId === null) {
       setTaskRuns([]);
       return;
     }
+
+    try {
+      setTaskRuns(listTaskRunsForRun(runId));
+    } catch {
+      setTaskRuns([]);
+    }
+
+    const refresh = (): void => {
+      try {
+        setTaskRuns(listTaskRunsForRun(runId));
+      } catch {
+        // DB locked or unavailable — keep stale data
+      }
+    };
+
+    const timer = setInterval(refresh, 2000);
 
     const unsub1 = msqEventBus.subscribe('task:started', (event) => {
       if (event.runId !== runId) return;
@@ -82,6 +110,7 @@ export function useTaskRuns(runId: number | null): TaskRun[] {
     });
 
     return () => {
+      clearInterval(timer);
       unsub1();
       unsub2();
     };

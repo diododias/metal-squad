@@ -2,8 +2,15 @@ import { defineConfig } from 'vitest/config';
 
 export default defineConfig({
   test: {
+    exclude: [
+      '.claude/**',
+      '.stryker-tmp/**',
+      'dist/**',
+      'node_modules/**',
+    ],
     coverage: {
       exclude: [
+        '.claude/**',
         'vitest.config.ts',
         'tests/**',
         'dist/**',

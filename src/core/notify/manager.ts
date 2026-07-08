@@ -6,18 +6,26 @@ import { SlackChannel } from './slack.js';
 import { DiscordChannel } from './discord.js';
 import { WebhookChannel } from './webhook.js';
 import { DesktopChannel } from './desktop.js';
+import { sanitizeNotificationMessage } from './sanitize.js';
+import type { NotificationChannelConfig } from '../../config/index.js';
 
 function buildChannels(): NotificationChannel[] {
-  const { notifications } = loadConfig();
-  return notifications.channels.map((cfg) => {
+  const { notifications, telegramChatId } = loadConfig();
+  const channels: NotificationChannelConfig[] = notifications.channels.length > 0
+    ? notifications.channels
+    : telegramChatId
+      ? [{ type: 'telegram', chatId: telegramChatId }]
+      : [];
+  return channels.reduce<NotificationChannel[]>((acc, cfg) => {
     switch (cfg.type) {
-      case 'telegram': return new TelegramChannel(cfg.chatId, cfg.forumTopicId);
-      case 'slack':    return new SlackChannel(cfg.webhookUrl);
-      case 'discord':  return new DiscordChannel(cfg.webhookUrl);
-      case 'webhook':  return new WebhookChannel(cfg.url);
-      case 'desktop':  return new DesktopChannel();
+      case 'telegram': acc.push(new TelegramChannel(cfg.chatId, cfg.forumTopicId)); break;
+      case 'slack':    acc.push(new SlackChannel(cfg.webhookUrl)); break;
+      case 'discord':  acc.push(new DiscordChannel(cfg.webhookUrl)); break;
+      case 'webhook':  acc.push(new WebhookChannel(cfg.url)); break;
+      case 'desktop':  acc.push(new DesktopChannel()); break;
     }
-  });
+    return acc;
+  }, []);
 }
 
 export async function dispatch(
@@ -28,12 +36,13 @@ export async function dispatch(
   const { notifications } = loadConfig();
   if (!notifications.events.includes(event)) return;
 
+  const safeMessage = sanitizeNotificationMessage(message);
   const channels = buildChannels();
 
   if (channels.length === 0) {
-    await new DesktopChannel().send(message, metadata).catch(() => {});
+    await new DesktopChannel().send(safeMessage, metadata).catch(() => {});
     return;
   }
 
-  await Promise.allSettled(channels.map((ch) => ch.send(message, metadata)));
+  await Promise.allSettled(channels.map((ch) => ch.send(safeMessage, metadata)));
 }

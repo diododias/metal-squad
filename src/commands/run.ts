@@ -8,10 +8,10 @@ import { assertWritableDbPath, DbAccessError } from '../db/index.js';
 export function registerRun(program: Command): void {
   program
     .command('run')
-    .description('Executa o workflow spec-kit do backlog (grafo de dependências)')
-    .option('-f, --feature <id>', 'roda apenas uma feature')
-    .option('-c, --concurrency <n>', 'runs paralelos globais')
-    .option('--auto-advance-stages', 'avanca etapas staged sem aprovacao manual no Telegram')
+    .description('Execute the spec-kit workflow from the backlog (dependency graph)')
+    .option('-f, --feature <id>', 'run a single feature only')
+    .option('-c, --concurrency <n>', 'global parallel runs')
+    .option('--auto-advance-stages', 'advance staged steps without manual Telegram approval')
     .action(async (opts: { feature?: string; concurrency?: string; autoAdvanceStages?: boolean }) => {
       try {
         assertWritableDbPath();
@@ -31,7 +31,7 @@ export function registerRun(program: Command): void {
       } catch (error) {
         if (error instanceof DbAccessError) {
           throw new Error(
-            `${error.message}\nNenhum adapter foi executado porque a persistência da run falhou antes do primeiro spawn.`,
+            `${error.message}\nNo adapter was executed because run persistence failed before the first spawn.`,
           );
         }
         throw error;
