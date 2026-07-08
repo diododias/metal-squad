@@ -28,7 +28,7 @@ Use como base e remova secoes que nao se aplicam.
 - [ ] `rtk npm run typecheck`
 - [ ] `rtk npm run lint` (se aplicavel)
 - [ ] `rtk npx vitest run ...` focado nas suites alteradas
-- [ ] validacao live com `MSQ_DB_PATH="$(pwd)/.metal-squad/app.db"` (se aplicavel)
+- [ ] validacao live com o banco default (`~/.local/share/metal-squad/app.db`); usar `MSQ_DB_PATH` apenas se o harness estiver sandboxado (se aplicavel)
 
 ## Evidencias / comandos
 ```bash

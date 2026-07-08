@@ -23,6 +23,7 @@ import { Sidebar } from './components/Sidebar.js';
 import { StatusBar } from './components/StatusBar.js';
 import { getLayoutMode } from './format.js';
 import { useCommandPalette } from './hooks/useCommandPalette.js';
+import { useCompletedFeatures } from './hooks/useCompletedFeatures.js';
 import { useGates } from './hooks/useGates.js';
 import type { PendingApproval } from './hooks/useGates.js';
 import { useKeyboardShortcuts } from './hooks/useKeyboardShortcuts.js';
@@ -127,6 +128,7 @@ export function App(): React.ReactElement {
   const config = useMemo(() => loadConfig(), []);
   const themeResolution = useMemo(() => resolveThemePreference(config.theme), [config.theme]);
   const runs = useRuns(2000);
+  const doneFeatureIds = useCompletedFeatures(2000);
   const { gates, resolve } = useGates(2000);
   const notifications = useNotifications(40);
   const width = useTerminalWidth();
@@ -195,7 +197,7 @@ export function App(): React.ReactElement {
   const activeFeatureIds = new Set(
     runs.filter((run) => run.status === 'running' || run.status === 'done').map((run) => run.featureId),
   );
-  const pendingFeatures = getPendingFeatures(featureCatalog, activeFeatureIds);
+  const pendingFeatures = getPendingFeatures(featureCatalog, doneFeatureIds, activeFeatureIds);
   const selectedPendingIndex = clampIndex(ui.selectedPending, pendingFeatures.length);
   const selectedPending = pendingFeatures[selectedPendingIndex] ?? null;
   const focusContext: ShortcutContext = activeView === 'run' && focusPanel === 'main' ? 'run-detail' : focusPanel;

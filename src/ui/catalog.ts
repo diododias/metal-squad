@@ -9,7 +9,6 @@ export interface FeatureCatalogEntry {
   tool: string;
   model?: string;
   effort: string;
-  status: 'todo' | 'done' | 'failed';
 }
 
 let cachedPath = '';
@@ -41,7 +40,6 @@ export function getFeatureCatalog(cwd = process.cwd()): Record<string, FeatureCa
             tool: feature.tool,
             model: feature.model,
             effort: feature.effort,
-            status: feature.status,
           } satisfies FeatureCatalogEntry,
         ]),
       ),
@@ -57,7 +55,8 @@ export function getFeatureCatalog(cwd = process.cwd()): Record<string, FeatureCa
 
 export function getPendingFeatures(
   catalog: Record<string, FeatureCatalogEntry>,
+  doneFeatureIds: Set<string>,
   activeFeatureIds: Set<string>,
 ): FeatureCatalogEntry[] {
-  return Object.values(catalog).filter((f) => f.status !== 'done' && !activeFeatureIds.has(f.id));
+  return Object.values(catalog).filter((f) => !doneFeatureIds.has(f.id) && !activeFeatureIds.has(f.id));
 }

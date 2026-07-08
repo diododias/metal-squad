@@ -78,11 +78,7 @@ Escolha a menor bateria que realmente prova a mudanca:
 - suites focadas com `rtk npx vitest run ...` para adapters, runner, db, backlog, ui, skills ou commands
 - validacao live do `msq` somente quando o risco pedir prova ponta a ponta
 
-Se rodar `msq`, `node dist/index.js`, `msq status` ou outro fluxo que persiste runs, use caminho local gravavel:
-
-```bash
-MSQ_DB_PATH="$(pwd)/.metal-squad/app.db" rtk node dist/index.js run --feature feat-XX
-```
+Se rodar `msq`, `node dist/index.js`, `msq status` ou outro fluxo que persiste runs, use o banco global default (sem `MSQ_DB_PATH`) — assim o historico de conclusao de features fica acumulado num unico lugar. So use o override `MSQ_DB_PATH="$(pwd)/.metal-squad/app.db"` se o banco global falhar com erro de permissao dentro de um harness sandboxado (ver [`../../rules/harness.md`](../../rules/harness.md)).
 
 ### 7. Empacotar
 

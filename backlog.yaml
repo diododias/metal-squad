@@ -54,7 +54,6 @@ epics:
           syncTasksToBacklog: true
       - id: feat-09
         title: F09 — Command Palette & Shortcuts
-        status: done
         tool: claude
         model: claude-sonnet-4-5
         effort: high
@@ -309,7 +308,6 @@ epics:
           syncTasksToBacklog: true
       - id: feat-10
         title: F10 — Theme System
-        status: done
         tool: claude
         model: claude-sonnet-4-5
         effort: high
@@ -367,7 +365,6 @@ epics:
           syncTasksToBacklog: true
       - id: feat-15
         title: F15 — Event System (pub/sub interno)
-        status: done
         tool: claude
         model: claude-sonnet-4-5
         effort: high
@@ -395,7 +392,6 @@ epics:
           syncTasksToBacklog: true
       - id: feat-26
         title: F26 — Resume de pipeline a partir do estado persistido
-        status: done
         tool: claude
         model: claude-sonnet-4-5
         effort: high
@@ -534,7 +530,6 @@ epics:
           syncTasksToBacklog: true
       - id: feat-25
         title: F25 — Hardening do fluxo msq-develop
-        status: done
         tool: claude
         model: claude-sonnet-4-5
         effort: high

@@ -82,6 +82,46 @@ describe('ui hooks', () => {
     expect(setRuns).not.toHaveBeenCalled();
   });
 
+  it('useCompletedFeatures loads initial ids and refreshes on run:done', async () => {
+    const setDone = vi.fn();
+    const listeners = new Map<string, Array<() => void>>();
+    vi.spyOn(globalThis, 'setInterval').mockReturnValue(1 as unknown as ReturnType<typeof setInterval>);
+    vi.spyOn(globalThis, 'clearInterval').mockImplementation(() => {});
+
+    vi.doMock('react', () => ({
+      useState: (value: unknown) => [typeof value === 'function' ? (value as () => unknown)() : value, setDone],
+      useEffect: (effect: () => (() => void) | void) => effect(),
+    }));
+
+    vi.doMock('../../src/db/repo.js', () => ({
+      listCompletedFeatureIds: vi.fn()
+        .mockReturnValueOnce(new Set(['feat-1']))
+        .mockReturnValueOnce(new Set(['feat-1', 'feat-2'])),
+    }));
+
+    vi.doMock('../../src/core/repo.js', () => ({
+      resolveRepo: () => ({ repoId: 'repo-1', path: '/repo' }),
+    }));
+
+    vi.doMock('../../src/core/events/index.js', () => ({
+      msqEventBus: {
+        subscribe: vi.fn((event: string, listener: () => void) => {
+          const current = listeners.get(event) ?? [];
+          current.push(listener);
+          listeners.set(event, current);
+          return () => {};
+        }),
+      },
+    }));
+
+    const { useCompletedFeatures } = await import('../../src/ui/hooks/useCompletedFeatures.js');
+    const doneIds = useCompletedFeatures(1234);
+
+    expect(doneIds).toEqual(new Set(['feat-1']));
+    listeners.get('run:done')?.[0]?.();
+    expect(setDone).toHaveBeenCalledWith(new Set(['feat-1', 'feat-2']));
+  });
+
   it('useRunOutput loads the current tail and refreshes on matching events', async () => {
     const setOutput = vi.fn();
     const listeners = new Map<string, Array<(event: { runId: number }) => void>>();

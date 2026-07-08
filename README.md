@@ -98,7 +98,10 @@ msq ui
 - Global skills: `~/.config/metal-squad/skills/<skill-name>/`
 - Generated task decomposition output: `./.msq/generated/<featureId>/decompose.yaml`
 
-If the global DB path is not writable in the current environment, override it:
+Real feature runs should use the global DB path above (no override) so run/completion
+history accumulates in one place — that history is what drives "Ready to start" in the
+TUI. Only override it in sandboxed/test environments where the global path is genuinely
+not writable:
 
 ```bash
 MSQ_DB_PATH="$(pwd)/.metal-squad/app.db" msq run --feature feat-08

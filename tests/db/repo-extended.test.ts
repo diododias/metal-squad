@@ -722,3 +722,59 @@ describe('findResumablePipeline', () => {
     expect(result).toBe(row);
   });
 });
+
+describe('listCompletedFeatureIds', () => {
+  it('unions done_json across every pipeline row for the repo', async () => {
+    const rows = [
+      {
+        id: 1, repoId: 'repo-1', featureId: 'feat-a', status: 'done',
+        cwd: null, currentStage: null, autoAdvance: 1,
+        planJson: '["feat-a"]', doneJson: '["feat-a"]', pendingJson: '[]',
+        activeJson: '[]', abortedJson: '[]',
+        requestedAbortFeatureId: null, resumeCount: 0, resumeSummary: null,
+        createdAt: '', updatedAt: '', endedAt: null,
+      },
+      {
+        id: 2, repoId: 'repo-1', featureId: 'feat-b', status: 'failed',
+        cwd: null, currentStage: null, autoAdvance: 1,
+        planJson: '["feat-b","feat-c"]', doneJson: '["feat-b"]', pendingJson: '[]',
+        activeJson: '[]', abortedJson: '["feat-c"]',
+        requestedAbortFeatureId: null, resumeCount: 0, resumeSummary: null,
+        createdAt: '', updatedAt: '', endedAt: null,
+      },
+    ];
+    mockAll.mockReturnValue(rows);
+    const { listCompletedFeatureIds } = await import('../../src/db/repo.js');
+    const result = listCompletedFeatureIds('repo-1');
+    expect(result).toEqual(new Set(['feat-a', 'feat-b']));
+  });
+
+  it('filters pipelines by repo_id', async () => {
+    mockAll.mockReturnValue([]);
+    const { listCompletedFeatureIds } = await import('../../src/db/repo.js');
+    listCompletedFeatureIds('repo-2');
+    expect(mockAll).toHaveBeenCalledWith('repo-2');
+  });
+
+  it('returns an empty set when the repo has no pipeline rows', async () => {
+    mockAll.mockReturnValue([]);
+    const { listCompletedFeatureIds } = await import('../../src/db/repo.js');
+    expect(listCompletedFeatureIds('repo-empty')).toEqual(new Set());
+  });
+});
+
+describe('listRunsForTui repo scoping', () => {
+  it('filters by repo_id when provided', async () => {
+    mockAll.mockReturnValue([]);
+    const { listRunsForTui } = await import('../../src/db/repo.js');
+    listRunsForTui(50, 'repo-1');
+    expect(mockAll).toHaveBeenCalledWith('repo-1', 50);
+  });
+
+  it('omits the repo filter when repoId is not provided', async () => {
+    mockAll.mockReturnValue([]);
+    const { listRunsForTui } = await import('../../src/db/repo.js');
+    listRunsForTui(50);
+    expect(mockAll).toHaveBeenCalledWith(50);
+  });
+});

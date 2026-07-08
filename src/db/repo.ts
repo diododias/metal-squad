@@ -186,13 +186,16 @@ export interface RunSummary {
 }
 
 // T003: listRunsForTui — most recent run per feature per repo (US2 deduplication via CTE)
-export function listRunsForTui(limit = 50): RunSummary[] {
+export function listRunsForTui(limit = 50, repoId?: string): RunSummary[] {
   if (!hasDbFile()) return [];
+  const repoFilter = repoId ? 'WHERE repo_id = ?' : '';
+  const params = repoId ? [repoId, limit] : [limit];
   return getDb('readonly')
     .prepare(
       `WITH latest AS (
          SELECT MAX(id) AS id
          FROM runs
+         ${repoFilter}
          GROUP BY repo_id, feature_id
        ),
        pending_stage_requests AS (
@@ -247,7 +250,46 @@ export function listRunsForTui(limit = 50): RunSummary[] {
        ORDER BY r.id DESC
        LIMIT ?`,
     )
-    .all(limit) as RunSummary[];
+    .all(...params) as RunSummary[];
+}
+
+// Union of feature ids present in pipelines.done_json across every pipeline run
+// for a repo (i.e. every `msq run` invocation, including resumes). "Done" here
+// follows the same policy the scheduler already applies when writing done_json:
+// a feature counts as done if it completed per its retry/onFail policy, not
+// strictly if the underlying run succeeded (see execute.ts shouldCountAsDone).
+export function listCompletedFeatureIds(repoId: string): Set<string> {
+  if (!hasDbFile()) return new Set();
+  const rows = getDb('readonly')
+    .prepare(
+      `SELECT
+         id,
+         repo_id AS repoId,
+         feature_id AS featureId,
+         status,
+         cwd,
+         current_stage AS currentStage,
+         auto_advance AS autoAdvance,
+         plan_json AS planJson,
+         done_json AS doneJson,
+         pending_json AS pendingJson,
+         active_json AS activeJson,
+         aborted_json AS abortedJson,
+         requested_abort_feature_id AS requestedAbortFeatureId,
+         resume_count AS resumeCount,
+         resume_summary AS resumeSummary,
+         created_at AS createdAt,
+         updated_at AS updatedAt,
+         ended_at AS endedAt
+       FROM pipelines
+       WHERE repo_id = ?`,
+    )
+    .all(repoId) as PipelineRow[];
+  const done = new Set<string>();
+  for (const row of rows) {
+    for (const featureId of getPipelineSnapshot(row).done) done.add(featureId);
+  }
+  return done;
 }
 
 export interface PipelineOverview {
