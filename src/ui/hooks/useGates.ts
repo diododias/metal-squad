@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from 'react';
 import {
   openGates,
   resolveGate,
+  forceResolveGate,
   listPendingStageRequests,
   resolveStageRequest,
   type GateRow,
@@ -21,6 +22,7 @@ export interface PendingApproval {
 }
 
 export type ResolveApprovalFn = (approval: PendingApproval, decision: GateDecision | 'advance' | 'hold') => void;
+export type ForceResolveApprovalFn = (approval: PendingApproval) => { resumedPipelineId: number | null };
 
 function gateToApproval(gate: GateRow): PendingApproval {
   return {
@@ -46,7 +48,17 @@ function collectApprovals(): PendingApproval[] {
   return [...gates, ...stageRequests];
 }
 
-export function useGates(intervalMs = 2000): { gates: PendingApproval[]; resolve: ResolveApprovalFn } {
+export interface UseGatesResult {
+  gates: PendingApproval[];
+  resolve: ResolveApprovalFn;
+  /** F1: force-bypass a gate. Unlike resolve(), this also resumes the
+   * associated pipeline when it is paused/blocked on this gate, so a single
+   * action gets a stuck run moving again instead of requiring a separate
+   * trip to the run detail screen's resume shortcut. */
+  forceResolve: ForceResolveApprovalFn;
+}
+
+export function useGates(intervalMs = 2000): UseGatesResult {
   const [gates, setGates] = useState<PendingApproval[]>(() => {
     try {
       return collectApprovals();
@@ -93,5 +105,19 @@ export function useGates(intervalMs = 2000): { gates: PendingApproval[]; resolve
     poll();
   }, [poll]);
 
-  return { gates, resolve };
+  const forceResolve = useCallback<ForceResolveApprovalFn>((approval) => {
+    if (approval.kind === 'gate') {
+      const result = forceResolveGate(approval.id);
+      poll();
+      return result;
+    }
+    // Stage approvals already unblock execution as soon as they resolve
+    // (the running pipeline polls stage_requests in-process), so "force" is
+    // the same effective action as a normal advance for this kind.
+    resolveStageRequest(approval.id, 'advance');
+    poll();
+    return { resumedPipelineId: null };
+  }, [poll]);
+
+  return { gates, resolve, forceResolve };
 }

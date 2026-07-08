@@ -78,6 +78,22 @@ export function truncateText(value: string, max: number): string {
   return `${value.slice(0, max - 3)}...`;
 }
 
+// D5: heartbeat lines carry a verbose diagnostic payload from
+// core/adapters/spawn.ts (`[msq] <label> running for Ns (stdout XB stderr YB
+// idle Zs) <suffix>`). Rendered raw and then hard-truncated by width, this
+// read as garbled noise (e.g. "...[msq] codex feat-10 running for 42s
+// (stdout 1..." cut mid-token). This condenses it into one clean, bounded
+// line instead of dumping+truncating the raw diagnostic string.
+const HEARTBEAT_PATTERN = /^\[msq\]\s+(.+?)\s+running for\s+(\d+)s\s+\(stdout\s+\d+B\s+stderr\s+\d+B\s+idle\s+(\d+)s\)\s*(.*)$/;
+
+export function formatHeartbeatLine(line: string, maxWidth: number): string {
+  const match = HEARTBEAT_PATTERN.exec(line.trim());
+  if (!match) return truncateText(line, maxWidth);
+  const [, label, elapsed, idle, suffix] = match;
+  const summary = `thinking... ${label} running ${elapsed}s (idle ${idle}s)${suffix ? ` — ${suffix}` : ''}`;
+  return truncateText(summary, maxWidth);
+}
+
 export function getLayoutMode(width: number): LayoutMode {
   if (width < 80) return 'stacked';
   if (width < 120) return 'compact';

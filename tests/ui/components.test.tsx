@@ -161,7 +161,10 @@ describe('ui components', () => {
       effort: 'medium' as const,
     };
 
-    expect(renderWithTheme(
+    // D1: the workflow board used to be duplicated in the sidebar. It now
+    // shows only declared skills — the live workflow stage summary lives
+    // solely in MainPanel's run detail screen (asserted below).
+    const sidebarFrame = renderWithTheme(
       <Sidebar
         runs={runs}
         gates={gates as any}
@@ -175,9 +178,11 @@ describe('ui components', () => {
         mode="full"
       />,
       'dark',
-    ).lastFrame()).toContain('Workflow');
+    ).lastFrame();
+    expect(sidebarFrame).toContain('Skills');
+    expect(sidebarFrame).not.toContain('Workflow');
 
-    expect(renderWithTheme(
+    const mainPanelFrame = renderWithTheme(
       <MainPanel
         runs={runs}
         gates={gates as any}
@@ -205,7 +210,12 @@ describe('ui components', () => {
         notifications={[]}
       />,
       'dark',
-    ).lastFrame()).toContain('Run Detail');
+    ).lastFrame();
+    expect(mainPanelFrame).toContain('Run Detail');
+    expect(mainPanelFrame).toContain('Workflow');
+    // D5: AI> and TOOL> prefixes are hidden from log output.
+    expect(mainPanelFrame).not.toContain('AI>');
+    expect(mainPanelFrame).toContain('Updating the TUI shell.');
 
     expect(renderWithTheme(
       <StatusBar

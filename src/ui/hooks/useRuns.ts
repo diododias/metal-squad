@@ -1,5 +1,12 @@
 import { useState, useEffect } from 'react';
-import { listRunsForTui, listTaskRunsForRun, type RunSummary, type TaskRun } from '../../db/repo.js';
+import {
+  listRunningTaskRuns,
+  listRunsForTui,
+  listTaskRunsForRun,
+  type RunningTaskSummary,
+  type RunSummary,
+  type TaskRun,
+} from '../../db/repo.js';
 import { msqEventBus } from '../../core/events/index.js';
 import { resolveRepo } from '../../core/repo.js';
 
@@ -123,4 +130,42 @@ export function useTaskRuns(runId: number | null): TaskRun[] {
   }, [runId]);
 
   return taskRuns;
+}
+
+// C3: cross-run in-progress task feed for the main dashboard (as opposed to
+// useTaskRuns above, which is scoped to a single selected run).
+export function useRunningTasks(intervalMs = 2000): RunningTaskSummary[] {
+  const [runningTasks, setRunningTasks] = useState<RunningTaskSummary[]>(() => {
+    try {
+      return listRunningTaskRuns(20);
+    } catch {
+      return [];
+    }
+  });
+
+  useEffect(() => {
+    const refresh = (): void => {
+      try {
+        setRunningTasks(listRunningTaskRuns(20));
+      } catch {
+        // DB locked or unavailable — keep stale data
+      }
+    };
+
+    const timer = setInterval(refresh, intervalMs);
+
+    const unsubscribers = [
+      msqEventBus.subscribe('task:started', refresh),
+      msqEventBus.subscribe('task:updated', refresh),
+      msqEventBus.subscribe('run:start', refresh),
+      msqEventBus.subscribe('run:done', refresh),
+      msqEventBus.subscribe('run:failed', refresh),
+    ];
+    return () => {
+      clearInterval(timer);
+      for (const unsubscribe of unsubscribers) unsubscribe();
+    };
+  }, [intervalMs]);
+
+  return runningTasks;
 }

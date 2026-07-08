@@ -1,6 +1,6 @@
 import React from 'react';
 import { Box, Text } from 'ink';
-import type { RunOutputRow, RunSummary, TaskRun } from '../../db/repo.js';
+import type { RunningTaskSummary, RunOutputRow, RunSummary, TaskRun } from '../../db/repo.js';
 import type { PendingApproval } from '../hooks/useGates.js';
 import type { NotificationEntry } from '../hooks/useNotifications.js';
 import type { FeatureCatalogEntry } from '../catalog.js';
@@ -10,17 +10,19 @@ import {
   formatClock,
   formatElapsed,
   formatPercent,
+  formatHeartbeatLine,
   formatTokens,
   getRunStatusTone,
   getRunStageLabel,
   getRunStatusLabel,
   truncateText,
 } from '../format.js';
+import { DASHBOARD_GROUP_LABEL, DASHBOARD_GROUP_ORDER, getRunGroup, type DashboardGroupId } from '../dashboardGroups.js';
 import { EmptyState } from './EmptyState.js';
 import { NotificationsFeed } from './NotificationsFeed.js';
 import { RunTable } from './RunTable.js';
 import { formatDurationMs, type RunBreakdown } from '../../core/stats.js';
-import { summarizeTaskRuns } from '../workflow.js';
+import { summarizeTaskRuns, type WorkflowStageSummary } from '../workflow.js';
 import { useTheme } from '../theme/context.js';
 import {
   getOutputStyle,
@@ -31,6 +33,14 @@ import {
 import type { ThemeRoleName } from '../theme/types.js';
 
 export type ActiveView = 'overview' | 'run' | 'notifications';
+
+const BACKLOG_TASK_ICON: Record<string, string> = {
+  todo: '○',
+  running: '⟳',
+  done: '✓',
+  failed: '✗',
+  blocked: '!',
+};
 
 interface Props {
   runs: RunSummary[];
@@ -49,6 +59,7 @@ interface Props {
   selectedPendingIndex: number;
   breakdown?: RunBreakdown | null;
   taskRuns?: TaskRun[];
+  runningTasks?: RunningTaskSummary[];
   notifications?: NotificationEntry[];
 }
 
@@ -80,6 +91,107 @@ function overviewSummary(
   );
 }
 
+// C3: cross-run "In Progress Tasks" feed shown directly on the dashboard,
+// not just once a run is opened in the detail screen.
+function inProgressTasksSection(
+  theme: ReturnType<typeof useTheme>,
+  runningTasks: RunningTaskSummary[],
+  innerWidth: number,
+  maxVisible: number,
+): React.ReactElement {
+  return (
+    <Box marginTop={1} flexDirection="column">
+      <Text {...theme.role('text')} bold>In Progress Tasks</Text>
+      {runningTasks.slice(0, maxVisible).map((task) => (
+        <Text key={`${task.runId}:${task.taskId}`} {...theme.role('muted')}>
+          {truncateText(
+            `${task.featureId} > ${task.taskId}${task.stage ? ` (${task.stage})` : ''} — ${task.title}`,
+            Math.max(24, innerWidth - 2),
+          )}
+        </Text>
+      ))}
+    </Box>
+  );
+}
+
+function stageStatusLabel(stage: WorkflowStageSummary): string {
+  if (stage.running > 0) return 'executing';
+  if (stage.failed > 0) return 'failed';
+  if (stage.blocked > 0) return 'blocked';
+  if (stage.total > 0 && stage.done === stage.total) return 'done';
+  return 'pending';
+}
+
+function localSelectedIndex(slice: RunSummary[], selectedRun: RunSummary | null): number {
+  if (!selectedRun) return -1;
+  return slice.findIndex((run) => run.runId === selectedRun.runId);
+}
+
+// C1 + C2: one ordered block per dashboard group. EXECUTION/BLOCKED renders
+// its own rows (rather than reusing RunTable) so the currently selected
+// running item can expand inline into its workflow stage tree right under
+// that row; DONE/CANCELED reuse RunTable for visual consistency with the
+// rest of the app.
+function DashboardBlock({
+  theme,
+  groupId,
+  groupRuns,
+  selectedRun,
+  isRunsFocused,
+  innerWidth,
+  workflowStages,
+}: {
+  theme: ReturnType<typeof useTheme>;
+  groupId: DashboardGroupId;
+  groupRuns: RunSummary[];
+  selectedRun: RunSummary | null;
+  isRunsFocused: boolean;
+  innerWidth: number;
+  workflowStages: WorkflowStageSummary[];
+}): React.ReactElement {
+  return (
+    <Box marginTop={1} flexDirection="column">
+      <Text {...theme.role('text')} bold>{DASHBOARD_GROUP_LABEL[groupId]}</Text>
+      {groupId === 'execution' ? (
+        <Box flexDirection="column">
+          {groupRuns.map((run) => {
+            const isSelected = selectedRun?.runId === run.runId;
+            const statusStyle = theme.statusTone(getRunStatusTone(run.status));
+            const stageLabel = getRunStageLabel(run);
+            return (
+              <Box key={run.runId} flexDirection="column" marginBottom={1}>
+                <Box>
+                  <Text {...(isSelected && isRunsFocused ? theme.role('focus') : theme.role('text'))} bold={isSelected}>
+                    {isSelected ? '> ' : '  '}{STATUS_ICON[run.status]} {truncateText(run.featureId, Math.max(16, innerWidth - 30))}
+                  </Text>
+                  <Text {...statusStyle}>  {run.tool}{stageLabel ? `  ·  ${stageLabel}` : ''}</Text>
+                </Box>
+                {isSelected && run.status === 'running' && workflowStages.length > 0 && (
+                  <Box flexDirection="column" marginLeft={2}>
+                    <Text {...theme.role('muted')}>{run.featureId} {'>'}</Text>
+                    {workflowStages.map((stage) => (
+                      <Text key={stage.stage} {...theme.role(getWorkflowRole(stage))}>
+                        {'  |_ '}{stage.stage} {stageStatusLabel(stage)}
+                      </Text>
+                    ))}
+                  </Box>
+                )}
+              </Box>
+            );
+          })}
+        </Box>
+      ) : (
+        <RunTable
+          runs={groupRuns}
+          width={innerWidth}
+          selectedIndex={localSelectedIndex(groupRuns, selectedRun)}
+          isFocused={isRunsFocused}
+        />
+      )}
+    </Box>
+  );
+}
+
 export function MainPanel({
   runs,
   gates,
@@ -97,12 +209,12 @@ export function MainPanel({
   selectedPendingIndex,
   breakdown = null,
   taskRuns = [],
+  runningTasks = [],
   notifications = [],
 }: Props): React.ReactElement {
   const theme = useTheme();
   const innerWidth = Math.max(32, width - 4);
   const visibleOutput = output.slice(-(mode === 'stacked' ? 8 : 14));
-  const lastOutput = visibleOutput[visibleOutput.length - 1] ?? null;
   const maxPending = mode === 'stacked' ? 3 : 5;
   const nextDemands = collectNextDemands(runs);
   const selectedRunStage = selectedRun ? getRunStageLabel(selectedRun) : null;
@@ -115,6 +227,8 @@ export function MainPanel({
   const contextLabel = selectedRun?.contextWindowTokens
     ? `${formatPercent(selectedRun.contextWindowPercent)} of ${formatTokens(selectedRun.contextWindowTokens)}`
     : '—';
+  const metricWidth = mode === 'stacked' ? innerWidth : Math.max(11, Math.floor(innerWidth / 7) - 1);
+  const declaredTasks = selectedFeature?.tasks ?? [];
 
   return (
     <Box
@@ -158,37 +272,47 @@ export function MainPanel({
               label="Status"
               value={`${STATUS_ICON[selectedRun.status]} ${selectedRunStatusLabel}`}
               accentRole={theme.resolution.profile.statusRoleByRun[getRunStatusTone(selectedRun.status)]}
-              width={mode === 'stacked' ? innerWidth : Math.max(16, Math.floor(innerWidth / 4) - 1)}
+              width={metricWidth}
             />
+            {/* D3: Tool (the adapter — claude/codex/opencode) and Model are
+                distinct facts. They used to share one "Tool"-labelled card
+                that actually preferred the model, hiding which adapter ran
+                the feature. Two separate cards fix that. */}
             <DetailMetric
               theme={theme}
               label="Tool"
-              value={selectedFeature?.model ?? selectedRun.tool}
-              width={mode === 'stacked' ? innerWidth : Math.max(14, Math.floor(innerWidth / 4) - 1)}
+              value={selectedRun.tool}
+              width={metricWidth}
+            />
+            <DetailMetric
+              theme={theme}
+              label="Model"
+              value={selectedFeature?.model ?? '—'}
+              width={metricWidth}
             />
             <DetailMetric
               theme={theme}
               label="Session Tokens"
               value={formatTokens(sessionTokens)}
-              width={mode === 'stacked' ? innerWidth : Math.max(14, Math.floor(innerWidth / 4) - 1)}
+              width={metricWidth}
             />
             <DetailMetric
               theme={theme}
               label="Pipeline Tokens"
               value={formatTokens(pipelineTokens)}
-              width={mode === 'stacked' ? innerWidth : Math.max(14, Math.floor(innerWidth / 4) - 1)}
+              width={metricWidth}
             />
             <DetailMetric
               theme={theme}
               label="Context"
               value={contextLabel}
-              width={mode === 'stacked' ? innerWidth : Math.max(18, Math.floor(innerWidth / 4) - 1)}
+              width={metricWidth}
             />
             <DetailMetric
               theme={theme}
               label="Elapsed"
               value={formatElapsed(selectedRun.startedAt, selectedRun.endedAt)}
-              width={mode === 'stacked' ? innerWidth : Math.max(14, Math.floor(innerWidth / 4) - 1)}
+              width={metricWidth}
             />
           </Box>
           <Box
@@ -223,13 +347,38 @@ export function MainPanel({
                   </>
                 )}
               </DetailSection>
+              {/* D2: full spec/feature description — the bare feat-xxx id
+                  plus a one-line title was not enough context. Pulled from
+                  the backlog's inline `spec` summary or `specFile` doc. */}
+              <Box marginTop={1}>
+                <DetailSection theme={theme} title="Feature Spec" width={leftColumnWidth}>
+                  {selectedFeature?.description ? (
+                    selectedFeature.description
+                      .split('\n')
+                      .slice(0, mode === 'stacked' ? 8 : 14)
+                      .map((line, index) => (
+                        // eslint-disable-next-line react/no-array-index-key
+                        <Text key={index} {...theme.role('muted')}>
+                          {truncateText(line || ' ', Math.max(24, leftColumnWidth - 4))}
+                        </Text>
+                      ))
+                  ) : (
+                    <Text {...theme.role('muted')}>
+                      No spec or specFile declared for {selectedRun.featureId} in the backlog.
+                    </Text>
+                  )}
+                </DetailSection>
+              </Box>
+              {/* D1: this is now the only place the workflow board renders —
+                  the sidebar used to show a duplicate summary of the same
+                  stages. */}
               <Box marginTop={1}>
                 <DetailSection theme={theme} title="Workflow" width={leftColumnWidth}>
                   {workflowStages.length > 0 ? (
                     workflowStages.map((stage) => (
                       <Box key={stage.stage} flexDirection="column" marginBottom={1}>
                         <Text {...theme.role(getWorkflowRole(stage))}>
-                          {stage.stage}  {stage.done}/{stage.total} done
+                          {stage.stage}  {stage.done}/{stage.total} done  ({stageStatusLabel(stage)})
                         </Text>
                         <Text {...theme.role('muted')}>
                           {[
@@ -282,89 +431,116 @@ export function MainPanel({
               </Box>
             </Box>
             <Box flexDirection="column" width={rightColumnWidth}>
-              <DetailSection theme={theme} title="Live Output" width={rightColumnWidth}>
-                {logsVisible ? (
-                  <>
-                    <Text {...theme.role('muted')}>
-                      {selectedRun.status === 'running'
-                        ? outputPaused
-                          ? 'Auto-scroll paused. Press Ctrl+S to resume live tailing.'
-                          : lastOutput?.source === 'heartbeat'
-                            ? 'Agent thinking... heartbeat received while waiting for the next visible event.'
-                            : 'Streaming latest run events in real time.'
-                        : 'Run finished. Tail below shows the latest captured output.'}
+              {/* D4: the declared task breakdown (backlog building blocks),
+                  distinct from the live Workflow section above (which
+                  tracks execution stage instances, not the backlog plan). */}
+              <DetailSection theme={theme} title="Tasks" width={rightColumnWidth}>
+                {declaredTasks.length > 0 ? (
+                  declaredTasks.slice(0, mode === 'stacked' ? 6 : 10).map((task) => (
+                    <Text key={task.id} {...theme.role('muted')}>
+                      {BACKLOG_TASK_ICON[task.status] ?? '○'} {task.id} — {truncateText(task.title, Math.max(20, rightColumnWidth - 12))}
                     </Text>
-                    <Box marginTop={1} flexDirection="column">
-                      {visibleOutput.length > 0 ? (
-                        visibleOutput.map((entry) => (
-                          <Text key={entry.id} {...getOutputStyle(theme, entry.source)}>
-                            {formatOutputPrefix(entry)} {truncateText(entry.line, Math.max(28, rightColumnWidth - 6))}
-                          </Text>
-                        ))
-                      ) : (
-                        <Text {...theme.role('muted')}>
-                          {selectedRun.status === 'running'
-                            ? 'Agent thinking... waiting for the first streamed line.'
-                            : 'No output captured for this run yet.'}
-                        </Text>
-                      )}
-                    </Box>
-                  </>
+                  ))
                 ) : (
-                  <Text {...theme.role('muted')}>Logs hidden. Press Ctrl+L to reopen the live output view.</Text>
+                  <Text {...theme.role('muted')}>No task breakdown declared for {selectedRun.featureId} in the backlog.</Text>
                 )}
               </DetailSection>
+              <Box marginTop={1}>
+                <DetailSection theme={theme} title="Live Output" width={rightColumnWidth}>
+                  {logsVisible ? (
+                    <>
+                      <Text {...theme.role('muted')}>
+                        {selectedRun.status === 'running'
+                          ? outputPaused
+                            ? 'Auto-scroll paused. Press Ctrl+S to resume live tailing.'
+                            : visibleOutput[visibleOutput.length - 1]?.source === 'heartbeat'
+                              ? 'Agent thinking... heartbeat received while waiting for the next visible event.'
+                              : 'Streaming latest run events in real time.'
+                          : 'Run finished. Tail below shows the latest captured output.'}
+                      </Text>
+                      <Box marginTop={1} flexDirection="column">
+                        {visibleOutput.length > 0 ? (
+                          visibleOutput.map((entry) => renderOutputEntry(theme, entry, Math.max(28, rightColumnWidth - 6)))
+                        ) : (
+                          <Text {...theme.role('muted')}>
+                            {selectedRun.status === 'running'
+                              ? 'Agent thinking... waiting for the first streamed line.'
+                              : 'No output captured for this run yet.'}
+                          </Text>
+                        )}
+                      </Box>
+                    </>
+                  ) : (
+                    <Text {...theme.role('muted')}>Logs hidden. Press Ctrl+L to reopen the live output view.</Text>
+                  )}
+                </DetailSection>
+              </Box>
             </Box>
           </Box>
         </Box>
       ) : (
         <Box flexDirection="column" marginTop={1}>
           {runs.length > 0 && overviewSummary(theme, runs, gates)}
+          {runningTasks.length > 0 && inProgressTasksSection(theme, runningTasks, innerWidth, mode === 'stacked' ? 4 : 6)}
           {runs.length > 0 && (
             <Text {...theme.role('muted')}>
               Select a run with arrows or j/k, then press Enter to inspect it. Esc returns here.
             </Text>
           )}
-          {runs.length > 0 && (
-            <Box marginTop={1}>
-              <RunTable
-                runs={runs}
-                width={innerWidth}
-                selectedIndex={selectedRunIndex}
-                isFocused={focusPanel === 'runs'}
+          {/* C1: rigid ordered blocks — EXECUTION/BLOCKED, TODO, DONE,
+              CANCELED — instead of one flat table plus a disconnected
+              "Ready to start" list. Empty blocks are skipped rather than
+              shown as empty headers. */}
+          {DASHBOARD_GROUP_ORDER.map((groupId) => {
+            if (groupId === 'todo') {
+              if (pendingFeatures.length === 0) return null;
+              return (
+                <Box key={groupId} marginTop={1} flexDirection="column">
+                  <Text {...(focusPanel === 'main' ? theme.role('focus') : theme.role('text'))} bold>
+                    {focusPanel === 'main' ? '> ' : '  '}{DASHBOARD_GROUP_LABEL.todo}
+                  </Text>
+                  {pendingFeatures.slice(0, maxPending).map((feature, index) => {
+                    const selected = focusPanel === 'main' && index === selectedPendingIndex;
+                    return (
+                      <Box key={feature.id}>
+                        <Text {...(selected ? theme.role('focus') : theme.role('text'))} bold={selected}>
+                          {selected ? '>' : ' '} {truncateText(`${feature.id}  ${feature.title}`, Math.max(24, innerWidth - 4))}
+                        </Text>
+                        {selected && (
+                          <Text {...theme.role('muted')}> [{feature.model ?? feature.tool} / {feature.effort}]</Text>
+                        )}
+                      </Box>
+                    );
+                  })}
+                  {pendingFeatures.length > maxPending && (
+                    <Text {...theme.role('muted')}>  +{pendingFeatures.length - maxPending} more in backlog</Text>
+                  )}
+                  <Text {...theme.role('muted')}>  Tab to focus · j/k to select · Enter or n to start</Text>
+                </Box>
+              );
+            }
+
+            const groupRuns = runs.filter((run) => getRunGroup(run.status) === groupId);
+            if (groupRuns.length === 0) return null;
+            return (
+              <DashboardBlock
+                key={groupId}
+                theme={theme}
+                groupId={groupId}
+                groupRuns={groupRuns}
+                selectedRun={selectedRun}
+                isRunsFocused={focusPanel === 'runs'}
+                innerWidth={innerWidth}
+                workflowStages={workflowStages}
               />
-            </Box>
-          )}
+            );
+          })}
           {nextDemands.length > 0 && (
             <Box marginTop={1} flexDirection="column">
               <Text {...theme.role('text')} bold>Next demands</Text>
               {nextDemands.slice(0, mode === 'stacked' ? 3 : 5).map((entry, index) => (
                 <Text key={`${index}:${entry}`} {...theme.role('muted')}>{truncateText(entry, Math.max(24, innerWidth - 2))}</Text>
               ))}
-            </Box>
-          )}
-          {pendingFeatures.length > 0 && (
-            <Box marginTop={1} flexDirection="column">
-              <Text {...(focusPanel === 'main' ? theme.role('focus') : theme.role('warning'))} bold>
-                {focusPanel === 'main' ? '> ' : '  '}Ready to start
-              </Text>
-              {pendingFeatures.slice(0, maxPending).map((feature, index) => {
-                const selected = focusPanel === 'main' && index === selectedPendingIndex;
-                return (
-                  <Box key={feature.id}>
-                    <Text {...(selected ? theme.role('focus') : theme.role('text'))} bold={selected}>
-                      {selected ? '>' : ' '} {truncateText(`${feature.id}  ${feature.title}`, Math.max(24, innerWidth - 4))}
-                    </Text>
-                    {selected && (
-                      <Text {...theme.role('muted')}> [{feature.model ?? feature.tool} / {feature.effort}]</Text>
-                    )}
-                  </Box>
-                );
-              })}
-              {pendingFeatures.length > maxPending && (
-                <Text {...theme.role('muted')}>  +{pendingFeatures.length - maxPending} more in backlog</Text>
-              )}
-              <Text {...theme.role('muted')}>  Tab to focus · j/k to select · Enter or n to start</Text>
             </Box>
           )}
           {notifications.length > 0 && (
@@ -435,19 +611,55 @@ function DetailSection({
   );
 }
 
-function formatOutputPrefix(entry: RunOutputRow): string {
-  switch (entry.source) {
-    case 'agent':
-      return 'AI>';
-    case 'tool':
-      return 'TOOL>';
-    case 'heartbeat':
-      return '...';
-    case 'stderr':
-      return 'ERR>';
-    default:
-      return 'OUT>';
+// D5: AI log rendering. `AI>` and `TOOL>` prefixes are hidden entirely — the
+// color palette (getOutputStyle) already distinguishes sources. TOOL output
+// renders inside a bordered block (a markdown-fenced-code-block look, since
+// Ink has no real Markdown renderer) instead of an inline prefixed line.
+// Heartbeat lines go through formatHeartbeatLine so a long raw diagnostic
+// string (`[msq] codex running for 42s (stdout 1B stderr 0B idle 0s)`)
+// condenses into a short line instead of being truncated mid-word.
+function renderOutputEntry(
+  theme: ReturnType<typeof useTheme>,
+  entry: RunOutputRow,
+  maxWidth: number,
+): React.ReactElement {
+  if (entry.source === 'tool') {
+    return (
+      <Box
+        key={entry.id}
+        borderStyle="round"
+        borderColor={getOutputStyle(theme, 'tool').color ?? theme.surface.borderColor}
+        paddingX={1}
+        marginBottom={1}
+        flexDirection="column"
+      >
+        <Text {...getOutputStyle(theme, 'tool')}>{truncateText(entry.line, maxWidth)}</Text>
+      </Box>
+    );
   }
+
+  if (entry.source === 'heartbeat') {
+    return (
+      <Text key={entry.id} {...getOutputStyle(theme, 'heartbeat')}>
+        {formatHeartbeatLine(entry.line, maxWidth)}
+      </Text>
+    );
+  }
+
+  if (entry.source === 'stderr') {
+    return (
+      <Text key={entry.id} {...getOutputStyle(theme, 'stderr')}>
+        {'ERR> '}{truncateText(entry.line, maxWidth)}
+      </Text>
+    );
+  }
+
+  // 'agent' (and any other/default source): prefix hidden per D5.
+  return (
+    <Text key={entry.id} {...getOutputStyle(theme, entry.source)}>
+      {truncateText(entry.line, maxWidth)}
+    </Text>
+  );
 }
 
 function collectNextDemands(runs: RunSummary[]): string[] {

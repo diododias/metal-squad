@@ -8,6 +8,7 @@ import { validateBacklogSkills } from '../core/skills/index.js';
 import { assertWritableDbPath } from '../db/index.js';
 import { abortPipeline, pausePipeline, requestFeatureAbort, resumePipeline } from '../db/repo.js';
 import { getFeatureCatalog, getPendingFeatures } from './catalog.js';
+import { sortRunsByGroup } from './dashboardGroups.js';
 import { buildCommandDefinitions } from './commands/definitions.js';
 import { createGatesShortcuts } from './commands/gatesShortcuts.js';
 import { createGlobalShortcuts } from './commands/globalShortcuts.js';
@@ -32,7 +33,7 @@ import { useNotifications } from './hooks/useNotifications.js';
 import { useToasts } from './hooks/useToasts.js';
 import { useRunBreakdown } from './hooks/useRunBreakdown.js';
 import { useRunOutput } from './hooks/useRunOutput.js';
-import { useRuns, useTaskRuns } from './hooks/useRuns.js';
+import { useRunningTasks, useRuns, useTaskRuns } from './hooks/useRuns.js';
 import { useStatsRows } from './hooks/useStatsRows.js';
 import { useTerminalWidth } from './hooks/useTerminalWidth.js';
 import type { ActiveView } from './components/MainPanel.js';
@@ -129,9 +130,14 @@ function launchFeatureRun(featureId: string): void {
 export function App(): React.ReactElement {
   const config = useMemo(() => loadConfig(), []);
   const themeResolution = useMemo(() => resolveThemePreference(config.theme), [config.theme]);
-  const runs = useRuns(2000);
+  const rawRuns = useRuns(2000);
+  // C1: EXECUTION/BLOCKED, TODO, DONE, CANCELED — display order and keyboard
+  // navigation order must stay in sync, so this reorder happens once and
+  // `runs` (used everywhere below) is always the grouped array.
+  const runs = useMemo(() => sortRunsByGroup(rawRuns), [rawRuns]);
   const doneFeatureIds = useCompletedFeatures(2000);
-  const { gates, resolve } = useGates(2000);
+  const { gates, resolve, forceResolve } = useGates(2000);
+  const runningTasks = useRunningTasks(2000);
   const notifications = useNotifications(40);
   const toasts = useToasts(4);
   const width = useTerminalWidth();
@@ -314,6 +320,15 @@ export function App(): React.ReactElement {
     announceGateDecision(selectedGate, 'retried');
   }, [resolve, selectedGate]);
 
+  // F1: force-bypass — distinct from approve/skip above because it also
+  // resumes the gate's pipeline when that pipeline was paused/blocked on
+  // this exact gate, instead of only recording a decision.
+  const forceApproveSelectedGate = useCallback(() => {
+    if (!selectedGate) return;
+    const { resumedPipelineId } = forceResolve(selectedGate);
+    announceGateDecision(selectedGate, 'force-approved', Boolean(resumedPipelineId));
+  }, [forceResolve, selectedGate]);
+
   const startSelectedFeature = useCallback(() => {
     if (activeView !== 'overview' || !selectedPending) return;
     launchFeatureRun(selectedPending.id);
@@ -427,6 +442,7 @@ export function App(): React.ReactElement {
       approveSelectedGate,
       skipSelectedGate,
       retrySelectedGate,
+      forceApproveSelectedGate,
       startSelectedFeature,
       quit,
     }),
@@ -440,6 +456,7 @@ export function App(): React.ReactElement {
       canResume,
       canRetryGate,
       focusContext,
+      forceApproveSelectedGate,
       pauseSelectedRun,
       quit,
       resumeSelectedRun,
@@ -552,8 +569,9 @@ export function App(): React.ReactElement {
       approve: approveSelectedGate,
       skip: skipSelectedGate,
       retry: retrySelectedGate,
+      forceApprove: forceApproveSelectedGate,
     }),
-    [approveSelectedGate, canResolveGate, canRetryGate, retrySelectedGate, skipSelectedGate],
+    [approveSelectedGate, canResolveGate, canRetryGate, forceApproveSelectedGate, retrySelectedGate, skipSelectedGate],
   );
 
   const runShortcuts = useMemo(
@@ -640,6 +658,7 @@ export function App(): React.ReactElement {
               selectedPendingIndex={selectedPendingIndex}
               breakdown={runBreakdown}
               taskRuns={taskRuns}
+              runningTasks={runningTasks}
               notifications={notifications}
             />
           </Box>
@@ -699,13 +718,25 @@ export function App(): React.ReactElement {
   );
 }
 
-function announceGateDecision(gate: PendingApproval, decision: 'approved' | 'skipped' | 'retried' | 'hold'): void {
+function announceGateDecision(
+  gate: PendingApproval,
+  decision: 'approved' | 'skipped' | 'retried' | 'hold' | 'force-approved',
+  resumedPipeline = false,
+): void {
   if (gate.kind === 'stage') {
-    const message = decision === 'approved'
+    const message = decision === 'approved' || decision === 'force-approved'
       ? `${gate.featureId} approval accepted`
       : decision === 'hold'
         ? `${gate.featureId} kept on hold; approval will remain pending`
         : `${gate.featureId} approval ${decision}`;
+    msqEventBus.emit('ui:info', { message });
+    return;
+  }
+
+  if (decision === 'force-approved') {
+    const message = resumedPipeline
+      ? `${gate.featureId} gate force-approved; pipeline resumed`
+      : `${gate.featureId} gate force-approved`;
     msqEventBus.emit('ui:info', { message });
     return;
   }

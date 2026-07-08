@@ -4,6 +4,7 @@ import React from 'react';
 const mockUseRuns = vi.fn();
 const mockUseCompletedFeatures = vi.fn(() => new Set<string>());
 const mockUseTaskRuns = vi.fn(() => []);
+const mockUseRunningTasks = vi.fn(() => []);
 const mockUseGates = vi.fn();
 const mockUseRunOutput = vi.fn();
 const mockUseTerminalWidth = vi.fn();
@@ -73,6 +74,7 @@ vi.mock('react', async () => {
 vi.mock('../../src/ui/hooks/useRuns.js', () => ({
   useRuns: mockUseRuns,
   useTaskRuns: mockUseTaskRuns,
+  useRunningTasks: mockUseRunningTasks,
 }));
 
 vi.mock('../../src/ui/hooks/useCompletedFeatures.js', () => ({
@@ -238,7 +240,8 @@ describe('App', () => {
     };
     mockUseTerminalWidth.mockReturnValue(88);
     mockUseRuns.mockReturnValue([]);
-    mockUseGates.mockReturnValue({ gates: [], resolve: vi.fn() });
+    mockUseRunningTasks.mockReturnValue([]);
+    mockUseGates.mockReturnValue({ gates: [], resolve: vi.fn(), forceResolve: vi.fn(() => ({ resumedPipelineId: null })) });
     mockUseRunOutput.mockReturnValue([]);
     mockUseNotifications.mockReturnValue([]);
     mockUseToasts.mockReturnValue([]);
@@ -551,8 +554,39 @@ describe('App', () => {
     expect(resolve).toHaveBeenCalledWith(gateApproval, 'retried');
   });
 
+  it('F1: force-approves the selected gate and announces whether it resumed the pipeline', async () => {
+    const forceResolve = vi.fn(() => ({ resumedPipelineId: 42 }));
+    stateValue = {
+      selectedRun: 0,
+      selectedGate: 0,
+      selectedPending: 0,
+      focusPanel: 'gates',
+      activeView: 'overview',
+      outputPaused: false,
+      logsVisible: true,
+    };
+    mockUseRuns.mockReturnValue([{ runId: 1, featureId: 'feat-1' }]);
+    const gateApproval = { kind: 'gate' as const, id: 7, featureId: 'feat-1', repoId: 'repo-1', prompt: '', createdAt: '' };
+    mockUseGates.mockReturnValue({
+      gates: [gateApproval],
+      resolve: vi.fn(),
+      forceResolve,
+    });
+    const { App } = await import('../../src/ui/App.js');
+
+    App();
+    const handler = mockUseInput.mock.calls[0]?.[0] as (input: string, key: Record<string, boolean>) => void;
+    handler('F', {});
+
+    expect(forceResolve).toHaveBeenCalledWith(gateApproval);
+    expect(mockEventBusEmit).toHaveBeenCalledWith('ui:info', {
+      message: 'feat-1 gate force-approved; pipeline resumed',
+    });
+  });
+
   it('ignores context shortcuts outside their active panels', async () => {
     const resolve = vi.fn();
+    const forceResolve = vi.fn(() => ({ resumedPipelineId: null }));
     mockUseRuns.mockReturnValue([{
       runId: 1,
       pipelineId: 42,
@@ -573,6 +607,7 @@ describe('App', () => {
     mockUseGates.mockReturnValue({
       gates: [{ kind: 'gate', id: 7, featureId: 'feat-1', repoId: 'repo-1', prompt: '', createdAt: '' }],
       resolve,
+      forceResolve,
     });
     const { App } = await import('../../src/ui/App.js');
 
@@ -581,10 +616,12 @@ describe('App', () => {
     handler('a', {});
     handler('s', {});
     handler('r', {});
+    handler('F', {});
     handler('p', {});
     handler('x', {});
 
     expect(resolve).not.toHaveBeenCalled();
+    expect(forceResolve).not.toHaveBeenCalled();
     expect(mockPausePipeline).not.toHaveBeenCalled();
     expect(mockRequestFeatureAbort).not.toHaveBeenCalled();
     expect(mockAbortPipeline).not.toHaveBeenCalled();
@@ -611,7 +648,10 @@ describe('App', () => {
     const rootChildren = (element.props as { children: React.ReactNode }).children;
     const statusBar = findElement(rootChildren, mockStatusBar);
 
-    expect(statusBar?.props.shortcutHints).toEqual(['a:approve', 's:skip', 'r:retry', 'tab:focus', 'esc:back', '?:help']);
+    // F1: the new force-approve shortcut ('F') joins the gates context hints.
+    // The status bar caps hints at 6, so ?:help drops off this list here —
+    // it's still reachable globally via the help overlay.
+    expect(statusBar?.props.shortcutHints).toEqual(['a:approve', 's:skip', 'r:retry', 'F:force', 'tab:focus', 'esc:back']);
   });
 
   it('pauses the selected pipeline from run detail context', async () => {
