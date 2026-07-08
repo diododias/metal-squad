@@ -27,7 +27,7 @@ export function StatsBar({ done, todo, execution, falha, gatesPending, tokenStat
   const tokensLabel = tokenStats.status === 'loading' ? '—' : formatTokens(tokenStats.totalTokens);
 
   return (
-    <Box marginBottom={1}>
+    <Box>
       <Text {...theme.statusTone('done')}>{done} done</Text>
       <Text {...theme.role('muted')}> | </Text>
       <Text {...theme.role('text')}>{todo} todo</Text>

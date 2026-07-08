@@ -40,10 +40,10 @@ export function KanbanCard({ width, selected, focused, run, pendingFeature, feat
   if (pendingFeature) {
     return (
       <Box flexDirection="column" marginBottom={1}>
-        <Text {...labelStyle} bold={selected}>
+        <Text {...labelStyle} bold>
           {prefix} {truncateText(`${pendingFeature.id}  ${pendingFeature.title}`, Math.max(18, width - 2))}
         </Text>
-        <Text {...theme.role('muted')}>
+        <Text {...theme.role('muted')} dimColor>
           {'  '}{toolModelEffort(pendingFeature.tool, pendingFeature.model, pendingFeature.effort)}
         </Text>
       </Box>
@@ -59,10 +59,10 @@ export function KanbanCard({ width, selected, focused, run, pendingFeature, feat
 
   return (
     <Box flexDirection="column" marginBottom={1}>
-      <Text {...labelStyle} bold={selected}>
+      <Text {...labelStyle} bold>
         {prefix} {STATUS_ICON[run.status]} {truncateText(run.featureId, Math.max(14, width - 4))}
       </Text>
-      <Text {...statusStyle}>
+      <Text {...statusStyle} dimColor>
         {'  '}{toolModelEffort(run.tool, feature?.model, feature?.effort ?? '—')}{stageLabel ? `  ·  ${stageLabel}` : ''}
       </Text>
       {children}

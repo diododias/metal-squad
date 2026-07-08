@@ -50,7 +50,7 @@ export function createGlobalShortcuts(options: GlobalShortcutOptions): KeyboardS
       action: cycleFocus,
     },
     // F31 "novo modelo de foco": ←/→ switches the active kanban column
-    // (EXECUTION/BLOCKED ↔ TODO ↔ DONE ↔ FALHA); Tab keeps cycling the
+    // (TODO ↔ EXECUTION/BLOCKED ↔ DONE ↔ FALHA); Tab keeps cycling the
     // high-level panels (columns ↔ gates ↔ activity), it no longer moves
     // between columns.
     {
