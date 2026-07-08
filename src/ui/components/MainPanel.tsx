@@ -63,34 +63,6 @@ interface Props {
   notifications?: NotificationEntry[];
 }
 
-function overviewSummary(
-  theme: ReturnType<typeof useTheme>,
-  runs: RunSummary[],
-  gates: PendingApproval[],
-): React.ReactElement {
-  const running = runs.filter((run) => run.status === 'running').length;
-  const done = runs.filter((run) => run.status === 'done').length;
-  const failed = runs.filter((run) => run.status === 'failed').length;
-  const blocked = runs.filter((run) => run.status === 'blocked').length;
-  const aborted = runs.filter((run) => run.status === 'aborted').length;
-
-  return (
-    <Box marginBottom={1}>
-      <Text {...theme.statusTone('running')}>{running} running</Text>
-      <Text {...theme.role('muted')}> | </Text>
-      <Text {...theme.statusTone('done')}>{done} done</Text>
-      <Text {...theme.role('muted')}> | </Text>
-      <Text {...theme.statusTone('failed')}>{failed} failed</Text>
-      <Text {...theme.role('muted')}> | </Text>
-      <Text {...theme.statusTone('blocked')}>{blocked} blocked</Text>
-      <Text {...theme.role('muted')}> | </Text>
-      <Text {...theme.statusTone('aborted')}>{aborted} aborted</Text>
-      <Text {...theme.role('muted')}> | </Text>
-      <Text {...theme.role('text')}>{gates.length} approvals pending</Text>
-    </Box>
-  );
-}
-
 // C3: cross-run "In Progress Tasks" feed shown directly on the dashboard,
 // not just once a run is opened in the detail screen.
 function inProgressTasksSection(
@@ -480,7 +452,6 @@ export function MainPanel({
         </Box>
       ) : (
         <Box flexDirection="column" marginTop={1}>
-          {runs.length > 0 && overviewSummary(theme, runs, gates)}
           {runningTasks.length > 0 && inProgressTasksSection(theme, runningTasks, innerWidth, mode === 'stacked' ? 4 : 6)}
           {runs.length > 0 && (
             <Text {...theme.role('muted')}>

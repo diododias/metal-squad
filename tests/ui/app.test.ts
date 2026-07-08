@@ -10,6 +10,7 @@ const mockUseRunOutput = vi.fn();
 const mockUseTerminalWidth = vi.fn();
 const mockUseNotifications = vi.fn();
 const mockUseToasts = vi.fn(() => []);
+const mockUseTokenStats = vi.fn(() => ({ status: 'ready' as const, totalTokens: 0, error: null }));
 const mockGetFeatureCatalog = vi.fn();
 const mockLoadConfig = vi.fn(() => ({ concurrency: 3 }));
 const mockLoadBacklog = vi.fn(() => ({ epics: [] }));
@@ -23,6 +24,8 @@ const mockSpawn = vi.fn(() => ({ once: vi.fn(), unref: vi.fn() }));
 const mockEventBusEmit = vi.fn();
 const mockMainPanel = vi.fn(() => React.createElement('main-panel'));
 const mockGateFooter = vi.fn(() => React.createElement('gate-footer'));
+const mockHeaderBar = vi.fn(() => React.createElement('header-bar'));
+const mockStatsBar = vi.fn(() => React.createElement('stats-bar'));
 const mockStatusBar = vi.fn(() => React.createElement('status-bar'));
 const mockToastStack = vi.fn(() => React.createElement('toast-stack'));
 const mockCommandBar = vi.fn(() => React.createElement('command-bar'));
@@ -109,6 +112,14 @@ vi.mock('../../src/ui/hooks/useToasts.js', () => ({
   useToasts: mockUseToasts,
 }));
 
+vi.mock('../../src/ui/hooks/useTokenStats.js', () => ({
+  useTokenStats: mockUseTokenStats,
+}));
+
+vi.mock('../../src/core/repo.js', () => ({
+  resolveRepo: () => ({ repoId: 'test-repo', path: '/test/repo' }),
+}));
+
 vi.mock('../../src/ui/catalog.js', () => ({
   getFeatureCatalog: mockGetFeatureCatalog,
   getPendingFeatures: mockGetPendingFeatures,
@@ -154,6 +165,14 @@ vi.mock('node:child_process', async () => {
 
 vi.mock('../../src/ui/components/MainPanel.js', () => ({
   MainPanel: mockMainPanel,
+}));
+
+vi.mock('../../src/ui/components/HeaderBar.js', () => ({
+  HeaderBar: mockHeaderBar,
+}));
+
+vi.mock('../../src/ui/components/StatsBar.js', () => ({
+  StatsBar: mockStatsBar,
 }));
 
 vi.mock('../../src/ui/components/GateFooter.js', () => ({

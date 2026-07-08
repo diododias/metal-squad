@@ -342,6 +342,48 @@ describe('ui hooks', () => {
     expect(off).toHaveBeenCalledWith('resize', expect.any(Function));
   });
 
+  it('useTokenStats sums the 7-day window and keeps the last total on error (F31 item 7)', async () => {
+    let setState: (updater: unknown) => void = () => {};
+    const setIntervalSpy = vi.spyOn(globalThis, 'setInterval').mockReturnValue(1 as unknown as ReturnType<typeof setInterval>);
+    vi.spyOn(globalThis, 'clearInterval').mockImplementation(() => {});
+
+    vi.doMock('react', () => ({
+      useState: (value: unknown) => {
+        const initial = typeof value === 'function' ? (value as () => unknown)() : value;
+        let current = initial;
+        setState = (updater: unknown) => {
+          current = typeof updater === 'function' ? (updater as (prev: unknown) => unknown)(current) : updater;
+        };
+        return [current, (updater: unknown) => setState(updater)];
+      },
+      useEffect: (effect: () => (() => void) | void) => {
+        effect();
+      },
+    }));
+
+    const listRunsForStats = vi.fn()
+      .mockReturnValueOnce([{ totalTokens: 1000 }, { totalTokens: 500 }])
+      .mockImplementationOnce(() => {
+        throw new Error('db locked');
+      });
+
+    vi.doMock('../../src/db/repo.js', () => ({ listRunsForStats }));
+    vi.doMock('../../src/db/index.js', () => ({
+      DbAccessError: class DbAccessError extends Error {},
+    }));
+
+    const { useTokenStats } = await import('../../src/ui/hooks/useTokenStats.js');
+    useTokenStats(7);
+
+    expect(listRunsForStats).toHaveBeenCalledWith({ sinceDays: 7 });
+    expect(setIntervalSpy).toHaveBeenCalledWith(expect.any(Function), 5000);
+
+    const refresh = setIntervalSpy.mock.calls[0]?.[0] as () => void;
+    refresh();
+
+    expect(listRunsForStats).toHaveBeenCalledTimes(2);
+  });
+
   it('useCommandPalette filters available commands, fuzzy matches queries, and executes the selection', async () => {
     const pause = vi.fn();
     const quit = vi.fn();

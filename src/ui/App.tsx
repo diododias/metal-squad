@@ -1,14 +1,16 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { Box, Text } from 'ink';
+import { Box } from 'ink';
 import { spawn } from 'node:child_process';
+import { basename } from 'node:path';
 import { loadConfig } from '../config/index.js';
 import { loadBacklog } from '../core/backlog/load.js';
 import { msqEventBus } from '../core/events/index.js';
+import { resolveRepo } from '../core/repo.js';
 import { validateBacklogSkills } from '../core/skills/index.js';
 import { assertWritableDbPath } from '../db/index.js';
 import { abortPipeline, pausePipeline, requestFeatureAbort, resumePipeline } from '../db/repo.js';
 import { getFeatureCatalog, getPendingFeatures } from './catalog.js';
-import { sortRunsByGroup } from './dashboardGroups.js';
+import { getRunGroup, sortRunsByGroup } from './dashboardGroups.js';
 import { buildCommandDefinitions } from './commands/definitions.js';
 import { createGatesShortcuts } from './commands/gatesShortcuts.js';
 import { createGlobalShortcuts } from './commands/globalShortcuts.js';
@@ -19,8 +21,10 @@ import { CommandBar } from './components/CommandBar.js';
 import { CommandPalette } from './components/CommandPalette.js';
 import { CostDashboard } from './components/CostDashboard.js';
 import { GateFooter } from './components/GateFooter.js';
+import { HeaderBar } from './components/HeaderBar.js';
 import { HelpOverlay } from './components/HelpOverlay.js';
 import { MainPanel } from './components/MainPanel.js';
+import { StatsBar } from './components/StatsBar.js';
 import { StatusBar } from './components/StatusBar.js';
 import { ToastStack } from './components/ToastStack.js';
 import { getLayoutMode } from './format.js';
@@ -35,32 +39,19 @@ import { useRunBreakdown } from './hooks/useRunBreakdown.js';
 import { useRunOutput } from './hooks/useRunOutput.js';
 import { useRunningTasks, useRuns, useTaskRuns } from './hooks/useRuns.js';
 import { useStatsRows } from './hooks/useStatsRows.js';
+import { useTokenStats } from './hooks/useTokenStats.js';
 import { useTerminalWidth } from './hooks/useTerminalWidth.js';
 import type { ActiveView } from './components/MainPanel.js';
 import type { FocusPanel as ShortcutContext } from './types/shortcuts.js';
 import { ThemeProvider } from './theme/context.js';
 import { resolveThemePreference } from './theme/resolve.js';
-import { mergeInkStyles } from './theme/styles.js';
 
 type FocusPanel = Exclude<ShortcutContext, 'run-detail'>;
 
-// Wordmark aligned as two full-width rows; sliced at a fixed column so the
-// "METAL" (primary) and "SQUAD" (accent) halves stay column-aligned between rows.
-const WORDMARK_TOP = '█▀▄▀█ █▀▀ ▀█▀ ▄▀█ █   ▀   █▀ █▀█ █ █ ▄▀█ █▀▄';
-const WORDMARK_BOTTOM = '█░▀░█ ██▄  █  █▀█ █▄▄     ▄█ ▀▀█ █▄█ █▀█ █▄▀';
-const SQUAD_COLUMN = 26;
-
-const BANNER = {
-  metalTop: WORDMARK_TOP.slice(0, SQUAD_COLUMN),
-  metalBottom: WORDMARK_BOTTOM.slice(0, SQUAD_COLUMN),
-  squadTop: WORDMARK_TOP.slice(SQUAD_COLUMN),
-  squadBottom: WORDMARK_BOTTOM.slice(SQUAD_COLUMN),
-} as const;
-
-function bannerRule(width: number): string {
-  const span = Math.min(Math.max(WORDMARK_TOP.length, 32), Math.max(0, width - 2));
-  return '─'.repeat(span);
-}
+// F31 section 1: cli.ts pins the same literal for `--version` — there is no
+// package.json read at runtime today, so this mirrors that existing pattern
+// rather than introducing a new one.
+const APP_VERSION = '0.0.1';
 
 interface UiState {
   selectedRun: number;
@@ -130,6 +121,8 @@ function launchFeatureRun(featureId: string): void {
 export function App(): React.ReactElement {
   const config = useMemo(() => loadConfig(), []);
   const themeResolution = useMemo(() => resolveThemePreference(config.theme), [config.theme]);
+  const repoLabel = useMemo(() => basename(resolveRepo().path), []);
+  const tokenStats = useTokenStats(7);
   const rawRuns = useRuns(2000);
   // C1: EXECUTION/BLOCKED, TODO, DONE, CANCELED — display order and keyboard
   // navigation order must stay in sync, so this reorder happens once and
@@ -208,6 +201,11 @@ export function App(): React.ReactElement {
   const pendingFeatures = getPendingFeatures(featureCatalog, doneFeatureIds, activeFeatureIds);
   const selectedPendingIndex = clampIndex(ui.selectedPending, pendingFeatures.length);
   const selectedPending = pendingFeatures[selectedPendingIndex] ?? null;
+  // F31 section 1: same grouping the kanban columns use (getRunGroup), so the
+  // header stats and the columns can never disagree on what counts as
+  // "execução" vs. "falha".
+  const executionCount = runs.filter((run) => getRunGroup(run.status) === 'execution').length;
+  const falhaCount = runs.filter((run) => getRunGroup(run.status) === 'canceled').length;
   const focusContext: ShortcutContext = activeView === 'run' && focusPanel === 'main' ? 'run-detail' : focusPanel;
   const hasTabs = false;
 
@@ -609,32 +607,20 @@ export function App(): React.ReactElement {
       ? ['type:search', 'enter:execute', 'esc:close', 'j/k:navigate']
       : getStatusBarHints();
 
-  const metalStyle = mergeInkStyles(themeResolution.profile.roles.primary, { bold: true });
-  const squadStyle = mergeInkStyles(themeResolution.profile.roles.accent, { bold: true });
-  const accentStyle = themeResolution.profile.roles.accent;
-  const subtitleStyle = themeResolution.profile.roles.muted;
-  const layoutLabel = layoutMode === 'stacked' ? 'single-column' : `${layoutMode} split`;
-
   return (
     <ThemeProvider resolution={themeResolution}>
       <Box flexDirection="column" paddingX={1} paddingY={0}>
         <Box marginTop={1} flexDirection="column">
-          <Box>
-            <Text {...metalStyle}>{BANNER.metalTop}</Text>
-            <Text {...squadStyle}>{BANNER.squadTop}</Text>
-          </Box>
-          <Box>
-            <Text {...metalStyle}>{BANNER.metalBottom}</Text>
-            <Text {...squadStyle}>{BANNER.squadBottom}</Text>
-          </Box>
-          <Box marginTop={1}>
-            <Text {...accentStyle}>Automated pipeline orchestrator</Text>
-          </Box>
-          <Box>
-            <Text {...subtitleStyle}>{layoutLabel}</Text>
-          </Box>
+          <HeaderBar version={APP_VERSION} repoLabel={repoLabel} width={width} />
+          <StatsBar
+            done={doneRuns}
+            todo={pendingFeatures.length}
+            execution={executionCount}
+            falha={falhaCount}
+            gatesPending={gates.length}
+            tokenStats={tokenStats}
+          />
         </Box>
-        <Text {...accentStyle}>{bannerRule(width)}</Text>
         {dashboardOpen ? (
           <Box marginTop={1}>
             <CostDashboard rows={statsRows} periodLabel={dashboardPeriod.label} width={width - 2} />

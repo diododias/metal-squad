@@ -4,6 +4,8 @@ import { render, cleanup } from 'ink-testing-library';
 
 import { EmptyState } from '../../src/ui/components/EmptyState.js';
 import { CommandBar } from '../../src/ui/components/CommandBar.js';
+import { HeaderBar } from '../../src/ui/components/HeaderBar.js';
+import { StatsBar } from '../../src/ui/components/StatsBar.js';
 import { RunTable } from '../../src/ui/components/RunTable.js';
 import { NotificationsFeed } from '../../src/ui/components/NotificationsFeed.js';
 import { StatusBar } from '../../src/ui/components/StatusBar.js';
@@ -61,6 +63,71 @@ describe('EmptyState', () => {
     const { lastFrame } = renderWithTheme(<EmptyState />);
     expect(lastFrame()).toContain('No runs yet');
     expect(lastFrame()).toContain('msq run');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// HeaderBar (F31 section 1: replaces the ASCII banner with a 1-line title)
+// ---------------------------------------------------------------------------
+describe('HeaderBar', () => {
+  it('renders the product name, version, and active repo on one line', () => {
+    const { lastFrame } = renderWithTheme(<HeaderBar version="0.0.1" repoLabel="metal-squad" width={80} />);
+    expect(lastFrame()).toContain('METAL SQUAD');
+    expect(lastFrame()).toContain('v0.0.1');
+    expect(lastFrame()).toContain('metal-squad');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// StatsBar (F31 section 1: always-visible done/todo/execução/falha/gates/tokens)
+// ---------------------------------------------------------------------------
+describe('StatsBar', () => {
+  it('renders the always-visible stats row', () => {
+    const { lastFrame } = renderWithTheme(
+      <StatsBar
+        done={3}
+        todo={5}
+        execution={2}
+        falha={1}
+        gatesPending={4}
+        tokenStats={{ status: 'ready', totalTokens: 1500, error: null }}
+      />,
+    );
+    expect(lastFrame()).toContain('3 done');
+    expect(lastFrame()).toContain('5 todo');
+    expect(lastFrame()).toContain('2 execução');
+    expect(lastFrame()).toContain('1 falha');
+    expect(lastFrame()).toContain('4 aprovações');
+    expect(lastFrame()).toContain('tokens (7d) 1.5k');
+  });
+
+  it('shows a loading placeholder instead of 0 while token stats are pending', () => {
+    const { lastFrame } = renderWithTheme(
+      <StatsBar
+        done={0}
+        todo={0}
+        execution={0}
+        falha={0}
+        gatesPending={0}
+        tokenStats={{ status: 'loading', totalTokens: null, error: null }}
+      />,
+    );
+    expect(lastFrame()).toContain('tokens (7d) —');
+  });
+
+  it('keeps the last known total visible when the token stats query errors', () => {
+    const { lastFrame } = renderWithTheme(
+      <StatsBar
+        done={0}
+        todo={0}
+        execution={0}
+        falha={0}
+        gatesPending={0}
+        tokenStats={{ status: 'error', totalTokens: 900, error: 'db locked' }}
+      />,
+    );
+    expect(lastFrame()).toContain('tokens (7d) 900');
+    expect(lastFrame()).toContain('stats unavailable');
   });
 });
 
