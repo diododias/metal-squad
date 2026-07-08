@@ -43,6 +43,6 @@ feat-01 — total 4m32s
 
 ## Criterios de aceite
 
-- [ ] Eventos de timeline gravados no DB
-- [ ] Breakdown de tempo calculado e exibido
-- [ ] Visivel no detail view da TUI e no CLI
+- [x] Eventos de timeline gravados no DB
+- [x] Breakdown de tempo calculado e exibido
+- [x] Visivel no detail view da TUI e no CLI

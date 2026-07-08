@@ -3,7 +3,8 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 // Mock better-sqlite3 before importing db modules
 const mockAll = vi.fn();
 const mockRun = vi.fn();
-const mockPrepare = vi.fn(() => ({ all: mockAll, run: mockRun }));
+const mockGet = vi.fn();
+const mockPrepare = vi.fn(() => ({ all: mockAll, run: mockRun, get: mockGet }));
 const mockPragma = vi.fn();
 const mockExec = vi.fn();
 const mockDb = { prepare: mockPrepare, pragma: mockPragma, exec: mockExec };
@@ -21,7 +22,8 @@ beforeEach(async () => {
   vi.resetModules();
   mockAll.mockReset();
   mockRun.mockReset();
-  mockPrepare.mockImplementation(() => ({ all: mockAll, run: mockRun }));
+  mockGet.mockReset();
+  mockPrepare.mockImplementation(() => ({ all: mockAll, run: mockRun, get: mockGet }));
 });
 
 // T014: listRunsForTui tests
@@ -111,7 +113,7 @@ describe('live run persistence helpers', () => {
   it('updates live token columns on the run row', async () => {
     const { updateRunUsage } = await import('../../src/db/repo.js');
     updateRunUsage(9, { input: 10, output: 4, total: 14 });
-    expect(mockRun).toHaveBeenCalledWith(10, 4, 14, 9);
+    expect(mockRun).toHaveBeenCalledWith(10, null, 4, 14, 9);
   });
 
   it('appends streamed output rows', async () => {

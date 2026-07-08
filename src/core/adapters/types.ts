@@ -2,6 +2,7 @@ import type { Effort, Feature, Tool } from '../backlog/schema.js';
 
 export interface TokenUsage {
   input: number;
+  cachedInput?: number;
   output: number;
   total: number;
 }
@@ -16,6 +17,7 @@ export type RunControl = RunControlNeedsInput;
 export interface RunFeatureOptions {
   cwd: string;
   runId: number;
+  signal?: AbortSignal;
 }
 
 export interface RunResult {
@@ -23,6 +25,7 @@ export interface RunResult {
   summary: string;
   usage?: TokenUsage;
   control?: RunControl;
+  aborted?: boolean;
 }
 
 export interface ToolAdapter {

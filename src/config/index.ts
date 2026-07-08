@@ -12,6 +12,7 @@ export const DEFAULT_DB_PATH = join(DATA_DIR, 'app.db');
 export const DB_PATH = resolveDbPath();
 
 export const NOTIFICABLE_EVENTS = [
+  'run:start',
   'gate:created',
   'run:failed',
   'budget:alert',
@@ -36,9 +37,18 @@ export const NotificationChannelConfig = z.discriminatedUnion('type', [
 ]);
 export type NotificationChannelConfig = z.infer<typeof NotificationChannelConfig>;
 
+const DEFAULT_NOTIFICATION_EVENTS: NotificableEvent[] = [
+  'run:start',
+  'gate:created',
+  'run:failed',
+  'run:done',
+  'stage:approval',
+  'stage:input',
+];
+
 const NotificationsConfig = z.object({
   channels: z.array(NotificationChannelConfig).default([]),
-  events: z.array(z.enum(NOTIFICABLE_EVENTS)).default(['gate:created', 'run:failed']),
+  events: z.array(z.enum(NOTIFICABLE_EVENTS)).default(DEFAULT_NOTIFICATION_EVENTS),
 });
 
 const WorkflowConfig = z.object({
@@ -46,20 +56,33 @@ const WorkflowConfig = z.object({
   pollIntervalMs: z.number().int().positive().default(2_000),
 });
 
+const BudgetConfig = z.object({
+  defaultMaxCostUsd: z.number().positive().optional(),
+  alertAtPercent: z.number().int().min(1).max(100).default(80),
+});
+
 export const ConfigSchema = z.object({
   concurrency: z.number().int().positive().default(3),
   toolTimeoutMs: z.number().int().positive().default(600_000),
   staleRunThresholdMinutes: z.number().int().positive().default(120),
   promptContextCharLimit: z.number().int().positive().default(20_000),
+  theme: z.string().trim().min(1).optional(),
   telegramChatId: z.string().optional(),
   notifications: NotificationsConfig.default({}),
   workflow: WorkflowConfig.default({}),
+  budget: BudgetConfig.default({}),
+  stageSkills: z.record(z.string(), z.array(z.string())).default({}),
 });
 export type Config = z.infer<typeof ConfigSchema>;
 
 export function loadConfig(): Config {
   if (!existsSync(CONFIG_PATH)) return ConfigSchema.parse({});
-  return ConfigSchema.parse(JSON.parse(readFileSync(CONFIG_PATH, 'utf8')));
+  try {
+    return ConfigSchema.parse(normalizeLegacyConfig(JSON.parse(readFileSync(CONFIG_PATH, 'utf8'))));
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    throw new Error(`Invalid metal-squad config at ${CONFIG_PATH}: ${message}`);
+  }
 }
 
 export function saveConfig(cfg: Config): void {
@@ -79,4 +102,40 @@ export function resolveDbPath(): string {
 
 export function ensureDataDir(dbPath = resolveDbPath()): void {
   mkdirSync(dirname(dbPath), { recursive: true });
+}
+
+function normalizeLegacyConfig(raw: unknown): unknown {
+  if (!raw || typeof raw !== 'object') return raw;
+  const cfg = structuredClone(raw) as {
+    telegramChatId?: string;
+    notifications?: {
+      channels?: Array<{ type: string; chatId?: string }>;
+      events?: string[];
+    };
+  };
+
+  if (cfg.telegramChatId && (!cfg.notifications?.channels || cfg.notifications.channels.length === 0)) {
+    cfg.notifications = {
+      ...cfg.notifications,
+      channels: [{ type: 'telegram', chatId: cfg.telegramChatId }],
+    };
+  }
+
+  const events = cfg.notifications?.events ?? [];
+  const legacyEventDefaults = [
+    ['gate:created', 'run:failed'],
+    ['gate:created', 'run:failed', 'run:done', 'stage:approval', 'stage:input'],
+  ];
+  const isLegacyDefault = legacyEventDefaults.some((candidate) =>
+    events.length === candidate.length
+    && candidate.every((event) => events.includes(event)),
+  );
+  if (isLegacyDefault) {
+    cfg.notifications = {
+      ...cfg.notifications,
+      events: DEFAULT_NOTIFICATION_EVENTS,
+    };
+  }
+
+  return cfg;
 }

@@ -10,6 +10,7 @@ export interface RunStartEvent {
   runId: number;
   featureId: string;
   tool: Tool;
+  stage?: string;
 }
 
 export interface RunOutputEvent {
@@ -72,6 +73,7 @@ export interface BudgetAlertEvent {
 export interface TokensUpdateEvent {
   runId: number;
   input: number;
+  cachedInput?: number;
   output: number;
   total: number;
   featureId?: string;
@@ -95,6 +97,14 @@ export interface TaskUpdatedEvent {
   endedAt?: string;
 }
 
+export interface UiNoticeEvent {
+  message: string;
+}
+
+export interface UiInfoEvent {
+  message: string;
+}
+
 export interface MsqEvents {
   'run:start': RunStartEvent;
   'run:output': RunOutputEvent;
@@ -110,4 +120,6 @@ export interface MsqEvents {
   'tokens:update': TokensUpdateEvent;
   'task:started': TaskStartedEvent;
   'task:updated': TaskUpdatedEvent;
+  'ui:info': UiInfoEvent;
+  'ui:notice': UiNoticeEvent;
 }

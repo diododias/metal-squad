@@ -2,79 +2,162 @@ import type { Feature } from '../backlog/schema.js';
 import type { RunResult } from '../adapters/types.js';
 
 export type FeatureExecutor = (feature: Feature) => Promise<RunResult>;
+export type SchedulerState = 'running' | 'paused' | 'aborting';
+export type SchedulerOutcome = 'completed' | 'aborted';
 
 export interface SchedulerOptions {
-  concurrency: number; // limite global (default 3)
+  concurrency: number;
   execute: FeatureExecutor;
+  initialDone?: Iterable<string>;
   onStart?: (feature: Feature) => void;
   onDone?: (feature: Feature, result: RunResult) => void;
+  onAbortFeature?: (featureId: string) => void;
+  onStateChange?: (state: SchedulerState) => void;
 }
 
-/**
- * Executa features respeitando dependsOn e o limite global de concorrência.
- * Política de falha configurável por feature via retry.onFail.
- */
-export async function schedule(
+export interface SchedulerController {
+  readonly result: Promise<SchedulerOutcome>;
+  getState(): SchedulerState;
+  pause(): void;
+  resume(): void;
+  abortFeature(featureId: string): boolean;
+  abortAll(): void;
+}
+
+export function schedule(
   ordered: Feature[],
   opts: SchedulerOptions,
-): Promise<void> {
-  const done = new Set<string>();
+): SchedulerController {
+  const done = new Set<string>(opts.initialDone ?? []);
   const remaining = [...ordered];
-  let active = 0;
-  let failed = false;
+  const active = new Map<string, Feature>();
+  let state: SchedulerState = 'running';
+  let settled = false;
+  let resolveResult!: (value: SchedulerOutcome) => void;
+  let rejectResult!: (reason?: unknown) => void;
+
+  const result = new Promise<SchedulerOutcome>((resolve, reject) => {
+    resolveResult = resolve;
+    rejectResult = reject;
+  });
+
+  const setState = (next: SchedulerState): void => {
+    if (state === next) return;
+    state = next;
+    opts.onStateChange?.(state);
+  };
 
   const ready = (): Feature[] =>
-    remaining.filter((f) => f.dependsOn.every((d) => done.has(d)));
+    remaining.filter((feature) => feature.dependsOn.every((dependency) => done.has(dependency)));
 
-  await new Promise<void>((resolve, reject) => {
-    const pump = (): void => {
-      if (failed) return;
-      if (remaining.length === 0 && active === 0) return resolve();
-      const readyFeatures = ready();
-      if (readyFeatures.length === 0 && active === 0) {
-        const blockers = remaining
-          .map((feature) => {
-            const missing = feature.dependsOn.filter((dep) => !done.has(dep));
-            return `${feature.id} -> [${missing.join(', ')}]`;
-          })
-          .join('; ');
-        return reject(
-          new Error(
-            `Deadlock: no executable features are ready. Unsatisfied dependencies: ${blockers}`,
-          ),
-        );
-      }
+  const maybeFinish = (): boolean => {
+    if (settled) return true;
+    if (remaining.length === 0 && active.size === 0) {
+      settled = true;
+      resolveResult('completed');
+      return true;
+    }
+    if (state === 'aborting' && active.size === 0) {
+      settled = true;
+      resolveResult('aborted');
+      return true;
+    }
+    return false;
+  };
 
-      for (const f of readyFeatures) {
-        if (active >= opts.concurrency) break;
-        remaining.splice(remaining.indexOf(f), 1);
-        active++;
-        opts.onStart?.(f);
-        opts
-          .execute(f)
-          .then((res) => {
-            active--;
-            opts.onDone?.(f, res);
-            if (!res.ok) {
-              const policy = f.retry?.onFail ?? 'stop';
-              if (policy === 'stop') {
-                failed = true;
-                return reject(new Error(`Feature ${f.id} falhou: ${res.summary}`));
-              }
-              done.add(f.id);
-              pump();
+  const pump = (): void => {
+    if (settled) return;
+    if (maybeFinish()) return;
+    if (state !== 'running') return;
+
+    const readyFeatures = ready();
+    if (readyFeatures.length === 0 && active.size === 0) {
+      const blockers = remaining
+        .map((feature) => {
+          const missing = feature.dependsOn.filter((dependency) => !done.has(dependency));
+          return `${feature.id} -> [${missing.join(', ')}]`;
+        })
+        .join('; ');
+      settled = true;
+      rejectResult(
+        new Error(
+          `Deadlock: no executable features are ready. Unsatisfied dependencies: ${blockers}`,
+        ),
+      );
+      return;
+    }
+
+    for (const feature of readyFeatures) {
+      if (active.size >= opts.concurrency || state !== 'running') break;
+      remaining.splice(remaining.indexOf(feature), 1);
+      active.set(feature.id, feature);
+      opts.onStart?.(feature);
+
+      opts.execute(feature)
+        .then((resultValue) => {
+          active.delete(feature.id);
+          opts.onDone?.(feature, resultValue);
+
+          if (resultValue.aborted) {
+            if (state === 'aborting') {
+              maybeFinish();
               return;
             }
-            done.add(f.id);
+            remaining.unshift(feature);
             pump();
-          })
-          .catch((err) => {
-            active--;
-            failed = true;
-            reject(err);
-          });
+            return;
+          }
+
+          if (!resultValue.ok) {
+            const policy = feature.retry?.onFail ?? 'stop';
+            if (policy === 'stop') {
+              settled = true;
+              rejectResult(new Error(`Feature ${feature.id} falhou: ${resultValue.summary}`));
+              return;
+            }
+            done.add(feature.id);
+            pump();
+            return;
+          }
+
+          done.add(feature.id);
+          pump();
+        })
+        .catch((error) => {
+          active.delete(feature.id);
+          settled = true;
+          rejectResult(error);
+        });
+    }
+  };
+
+  queueMicrotask(pump);
+
+  return {
+    result,
+    getState: () => state,
+    pause() {
+      if (settled || state === 'aborting') return;
+      setState('paused');
+    },
+    resume() {
+      if (settled || state !== 'paused') return;
+      setState('running');
+      pump();
+    },
+    abortFeature(featureId: string) {
+      const feature = active.get(featureId);
+      if (!feature || settled) return false;
+      opts.onAbortFeature?.(featureId);
+      return true;
+    },
+    abortAll() {
+      if (settled || state === 'aborting') return;
+      setState('aborting');
+      for (const featureId of active.keys()) {
+        opts.onAbortFeature?.(featureId);
       }
-    };
-    pump();
-  });
+      maybeFinish();
+    },
+  };
 }

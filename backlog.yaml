@@ -1,169 +1,557 @@
 version: 2
 repo: metal-squad
 defaults:
-  tool: claude
-  effort: medium
-  skills: []
-
+  tool: codex
+  effort: high
+  skills:
+    - implement
+  stageSkills:
+    specify:
+      - speckit-specify
+    plan:
+      - speckit-plan
+    tasks:
+      - speckit-tasks
+    implement:
+      - speckit-implement
+      - dev-flow
+    validate:
+      - reviewr
+budget:
+  maxTokens: 5000000
+  maxCostUsd: 100
+  perFeatureMaxTokens: 500000
 epics:
-  - id: epic-orchestration-v2
+  - id: e02-modern-tui
+    title: E02 — Modern TUI
+    features:
+      - id: feat-08
+        title: F08 — Navegacao por Sessoes/Runs
+        tool: claude
+        model: claude-sonnet-4-6
+        effort: high
+        skills:
+          - dev-flow
+        specFile: docs/features/F08-session-navigation.md
+        context:
+          - docs/ROADMAP.md
+        dependsOn: []
+        tasks: []
+        retry:
+          maxAttempts: 1
+          backoffMs: 5000
+          onFail: stop
+        workflow:
+          mode: staged
+          stages:
+            - specify
+            - plan
+            - tasks
+            - implement
+          approvals:
+            channel: telegram
+            autoAdvance: false
+          syncTasksToBacklog: true
+      - id: feat-09
+        title: F09 — Command Palette & Shortcuts
+        tool: claude
+        model: claude-sonnet-4-5
+        effort: high
+        skills:
+          - dev-flow
+        specFile: docs/features/F09-command-palette.md
+        context:
+          - docs/ROADMAP.md
+        dependsOn: []
+        tasks:
+          - id: T001
+            title: Create fuzzy matching utility in src/ui/utils/fuzzyMatch.ts
+            status: todo
+            dependsOn: []
+          - id: T002
+            title: Create command types contract from
+              specs/003-command-palette/contracts/types.ts to
+              src/ui/types/commands.ts
+            status: todo
+            dependsOn: []
+          - id: T003
+            title: "[P] Create keyboard shortcut types from contracts to
+              src/ui/types/shortcuts.ts"
+            status: todo
+            dependsOn: []
+          - id: T004
+            title: Create command registry structure in src/ui/commands/registry.ts
+            status: todo
+            dependsOn: []
+          - id: T005
+            title: Implement useKeyboardShortcuts hook in
+              src/ui/hooks/useKeyboardShortcuts.ts
+            status: todo
+            dependsOn: []
+          - id: T006
+            title: Implement useCommandPalette hook in src/ui/hooks/useCommandPalette.ts
+            status: todo
+            dependsOn: []
+          - id: T007
+            title: Integrate keyboard shortcut hook into App.tsx (refactor existing useInput
+              logic)
+            status: todo
+            dependsOn: []
+          - id: T008
+            title: Define initial command set in src/ui/commands/definitions.ts (run, pause,
+              resume, abort, stats, config, help)
+            status: todo
+            dependsOn: []
+          - id: T009
+            title: "[US1] Create CommandPalette component in
+              src/ui/components/CommandPalette.tsx"
+            status: todo
+            dependsOn: []
+          - id: T010
+            title: "[US1] Implement command filtering logic using fuzzyMatch utility in
+              CommandPalette component"
+            status: todo
+            dependsOn: []
+          - id: T011
+            title: "[US1] Add keyboard event handlers for palette (Ctrl+P, :, Esc, Enter,
+              arrows/j/k navigation)"
+            status: todo
+            dependsOn: []
+          - id: T012
+            title: "[US1] Integrate CommandPalette into App.tsx with state management"
+            status: todo
+            dependsOn: []
+          - id: T013
+            title: "[US1] Implement command availability filtering (hide unavailable
+              commands)"
+            status: todo
+            dependsOn: []
+          - id: T014
+            title: "[US1] Add command category grouping display in palette UI"
+            status: todo
+            dependsOn: []
+          - id: T015
+            title: "[US1] Test command palette opening, filtering, and command execution per
+              quickstart.md scenarios 1-2"
+            status: todo
+            dependsOn: []
+          - id: T016
+            title: "[P] [US2] Define gates panel shortcuts in
+              src/ui/commands/gatesShortcuts.ts (a, s, r)"
+            status: todo
+            dependsOn: []
+          - id: T017
+            title: "[P] [US2] Define run detail shortcuts in src/ui/commands/runShortcuts.ts
+              (p, x)"
+            status: todo
+            dependsOn: []
+          - id: T018
+            title: "[US2] Implement focus context tracking in App.tsx (gates, runs,
+              run-detail panels)"
+            status: todo
+            dependsOn: []
+          - id: T019
+            title: "[US2] Update useKeyboardShortcuts hook to filter active shortcuts by
+              current context"
+            status: todo
+            dependsOn: []
+          - id: T020
+            title: "[US2] Wire gate approval/skip/retry actions to shortcuts in GatePanel
+              component"
+            status: todo
+            dependsOn: []
+          - id: T021
+            title: "[US2] Wire pause/abort actions to shortcuts in run detail panel"
+            status: todo
+            dependsOn: []
+          - id: T022
+            title: "[US2] Test context-aware shortcuts per quickstart.md scenario 3"
+            status: todo
+            dependsOn: []
+          - id: T023
+            title: "[P] [US3] Define global navigation shortcuts in
+              src/ui/commands/globalShortcuts.ts (q, Tab, j/k, Enter, Esc)"
+            status: todo
+            dependsOn: []
+          - id: T024
+            title: "[P] [US3] Define global view shortcuts (Ctrl+L for log toggle, ? for
+              help, 1-5 for tabs)"
+            status: todo
+            dependsOn: []
+          - id: T025
+            title: "[US3] Implement quit shortcut (q) with cleanup logic in App.tsx"
+            status: todo
+            dependsOn: []
+          - id: T026
+            title: "[US3] Implement Tab focus cycling logic across panels in App.tsx"
+            status: todo
+            dependsOn: []
+          - id: T027
+            title: "[US3] Implement j/k list navigation in RunTable and GatePanel
+              components"
+            status: todo
+            dependsOn: []
+          - id: T028
+            title: "[US3] Implement Enter drill-down and Esc back navigation in App.tsx"
+            status: todo
+            dependsOn: []
+          - id: T029
+            title: "[US3] Implement Ctrl+L log toggle functionality"
+            status: todo
+            dependsOn: []
+          - id: T030
+            title: "[US3] Implement number key tab switching (1-5) if tabs exist"
+            status: todo
+            dependsOn: []
+          - id: T031
+            title: "[US3] Test global navigation shortcuts per quickstart.md scenario 4"
+            status: todo
+            dependsOn: []
+          - id: T032
+            title: "[US4] Create HelpOverlay component in src/ui/components/HelpOverlay.tsx"
+            status: todo
+            dependsOn: []
+          - id: T033
+            title: "[US4] Implement help overlay state management (isOpen, current context)"
+            status: todo
+            dependsOn: []
+          - id: T034
+            title: "[US4] Generate help content from keyboard shortcut registry (global vs
+              context-specific)"
+            status: todo
+            dependsOn: []
+          - id: T035
+            title: "[US4] Add context highlighting logic (highlight shortcuts relevant to
+              current focus)"
+            status: todo
+            dependsOn: []
+          - id: T036
+            title: "[US4] Integrate HelpOverlay into App.tsx with ? key binding"
+            status: todo
+            dependsOn: []
+          - id: T037
+            title: "[US4] Implement help overlay close on ? or Esc"
+            status: todo
+            dependsOn: []
+          - id: T038
+            title: "[US4] Test help overlay per quickstart.md scenario 5"
+            status: todo
+            dependsOn: []
+          - id: T039
+            title: "[US5] Update StatusBar component to accept dynamic shortcut hints prop"
+            status: todo
+            dependsOn: []
+          - id: T040
+            title: "[US5] Implement hint generation from active shortcuts for current
+              context"
+            status: todo
+            dependsOn: []
+          - id: T041
+            title: "[US5] Wire status bar hints to focus context in App.tsx"
+            status: todo
+            dependsOn: []
+          - id: T042
+            title: '[US5] Format hints compactly for status bar display (e.g., "a:approve
+              s:skip r:retry ?:help")'
+            status: todo
+            dependsOn: []
+          - id: T043
+            title: "[US5] Test status bar hints update per quickstart.md scenario 6"
+            status: todo
+            dependsOn: []
+          - id: T044
+            title: "[P] Test edge cases per quickstart.md (invalid commands, modal
+              conflicts, shortcuts when palette open)"
+            status: todo
+            dependsOn: []
+          - id: T045
+            title: "[P] Ensure command palette and help overlay prevent shortcut propagation
+              when open"
+            status: todo
+            dependsOn: []
+          - id: T046
+            title: Verify all shortcuts work without conflicts across contexts
+            status: todo
+            dependsOn: []
+          - id: T047
+            title: "Performance check: palette opens/closes instantly (<50ms), fuzzy search
+              feels real-time (<100ms)"
+            status: todo
+            dependsOn: []
+          - id: T048
+            title: Run full quickstart.md validation scenarios 1-6
+            status: todo
+            dependsOn: []
+          - id: T049
+            title: Verify no regressions in existing TUI functionality
+            status: todo
+            dependsOn: []
+          - id: T050
+            title: "Code cleanup: remove old inline keyboard handling from App.tsx after
+              hook refactor"
+            status: todo
+            dependsOn: []
+        retry:
+          maxAttempts: 1
+          backoffMs: 5000
+          onFail: stop
+        workflow:
+          mode: staged
+          stages:
+            - specify
+            - plan
+            - tasks
+            - implement
+          approvals:
+            channel: telegram
+            autoAdvance: false
+          syncTasksToBacklog: true
+      - id: feat-10
+        title: F10 — Theme System
+        tool: claude
+        model: claude-sonnet-4-5
+        effort: high
+        skills:
+          - dev-flow
+        specFile: docs/features/F10-theme-system.md
+        context:
+          - docs/ROADMAP.md
+        dependsOn: []
+        tasks: []
+        retry:
+          maxAttempts: 1
+          backoffMs: 5000
+          onFail: stop
+        workflow:
+          mode: staged
+          stages:
+            - specify
+            - plan
+            - tasks
+            - implement
+          approvals:
+            channel: telegram
+            autoAdvance: false
+          syncTasksToBacklog: true
+  - id: e03-orchestration-v2
     title: E03 — Orchestration v2
     features:
-      - id: feat-11
-        title: F11 — Retry Policies
-        tool: codex
-        model: gpt-5.4
-        effort: medium
-        skills: []
-        specFile: docs/features/F11-retry-policies.md
+      - id: feat-13
+        title: F13 — Execution Graph Visualization
+        tool: claude
+        model: claude-sonnet-4-5
+        effort: high
+        skills:
+          - dev-flow
+        specFile: docs/features/F13-execution-graph.md
         context:
-          - src/core/backlog/schema.ts
-          - src/core/runner/execute.ts
-          - src/core/orchestrator/scheduler.ts
-          - src/db/index.ts
-          - src/db/repo.ts
-          - tests/runner/execute.test.ts
+          - docs/ROADMAP.md
         dependsOn: []
-        spec: |
-          Implemente a feature F11 — Retry Policies no repositório metal-squad.
-
-          ## Contexto atual
-
-          O scheduler em `src/core/orchestrator/scheduler.ts` tem política fixa stop-on-fail:
-          quando uma feature falha, `failed = true` e o pipeline para imediatamente com reject.
-          Não há retry automático.
-
-          O executor em `src/core/runner/execute.ts` chama `getAdapter(feature.tool).runFeature()`
-          diretamente, sem lógica de retry. Quando `res.ok === false`, simplesmente faz
-          `finishRun(runId, 'failed', res.summary)` e emite `run:failed`.
-
-          O schema em `src/core/backlog/schema.ts` não tem campo `retry` no `FeatureSchema`.
-
-          ## Mudanças necessárias por arquivo
-
-          ### src/core/backlog/schema.ts
-
-          Adicionar schema de retry e campo opcional na feature:
-
-          ```typescript
-          export const OnFailSchema = z.enum(['stop', 'continue', 'gate']);
-
-          export const RetrySchema = z.object({
-            maxAttempts: z.number().int().min(1).max(10).default(1),
-            backoffMs: z.number().int().min(0).default(5000),
-            onFail: OnFailSchema.default('stop'),
-          });
-
-          // Dentro de FeatureSchema, adicionar:
-          retry: RetrySchema.optional(),
-          ```
-
-          Exportar `OnFail`, `Retry` como tipos derivados.
-
-          ### src/db/index.ts
-
-          Adicionar tabela `retry_history` na função `migrate()`:
-
-          ```sql
-          CREATE TABLE IF NOT EXISTS retry_history (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            run_id INTEGER NOT NULL REFERENCES runs(id),
-            attempt INTEGER NOT NULL,
-            error TEXT,
-            retried_at TEXT NOT NULL DEFAULT (datetime('now'))
-          );
-          ```
-
-          ### src/db/repo.ts
-
-          Adicionar função:
-
-          ```typescript
-          export function createRetryRecord(runId: number, attempt: number, error?: string): void {
-            getDb('readwrite')
-              .prepare(
-                `INSERT INTO retry_history (run_id, attempt, error)
-                 VALUES (?, ?, ?)`,
-              )
-              .run(runId, attempt, error ?? null);
-          }
-          ```
-
-          ### src/core/runner/execute.ts
-
-          Substituir a chamada direta a `getAdapter(...).runFeature()` por uma função
-          `runWithRetry(feature, prompt, opts)` que:
-
-          1. Loop de tentativas até `maxAttempts` (default 1 = sem retry):
-             ```
-             for attempt 1..maxAttempts:
-               res = await adapter.runFeature(feature, prompt, { cwd, runId })
-               if res.ok → return res
-               createRetryRecord(runId, attempt, res.summary)
-               if attempt < maxAttempts → await sleep(backoffWithJitter(backoffMs, attempt))
-             ```
-          2. Backoff exponencial com jitter:
-             ```typescript
-             function backoffWithJitter(baseMs: number, attempt: number): number {
-               const exp = Math.min(baseMs * 2 ** (attempt - 1), 60_000);
-               return exp * (0.5 + Math.random() * 0.5);
-             }
-             ```
-          3. Após esgotar tentativas, verificar `retry.onFail`:
-             - `'stop'` (default): comportamento atual — finishRun failed, emite run:failed, throw
-             - `'continue'`: finishRun failed, emite run:failed, retorna `{ ok: false, summary }` SEM throw
-             - `'gate'`: cria gate via `createGate(runId, featureId, repoId)`, finishRun blocked, emite run:failed, retorna `{ ok: false }`
-
-          Para `onFail: 'continue'`, o executor não pode lançar exceção, pois o scheduler
-          interpreta exceção como falha fatal. O scheduler precisa receber `res.ok === false`
-          e ter como decidir se para ou continua.
-
-          ### src/core/orchestrator/scheduler.ts
-
-          Atualizar a política de falha para respeitar `onFail`:
-
-          O scheduler recebe `RunResult` de `execute(f)`. Atualmente para em qualquer `!res.ok`.
-          Ajustar para:
-
-          ```typescript
-          .then((res) => {
-            active--;
-            opts.onDone?.(f, res);
-            if (!res.ok) {
-              const policy = f.retry?.onFail ?? 'stop';
-              if (policy === 'stop') {
-                failed = true;
-                return reject(new Error(`Feature ${f.id} falhou: ${res.summary}`));
-              }
-              // 'continue' ou 'gate': marca como done para desbloquear dependentes
-              done.add(f.id);
-              pump();
-              return;
-            }
-            done.add(f.id);
-            pump();
-          })
-          ```
-
-          ### tests/runner/execute.test.ts
-
-          Adicionar testes para:
-          - Feature sem `retry` usa comportamento atual (stop-on-fail, 1 tentativa)
-          - Feature com `retry.maxAttempts: 3` tenta 3 vezes antes de falhar
-          - Feature com `retry.onFail: 'continue'` não lança exceção, pipeline continua
-          - `backoffWithJitter` retorna valor no intervalo esperado
-
-          Use o padrão de mock já estabelecido no arquivo (vi.fn(), adapters mockados).
-
-          ## Critérios de aceite
-
-          - [ ] `FeatureSchema` aceita campo `retry` com `maxAttempts`, `backoffMs`, `onFail`
-          - [ ] Tabela `retry_history` criada no SQLite
-          - [ ] Tentativas registradas em `retry_history` após cada falha não-final
-          - [ ] `onFail: 'stop'` mantém comportamento atual (para tudo)
-          - [ ] `onFail: 'continue'` registra falha e avança pipeline
-          - [ ] `onFail: 'gate'` cria gate de aprovação humana
-          - [ ] Backoff exponencial com jitter entre tentativas
-          - [ ] Todos os testes passam: npx vitest run
-          - [ ] Sem erros de tipo: npx tsc --noEmit
         tasks: []
+        retry:
+          maxAttempts: 1
+          backoffMs: 5000
+          onFail: stop
+        workflow:
+          mode: staged
+          stages:
+            - specify
+            - plan
+            - tasks
+            - implement
+          approvals:
+            channel: telegram
+            autoAdvance: false
+          syncTasksToBacklog: true
+      - id: feat-15
+        title: F15 — Event System (pub/sub interno)
+        tool: claude
+        model: claude-sonnet-4-5
+        effort: high
+        skills:
+          - dev-flow
+        specFile: docs/features/F15-event-system.md
+        context:
+          - docs/ROADMAP.md
+        dependsOn: []
+        tasks: []
+        retry:
+          maxAttempts: 1
+          backoffMs: 5000
+          onFail: stop
+        workflow:
+          mode: staged
+          stages:
+            - specify
+            - plan
+            - tasks
+            - implement
+          approvals:
+            channel: telegram
+            autoAdvance: false
+          syncTasksToBacklog: true
+      - id: feat-26
+        title: F26 — Resume de pipeline a partir do estado persistido
+        tool: claude
+        model: claude-sonnet-4-5
+        effort: high
+        skills:
+          - dev-flow
+        specFile: docs/features/F26-resume-pipeline-from-state.md
+        context:
+          - docs/ROADMAP.md
+        dependsOn: []
+        tasks: []
+        retry:
+          maxAttempts: 1
+          backoffMs: 5000
+          onFail: stop
+        workflow:
+          mode: staged
+          stages:
+            - specify
+            - plan
+            - tasks
+            - implement
+          approvals:
+            channel: telegram
+            autoAdvance: false
+          syncTasksToBacklog: true
+  - id: e05-developer-experience
+    title: E05 — Developer Experience
+    features:
+      - id: feat-20
+        title: F20 — Plugin System para Adapters
+        tool: claude
+        model: claude-sonnet-4-5
+        effort: high
+        skills:
+          - dev-flow
+        specFile: docs/features/F20-plugin-adapters.md
+        context:
+          - docs/ROADMAP.md
+        dependsOn: []
+        tasks: []
+        retry:
+          maxAttempts: 1
+          backoffMs: 5000
+          onFail: stop
+        workflow:
+          mode: staged
+          stages:
+            - specify
+            - plan
+            - tasks
+            - implement
+          approvals:
+            channel: telegram
+            autoAdvance: false
+          syncTasksToBacklog: true
+      - id: feat-21
+        title: F21 — Interactive Setup Wizard
+        tool: claude
+        model: claude-sonnet-4-5
+        effort: high
+        skills:
+          - dev-flow
+        specFile: docs/features/F21-setup-wizard.md
+        context:
+          - docs/ROADMAP.md
+        dependsOn: []
+        tasks: []
+        retry:
+          maxAttempts: 1
+          backoffMs: 5000
+          onFail: stop
+        workflow:
+          mode: staged
+          stages:
+            - specify
+            - plan
+            - tasks
+            - implement
+          approvals:
+            channel: telegram
+            autoAdvance: false
+          syncTasksToBacklog: true
+      - id: feat-22
+        title: F22 — Per-Repo Config Overrides
+        tool: claude
+        model: claude-sonnet-4-5
+        effort: high
+        skills:
+          - dev-flow
+        specFile: docs/features/F22-per-repo-config.md
+        context:
+          - docs/ROADMAP.md
+        dependsOn: []
+        tasks: []
+        retry:
+          maxAttempts: 1
+          backoffMs: 5000
+          onFail: stop
+        workflow:
+          mode: staged
+          stages:
+            - specify
+            - plan
+            - tasks
+            - implement
+          approvals:
+            channel: telegram
+            autoAdvance: false
+          syncTasksToBacklog: true
+      - id: feat-23
+        title: F23 — CLAUDE.md / Agent Config Generation
+        tool: claude
+        model: claude-sonnet-4-5
+        effort: high
+        skills:
+          - dev-flow
+        specFile: docs/features/F23-agent-config-gen.md
+        context:
+          - docs/ROADMAP.md
+        dependsOn: []
+        tasks: []
+        retry:
+          maxAttempts: 1
+          backoffMs: 5000
+          onFail: stop
+        workflow:
+          mode: staged
+          stages:
+            - specify
+            - plan
+            - tasks
+            - implement
+          approvals:
+            channel: telegram
+            autoAdvance: false
+          syncTasksToBacklog: true
+      - id: feat-25
+        title: F25 — Hardening do fluxo msq-develop
+        tool: claude
+        model: claude-sonnet-4-5
+        effort: high
+        skills:
+          - dev-flow
+        specFile: docs/features/F25-msq-develop-harness-hardening.md
+        context:
+          - docs/ROADMAP.md
+        dependsOn: []
+        tasks: []
+        retry:
+          maxAttempts: 1
+          backoffMs: 5000
+          onFail: stop
+        workflow:
+          mode: staged
+          stages:
+            - specify
+            - plan
+            - tasks
+            - implement
+          approvals:
+            channel: telegram
+            autoAdvance: false
+          syncTasksToBacklog: true

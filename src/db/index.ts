@@ -13,10 +13,10 @@ export class DbAccessError extends Error {
   ) {
     super(
       [
-        `Banco SQLite sem escrita em: ${dbPath}`,
+        `SQLite database not writable at: ${dbPath}`,
         detail,
-        `Corrija as permissões do arquivo/diretório ou defina ${DB_PATH_ENV} para um caminho gravável.`,
-        `Exemplo: ${DB_PATH_ENV}=$(pwd)/.metal-squad/app.db msq run --feature feat-1`,
+        `Fix file/directory permissions or set ${DB_PATH_ENV} to a writable path.`,
+        `Example: ${DB_PATH_ENV}=$(pwd)/.metal-squad/app.db msq run --feature feat-1`,
       ].join('\n'),
     );
     this.name = 'DbAccessError';
@@ -114,6 +114,7 @@ function migrate(d: Database.Database): void {
       started_at TEXT NOT NULL DEFAULT (datetime('now')),
       ended_at   TEXT,
       input_tokens INTEGER,
+      cached_input_tokens INTEGER,
       output_tokens INTEGER,
       total_tokens INTEGER
     );
@@ -122,6 +123,7 @@ function migrate(d: Database.Database): void {
       id        INTEGER PRIMARY KEY AUTOINCREMENT,
       run_id    INTEGER NOT NULL REFERENCES runs(id),
       input     INTEGER NOT NULL DEFAULT 0,
+      cached_input INTEGER NOT NULL DEFAULT 0,
       output    INTEGER NOT NULL DEFAULT 0,
       total     INTEGER NOT NULL DEFAULT 0
     );
@@ -171,11 +173,28 @@ function migrate(d: Database.Database): void {
       repo_id     TEXT NOT NULL REFERENCES repos(repo_id),
       feature_id  TEXT NOT NULL,
       status      TEXT NOT NULL DEFAULT 'running',
+      cwd         TEXT,
       current_stage TEXT,
       auto_advance INTEGER NOT NULL DEFAULT 0,
+      plan_json   TEXT NOT NULL DEFAULT '[]',
+      done_json   TEXT NOT NULL DEFAULT '[]',
+      pending_json TEXT NOT NULL DEFAULT '[]',
+      active_json TEXT NOT NULL DEFAULT '[]',
+      aborted_json TEXT NOT NULL DEFAULT '[]',
+      requested_abort_feature_id TEXT,
+      resume_count INTEGER NOT NULL DEFAULT 0,
+      resume_summary TEXT,
       created_at  TEXT NOT NULL DEFAULT (datetime('now')),
       updated_at  TEXT NOT NULL DEFAULT (datetime('now')),
       ended_at    TEXT
+    );
+
+    CREATE TABLE IF NOT EXISTS run_events (
+      id         INTEGER PRIMARY KEY AUTOINCREMENT,
+      run_id     INTEGER NOT NULL REFERENCES runs(id),
+      event      TEXT NOT NULL,
+      metadata   TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
 
     CREATE TABLE IF NOT EXISTS stage_requests (
@@ -209,6 +228,10 @@ function migrate(d: Database.Database): void {
   if (!hasOutputTokens) {
     d.exec(`ALTER TABLE runs ADD COLUMN output_tokens INTEGER`);
   }
+  const hasCachedInputTokens = runColumns.some((column) => column.name === 'cached_input_tokens');
+  if (!hasCachedInputTokens) {
+    d.exec(`ALTER TABLE runs ADD COLUMN cached_input_tokens INTEGER`);
+  }
   const hasTotalTokens = runColumns.some((column) => column.name === 'total_tokens');
   if (!hasTotalTokens) {
     d.exec(`ALTER TABLE runs ADD COLUMN total_tokens INTEGER`);
@@ -221,6 +244,33 @@ function migrate(d: Database.Database): void {
   if (!hasStage) {
     d.exec(`ALTER TABLE runs ADD COLUMN stage TEXT`);
   }
+
+  const usageColumns = (d
+    .prepare(`PRAGMA table_info(token_usage)`)
+    .all() ?? []) as Array<{ name?: string }>;
+  const hasCachedInputUsage = usageColumns.some((column) => column.name === 'cached_input');
+  if (!hasCachedInputUsage) {
+    d.exec(`ALTER TABLE token_usage ADD COLUMN cached_input INTEGER NOT NULL DEFAULT 0`);
+  }
+
+  const pipelineColumns = (d
+    .prepare(`PRAGMA table_info(pipelines)`)
+    .all() ?? []) as Array<{ name?: string }>;
+  const ensurePipelineColumn = (name: string, sql: string): void => {
+    if (!pipelineColumns.some((column) => column.name === name)) {
+      d.exec(sql);
+      pipelineColumns.push({ name });
+    }
+  };
+  ensurePipelineColumn('cwd', `ALTER TABLE pipelines ADD COLUMN cwd TEXT`);
+  ensurePipelineColumn('plan_json', `ALTER TABLE pipelines ADD COLUMN plan_json TEXT NOT NULL DEFAULT '[]'`);
+  ensurePipelineColumn('done_json', `ALTER TABLE pipelines ADD COLUMN done_json TEXT NOT NULL DEFAULT '[]'`);
+  ensurePipelineColumn('pending_json', `ALTER TABLE pipelines ADD COLUMN pending_json TEXT NOT NULL DEFAULT '[]'`);
+  ensurePipelineColumn('active_json', `ALTER TABLE pipelines ADD COLUMN active_json TEXT NOT NULL DEFAULT '[]'`);
+  ensurePipelineColumn('aborted_json', `ALTER TABLE pipelines ADD COLUMN aborted_json TEXT NOT NULL DEFAULT '[]'`);
+  ensurePipelineColumn('requested_abort_feature_id', `ALTER TABLE pipelines ADD COLUMN requested_abort_feature_id TEXT`);
+  ensurePipelineColumn('resume_count', `ALTER TABLE pipelines ADD COLUMN resume_count INTEGER NOT NULL DEFAULT 0`);
+  ensurePipelineColumn('resume_summary', `ALTER TABLE pipelines ADD COLUMN resume_summary TEXT`);
 }
 
 function toDbAccessError(error: unknown, dbPath: string): Error {

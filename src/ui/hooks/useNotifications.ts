@@ -18,7 +18,7 @@ export function useNotifications(maxItems = 12): NotificationEntry[] {
         id: ++counter.current,
         event,
         message,
-        ts: new Date().toLocaleTimeString('pt-BR', {
+        ts: new Date().toLocaleTimeString('en-US', {
           hour: '2-digit',
           minute: '2-digit',
           second: '2-digit',
@@ -28,18 +28,37 @@ export function useNotifications(maxItems = 12): NotificationEntry[] {
     };
 
     const unsubscribers = [
+      msqEventBus.subscribe('run:start', ({ featureId }) =>
+        push('run:start', `${featureId} started`)),
       msqEventBus.subscribe('gate:created', ({ gateId, featureId }) =>
         push('gate:created', `gate ${gateId} → ${featureId}`)),
+      msqEventBus.subscribe('gate:resolved', ({ gateId, decision }) =>
+        push('gate:resolved', `gate ${gateId} ${decision}`)),
+      msqEventBus.subscribe('stage:request-created', ({ requestId, featureId, stage, prompt }) =>
+        push('stage:request-created', `stage:${requestId} ${featureId} ${stage} · ${prompt}`)),
+      msqEventBus.subscribe('stage:request-resolved', ({ requestId, response }) =>
+        push('stage:request-resolved', formatStageResponse(requestId, response))),
       msqEventBus.subscribe('run:failed', ({ featureId }) =>
-        push('run:failed', `${featureId} falhou`)),
+        push('run:failed', `${featureId} failed`)),
       msqEventBus.subscribe('budget:alert', ({ percent }) =>
-        push('budget:alert', `budget ${percent}% atingido`)),
+        push('budget:alert', `budget ${percent}% reached`)),
       msqEventBus.subscribe('run:done', ({ featureId }) =>
-        push('run:done', `${featureId} concluido`)),
+        push('run:done', `${featureId} done`)),
+      msqEventBus.subscribe('ui:info', ({ message }) =>
+        push('ui:info', message)),
+      msqEventBus.subscribe('ui:notice', ({ message }) =>
+        push('ui:notice', message)),
     ];
 
     return () => { for (const u of unsubscribers) u(); };
   }, [maxItems]);
 
   return items;
+}
+
+function formatStageResponse(requestId: number, response: string): string {
+  if (response === 'advance') return `stage:${requestId} approved and advanced`;
+  if (response === 'hold') return `stage:${requestId} skipped for now and kept on hold`;
+  if (response === 'retry') return `stage:${requestId} requested retry`;
+  return `stage:${requestId} resolved as ${response}`;
 }
