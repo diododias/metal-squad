@@ -1,6 +1,7 @@
 import React from 'react';
 import { Box, Text, useInput } from 'ink';
 import type { KeyboardShortcut } from '../types/shortcuts.js';
+import { getLayoutMode } from '../format.js';
 import { useTheme } from '../theme/context.js';
 import { getSurfaceBorderStyle, getSurfaceTitleStyle, mergeInkStyles } from '../theme/styles.js';
 
@@ -67,6 +68,7 @@ export function HelpOverlay({
   }
 
   const overlayWidth = Math.max(48, Math.min(width - 6, 92));
+  const stacked = getLayoutMode(width) === 'stacked';
   const globalShortcuts = shortcuts.filter((shortcut) => shortcut.scope === 'global');
   const contextShortcuts = shortcuts.filter((shortcut) => shortcut.scope === 'context');
   const activeContextShortcuts = contextShortcuts.filter((shortcut) => shortcut.context === currentContext);
@@ -76,6 +78,15 @@ export function HelpOverlay({
       <Box borderStyle="round" {...getSurfaceBorderStyle(theme, { active: true, role: 'warning' })} paddingX={1} width={overlayWidth} flexDirection="column">
         <Text {...getSurfaceTitleStyle(theme, true)}>Keyboard Shortcuts</Text>
         <Text {...theme.role('muted')}>Current context: {currentContext}</Text>
+        {stacked && (
+          // F31 "Navegacao e casos de borda": below 80 columns the kanban
+          // groups render stacked vertically instead of side-by-side, but
+          // the same bindings still apply — ←/→ still switches the active
+          // column, j/k still moves within it.
+          <Text {...theme.role('warning')}>
+            Narrow terminal (&lt;80 col): columns stack vertically — ←/→ still switches the active column, j/k still moves within it.
+          </Text>
+        )}
         <Box marginTop={1} flexDirection="column">
           <Text {...theme.role('text')} bold>Global</Text>
           {globalShortcuts.map((shortcut) => renderShortcutLine(theme, shortcut, currentContext))}

@@ -605,6 +605,7 @@ export function App(): React.ReactElement {
       retrySelectedGate,
       forceApproveSelectedGate,
       startSelectedFeature,
+      toggleDetailDensity,
       quit,
     }),
     [
@@ -626,6 +627,7 @@ export function App(): React.ReactElement {
       skipSelectedGate,
       startSelectedFeature,
       toggleDashboard,
+      toggleDetailDensity,
       toggleNotifications,
     ],
   );

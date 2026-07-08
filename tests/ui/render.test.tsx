@@ -13,6 +13,7 @@ import { WorkflowStepper } from '../../src/ui/components/WorkflowStepper.js';
 import { NotificationsFeed } from '../../src/ui/components/NotificationsFeed.js';
 import { StatusBar } from '../../src/ui/components/StatusBar.js';
 import { CommandPalette } from '../../src/ui/components/CommandPalette.js';
+import { HelpOverlay } from '../../src/ui/components/HelpOverlay.js';
 import { ThemeProvider } from '../../src/ui/theme/context.js';
 import { resolveThemePreference } from '../../src/ui/theme/resolve.js';
 import type { RunSummary } from '../../src/db/repo.js';
@@ -484,6 +485,28 @@ describe('CommandPalette', () => {
   it('renders nothing when closed', () => {
     const { lastFrame } = renderWithTheme(
       <CommandPalette state={closedState} width={120} {...noopHandlers} />
+    );
+    expect(lastFrame()).toBe('');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// HelpOverlay
+// ---------------------------------------------------------------------------
+// Same `position="absolute"` limitation as CommandPalette above — the F31
+// stacked-mode note and dynamic shortcut list are exercised via the mock in
+// app.test.ts instead of asserting on lastFrame() content here.
+describe('HelpOverlay', () => {
+  it('renders nothing when closed', () => {
+    const { lastFrame } = renderWithTheme(
+      <HelpOverlay
+        isOpen={false}
+        currentContext="columns"
+        shortcuts={[]}
+        width={120}
+        onClose={vi.fn()}
+        onOpenPalette={vi.fn()}
+      />,
     );
     expect(lastFrame()).toBe('');
   });
