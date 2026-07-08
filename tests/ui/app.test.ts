@@ -8,6 +8,7 @@ const mockUseGates = vi.fn();
 const mockUseRunOutput = vi.fn();
 const mockUseTerminalWidth = vi.fn();
 const mockUseNotifications = vi.fn();
+const mockUseToasts = vi.fn(() => []);
 const mockGetFeatureCatalog = vi.fn();
 const mockLoadConfig = vi.fn(() => ({ concurrency: 3 }));
 const mockLoadBacklog = vi.fn(() => ({ epics: [] }));
@@ -20,8 +21,9 @@ const mockAbortPipeline = vi.fn();
 const mockSpawn = vi.fn(() => ({ once: vi.fn(), unref: vi.fn() }));
 const mockEventBusEmit = vi.fn();
 const mockMainPanel = vi.fn(() => React.createElement('main-panel'));
-const mockSidebar = vi.fn(() => React.createElement('sidebar-panel'));
+const mockGateFooter = vi.fn(() => React.createElement('gate-footer'));
 const mockStatusBar = vi.fn(() => React.createElement('status-bar'));
+const mockToastStack = vi.fn(() => React.createElement('toast-stack'));
 const mockCommandBar = vi.fn(() => React.createElement('command-bar'));
 const mockCommandPalette = vi.fn(() => React.createElement('command-palette'));
 const mockHelpOverlay = vi.fn(() => React.createElement('help-overlay'));
@@ -101,6 +103,10 @@ vi.mock('../../src/ui/hooks/useNotifications.js', () => ({
   useNotifications: mockUseNotifications,
 }));
 
+vi.mock('../../src/ui/hooks/useToasts.js', () => ({
+  useToasts: mockUseToasts,
+}));
+
 vi.mock('../../src/ui/catalog.js', () => ({
   getFeatureCatalog: mockGetFeatureCatalog,
   getPendingFeatures: mockGetPendingFeatures,
@@ -132,6 +138,7 @@ vi.mock('../../src/db/repo.js', () => ({
 vi.mock('../../src/core/events/index.js', () => ({
   msqEventBus: {
     emit: mockEventBusEmit,
+    subscribe: vi.fn(() => () => {}),
   },
 }));
 
@@ -147,12 +154,16 @@ vi.mock('../../src/ui/components/MainPanel.js', () => ({
   MainPanel: mockMainPanel,
 }));
 
-vi.mock('../../src/ui/components/Sidebar.js', () => ({
-  Sidebar: mockSidebar,
+vi.mock('../../src/ui/components/GateFooter.js', () => ({
+  GateFooter: mockGateFooter,
 }));
 
 vi.mock('../../src/ui/components/StatusBar.js', () => ({
   StatusBar: mockStatusBar,
+}));
+
+vi.mock('../../src/ui/components/ToastStack.js', () => ({
+  ToastStack: mockToastStack,
 }));
 
 vi.mock('../../src/ui/components/CommandBar.js', () => ({
@@ -230,6 +241,7 @@ describe('App', () => {
     mockUseGates.mockReturnValue({ gates: [], resolve: vi.fn() });
     mockUseRunOutput.mockReturnValue([]);
     mockUseNotifications.mockReturnValue([]);
+    mockUseToasts.mockReturnValue([]);
     mockGetFeatureCatalog.mockReturnValue({});
     mockGetPendingFeatures.mockReturnValue([]);
     mockLoadConfig.mockClear();
@@ -253,14 +265,14 @@ describe('App', () => {
     const element = App();
     const rootChildren = (element.props as { children: React.ReactNode }).children;
     const mainPanel = findElement(rootChildren, mockMainPanel);
-    const sidebar = findElement(rootChildren, mockSidebar);
+    const gateFooter = findElement(rootChildren, mockGateFooter);
     const statusBar = findElement(rootChildren, mockStatusBar);
     const commandBar = findElement(rootChildren, mockCommandBar);
 
     expect(React.isValidElement(element)).toBe(true);
     expect(mainPanel?.props.runs).toEqual([]);
     expect(mainPanel?.props.output).toEqual([]);
-    expect(sidebar?.props.mode).toBe('compact');
+    expect(gateFooter).toBeUndefined();
     expect(statusBar?.props.selectedRun).toBeNull();
     expect(commandBar?.props.hasRuns).toBe(false);
   });
@@ -319,13 +331,13 @@ describe('App', () => {
     const element = App();
     const rootChildren = (element.props as { children: React.ReactNode }).children;
     const mainPanel = findElement(rootChildren, mockMainPanel);
-    const sidebar = findElement(rootChildren, mockSidebar);
+    const gateFooter = findElement(rootChildren, mockGateFooter);
     const statusBar = findElement(rootChildren, mockStatusBar);
 
     expect(mainPanel?.props.selectedRun?.runId).toBe(1);
     expect(mainPanel?.props.selectedFeature?.title).toBe('F05 — Layout Multi-Painel');
     expect(mainPanel?.props.outputPaused).toBe(false);
-    expect(sidebar?.props.skills).toEqual(['implement']);
+    expect(gateFooter?.props.gates).toHaveLength(1);
     expect(statusBar?.props.gateCount).toBe(1);
   });
 

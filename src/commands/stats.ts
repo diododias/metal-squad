@@ -55,6 +55,7 @@ export function registerStats(program: Command): void {
         scope,
         `  Runs: ${runs.total} total (${runs.done} done, ${runs.failed} failed, ${runs.running} running, ${runs.blocked} blocked, ${runs.aborted} aborted)`,
         `  Tokens: ${formatTokensCompact(tokens.total)} (${formatTokensCompact(tokens.input)} input, ${formatTokensCompact(tokens.output)} output${tokens.cachedInput > 0 ? `, ${formatTokensCompact(tokens.cachedInput)} cached` : ''})`,
+        `  Context: avg ${formatContextPercent(stats.context.avgPercent)}${stats.context.maxPercent !== null ? `, max ${formatContextPercent(stats.context.maxPercent)}` : ''}`,
         `  Cost: ~$${stats.costUsd.toFixed(2)}`,
         `  Avg duration: ${formatDurationMs(stats.avgDurationMs)}`,
         `  Success rate: ${stats.successRatePercent !== null ? `${stats.successRatePercent}%` : '—'}`,
@@ -81,10 +82,24 @@ function printRunBreakdown(runId: number, asJson: boolean): void {
   }
   const breakdown = computeRunBreakdown(listRunEvents(runId), run.startedAt, run.endedAt);
   if (asJson) {
-    console.log(JSON.stringify({ runId, featureId: run.featureId, ...breakdown }, null, 2));
+    console.log(JSON.stringify({
+      runId,
+      featureId: run.featureId,
+      totalTokens: run.totalTokens,
+      contextWindowTokens: run.contextWindowTokens ?? null,
+      contextWindowPercent: run.contextWindowPercent ?? null,
+      ...breakdown,
+    }, null, 2));
     return;
   }
-  console.log(`${run.featureId} — ${formatBreakdown(breakdown) || 'no timeline recorded'}`);
+  const header = [
+    `${run.featureId}`,
+    run.totalTokens !== null ? `${formatTokensCompact(run.totalTokens)} tokens` : null,
+    run.contextWindowPercent !== null && run.contextWindowPercent !== undefined
+      ? `${formatContextPercent(run.contextWindowPercent)} of context`
+      : null,
+  ].filter(Boolean).join(' — ');
+  console.log(`${header} — ${formatBreakdown(breakdown) || 'no timeline recorded'}`);
 }
 
 export function parsePeriodDays(period: string): number {
@@ -97,4 +112,10 @@ export function parsePeriodDays(period: string): number {
   if (unit === 'h') return value / 24;
   if (unit === 'w') return value * 7;
   return value;
+}
+
+function formatContextPercent(value: number | null): string {
+  if (value === null || !Number.isFinite(value)) return '—';
+  const rounded = Math.round(value * 10) / 10;
+  return Number.isInteger(rounded) ? `${rounded}%` : `${rounded.toFixed(1)}%`;
 }

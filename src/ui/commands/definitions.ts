@@ -126,10 +126,10 @@ export function buildCommandDefinitions(options: CommandDefinitionOptions): Comm
     },
     {
       id: 'view-stats',
-      name: 'Toggle stats dashboard',
-      description: 'Open or close the cost analytics dashboard.',
+      name: 'Toggle telemetry dashboard',
+      description: 'Open or close the token and context telemetry dashboard.',
       category: 'view',
-      keywords: ['stats', 'dashboard', 'analytics', 'cost'],
+      keywords: ['stats', 'dashboard', 'analytics', 'tokens', 'context'],
       shortcut: 'd',
       available: () => true,
       execute: toggleDashboard,

@@ -254,7 +254,7 @@ describe('ui components', () => {
       },
     ];
     const { lastFrame } = renderWithTheme(<CostDashboard rows={rows} periodLabel="last 7 days" width={100} />, 'dark');
-    expect(lastFrame()).toContain('Token Usage');
+    expect(lastFrame()).toContain('Usage Telemetry');
     expect(lastFrame()).toContain('By feature');
   });
 

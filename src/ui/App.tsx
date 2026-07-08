@@ -17,10 +17,11 @@ import { createViewShortcuts } from './commands/viewShortcuts.js';
 import { CommandBar } from './components/CommandBar.js';
 import { CommandPalette } from './components/CommandPalette.js';
 import { CostDashboard } from './components/CostDashboard.js';
+import { GateFooter } from './components/GateFooter.js';
 import { HelpOverlay } from './components/HelpOverlay.js';
 import { MainPanel } from './components/MainPanel.js';
-import { Sidebar } from './components/Sidebar.js';
 import { StatusBar } from './components/StatusBar.js';
+import { ToastStack } from './components/ToastStack.js';
 import { getLayoutMode } from './format.js';
 import { useCommandPalette } from './hooks/useCommandPalette.js';
 import { useCompletedFeatures } from './hooks/useCompletedFeatures.js';
@@ -28,6 +29,7 @@ import { useGates } from './hooks/useGates.js';
 import type { PendingApproval } from './hooks/useGates.js';
 import { useKeyboardShortcuts } from './hooks/useKeyboardShortcuts.js';
 import { useNotifications } from './hooks/useNotifications.js';
+import { useToasts } from './hooks/useToasts.js';
 import { useRunBreakdown } from './hooks/useRunBreakdown.js';
 import { useRunOutput } from './hooks/useRunOutput.js';
 import { useRuns, useTaskRuns } from './hooks/useRuns.js';
@@ -131,6 +133,7 @@ export function App(): React.ReactElement {
   const doneFeatureIds = useCompletedFeatures(2000);
   const { gates, resolve } = useGates(2000);
   const notifications = useNotifications(40);
+  const toasts = useToasts(4);
   const width = useTerminalWidth();
   const [ui, setUi] = useState<UiState>({
     selectedRun: 0,
@@ -183,8 +186,7 @@ export function App(): React.ReactElement {
   const currentStage = taskRuns.find((task) => task.status === 'running')?.stage
     ?? selectedRun?.pipelineCurrentStage
     ?? undefined;
-  const sidebarWidth = layoutMode === 'full' ? 42 : layoutMode === 'compact' ? 36 : width - 2;
-  const mainWidth = layoutMode === 'stacked' ? width - 2 : Math.max(38, width - sidebarWidth - 5);
+  const mainWidth = Math.max(38, width - 2);
   const canPause = Boolean(selectedRun?.pipelineId && selectedRun.pipelineStatus === 'running');
   const canResume = Boolean(selectedRun?.pipelineId && selectedRun.pipelineStatus === 'paused');
   const canAbortFeature = Boolean(selectedRun?.pipelineId && selectedRun.status === 'running');
@@ -597,18 +599,22 @@ export function App(): React.ReactElement {
 
   return (
     <ThemeProvider resolution={themeResolution}>
-      <Box flexDirection="column" padding={1}>
-        <Box>
-          <Text {...metalStyle}>{BANNER.metalTop}</Text>
-          <Text {...squadStyle}>{BANNER.squadTop}</Text>
-        </Box>
-        <Box>
-          <Text {...metalStyle}>{BANNER.metalBottom}</Text>
-          <Text {...squadStyle}>{BANNER.squadBottom}</Text>
-        </Box>
-        <Box>
-          <Text {...accentStyle}>{`⚡ `}</Text>
-          <Text {...subtitleStyle}>{`ai dev pipeline orchestrator · ${layoutLabel}`}</Text>
+      <Box flexDirection="column" paddingX={1} paddingY={0}>
+        <Box marginTop={1} flexDirection="column">
+          <Box>
+            <Text {...metalStyle}>{BANNER.metalTop}</Text>
+            <Text {...squadStyle}>{BANNER.squadTop}</Text>
+          </Box>
+          <Box>
+            <Text {...metalStyle}>{BANNER.metalBottom}</Text>
+            <Text {...squadStyle}>{BANNER.squadBottom}</Text>
+          </Box>
+          <Box marginTop={1}>
+            <Text {...accentStyle}>Automated pipeline orchestrator</Text>
+          </Box>
+          <Box>
+            <Text {...subtitleStyle}>{layoutLabel}</Text>
+          </Box>
         </Box>
         <Text {...accentStyle}>{bannerRule(width)}</Text>
         {dashboardOpen ? (
@@ -616,7 +622,7 @@ export function App(): React.ReactElement {
             <CostDashboard rows={statsRows} periodLabel={dashboardPeriod.label} width={width - 2} />
           </Box>
         ) : (
-          <Box flexDirection={layoutMode === 'stacked' ? 'column' : 'row'} marginTop={1}>
+          <Box flexDirection="column" marginTop={1}>
             <MainPanel
               runs={runs}
               gates={gates}
@@ -636,21 +642,16 @@ export function App(): React.ReactElement {
               taskRuns={taskRuns}
               notifications={notifications}
             />
-            <Sidebar
-              runs={runs}
-              gates={gates}
-              notifications={notifications}
-              selectedRunIndex={selectedRunIndex}
-              selectedGateIndex={selectedGateIndex}
-              focusPanel={focusPanel}
-              activeView={activeView}
-              skills={selectedFeature?.skills ?? []}
-              taskRuns={taskRuns}
-              width={sidebarWidth}
-              mode={layoutMode}
-            />
           </Box>
         )}
+        {!dashboardOpen && gates.length > 0 ? (
+          <GateFooter
+            gates={gates}
+            selectedIndex={selectedGateIndex}
+            isFocused={focusPanel === 'gates'}
+            width={width - 2}
+          />
+        ) : null}
         <StatusBar
           selectedRun={selectedRun}
           selectedFeature={selectedFeature}
@@ -675,6 +676,7 @@ export function App(): React.ReactElement {
           dashboardOpen={dashboardOpen}
           width={width}
         />
+        <ToastStack toasts={toasts} width={width} />
         <CommandPalette
           state={paletteState}
           width={width}

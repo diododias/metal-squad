@@ -9,6 +9,7 @@ import {
   STATUS_ICON,
   formatClock,
   formatElapsed,
+  formatPercent,
   formatTokens,
   getRunStatusTone,
   getRunStageLabel,
@@ -74,7 +75,7 @@ function overviewSummary(
       <Text {...theme.role('muted')}> | </Text>
       <Text {...theme.statusTone('aborted')}>{aborted} aborted</Text>
       <Text {...theme.role('muted')}> | </Text>
-      <Text {...theme.role('text')}>{gates.length} open gates</Text>
+      <Text {...theme.role('text')}>{gates.length} approvals pending</Text>
     </Box>
   );
 }
@@ -109,6 +110,11 @@ export function MainPanel({
   const workflowStages = summarizeTaskRuns(taskRuns);
   const leftColumnWidth = mode === 'stacked' ? innerWidth : Math.max(28, Math.floor(innerWidth * 0.42));
   const rightColumnWidth = mode === 'stacked' ? innerWidth : Math.max(34, innerWidth - leftColumnWidth - 2);
+  const pipelineTokens = selectedRun?.pipelineTotalTokens ?? selectedRun?.totalTokens ?? null;
+  const sessionTokens = selectedRun?.totalTokens ?? null;
+  const contextLabel = selectedRun?.contextWindowTokens
+    ? `${formatPercent(selectedRun.contextWindowPercent)} of ${formatTokens(selectedRun.contextWindowTokens)}`
+    : '—';
 
   return (
     <Box
@@ -162,14 +168,26 @@ export function MainPanel({
             />
             <DetailMetric
               theme={theme}
-              label="Elapsed"
-              value={formatElapsed(selectedRun.startedAt, selectedRun.endedAt)}
+              label="Session Tokens"
+              value={formatTokens(sessionTokens)}
               width={mode === 'stacked' ? innerWidth : Math.max(14, Math.floor(innerWidth / 4) - 1)}
             />
             <DetailMetric
               theme={theme}
-              label="Tokens"
-              value={formatTokens(selectedRun.totalTokens)}
+              label="Pipeline Tokens"
+              value={formatTokens(pipelineTokens)}
+              width={mode === 'stacked' ? innerWidth : Math.max(14, Math.floor(innerWidth / 4) - 1)}
+            />
+            <DetailMetric
+              theme={theme}
+              label="Context"
+              value={contextLabel}
+              width={mode === 'stacked' ? innerWidth : Math.max(18, Math.floor(innerWidth / 4) - 1)}
+            />
+            <DetailMetric
+              theme={theme}
+              label="Elapsed"
+              value={formatElapsed(selectedRun.startedAt, selectedRun.endedAt)}
               width={mode === 'stacked' ? innerWidth : Math.max(14, Math.floor(innerWidth / 4) - 1)}
             />
           </Box>
@@ -182,6 +200,14 @@ export function MainPanel({
                 <Text {...theme.role('muted')}>started {formatClock(selectedRun.startedAt)}  ·  ended {formatClock(selectedRun.endedAt)}</Text>
                 {selectedFeature && <Text {...theme.role('muted')}>effort {selectedFeature.effort}</Text>}
                 {selectedRunStage && <Text {...theme.role('muted')}>stage {selectedRunStage}</Text>}
+                <Text {...theme.role('muted')}>
+                  session {formatTokens(sessionTokens)}  ·  pipeline {formatTokens(pipelineTokens)}
+                </Text>
+                {selectedRun.contextWindowTokens ? (
+                  <Text {...theme.role('muted')}>
+                    context {formatPercent(selectedRun.contextWindowPercent)} of {formatTokens(selectedRun.contextWindowTokens)}
+                  </Text>
+                ) : null}
                 {selectedRun.pendingStageRequestPrompt && (
                   <Text {...theme.role('muted')}>
                     wait {truncateText(selectedRun.pendingStageRequestPrompt, Math.max(22, leftColumnWidth - 6))}
@@ -207,6 +233,8 @@ export function MainPanel({
                         </Text>
                         <Text {...theme.role('muted')}>
                           {[
+                            stage.totalTokens > 0 ? `${formatTokens(stage.totalTokens)} tokens` : null,
+                            stage.maxContextPercent !== null ? `${formatPercent(stage.maxContextPercent)} ctx` : null,
                             stage.running > 0 ? `${stage.running} active` : null,
                             stage.pending > 0 ? `${stage.pending} pending` : null,
                             stage.blocked > 0 ? `${stage.blocked} blocked` : null,
@@ -214,9 +242,18 @@ export function MainPanel({
                             stage.skipped > 0 ? `${stage.skipped} skipped` : null,
                           ].filter(Boolean).join('  ·  ') || 'completed'}
                         </Text>
-                        {stage.tasks.slice(0, 2).map((task) => (
-                          <Text key={task.taskId} {...theme.role('muted')}>
-                            {task.status === 'running' ? '>' : '-'} {truncateText(task.title, Math.max(20, leftColumnWidth - 6))}
+                        {stage.tasks.slice(0, 2).map((task, index) => (
+                          <Text key={`${stage.stage}:${task.taskId}:${index}`} {...theme.role('muted')}>
+                            {task.status === 'running' ? '>' : '-'} {truncateText(
+                              [
+                                task.title,
+                                task.totalTokens ? `${formatTokens(task.totalTokens)} tokens` : null,
+                                task.contextWindowPercent !== null && task.contextWindowPercent !== undefined
+                                  ? `${formatPercent(task.contextWindowPercent)} ctx`
+                                  : null,
+                              ].filter(Boolean).join('  ·  '),
+                              Math.max(20, leftColumnWidth - 6),
+                            )}
                           </Text>
                         ))}
                       </Box>
@@ -233,8 +270,8 @@ export function MainPanel({
               <Box marginTop={1}>
                 <DetailSection theme={theme} title="Declared Skills" width={leftColumnWidth}>
                   {selectedFeature?.skills?.length ? (
-                    selectedFeature.skills.map((skill) => (
-                      <Text key={skill} {...theme.role('success')}>
+                    selectedFeature.skills.map((skill, index) => (
+                      <Text key={`${skill}:${index}`} {...theme.role('success')}>
                         - {skill}
                       </Text>
                     ))
@@ -301,8 +338,8 @@ export function MainPanel({
           {nextDemands.length > 0 && (
             <Box marginTop={1} flexDirection="column">
               <Text {...theme.role('text')} bold>Next demands</Text>
-              {nextDemands.slice(0, mode === 'stacked' ? 3 : 5).map((entry) => (
-                <Text key={entry} {...theme.role('muted')}>{truncateText(entry, Math.max(24, innerWidth - 2))}</Text>
+              {nextDemands.slice(0, mode === 'stacked' ? 3 : 5).map((entry, index) => (
+                <Text key={`${index}:${entry}`} {...theme.role('muted')}>{truncateText(entry, Math.max(24, innerWidth - 2))}</Text>
               ))}
             </Box>
           )}
@@ -328,6 +365,17 @@ export function MainPanel({
                 <Text {...theme.role('muted')}>  +{pendingFeatures.length - maxPending} more in backlog</Text>
               )}
               <Text {...theme.role('muted')}>  Tab to focus · j/k to select · Enter or n to start</Text>
+            </Box>
+          )}
+          {notifications.length > 0 && (
+            <Box marginTop={1} flexDirection="column">
+              <Text {...theme.role('text')} bold>Recent activity</Text>
+              <NotificationsFeed
+                notifications={notifications}
+                maxVisible={mode === 'stacked' ? 4 : 6}
+                width={innerWidth}
+                compact
+              />
             </Box>
           )}
         </Box>
