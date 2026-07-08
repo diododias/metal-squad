@@ -102,8 +102,9 @@ Se o usuario especificou uma feature (ex: "feat-02", "F03"), use essa. Caso cont
 
 ### 7. Atualizar backlog
 
-1. Atualize o `backlog.yaml` no branch develop adicionando a feature como `done` (ou remova-a se ja entregue)
-2. Se houver novas features specs criadas durante o desenvolvimento, commite-as tambem
+1. `msq run` agora marca `status: done` (ou `failed`) automaticamente na feature dentro do `backlog.yaml` usado na run, ao final do pipeline (`markFeatureStatus` em `src/core/backlog/sync.ts`, chamado no `onDone` do scheduler em `src/core/runner/execute.ts`). Isso evita que a feature volte a aparecer como "Ready to start" na TUI por falta de sync manual.
+2. Ainda assim, confirme manualmente que o `backlog.yaml` do branch develop reflete a feature como `done` (ou remova-a se ja entregue) — o backlog temporario montado no passo 2 roda na branch da feature, nao necessariamente no develop, entao o sync automatico so cobre o arquivo usado durante a run.
+3. Se houver novas features specs criadas durante o desenvolvimento, commite-as tambem
 
 ## Notas
 
