@@ -91,7 +91,9 @@ describe('ui components', () => {
         }]}
         outputPaused={false}
         logsVisible
-        focusPanel="main"
+        focusPanel="columns"
+        activeColumn="execution"
+        detailPageSize={7}
         mode="full"
         width={72}
         pendingFeatures={[]}

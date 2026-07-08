@@ -1,5 +1,10 @@
 import type { TaskRun } from '../db/repo.js';
 
+// F31 item 4: fallback default only — matches WorkflowSchema's own default
+// `stages` (schema.ts). Features that declare a custom `workflow.stages`
+// must have that order passed in explicitly (see summarizeTaskRuns below),
+// otherwise a stage outside this hardcoded list fell to `length` and could
+// desync from the stepper, which reads the same feature's declared stages.
 const STAGE_ORDER = ['specify', 'plan', 'tasks', 'implement', 'validate'];
 
 export interface WorkflowStageSummary {
@@ -16,10 +21,10 @@ export interface WorkflowStageSummary {
   skipped: number;
 }
 
-function stageOrder(stage: string | null): number {
-  if (!stage) return STAGE_ORDER.length + 1;
-  const index = STAGE_ORDER.indexOf(stage);
-  return index === -1 ? STAGE_ORDER.length : index;
+function stageOrder(stage: string | null, stages: string[]): number {
+  if (!stage) return stages.length + 1;
+  const index = stages.indexOf(stage);
+  return index === -1 ? stages.length : index;
 }
 
 function taskOrder(status: TaskRun['status']): number {
@@ -41,7 +46,7 @@ function taskOrder(status: TaskRun['status']): number {
   }
 }
 
-export function summarizeTaskRuns(taskRuns: TaskRun[]): WorkflowStageSummary[] {
+export function summarizeTaskRuns(taskRuns: TaskRun[], stages: string[] = STAGE_ORDER): WorkflowStageSummary[] {
   const groups = new Map<string, TaskRun[]>();
 
   for (const task of taskRuns) {
@@ -52,7 +57,7 @@ export function summarizeTaskRuns(taskRuns: TaskRun[]): WorkflowStageSummary[] {
   }
 
   return [...groups.entries()]
-    .sort(([left], [right]) => stageOrder(left) - stageOrder(right) || left.localeCompare(right))
+    .sort(([left], [right]) => stageOrder(left, stages) - stageOrder(right, stages) || left.localeCompare(right))
     .map(([stage, tasks]) => {
       const orderedTasks = [...tasks].sort((left, right) =>
         taskOrder(left.status) - taskOrder(right.status)

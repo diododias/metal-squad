@@ -9,6 +9,7 @@ import { StatsBar } from '../../src/ui/components/StatsBar.js';
 import { KanbanCard } from '../../src/ui/components/KanbanCard.js';
 import { FeaturePreview } from '../../src/ui/components/FeaturePreview.js';
 import { FeatureConfigSection } from '../../src/ui/components/FeatureConfigSection.js';
+import { WorkflowStepper } from '../../src/ui/components/WorkflowStepper.js';
 import { NotificationsFeed } from '../../src/ui/components/NotificationsFeed.js';
 import { StatusBar } from '../../src/ui/components/StatusBar.js';
 import { CommandPalette } from '../../src/ui/components/CommandPalette.js';
@@ -292,6 +293,38 @@ describe('FeaturePreview', () => {
     expect(lastFrame()).toContain('maxAttempts: 1');
     expect(lastFrame()).toContain('onFail: stop');
     expect(lastFrame()).toContain('feat-earlier');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// WorkflowStepper (F31 section 5: compact, always-visible stepper)
+// ---------------------------------------------------------------------------
+describe('WorkflowStepper', () => {
+  const stages = ['specify', 'plan', 'tasks', 'implement', 'validate'];
+  const workflowStages = [
+    { stage: 'specify', tasks: [], total: 2, totalTokens: 0, maxContextPercent: null, done: 2, running: 0, failed: 0, blocked: 0, pending: 0, skipped: 0 },
+    { stage: 'plan', tasks: [], total: 3, totalTokens: 0, maxContextPercent: null, done: 1, running: 1, failed: 0, blocked: 0, pending: 1, skipped: 0 },
+  ];
+
+  it('marks completed stages done and the current stage as active', () => {
+    const { lastFrame } = renderWithTheme(
+      <WorkflowStepper stages={stages} workflowStages={workflowStages} currentStage="plan" width={80} />,
+    );
+    const frame = lastFrame();
+    expect(frame).toContain('✓ specify');
+    expect(frame).toContain('▸ plan 1/3');
+    expect(frame).toContain('· tasks');
+    expect(frame).toContain('· implement');
+    expect(frame).toContain('· validate');
+  });
+
+  it('shows every declared stage even when none has run yet', () => {
+    const { lastFrame } = renderWithTheme(
+      <WorkflowStepper stages={stages} workflowStages={[]} currentStage={null} width={80} />,
+    );
+    for (const stage of stages) {
+      expect(lastFrame()).toContain(stage);
+    }
   });
 });
 

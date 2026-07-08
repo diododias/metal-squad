@@ -135,6 +135,10 @@ function matchesShortcutBinding(binding: string, input: string, key: Record<stri
       return Boolean(key.leftArrow);
     case 'right':
       return Boolean(key.rightArrow);
+    case 'pageup':
+      return Boolean(key.pageUp);
+    case 'pagedown':
+      return Boolean(key.pageDown);
     default:
       return input === binding;
   }

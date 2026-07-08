@@ -8,6 +8,7 @@ const mockUseRunningTasks = vi.fn(() => []);
 const mockUseGates = vi.fn();
 const mockUseRunOutput = vi.fn();
 const mockUseTerminalWidth = vi.fn();
+const mockUseTerminalHeight = vi.fn(() => 40);
 const mockUseNotifications = vi.fn();
 const mockUseToasts = vi.fn(() => []);
 const mockUseTokenStats = vi.fn(() => ({ status: 'ready' as const, totalTokens: 0, error: null }));
@@ -53,6 +54,8 @@ let stateValue: {
   logsVisible: boolean;
   dashboard?: boolean;
   dashboardPeriod?: number;
+  detailSectionIndex: number;
+  detailDense: boolean;
 };
 let helpOpenValue = false;
 let useStateCallIndex = 0;
@@ -104,6 +107,10 @@ vi.mock('../../src/ui/hooks/useStatsRows.js', () => ({
 
 vi.mock('../../src/ui/hooks/useTerminalWidth.js', () => ({
   useTerminalWidth: mockUseTerminalWidth,
+}));
+
+vi.mock('../../src/ui/hooks/useTerminalHeight.js', () => ({
+  useTerminalHeight: mockUseTerminalHeight,
 }));
 
 vi.mock('../../src/ui/hooks/useNotifications.js', () => ({
@@ -260,6 +267,8 @@ describe('App', () => {
       activeView: 'overview',
       outputPaused: false,
       logsVisible: true,
+      detailSectionIndex: 0,
+      detailDense: false,
     };
     mockUseTerminalWidth.mockReturnValue(88);
     mockUseRuns.mockReturnValue([]);
@@ -421,6 +430,8 @@ describe('App', () => {
       activeView: 'overview',
       outputPaused: false,
       logsVisible: true,
+      detailSectionIndex: 0,
+      detailDense: false,
     };
     mockUseRuns.mockReturnValue([{ runId: 1, featureId: 'feat-1', status: 'running' }]);
     mockUseGates.mockReturnValue({
@@ -454,6 +465,8 @@ describe('App', () => {
       activeView: 'overview',
       outputPaused: false,
       logsVisible: true,
+      detailSectionIndex: 0,
+      detailDense: false,
     };
     mockGetPendingFeatures.mockReturnValue([{ id: 'feat-9', title: 'F09', tool: 'codex', effort: 'medium' }]);
     const { App } = await import('../../src/ui/App.js');
@@ -478,6 +491,8 @@ describe('App', () => {
       activeView: 'preview',
       outputPaused: false,
       logsVisible: true,
+      detailSectionIndex: 0,
+      detailDense: false,
     };
     mockGetPendingFeatures.mockReturnValue([{ id: 'feat-9', title: 'F09', tool: 'codex', effort: 'medium' }]);
     const argvSpy = vi.spyOn(process, 'argv', 'get').mockReturnValue(['/usr/local/bin/node', '/repo/src/index.ts']);
@@ -510,6 +525,8 @@ describe('App', () => {
       activeView: 'preview',
       outputPaused: false,
       logsVisible: true,
+      detailSectionIndex: 0,
+      detailDense: false,
     };
     mockGetPendingFeatures.mockReturnValue([{ id: 'feat-9', title: 'F09', tool: 'codex', effort: 'medium' }]);
     const { App } = await import('../../src/ui/App.js');
@@ -546,6 +563,8 @@ describe('App', () => {
       activeView: 'run',
       outputPaused: false,
       logsVisible: true,
+      detailSectionIndex: 0,
+      detailDense: false,
     };
     mockUseRuns.mockReturnValue([{ runId: 1, featureId: 'feat-1', status: 'running' }]);
     mockUseGates.mockReturnValue({ gates: [], resolve: vi.fn() });
@@ -570,6 +589,8 @@ describe('App', () => {
       activeView: 'run',
       outputPaused: false,
       logsVisible: true,
+      detailSectionIndex: 0,
+      detailDense: false,
     };
     mockUseRuns.mockReturnValue([{ runId: 1, featureId: 'feat-1', status: 'running' }]);
     mockUseGates.mockReturnValue({ gates: [], resolve: vi.fn() });
@@ -594,6 +615,8 @@ describe('App', () => {
       activeView: 'overview',
       outputPaused: false,
       logsVisible: true,
+      detailSectionIndex: 0,
+      detailDense: false,
     };
     mockUseRuns.mockReturnValue([{ runId: 1, featureId: 'feat-1', status: 'running' }]);
     mockUseGates.mockReturnValue({ gates: [], resolve: vi.fn() });
@@ -618,6 +641,8 @@ describe('App', () => {
       activeView: 'overview',
       outputPaused: false,
       logsVisible: true,
+      detailSectionIndex: 0,
+      detailDense: false,
     };
     mockUseRuns.mockReturnValue([{ runId: 1, featureId: 'feat-1', status: 'running' }]);
     mockUseGates.mockReturnValue({ gates: [], resolve: vi.fn() });
@@ -643,6 +668,8 @@ describe('App', () => {
       activeView: 'overview',
       outputPaused: false,
       logsVisible: true,
+      detailSectionIndex: 0,
+      detailDense: false,
     };
     mockUseRuns.mockReturnValue([{ runId: 1, featureId: 'feat-1', status: 'running' }]);
     const gateApproval = { kind: 'gate' as const, id: 7, featureId: 'feat-1', repoId: 'repo-1', prompt: '', createdAt: '' };
@@ -675,6 +702,8 @@ describe('App', () => {
       activeView: 'overview',
       outputPaused: false,
       logsVisible: true,
+      detailSectionIndex: 0,
+      detailDense: false,
     };
     mockUseRuns.mockReturnValue([{ runId: 1, featureId: 'feat-1', status: 'running' }]);
     const gateApproval = { kind: 'gate' as const, id: 7, featureId: 'feat-1', repoId: 'repo-1', prompt: '', createdAt: '' };
@@ -751,6 +780,8 @@ describe('App', () => {
       activeView: 'overview',
       outputPaused: false,
       logsVisible: true,
+      detailSectionIndex: 0,
+      detailDense: false,
     };
     mockUseRuns.mockReturnValue([{ runId: 1, featureId: 'feat-1', status: 'running' }]);
     mockUseGates.mockReturnValue({
@@ -779,6 +810,8 @@ describe('App', () => {
       activeView: 'run',
       outputPaused: false,
       logsVisible: true,
+      detailSectionIndex: 0,
+      detailDense: false,
     };
     mockUseRuns.mockReturnValue([{
       runId: 1,
@@ -816,6 +849,8 @@ describe('App', () => {
       activeView: 'run',
       outputPaused: false,
       logsVisible: true,
+      detailSectionIndex: 0,
+      detailDense: false,
     };
     mockUseRuns.mockReturnValue([{
       runId: 1,
@@ -841,7 +876,10 @@ describe('App', () => {
     const rootChildren = (element.props as { children: React.ReactNode }).children;
     const statusBar = findElement(rootChildren, mockStatusBar);
 
-    expect(statusBar?.props.shortcutHints).toEqual(['p:pause', 'x:abort', '^l:logs', 'esc:back', '?:help', '^p:palette']);
+    // F31 section 5: run-detail now also registers j/k (scroll), up/down,
+    // and PgUp/PgDn as context shortcuts — j/k merge into 'j/k:navigate'
+    // per the existing hint-building rule, pushing some hints past the cap.
+    expect(statusBar?.props.shortcutHints).toEqual(['j/k:navigate', 'p:pause', 'x:abort', 'up:scroll up', 'down:scroll down', 'pageup:page up']);
   });
 
   it('aborts the selected feature with x in run detail context', async () => {
@@ -854,6 +892,8 @@ describe('App', () => {
       activeView: 'run',
       outputPaused: false,
       logsVisible: true,
+      detailSectionIndex: 0,
+      detailDense: false,
     };
     mockUseRuns.mockReturnValue([{
       runId: 1,
@@ -883,6 +923,82 @@ describe('App', () => {
     expect(mockAbortPipeline).not.toHaveBeenCalled();
   });
 
+  // F31 section 5: j/k/PgUp/PgDn page through the detail body's sections;
+  // `i` toggles density. These are run-detail-scoped so they don't collide
+  // with the global j/k that move between kanban cards on the overview.
+  it('scrolls, pages, and toggles density in the run-detail section body', async () => {
+    stateValue = {
+      selectedRun: 0,
+      selectedGate: 0,
+      selectedPending: 0,
+      focusPanel: 'columns',
+      activeColumn: 'execution',
+      activeView: 'run',
+      outputPaused: false,
+      logsVisible: true,
+      detailSectionIndex: 2,
+      detailDense: false,
+    };
+    mockUseRuns.mockReturnValue([{ runId: 1, featureId: 'feat-1', status: 'running' }]);
+    mockUseGates.mockReturnValue({ gates: [], resolve: vi.fn() });
+    const { App } = await import('../../src/ui/App.js');
+
+    App();
+    const handler = mockUseInput.mock.calls[0]?.[0] as (input: string, key: Record<string, boolean>) => void;
+
+    handler('j', {});
+    handler('k', {});
+    handler('', { pageDown: true });
+    handler('', { pageUp: true });
+    handler('i', {});
+
+    expect(setUi).toHaveBeenCalledTimes(5);
+    const scrollDown = setUi.mock.calls[0]?.[0] as (state: typeof stateValue) => typeof stateValue;
+    const scrollUp = setUi.mock.calls[1]?.[0] as (state: typeof stateValue) => typeof stateValue;
+    const pageDown = setUi.mock.calls[2]?.[0] as (state: typeof stateValue) => typeof stateValue;
+    const pageUp = setUi.mock.calls[3]?.[0] as (state: typeof stateValue) => typeof stateValue;
+    const toggleDensity = setUi.mock.calls[4]?.[0] as (state: typeof stateValue) => typeof stateValue;
+
+    expect(scrollDown(stateValue).detailSectionIndex).toBe(3);
+    expect(scrollUp(stateValue).detailSectionIndex).toBe(1);
+    expect(pageDown(stateValue).detailSectionIndex).toBeGreaterThan(stateValue.detailSectionIndex);
+    expect(pageUp(stateValue).detailSectionIndex).toBeLessThan(stateValue.detailSectionIndex);
+    expect(toggleDensity(stateValue).detailDense).toBe(true);
+  });
+
+  it('does not move between kanban cards when j/k are pressed in run-detail', async () => {
+    stateValue = {
+      selectedRun: 0,
+      selectedGate: 0,
+      selectedPending: 0,
+      focusPanel: 'columns',
+      activeColumn: 'execution',
+      activeView: 'run',
+      outputPaused: false,
+      logsVisible: true,
+      detailSectionIndex: 0,
+      detailDense: false,
+    };
+    mockUseRuns.mockReturnValue([
+      { runId: 1, featureId: 'feat-1', status: 'running' },
+      { runId: 2, featureId: 'feat-2', status: 'running' },
+    ]);
+    mockUseGates.mockReturnValue({ gates: [], resolve: vi.fn() });
+    const { App } = await import('../../src/ui/App.js');
+
+    App();
+    const handler = mockUseInput.mock.calls[0]?.[0] as (input: string, key: Record<string, boolean>) => void;
+    handler('j', {});
+
+    // Only the run-detail scroll action should fire — the global column
+    // navigation (selectedRun index) must not also move on the same key.
+    expect(setUi).toHaveBeenCalledTimes(1);
+    const action = setUi.mock.calls[0]?.[0] as (state: typeof stateValue) => typeof stateValue;
+    const result = action(stateValue);
+    expect(result.detailSectionIndex).toBe(1);
+    expect(result.selectedRun).toBe(stateValue.selectedRun);
+  });
+
   it('starts the selected pending feature with the current runtime args', async () => {
     stateValue = {
       selectedRun: 0,
@@ -893,6 +1009,8 @@ describe('App', () => {
       activeView: 'overview',
       outputPaused: false,
       logsVisible: true,
+      detailSectionIndex: 0,
+      detailDense: false,
     };
     mockGetPendingFeatures.mockReturnValue([
       { id: 'feat-9', title: 'F09', tool: 'codex', effort: 'medium' },

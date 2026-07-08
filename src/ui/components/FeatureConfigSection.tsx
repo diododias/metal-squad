@@ -1,6 +1,6 @@
 import React from 'react';
 import { Box, Text } from 'ink';
-import type { Retry } from '../../core/backlog/schema.js';
+import type { Retry, Workflow } from '../../core/backlog/schema.js';
 import type { BacklogSettings, FeatureCatalogEntry } from '../catalog.js';
 import { truncateText } from '../format.js';
 import { useTheme } from '../theme/context.js';
@@ -10,6 +10,16 @@ const DEFAULT_RETRY: Required<Retry> = {
   maxAttempts: 1,
   backoffMs: 5000,
   onFail: 'stop',
+};
+
+// Matches WorkflowSchema's own defaults (schema.ts) — used defensively when a
+// catalog entry lacks a resolved workflow (e.g. a partial/stale lookup),
+// consistent with this component's own "never blank, show the default" rule.
+const DEFAULT_WORKFLOW: Workflow = {
+  mode: 'staged',
+  stages: ['specify', 'plan', 'tasks', 'implement', 'validate'],
+  approvals: { channel: 'telegram', autoAdvance: false },
+  syncTasksToBacklog: true,
 };
 
 interface Props {
@@ -38,6 +48,9 @@ export function FeatureConfigSection({ feature, settings, width }: Props): React
   const retry = feature.retry;
   const retryExplicit = Boolean(retry);
   const resolvedRetry = { ...DEFAULT_RETRY, ...retry };
+  const workflow = feature.workflow ?? DEFAULT_WORKFLOW;
+  const skills = feature.skills ?? [];
+  const dependsOn = feature.dependsOn ?? [];
   const stageSkillEntries = Object.entries(settings.stageSkills);
   const innerWidth = Math.max(24, width - 4);
 
@@ -58,19 +71,19 @@ export function FeatureConfigSection({ feature, settings, width }: Props): React
       </Box>
       <Box marginTop={1} flexDirection="column">
         <Text {...theme.role('muted')} bold>Workflow</Text>
-        {row(theme, 'mode', feature.workflow.mode)}
-        {row(theme, 'stages', feature.workflow.stages.join(' → '))}
-        {row(theme, 'syncTasksToBacklog', String(feature.workflow.syncTasksToBacklog))}
+        {row(theme, 'mode', workflow.mode)}
+        {row(theme, 'stages', workflow.stages.join(' → '))}
+        {row(theme, 'syncTasksToBacklog', String(workflow.syncTasksToBacklog))}
       </Box>
       <Box marginTop={1} flexDirection="column">
         <Text {...theme.role('muted')} bold>Aprovações</Text>
-        {row(theme, 'channel', feature.workflow.approvals.channel)}
-        {row(theme, 'autoAdvance', String(feature.workflow.approvals.autoAdvance))}
+        {row(theme, 'channel', workflow.approvals.channel)}
+        {row(theme, 'autoAdvance', String(workflow.approvals.autoAdvance))}
       </Box>
       <Box marginTop={1} flexDirection="column">
         <Text {...theme.role('muted')} bold>Skills</Text>
-        {feature.skills.length > 0 ? (
-          feature.skills.map((skill) => (
+        {skills.length > 0 ? (
+          skills.map((skill) => (
             <Text key={skill} {...theme.role('success')}>- {skill}</Text>
           ))
         ) : (
@@ -90,7 +103,7 @@ export function FeatureConfigSection({ feature, settings, width }: Props): React
       <Box marginTop={1} flexDirection="column">
         <Text {...theme.role('muted')} bold>Dependências</Text>
         <Text {...theme.role('muted')}>
-          {feature.dependsOn.length > 0 ? feature.dependsOn.join(', ') : 'nenhuma'}
+          {dependsOn.length > 0 ? dependsOn.join(', ') : 'nenhuma'}
         </Text>
       </Box>
       <Box marginTop={1} flexDirection="column">

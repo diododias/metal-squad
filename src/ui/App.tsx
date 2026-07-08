@@ -12,6 +12,7 @@ import { abortPipeline, pausePipeline, requestFeatureAbort, resumePipeline } fro
 import type { RunSummary } from '../db/repo.js';
 import { getBacklogSettings, getFeatureCatalog, getPendingFeatures } from './catalog.js';
 import { DASHBOARD_GROUP_ORDER, getRunGroup, sortRunsByGroup, type DashboardGroupId } from './dashboardGroups.js';
+import { DETAIL_SECTION_ORDER } from './detailSections.js';
 import { buildCommandDefinitions } from './commands/definitions.js';
 import { createGatesShortcuts } from './commands/gatesShortcuts.js';
 import { createGlobalShortcuts } from './commands/globalShortcuts.js';
@@ -28,7 +29,7 @@ import { MainPanel } from './components/MainPanel.js';
 import { StatsBar } from './components/StatsBar.js';
 import { StatusBar } from './components/StatusBar.js';
 import { ToastStack } from './components/ToastStack.js';
-import { getLayoutMode } from './format.js';
+import { getLayoutMode, getVerticalBudget } from './format.js';
 import { useCommandPalette } from './hooks/useCommandPalette.js';
 import { useCompletedFeatures } from './hooks/useCompletedFeatures.js';
 import { useGates } from './hooks/useGates.js';
@@ -41,6 +42,7 @@ import { useRunOutput } from './hooks/useRunOutput.js';
 import { useRunningTasks, useRuns, useTaskRuns } from './hooks/useRuns.js';
 import { useStatsRows } from './hooks/useStatsRows.js';
 import { useTokenStats } from './hooks/useTokenStats.js';
+import { useTerminalHeight } from './hooks/useTerminalHeight.js';
 import { useTerminalWidth } from './hooks/useTerminalWidth.js';
 import type { ActiveView } from './components/MainPanel.js';
 import type { FocusPanel as ShortcutContext } from './types/shortcuts.js';
@@ -66,6 +68,12 @@ interface UiState {
   logsVisible: boolean;
   dashboard?: boolean;
   dashboardPeriod?: number;
+  /** F31 section 5: index of the first visible section in the run-detail
+   * scrollable body (header/stepper/gates stay anchored, only this scrolls). */
+  detailSectionIndex: number;
+  /** F31 section 5: `i` toggles this — collapses long sections for a quick
+   * read; default is rich/complete, nothing hidden. */
+  detailDense: boolean;
 }
 
 const DASHBOARD_PERIODS: Array<{ label: string; days: number | null }> = [
@@ -137,6 +145,7 @@ export function App(): React.ReactElement {
   const notifications = useNotifications(40);
   const toasts = useToasts(4);
   const width = useTerminalWidth();
+  const height = useTerminalHeight();
   const [ui, setUi] = useState<UiState>({
     selectedRun: 0,
     selectedGate: 0,
@@ -149,6 +158,8 @@ export function App(): React.ReactElement {
     activeView: 'overview',
     outputPaused: false,
     logsVisible: true,
+    detailSectionIndex: 0,
+    detailDense: false,
   });
   const [helpOpen, setHelpOpen] = useState(false);
 
@@ -158,6 +169,13 @@ export function App(): React.ReactElement {
   }, [themeResolution.message]);
 
   const layoutMode = getLayoutMode(width);
+  // F31 section 5: page size for the detail screen's section-level paging —
+  // taller terminals show more sections per page. This is distinct from the
+  // overview's own vertical-budget wiring (cards-per-column, stats density),
+  // which stays untouched here.
+  const verticalBudget = getVerticalBudget(height);
+  const detailPageSize = verticalBudget === 'short' ? 1 : verticalBudget === 'regular' ? 2 : 3;
+  const detailSectionIndex = clampIndex(ui.detailSectionIndex, DETAIL_SECTION_ORDER.length);
   const selectedGateIndex = clampIndex(ui.selectedGate, gates.length);
   const activeColumn = ui.activeColumn;
   // F31 "novo modelo de foco": EXECUTION/DONE/FALHA columns each navigate
@@ -352,6 +370,38 @@ export function App(): React.ReactElement {
     setUi((current) => ({ ...current, outputPaused: !current.outputPaused }));
   }, [activeView, selectedRun]);
 
+  const scrollSectionUp = useCallback(() => {
+    setUi((current) => ({
+      ...current,
+      detailSectionIndex: clampIndex(current.detailSectionIndex - 1, DETAIL_SECTION_ORDER.length),
+    }));
+  }, []);
+
+  const scrollSectionDown = useCallback(() => {
+    setUi((current) => ({
+      ...current,
+      detailSectionIndex: clampIndex(current.detailSectionIndex + 1, DETAIL_SECTION_ORDER.length),
+    }));
+  }, []);
+
+  const pageSectionUp = useCallback(() => {
+    setUi((current) => ({
+      ...current,
+      detailSectionIndex: clampIndex(current.detailSectionIndex - detailPageSize, DETAIL_SECTION_ORDER.length),
+    }));
+  }, [detailPageSize]);
+
+  const pageSectionDown = useCallback(() => {
+    setUi((current) => ({
+      ...current,
+      detailSectionIndex: clampIndex(current.detailSectionIndex + detailPageSize, DETAIL_SECTION_ORDER.length),
+    }));
+  }, [detailPageSize]);
+
+  const toggleDetailDensity = useCallback(() => {
+    setUi((current) => ({ ...current, detailDense: !current.detailDense }));
+  }, []);
+
   const pauseSelectedRun = useCallback(() => {
     if (canPause && selectedRun?.pipelineId) {
       pausePipeline(selectedRun.pipelineId);
@@ -504,7 +554,7 @@ export function App(): React.ReactElement {
       return;
     }
     if (selectedRun && focusPanel === 'columns' && activeColumn !== 'todo') {
-      setUi((current) => ({ ...current, activeView: 'run', focusPanel: 'columns' }));
+      setUi((current) => ({ ...current, activeView: 'run', focusPanel: 'columns', detailSectionIndex: 0 }));
       return;
     }
     if (focusPanel === 'columns' && activeColumn === 'todo' && activeView === 'overview' && selectedPending) {
@@ -605,8 +655,11 @@ export function App(): React.ReactElement {
 
   const globalShortcuts = useMemo(
     () => createGlobalShortcuts({
-      canNavigateRuns: focusPanel === 'columns' && activeColumn !== 'todo' && activeColumnRuns.length > 0,
-      canNavigateGates: focusPanel === 'gates' && gates.length > 0,
+      // F31 section 5: while a run's detail is open, j/k/up/down scroll its
+      // sections instead (run-detail-scoped shortcuts in runShortcuts.ts) —
+      // these global bindings must yield so both don't fire on the same key.
+      canNavigateRuns: activeView !== 'run' && focusPanel === 'columns' && activeColumn !== 'todo' && activeColumnRuns.length > 0,
+      canNavigateGates: activeView !== 'run' && focusPanel === 'gates' && gates.length > 0,
       canMovePending: activeView === 'overview' && focusPanel === 'columns' && activeColumn === 'todo' && pendingFeatures.length > 0,
       canSwitchColumn: !dashboardOpen && focusPanel === 'columns',
       canConfirmPreview: activeView === 'preview' && Boolean(selectedPending),
@@ -694,8 +747,24 @@ export function App(): React.ReactElement {
       canAbort: canAbortFeature || canAbortPipeline,
       pause: pauseSelectedRun,
       abort: abortSelectedRun,
+      scrollSectionUp,
+      scrollSectionDown,
+      pageSectionUp,
+      pageSectionDown,
+      toggleDensity: toggleDetailDensity,
     }),
-    [abortSelectedRun, canAbortFeature, canAbortPipeline, canPause, pauseSelectedRun],
+    [
+      abortSelectedRun,
+      canAbortFeature,
+      canAbortPipeline,
+      canPause,
+      pageSectionDown,
+      pageSectionUp,
+      pauseSelectedRun,
+      scrollSectionDown,
+      scrollSectionUp,
+      toggleDetailDensity,
+    ],
   );
 
   useEffect(() => {
@@ -757,6 +826,9 @@ export function App(): React.ReactElement {
               logsVisible={ui.logsVisible}
               focusPanel={focusPanel}
               activeColumn={activeColumn}
+              detailSectionIndex={detailSectionIndex}
+              detailPageSize={detailPageSize}
+              detailDense={ui.detailDense}
               mode={layoutMode}
               width={mainWidth}
               pendingFeatures={pendingFeatures}

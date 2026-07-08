@@ -18,11 +18,14 @@ import {
   truncateText,
 } from '../format.js';
 import { DASHBOARD_GROUP_LABEL, DASHBOARD_GROUP_ORDER, getRunGroup, type DashboardGroupId } from '../dashboardGroups.js';
+import { DETAIL_SECTION_LABEL, DETAIL_SECTION_ORDER, type DetailSectionId } from '../detailSections.js';
 import { EmptyState } from './EmptyState.js';
+import { FeatureConfigSection } from './FeatureConfigSection.js';
 import { FeaturePreview } from './FeaturePreview.js';
 import { KanbanCard } from './KanbanCard.js';
 import { KanbanColumn } from './KanbanColumn.js';
 import { NotificationsFeed } from './NotificationsFeed.js';
+import { WorkflowStepper } from './WorkflowStepper.js';
 import { formatDurationMs, type RunBreakdown } from '../../core/stats.js';
 import { summarizeTaskRuns, type WorkflowStageSummary } from '../workflow.js';
 import { useTheme } from '../theme/context.js';
@@ -44,6 +47,10 @@ const BACKLOG_TASK_ICON: Record<string, string> = {
   blocked: '!',
 };
 
+// Matches WorkflowSchema's own default (schema.ts) — used only when a run
+// has no matching feature catalog entry to read workflow.stages from.
+const DEFAULT_STEPPER_STAGES = ['specify', 'plan', 'tasks', 'implement', 'validate'];
+
 interface Props {
   runs: RunSummary[];
   gates: PendingApproval[];
@@ -61,6 +68,12 @@ interface Props {
   focusPanel: 'columns' | 'gates' | 'activity';
   /** F31 "novo modelo de foco": which kanban column has the cursor. */
   activeColumn: DashboardGroupId;
+  /** F31 section 5: first visible section in the run-detail scrollable body. */
+  detailSectionIndex?: number;
+  /** F31 section 5: how many sections fit per page (taller terminal → more). */
+  detailPageSize?: number;
+  /** F31 section 5: `i` toggle — collapses long sections when true. */
+  detailDense?: boolean;
   mode: LayoutMode;
   width: number;
   pendingFeatures: FeatureCatalogEntry[];
@@ -123,6 +136,9 @@ export function MainPanel({
   logsVisible,
   focusPanel,
   activeColumn,
+  detailSectionIndex = 0,
+  detailPageSize = 2,
+  detailDense = false,
   mode,
   width,
   pendingFeatures,
@@ -143,9 +159,10 @@ export function MainPanel({
   const nextDemands = collectNextDemands(runs);
   const selectedRunStage = selectedRun ? getRunStageLabel(selectedRun) : null;
   const selectedRunStatusLabel = selectedRun ? getRunStatusLabel(selectedRun) : null;
-  const workflowStages = summarizeTaskRuns(taskRuns);
-  const leftColumnWidth = mode === 'stacked' ? innerWidth : Math.max(28, Math.floor(innerWidth * 0.42));
-  const rightColumnWidth = mode === 'stacked' ? innerWidth : Math.max(34, innerWidth - leftColumnWidth - 2);
+  // F31 item 4: pass the feature's declared stages so the stepper and this
+  // summary can never disagree on order, even when a feature customizes them.
+  const workflowStages = summarizeTaskRuns(taskRuns, selectedFeature?.workflow?.stages);
+  const visibleDetailSections = DETAIL_SECTION_ORDER.slice(detailSectionIndex, detailSectionIndex + detailPageSize);
   const pipelineTokens = selectedRun?.pipelineTotalTokens ?? selectedRun?.totalTokens ?? null;
   const sessionTokens = selectedRun?.totalTokens ?? null;
   const contextLabel = selectedRun?.contextWindowTokens
@@ -194,6 +211,8 @@ export function MainPanel({
         <FeaturePreview feature={selectedPending} settings={backlogSettings} mode={mode} width={innerWidth} />
       ) : activeView === 'run' && selectedRun ? (
         <Box flexDirection="column" marginTop={1}>
+          {/* F31 section 5: anchored header — title, metrics, and the
+              workflow stepper never scroll away; only the body below does. */}
           <Text {...theme.role('text')} bold>{selectedFeature?.title ?? selectedRun.featureId}</Text>
           <Text {...theme.role('muted')}>{selectedRun.featureId} · {selectedRun.repoId}</Text>
           <Box
@@ -248,167 +267,45 @@ export function MainPanel({
               width={metricWidth}
             />
           </Box>
-          <Box
-            marginTop={1}
-            flexDirection={mode === 'stacked' ? 'column' : 'row'}
-          >
-            <Box flexDirection="column" width={leftColumnWidth} marginRight={mode === 'stacked' ? 0 : 2}>
-              <DetailSection theme={theme} title="Run Summary" width={leftColumnWidth}>
-                <Text {...theme.role('muted')}>started {formatClock(selectedRun.startedAt)}  ·  ended {formatClock(selectedRun.endedAt)}</Text>
-                {selectedFeature && <Text {...theme.role('muted')}>effort {selectedFeature.effort}</Text>}
-                {selectedRunStage && <Text {...theme.role('muted')}>stage {selectedRunStage}</Text>}
-                <Text {...theme.role('muted')}>
-                  session {formatTokens(sessionTokens)}  ·  pipeline {formatTokens(pipelineTokens)}
-                </Text>
-                {selectedRun.contextWindowTokens ? (
-                  <Text {...theme.role('muted')}>
-                    context {formatPercent(selectedRun.contextWindowPercent)} of {formatTokens(selectedRun.contextWindowTokens)}
-                  </Text>
-                ) : null}
-                {selectedRun.pendingStageRequestPrompt && (
-                  <Text {...theme.role('muted')}>
-                    wait {truncateText(selectedRun.pendingStageRequestPrompt, Math.max(22, leftColumnWidth - 6))}
-                  </Text>
-                )}
-                {breakdown && breakdown.wallMs !== null && (
-                  <>
-                    <Text {...theme.role('muted')}>agent {formatDurationMs(breakdown.agentMs)}</Text>
-                    {breakdown.gateWaitMs > 0 && <Text {...theme.role('muted')}>gate wait {formatDurationMs(breakdown.gateWaitMs)}</Text>}
-                    {breakdown.retryCount > 0 && (
-                      <Text {...theme.role('muted')}>retry wait {formatDurationMs(breakdown.retryWaitMs)} ({breakdown.retryCount}x)</Text>
-                    )}
-                  </>
-                )}
-              </DetailSection>
-              {/* D2: full spec/feature description — the bare feat-xxx id
-                  plus a one-line title was not enough context. Pulled from
-                  the backlog's inline `spec` summary or `specFile` doc. */}
-              <Box marginTop={1}>
-                <DetailSection theme={theme} title="Feature Spec" width={leftColumnWidth}>
-                  {selectedFeature?.description ? (
-                    selectedFeature.description
-                      .split('\n')
-                      .slice(0, mode === 'stacked' ? 8 : 14)
-                      .map((line, index) => (
-                        // eslint-disable-next-line react/no-array-index-key
-                        <Text key={index} {...theme.role('muted')}>
-                          {truncateText(line || ' ', Math.max(24, leftColumnWidth - 4))}
-                        </Text>
-                      ))
-                  ) : (
-                    <Text {...theme.role('muted')}>
-                      No spec or specFile declared for {selectedRun.featureId} in the backlog.
-                    </Text>
-                  )}
-                </DetailSection>
+          <Box marginTop={1}>
+            <WorkflowStepper
+              stages={selectedFeature?.workflow?.stages ?? DEFAULT_STEPPER_STAGES}
+              workflowStages={workflowStages}
+              currentStage={selectedRun.pipelineCurrentStage ?? selectedRun.stage}
+              width={innerWidth}
+            />
+          </Box>
+          {/* F31 section 5: scrollable body — Ink has no native scroll, so
+              this pages through DETAIL_SECTION_ORDER (F31 "section-level
+              paging"): j/k move one section, PgUp/PgDn move a full page.
+              `i` toggles density (shorter previews), never hides a section
+              outright — nothing here is permanently cut. */}
+          <Box marginTop={1} flexDirection="column">
+            {visibleDetailSections.map((sectionId) => (
+              <Box key={sectionId} marginTop={1} flexDirection="column">
+                {renderDetailSection(sectionId, {
+                  theme,
+                  selectedRun,
+                  selectedFeature,
+                  backlogSettings,
+                  selectedRunStage,
+                  breakdown,
+                  sessionTokens,
+                  pipelineTokens,
+                  workflowStages,
+                  declaredTasks,
+                  visibleOutput,
+                  outputPaused,
+                  logsVisible,
+                  width: innerWidth,
+                  dense: detailDense,
+                })}
               </Box>
-              {/* D1: this is now the only place the workflow board renders —
-                  the sidebar used to show a duplicate summary of the same
-                  stages. */}
-              <Box marginTop={1}>
-                <DetailSection theme={theme} title="Workflow" width={leftColumnWidth}>
-                  {workflowStages.length > 0 ? (
-                    workflowStages.map((stage) => (
-                      <Box key={stage.stage} flexDirection="column" marginBottom={1}>
-                        <Text {...theme.role(getWorkflowRole(stage))}>
-                          {stage.stage}  {stage.done}/{stage.total} done  ({stageStatusLabel(stage)})
-                        </Text>
-                        <Text {...theme.role('muted')}>
-                          {[
-                            stage.totalTokens > 0 ? `${formatTokens(stage.totalTokens)} tokens` : null,
-                            stage.maxContextPercent !== null ? `${formatPercent(stage.maxContextPercent)} ctx` : null,
-                            stage.running > 0 ? `${stage.running} active` : null,
-                            stage.pending > 0 ? `${stage.pending} pending` : null,
-                            stage.blocked > 0 ? `${stage.blocked} blocked` : null,
-                            stage.failed > 0 ? `${stage.failed} failed` : null,
-                            stage.skipped > 0 ? `${stage.skipped} skipped` : null,
-                          ].filter(Boolean).join('  ·  ') || 'completed'}
-                        </Text>
-                        {stage.tasks.slice(0, 2).map((task, index) => (
-                          <Text key={`${stage.stage}:${task.taskId}:${index}`} {...theme.role('muted')}>
-                            {task.status === 'running' ? '>' : '-'} {truncateText(
-                              [
-                                task.title,
-                                task.totalTokens ? `${formatTokens(task.totalTokens)} tokens` : null,
-                                task.contextWindowPercent !== null && task.contextWindowPercent !== undefined
-                                  ? `${formatPercent(task.contextWindowPercent)} ctx`
-                                  : null,
-                              ].filter(Boolean).join('  ·  '),
-                              Math.max(20, leftColumnWidth - 6),
-                            )}
-                          </Text>
-                        ))}
-                      </Box>
-                    ))
-                  ) : (
-                    <Text {...theme.role('muted')}>
-                      {selectedRun.pipelineResumeSummary
-                        ? truncateText(selectedRun.pipelineResumeSummary, Math.max(24, leftColumnWidth - 4))
-                        : 'No workflow steps recorded for this run yet.'}
-                    </Text>
-                  )}
-                </DetailSection>
-              </Box>
-              <Box marginTop={1}>
-                <DetailSection theme={theme} title="Declared Skills" width={leftColumnWidth}>
-                  {selectedFeature?.skills?.length ? (
-                    selectedFeature.skills.map((skill, index) => (
-                      <Text key={`${skill}:${index}`} {...theme.role('success')}>
-                        - {skill}
-                      </Text>
-                    ))
-                  ) : (
-                    <Text {...theme.role('muted')}>No backlog skill metadata found for this run.</Text>
-                  )}
-                </DetailSection>
-              </Box>
-            </Box>
-            <Box flexDirection="column" width={rightColumnWidth}>
-              {/* D4: the declared task breakdown (backlog building blocks),
-                  distinct from the live Workflow section above (which
-                  tracks execution stage instances, not the backlog plan). */}
-              <DetailSection theme={theme} title="Tasks" width={rightColumnWidth}>
-                {declaredTasks.length > 0 ? (
-                  declaredTasks.slice(0, mode === 'stacked' ? 6 : 10).map((task) => (
-                    <Text key={task.id} {...theme.role('muted')}>
-                      {BACKLOG_TASK_ICON[task.status] ?? '○'} {task.id} — {truncateText(task.title, Math.max(20, rightColumnWidth - 12))}
-                    </Text>
-                  ))
-                ) : (
-                  <Text {...theme.role('muted')}>No task breakdown declared for {selectedRun.featureId} in the backlog.</Text>
-                )}
-              </DetailSection>
-              <Box marginTop={1}>
-                <DetailSection theme={theme} title="Live Output" width={rightColumnWidth}>
-                  {logsVisible ? (
-                    <>
-                      <Text {...theme.role('muted')}>
-                        {selectedRun.status === 'running'
-                          ? outputPaused
-                            ? 'Auto-scroll paused. Press Ctrl+S to resume live tailing.'
-                            : visibleOutput[visibleOutput.length - 1]?.source === 'heartbeat'
-                              ? 'Agent thinking... heartbeat received while waiting for the next visible event.'
-                              : 'Streaming latest run events in real time.'
-                          : 'Run finished. Tail below shows the latest captured output.'}
-                      </Text>
-                      <Box marginTop={1} flexDirection="column">
-                        {visibleOutput.length > 0 ? (
-                          visibleOutput.map((entry) => renderOutputEntry(theme, entry, Math.max(28, rightColumnWidth - 6)))
-                        ) : (
-                          <Text {...theme.role('muted')}>
-                            {selectedRun.status === 'running'
-                              ? 'Agent thinking... waiting for the first streamed line.'
-                              : 'No output captured for this run yet.'}
-                          </Text>
-                        )}
-                      </Box>
-                    </>
-                  ) : (
-                    <Text {...theme.role('muted')}>Logs hidden. Press Ctrl+L to reopen the live output view.</Text>
-                  )}
-                </DetailSection>
-              </Box>
-            </Box>
+            ))}
+            <Text {...theme.role('muted')}>
+              {`Section ${detailSectionIndex + 1}-${Math.min(DETAIL_SECTION_ORDER.length, detailSectionIndex + detailPageSize)} of ${DETAIL_SECTION_ORDER.length}`}
+              {'  ·  j/k scroll · PgUp/PgDn page · i density: '}{detailDense ? 'dense' : 'rich'}
+            </Text>
           </Box>
         </Box>
       ) : (
@@ -620,6 +517,222 @@ function renderOutputEntry(
       {truncateText(entry.line, maxWidth)}
     </Text>
   );
+}
+
+interface DetailSectionContext {
+  theme: ReturnType<typeof useTheme>;
+  selectedRun: RunSummary;
+  selectedFeature: FeatureCatalogEntry | null;
+  backlogSettings: BacklogSettings;
+  selectedRunStage: string | null;
+  breakdown: RunBreakdown | null | undefined;
+  sessionTokens: number | null;
+  pipelineTokens: number | null;
+  workflowStages: WorkflowStageSummary[];
+  declaredTasks: NonNullable<FeatureCatalogEntry['tasks']>;
+  visibleOutput: RunOutputRow[];
+  outputPaused: boolean;
+  logsVisible: boolean;
+  width: number;
+  dense: boolean;
+}
+
+// F31 section 5: one of DETAIL_SECTION_ORDER's sections, rendered as its own
+// rich bordered Box (unchanged styling from before) — only the surrounding
+// paging logic in MainPanel decides which of these are currently visible.
+// `dense` (the `i` toggle) shortens previews without ever removing a section.
+function renderDetailSection(sectionId: DetailSectionId, ctx: DetailSectionContext): React.ReactElement {
+  const {
+    theme,
+    selectedRun,
+    selectedFeature,
+    backlogSettings,
+    selectedRunStage,
+    breakdown,
+    sessionTokens,
+    pipelineTokens,
+    workflowStages,
+    declaredTasks,
+    visibleOutput,
+    outputPaused,
+    logsVisible,
+    width,
+    dense,
+  } = ctx;
+
+  switch (sectionId) {
+    case 'summary':
+      return (
+        <DetailSection theme={theme} title={DETAIL_SECTION_LABEL.summary} width={width}>
+          <Text {...theme.role('muted')}>started {formatClock(selectedRun.startedAt)}  ·  ended {formatClock(selectedRun.endedAt)}</Text>
+          {selectedFeature && <Text {...theme.role('muted')}>effort {selectedFeature.effort}</Text>}
+          {selectedRunStage && <Text {...theme.role('muted')}>stage {selectedRunStage}</Text>}
+          <Text {...theme.role('muted')}>
+            session {formatTokens(sessionTokens)}  ·  pipeline {formatTokens(pipelineTokens)}
+          </Text>
+          {selectedRun.contextWindowTokens ? (
+            <Text {...theme.role('muted')}>
+              context {formatPercent(selectedRun.contextWindowPercent)} of {formatTokens(selectedRun.contextWindowTokens)}
+            </Text>
+          ) : null}
+          {selectedRun.pendingStageRequestPrompt && (
+            <Text {...theme.role('muted')}>
+              wait {truncateText(selectedRun.pendingStageRequestPrompt, Math.max(22, width - 6))}
+            </Text>
+          )}
+          {breakdown && breakdown.wallMs !== null && (
+            <>
+              <Text {...theme.role('muted')}>agent {formatDurationMs(breakdown.agentMs)}</Text>
+              {breakdown.gateWaitMs > 0 && <Text {...theme.role('muted')}>gate wait {formatDurationMs(breakdown.gateWaitMs)}</Text>}
+              {breakdown.retryCount > 0 && (
+                <Text {...theme.role('muted')}>retry wait {formatDurationMs(breakdown.retryWaitMs)} ({breakdown.retryCount}x)</Text>
+              )}
+            </>
+          )}
+        </DetailSection>
+      );
+
+    case 'spec':
+      return (
+        <DetailSection theme={theme} title={DETAIL_SECTION_LABEL.spec} width={width}>
+          {selectedFeature?.description ? (
+            selectedFeature.description
+              .split('\n')
+              .slice(0, dense ? 4 : 18)
+              .map((line, index) => (
+                // eslint-disable-next-line react/no-array-index-key
+                <Text key={index} {...theme.role('muted')}>
+                  {truncateText(line || ' ', Math.max(24, width - 4))}
+                </Text>
+              ))
+          ) : (
+            <Text {...theme.role('muted')}>
+              No spec or specFile declared for {selectedRun.featureId} in the backlog.
+            </Text>
+          )}
+        </DetailSection>
+      );
+
+    case 'workflow':
+      return (
+        <DetailSection theme={theme} title={DETAIL_SECTION_LABEL.workflow} width={width}>
+          {workflowStages.length > 0 ? (
+            workflowStages.map((stage) => (
+              <Box key={stage.stage} flexDirection="column" marginBottom={1}>
+                <Text {...theme.role(getWorkflowRole(stage))}>
+                  {stage.stage}  {stage.done}/{stage.total} done  ({stageStatusLabel(stage)})
+                </Text>
+                <Text {...theme.role('muted')}>
+                  {[
+                    stage.totalTokens > 0 ? `${formatTokens(stage.totalTokens)} tokens` : null,
+                    stage.maxContextPercent !== null ? `${formatPercent(stage.maxContextPercent)} ctx` : null,
+                    stage.running > 0 ? `${stage.running} active` : null,
+                    stage.pending > 0 ? `${stage.pending} pending` : null,
+                    stage.blocked > 0 ? `${stage.blocked} blocked` : null,
+                    stage.failed > 0 ? `${stage.failed} failed` : null,
+                    stage.skipped > 0 ? `${stage.skipped} skipped` : null,
+                  ].filter(Boolean).join('  ·  ') || 'completed'}
+                </Text>
+                {stage.tasks.slice(0, dense ? 1 : 6).map((task, index) => (
+                  <Text key={`${stage.stage}:${task.taskId}:${index}`} {...theme.role('muted')}>
+                    {task.status === 'running' ? '>' : '-'} {truncateText(
+                      [
+                        task.title,
+                        task.totalTokens ? `${formatTokens(task.totalTokens)} tokens` : null,
+                        task.contextWindowPercent !== null && task.contextWindowPercent !== undefined
+                          ? `${formatPercent(task.contextWindowPercent)} ctx`
+                          : null,
+                      ].filter(Boolean).join('  ·  '),
+                      Math.max(20, width - 6),
+                    )}
+                  </Text>
+                ))}
+              </Box>
+            ))
+          ) : (
+            <Text {...theme.role('muted')}>
+              {selectedRun.pipelineResumeSummary
+                ? truncateText(selectedRun.pipelineResumeSummary, Math.max(24, width - 4))
+                : 'No workflow steps recorded for this run yet.'}
+            </Text>
+          )}
+        </DetailSection>
+      );
+
+    case 'config':
+      return selectedFeature ? (
+        <FeatureConfigSection feature={selectedFeature} settings={backlogSettings} width={width} />
+      ) : (
+        <DetailSection theme={theme} title={DETAIL_SECTION_LABEL.config} width={width}>
+          <Text {...theme.role('muted')}>No feature catalog entry found for {selectedRun.featureId}.</Text>
+        </DetailSection>
+      );
+
+    case 'skills':
+      return (
+        <DetailSection theme={theme} title={DETAIL_SECTION_LABEL.skills} width={width}>
+          {selectedFeature?.skills?.length ? (
+            selectedFeature.skills.map((skill, index) => (
+              <Text key={`${skill}:${index}`} {...theme.role('success')}>
+                - {skill}
+              </Text>
+            ))
+          ) : (
+            <Text {...theme.role('muted')}>No backlog skill metadata found for this run.</Text>
+          )}
+        </DetailSection>
+      );
+
+    case 'tasks':
+      return (
+        <DetailSection theme={theme} title={DETAIL_SECTION_LABEL.tasks} width={width}>
+          {declaredTasks.length > 0 ? (
+            declaredTasks.slice(0, dense ? 5 : 14).map((task) => (
+              <Text key={task.id} {...theme.role('muted')}>
+                {BACKLOG_TASK_ICON[task.status] ?? '○'} {task.id} — {truncateText(task.title, Math.max(20, width - 12))}
+              </Text>
+            ))
+          ) : (
+            <Text {...theme.role('muted')}>No task breakdown declared for {selectedRun.featureId} in the backlog.</Text>
+          )}
+        </DetailSection>
+      );
+
+    case 'output':
+      return (
+        <DetailSection theme={theme} title={DETAIL_SECTION_LABEL.output} width={width}>
+          {logsVisible ? (
+            <>
+              <Text {...theme.role('muted')}>
+                {selectedRun.status === 'running'
+                  ? outputPaused
+                    ? 'Auto-scroll paused. Press Ctrl+S to resume live tailing.'
+                    : visibleOutput[visibleOutput.length - 1]?.source === 'heartbeat'
+                      ? 'Agent thinking... heartbeat received while waiting for the next visible event.'
+                      : 'Streaming latest run events in real time.'
+                  : 'Run finished. Tail below shows the latest captured output.'}
+              </Text>
+              <Box marginTop={1} flexDirection="column">
+                {visibleOutput.length > 0 ? (
+                  (dense ? visibleOutput.slice(-6) : visibleOutput).map((entry) => renderOutputEntry(theme, entry, Math.max(28, width - 6)))
+                ) : (
+                  <Text {...theme.role('muted')}>
+                    {selectedRun.status === 'running'
+                      ? 'Agent thinking... waiting for the first streamed line.'
+                      : 'No output captured for this run yet.'}
+                  </Text>
+                )}
+              </Box>
+            </>
+          ) : (
+            <Text {...theme.role('muted')}>Logs hidden. Press Ctrl+L to reopen the live output view.</Text>
+          )}
+        </DetailSection>
+      );
+
+    default:
+      return <Text {...theme.role('muted')}>Unknown section.</Text>;
+  }
 }
 
 function collectNextDemands(runs: RunSummary[]): string[] {
