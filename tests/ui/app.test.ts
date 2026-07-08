@@ -999,6 +999,34 @@ describe('App', () => {
     expect(result.selectedRun).toBe(stateValue.selectedRun);
   });
 
+  // F31 "Riscos de UX resolvidos" item 5: resolving the last gate must not
+  // leave focus orphaned on a column that happens to be empty — it falls
+  // back to EXECUTION (or the first non-empty column) deterministically.
+  it('falls back focus to the EXECUTION column once the last gate resolves off an empty column', async () => {
+    stateValue = {
+      selectedRun: 0,
+      selectedGate: 0,
+      selectedPending: 0,
+      focusPanel: 'gates',
+      activeColumn: 'done',
+      activeView: 'overview',
+      outputPaused: false,
+      logsVisible: true,
+      detailSectionIndex: 0,
+      detailDense: false,
+    };
+    mockUseRuns.mockReturnValue([{ runId: 1, featureId: 'feat-1', status: 'running' }]);
+    mockUseGates.mockReturnValue({ gates: [], resolve: vi.fn() });
+    const { App } = await import('../../src/ui/App.js');
+
+    const element = App();
+    const rootChildren = (element.props as { children: React.ReactNode }).children;
+    const mainPanel = findElement(rootChildren, mockMainPanel);
+
+    expect(mainPanel?.props.activeColumn).toBe('execution');
+    expect(mainPanel?.props.focusPanel).toBe('columns');
+  });
+
   it('starts the selected pending feature with the current runtime args', async () => {
     stateValue = {
       selectedRun: 0,

@@ -23,8 +23,8 @@ function renderWithTheme(node: React.ReactElement, theme = 'default') {
 describe('ui components', () => {
   it('renders the empty state message', () => {
     const { lastFrame } = renderWithTheme(<EmptyState />, 'light');
-    expect(lastFrame()).toContain('No runs yet');
-    expect(lastFrame()).toContain('msq run');
+    expect(lastFrame()).toContain('Backlog vazio');
+    expect(lastFrame()).toContain('msq init');
   });
 
   it('renders main panel, status bar, and command bar with theme-aware content', () => {

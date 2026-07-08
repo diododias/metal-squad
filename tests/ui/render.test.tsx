@@ -62,10 +62,10 @@ const baseRun: RunSummary = {
 // EmptyState
 // ---------------------------------------------------------------------------
 describe('EmptyState', () => {
-  it('renders the idle message', () => {
+  it('renders the onboarding message when the backlog is empty', () => {
     const { lastFrame } = renderWithTheme(<EmptyState />);
-    expect(lastFrame()).toContain('No runs yet');
-    expect(lastFrame()).toContain('msq run');
+    expect(lastFrame()).toContain('Backlog vazio');
+    expect(lastFrame()).toContain('msq init');
   });
 });
 
@@ -131,6 +131,26 @@ describe('StatsBar', () => {
     );
     expect(lastFrame()).toContain('tokens (7d) 900');
     expect(lastFrame()).toContain('stats unavailable');
+  });
+
+  // F31 item 1: short terminals drop the tokens segment first to keep the
+  // stats row a single dense line — the counts themselves are never cut.
+  it('drops the tokens segment in compact mode, keeping the counts', () => {
+    const { lastFrame } = renderWithTheme(
+      <StatsBar
+        done={3}
+        todo={5}
+        execution={2}
+        falha={1}
+        gatesPending={4}
+        tokenStats={{ status: 'ready', totalTokens: 1500, error: null }}
+        compact
+      />,
+    );
+    const frame = lastFrame();
+    expect(frame).toContain('3 done');
+    expect(frame).toContain('4 aprovações');
+    expect(frame).not.toContain('tokens (7d)');
   });
 });
 

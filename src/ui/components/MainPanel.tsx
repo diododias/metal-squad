@@ -4,7 +4,7 @@ import type { RunningTaskSummary, RunOutputRow, RunSummary, TaskRun } from '../.
 import type { PendingApproval } from '../hooks/useGates.js';
 import type { NotificationEntry } from '../hooks/useNotifications.js';
 import type { BacklogSettings, FeatureCatalogEntry } from '../catalog.js';
-import type { LayoutMode } from '../format.js';
+import type { LayoutMode, VerticalBudget } from '../format.js';
 import {
   STATUS_ICON,
   formatClock,
@@ -74,6 +74,10 @@ interface Props {
   detailPageSize?: number;
   /** F31 section 5: `i` toggle — collapses long sections when true. */
   detailDense?: boolean;
+  /** F31 "Riscos de UX resolvidos" item 1: degrades the overview's own
+   * chrome (cards-per-column, activity feed) under height pressure — never
+   * cuts the gates strip. Distinct from detailPageSize's own budget use. */
+  verticalBudget?: VerticalBudget;
   mode: LayoutMode;
   width: number;
   pendingFeatures: FeatureCatalogEntry[];
@@ -139,6 +143,7 @@ export function MainPanel({
   detailSectionIndex = 0,
   detailPageSize = 2,
   detailDense = false,
+  verticalBudget = 'regular',
   mode,
   width,
   pendingFeatures,
@@ -151,7 +156,14 @@ export function MainPanel({
   const theme = useTheme();
   const innerWidth = Math.max(32, width - 4);
   const visibleOutput = output.slice(-(mode === 'stacked' ? 8 : 14));
-  const maxPerColumn = mode === 'stacked' ? 3 : 5;
+  // F31 item 1 degradation order: activity feed goes first, then stats
+  // density (StatsBar's own concern), then cards-per-column (here) — gates
+  // never cut. Taller terminals raise the cap; short ones lower it.
+  const maxPerColumn = verticalBudget === 'short'
+    ? (mode === 'stacked' ? 2 : 3)
+    : verticalBudget === 'tall'
+      ? (mode === 'stacked' ? 6 : 10)
+      : (mode === 'stacked' ? 3 : 5);
   const columnGap = mode === 'stacked' ? 0 : 1;
   const columnWidth = mode === 'stacked'
     ? innerWidth
@@ -400,7 +412,9 @@ export function MainPanel({
               ))}
             </Box>
           )}
-          {notifications.length > 0 && (
+          {/* F31 item 1: first to go under height pressure — still reachable
+              via `o` (full notifications view), never truly lost. */}
+          {notifications.length > 0 && verticalBudget !== 'short' && (
             <Box marginTop={1} flexDirection="column">
               <Text {...theme.role('text')} bold>Recent activity</Text>
               <NotificationsFeed

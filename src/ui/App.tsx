@@ -177,7 +177,7 @@ export function App(): React.ReactElement {
   const detailPageSize = verticalBudget === 'short' ? 1 : verticalBudget === 'regular' ? 2 : 3;
   const detailSectionIndex = clampIndex(ui.detailSectionIndex, DETAIL_SECTION_ORDER.length);
   const selectedGateIndex = clampIndex(ui.selectedGate, gates.length);
-  const activeColumn = ui.activeColumn;
+  const storedActiveColumn = ui.activeColumn;
   // F31 "novo modelo de foco": EXECUTION/DONE/FALHA columns each navigate
   // their own slice of `runs` (already grouped by sortRunsByGroup) rather
   // than one flat index shared across every group — switching columns
@@ -191,6 +191,24 @@ export function App(): React.ReactElement {
     done: doneRunsList,
     canceled: falhaRunsList,
   };
+  // F31 "Riscos de UX resolvidos" item 5 / "Navegacao e casos de borda":
+  // resolving the last gate must never leave focus orphaned on a now-empty
+  // column — it falls back to EXECUTION, or the first non-empty non-TODO
+  // column. Scoped to the moment the gate strip itself just disappeared
+  // (ui.focusPanel was 'gates', now there are none), so it doesn't fight a
+  // user who deliberately browses an empty column for unrelated reasons.
+  const gateJustResolved = ui.focusPanel === 'gates' && gates.length === 0;
+  const activeColumn = gateJustResolved
+    && storedActiveColumn !== 'todo'
+    && (columnRunLists[storedActiveColumn]?.length ?? 0) === 0
+    ? executionRuns.length > 0
+      ? 'execution'
+      : doneRunsList.length > 0
+        ? 'done'
+        : falhaRunsList.length > 0
+          ? 'canceled'
+          : storedActiveColumn
+    : storedActiveColumn;
   const activeColumnRuns = columnRunLists[activeColumn] ?? [];
   const selectedRunIndex = clampIndex(ui.selectedRun, activeColumnRuns.length);
   const focusOrder: FocusPanel[] = [
@@ -804,6 +822,7 @@ export function App(): React.ReactElement {
             falha={falhaCount}
             gatesPending={gates.length}
             tokenStats={tokenStats}
+            compact={verticalBudget === 'short'}
           />
         </Box>
         {dashboardOpen ? (
@@ -829,6 +848,7 @@ export function App(): React.ReactElement {
               detailSectionIndex={detailSectionIndex}
               detailPageSize={detailPageSize}
               detailDense={ui.detailDense}
+              verticalBudget={verticalBudget}
               mode={layoutMode}
               width={mainWidth}
               pendingFeatures={pendingFeatures}

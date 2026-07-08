@@ -11,6 +11,8 @@ interface Props {
   falha: number;
   gatesPending: number;
   tokenStats: TokenStatsState;
+  /** F31 item 1: 'short' drops the tokens segment to keep this one dense line. */
+  compact?: boolean;
 }
 
 /**
@@ -20,7 +22,7 @@ interface Props {
  * Tokens are the current period (7d), not all-time (item 7) — all-time and
  * per-repo/feature breakdown stay in the Cost Dashboard (`d`).
  */
-export function StatsBar({ done, todo, execution, falha, gatesPending, tokenStats }: Props): React.ReactElement {
+export function StatsBar({ done, todo, execution, falha, gatesPending, tokenStats, compact = false }: Props): React.ReactElement {
   const theme = useTheme();
   const tokensLabel = tokenStats.status === 'loading' ? '—' : formatTokens(tokenStats.totalTokens);
 
@@ -35,8 +37,12 @@ export function StatsBar({ done, todo, execution, falha, gatesPending, tokenStat
       <Text {...theme.statusTone('failed')}>{falha} falha</Text>
       <Text {...theme.role('muted')}> | </Text>
       <Text {...theme.role('warning')}>{gatesPending} aprovações</Text>
-      <Text {...theme.role('muted')}> | tokens (7d) {tokensLabel}</Text>
-      {tokenStats.status === 'error' ? <Text {...theme.role('error')}> (stats unavailable)</Text> : null}
+      {!compact && (
+        <>
+          <Text {...theme.role('muted')}> | tokens (7d) {tokensLabel}</Text>
+          {tokenStats.status === 'error' ? <Text {...theme.role('error')}> (stats unavailable)</Text> : null}
+        </>
+      )}
     </Box>
   );
 }
