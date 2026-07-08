@@ -312,6 +312,18 @@ describe('App', () => {
     expect(commandBar?.props.hasRuns).toBe(false);
   });
 
+  it('registers the density-toggle command with the command palette', async () => {
+    const { App } = await import('../../src/ui/App.js');
+    const { useCommandPalette } = await import('../../src/ui/hooks/useCommandPalette.js');
+
+    App();
+
+    const paletteArgs = vi.mocked(useCommandPalette).mock.calls[0]?.[0] as {
+      commands: Array<{ id: string }>;
+    };
+    expect(paletteArgs.commands.some((command) => command.id === 'view-toggle-density')).toBe(true);
+  });
+
   it('passes the resolved theme notice to the status bar when the configured theme is unknown', async () => {
     mockLoadConfig.mockReturnValue({ concurrency: 3, theme: 'solarized' });
     const { App } = await import('../../src/ui/App.js');
