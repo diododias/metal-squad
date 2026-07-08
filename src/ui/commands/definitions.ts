@@ -20,6 +20,7 @@ interface CommandDefinitionOptions {
   approveSelectedGate: () => void;
   skipSelectedGate: () => void;
   retrySelectedGate: () => void;
+  forceApproveSelectedGate: () => void;
   startSelectedFeature: () => void;
   quit: () => void;
 }
@@ -49,6 +50,7 @@ export function buildCommandDefinitions(options: CommandDefinitionOptions): Comm
     approveSelectedGate,
     skipSelectedGate,
     retrySelectedGate,
+    forceApproveSelectedGate,
     startSelectedFeature,
     quit,
   } = options;
@@ -123,6 +125,16 @@ export function buildCommandDefinitions(options: CommandDefinitionOptions): Comm
       shortcut: 'r',
       available: () => canRetryGate,
       execute: retrySelectedGate,
+    },
+    {
+      id: 'gate-force-approve',
+      name: 'Force-approve gate (bypass)',
+      description: 'Force past the selected gate: approves it and, if it left the pipeline paused, resumes execution immediately.',
+      category: 'gate',
+      keywords: ['force', 'approve', 'gate', 'bypass', 'unblock', 'resume'],
+      shortcut: 'F',
+      available: () => canResolveGate,
+      execute: forceApproveSelectedGate,
     },
     {
       id: 'view-stats',

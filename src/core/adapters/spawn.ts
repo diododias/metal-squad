@@ -103,9 +103,13 @@ export function runCli(
           const idleMs = Date.now() - lastOutputAt;
           const label = opts.logLabel ?? bin;
           const suffix = opts.heartbeatSuffix?.();
+          // D5: plain ASCII, single-sentence structure so the TUI can parse
+          // and condense this into a clean status line (see
+          // ui/format.ts#formatHeartbeatLine) instead of hard-truncating a
+          // long accented string mid-word.
           opts.onHeartbeat?.(
-            `[msq] ${label} em execução há ${Math.round(elapsedMs / 1000)}s `
-              + `(stdout=${stdout.length}B stderr=${stderr.length}B idle=${Math.round(idleMs / 1000)}s)`
+            `[msq] ${label} running for ${Math.round(elapsedMs / 1000)}s `
+              + `(stdout ${stdout.length}B stderr ${stderr.length}B idle ${Math.round(idleMs / 1000)}s)`
               + (suffix ? ` ${suffix}` : ''),
           );
         }, heartbeatMs)

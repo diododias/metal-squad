@@ -480,6 +480,34 @@ export function resolveGate(id: number, decision: GateDecision): void {
   }
 }
 
+// F1: force-bypass an approval gate. Plain resolveGate only records a
+// decision — it does not unblock execution, since a budget-violation or
+// on-fail 'gate' policy pauses the whole pipeline separately (see
+// core/runner/execute.ts handleGlobalBudgetViolation). Today the user has to
+// approve the gate *and then* separately find the paused run in the run
+// detail screen to hit resume. forceResolveGate consolidates both steps: it
+// resolves the gate as 'approved' and, if that gate's pipeline is paused or
+// blocked, resumes it immediately.
+export function forceResolveGate(id: number): { resumedPipelineId: number | null } {
+  resolveGate(id, 'approved');
+  const gate = getDb('readonly')
+    .prepare(`SELECT run_id AS runId FROM gates WHERE id = ?`)
+    .get(id) as { runId: number } | undefined;
+  if (!gate) return { resumedPipelineId: null };
+
+  const run = getDb('readonly')
+    .prepare(`SELECT pipeline_id AS pipelineId FROM runs WHERE id = ?`)
+    .get(gate.runId) as { pipelineId: number | null } | undefined;
+  if (!run?.pipelineId) return { resumedPipelineId: null };
+
+  const pipeline = getPipeline(run.pipelineId);
+  if (pipeline && (pipeline.status === 'paused' || pipeline.status === 'blocked')) {
+    resumePipeline(run.pipelineId);
+    return { resumedPipelineId: run.pipelineId };
+  }
+  return { resumedPipelineId: null };
+}
+
 // T007: createGate — INSERT, returns new gate id
 export function createGate(runId: number, featureId: string, repoId: string): number {
   const info = getDb('readwrite')
@@ -763,6 +791,34 @@ function clampUsageDelta(next: number, previous: number | undefined): number {
 function computeContextWindowPercent(totalTokens: number, contextWindowTokens: number): number {
   if (contextWindowTokens <= 0) return 0;
   return Math.round(((totalTokens / contextWindowTokens) * 100) * 10) / 10;
+}
+
+// C3 (folded into F24 — task & stage progress): cross-run view of tasks
+// currently running, so the main dashboard can surface in-progress task
+// titles without requiring the user to first open a specific run's detail
+// screen (listTaskRunsForRun above is scoped to a single runId).
+export interface RunningTaskSummary {
+  runId: number;
+  featureId: string;
+  taskId: string;
+  title: string;
+  stage: string | null;
+  startedAt: string | null;
+}
+
+export function listRunningTaskRuns(limit = 20): RunningTaskSummary[] {
+  if (!hasDbFile()) return [];
+  return getDb('readonly')
+    .prepare(
+      `SELECT t.run_id AS runId, r.feature_id AS featureId, t.task_id AS taskId,
+              t.title, t.stage, t.started_at AS startedAt
+       FROM task_runs t
+       JOIN runs r ON r.id = t.run_id
+       WHERE t.status = 'running'
+       ORDER BY t.started_at DESC, t.id DESC
+       LIMIT ?`,
+    )
+    .all(limit) as RunningTaskSummary[];
 }
 
 function hasDbFile(): boolean {

@@ -513,7 +513,7 @@ describe('runCli', () => {
 
     expect(await captured).toBeInstanceOf(CliTimeoutError);
     expect(child.kill).toHaveBeenCalledWith('SIGKILL');
-    expect(onHeartbeat).toHaveBeenCalledWith(expect.stringContaining('[msq] codex em execução há'));
+    expect(onHeartbeat).toHaveBeenCalledWith(expect.stringContaining('[msq] codex running for'));
     expect(onHeartbeat).toHaveBeenCalledWith(expect.stringContaining('extra'));
   });
 });

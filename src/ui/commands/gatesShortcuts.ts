@@ -6,10 +6,13 @@ interface GatesShortcutOptions {
   approve: () => void;
   skip: () => void;
   retry: () => void;
+  /** F1: force-bypass — resolves the gate as approved and, if it is blocking
+   * a paused pipeline, resumes that pipeline in the same action. */
+  forceApprove: () => void;
 }
 
 export function createGatesShortcuts(options: GatesShortcutOptions): KeyboardShortcut[] {
-  const { canResolve, canRetry, approve, skip, retry } = options;
+  const { canResolve, canRetry, approve, skip, retry, forceApprove } = options;
 
   return [
     {
@@ -35,6 +38,14 @@ export function createGatesShortcuts(options: GatesShortcutOptions): KeyboardSho
       label: 'Retry',
       condition: () => canRetry,
       action: retry,
+    },
+    {
+      key: 'F',
+      scope: 'context',
+      context: 'gates',
+      label: 'Force',
+      condition: () => canResolve,
+      action: forceApprove,
     },
   ];
 }
