@@ -12,6 +12,7 @@ const mockUseNotifications = vi.fn();
 const mockUseToasts = vi.fn(() => []);
 const mockUseTokenStats = vi.fn(() => ({ status: 'ready' as const, totalTokens: 0, error: null }));
 const mockGetFeatureCatalog = vi.fn();
+const mockGetBacklogSettings = vi.fn(() => ({ stageSkills: {} }));
 const mockLoadConfig = vi.fn(() => ({ concurrency: 3 }));
 const mockLoadBacklog = vi.fn(() => ({ epics: [] }));
 const mockValidateBacklogSkills = vi.fn();
@@ -124,6 +125,7 @@ vi.mock('../../src/core/repo.js', () => ({
 vi.mock('../../src/ui/catalog.js', () => ({
   getFeatureCatalog: mockGetFeatureCatalog,
   getPendingFeatures: mockGetPendingFeatures,
+  getBacklogSettings: mockGetBacklogSettings,
 }));
 
 vi.mock('../../src/config/index.js', () => ({
@@ -438,6 +440,87 @@ describe('App', () => {
     const openRun = setUi.mock.calls[1]?.[0] as (state: typeof stateValue) => typeof stateValue;
     expect(cycleFocus(stateValue).focusPanel).toBe('gates');
     expect(openRun(stateValue)).toMatchObject({ activeView: 'run', focusPanel: 'columns' });
+  });
+
+  // F31 section 4: Enter on a TODO card opens a read-only preview instead of
+  // starting the run immediately; Enter *inside* the preview is what starts it.
+  it('opens the TODO preview with Enter instead of starting the feature directly', async () => {
+    stateValue = {
+      selectedRun: 0,
+      selectedGate: 0,
+      selectedPending: 0,
+      focusPanel: 'columns',
+      activeColumn: 'todo',
+      activeView: 'overview',
+      outputPaused: false,
+      logsVisible: true,
+    };
+    mockGetPendingFeatures.mockReturnValue([{ id: 'feat-9', title: 'F09', tool: 'codex', effort: 'medium' }]);
+    const { App } = await import('../../src/ui/App.js');
+
+    App();
+    const handler = mockUseInput.mock.calls[0]?.[0] as (input: string, key: Record<string, boolean>) => void;
+    handler('', { return: true });
+
+    expect(setUi).toHaveBeenCalledTimes(1);
+    const openPreview = setUi.mock.calls[0]?.[0] as (state: typeof stateValue) => typeof stateValue;
+    expect(openPreview(stateValue)).toMatchObject({ activeView: 'preview' });
+    expect(mockSpawn).not.toHaveBeenCalled();
+  });
+
+  it('confirms and starts the feature with Enter from inside the preview', async () => {
+    stateValue = {
+      selectedRun: 0,
+      selectedGate: 0,
+      selectedPending: 0,
+      focusPanel: 'columns',
+      activeColumn: 'todo',
+      activeView: 'preview',
+      outputPaused: false,
+      logsVisible: true,
+    };
+    mockGetPendingFeatures.mockReturnValue([{ id: 'feat-9', title: 'F09', tool: 'codex', effort: 'medium' }]);
+    const argvSpy = vi.spyOn(process, 'argv', 'get').mockReturnValue(['/usr/local/bin/node', '/repo/src/index.ts']);
+    const execArgvSpy = vi.spyOn(process, 'execArgv', 'get').mockReturnValue([]);
+    const cwdSpy = vi.spyOn(process, 'cwd').mockReturnValue('/repo');
+    const { App } = await import('../../src/ui/App.js');
+
+    App();
+    const handler = mockUseInput.mock.calls[0]?.[0] as (input: string, key: Record<string, boolean>) => void;
+    handler('', { return: true });
+
+    expect(mockSpawn).toHaveBeenCalledWith(
+      process.execPath,
+      ['/repo/src/index.ts', 'run', '--feature', 'feat-9'],
+      expect.objectContaining({ detached: true, stdio: 'ignore', cwd: '/repo' }),
+    );
+
+    argvSpy.mockRestore();
+    execArgvSpy.mockRestore();
+    cwdSpy.mockRestore();
+  });
+
+  it('returns from the preview without starting when Esc is pressed', async () => {
+    stateValue = {
+      selectedRun: 0,
+      selectedGate: 0,
+      selectedPending: 0,
+      focusPanel: 'columns',
+      activeColumn: 'todo',
+      activeView: 'preview',
+      outputPaused: false,
+      logsVisible: true,
+    };
+    mockGetPendingFeatures.mockReturnValue([{ id: 'feat-9', title: 'F09', tool: 'codex', effort: 'medium' }]);
+    const { App } = await import('../../src/ui/App.js');
+
+    App();
+    const handler = mockUseInput.mock.calls[0]?.[0] as (input: string, key: Record<string, boolean>) => void;
+    handler('', { escape: true });
+
+    expect(mockSpawn).not.toHaveBeenCalled();
+    const escapeRun = setUi.mock.calls[0]?.[0] as (state: typeof stateValue) => typeof stateValue;
+    expect(escapeRun(stateValue)).toMatchObject({ activeView: 'overview' });
   });
 
   it('opens the help overlay with ? and closes the palette first', async () => {

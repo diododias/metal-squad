@@ -7,6 +7,7 @@ function makeOptions(overrides: Partial<Parameters<typeof createGlobalShortcuts>
     canNavigateGates: false,
     canMovePending: true,
     canSwitchColumn: true,
+    canConfirmPreview: false,
     movePrevious: vi.fn(),
     moveNext: vi.fn(),
     moveColumnLeft: vi.fn(),
@@ -77,5 +78,16 @@ describe('createGlobalShortcuts column switching (F31 novo modelo de foco)', () 
     const shortcuts = createGlobalShortcuts(makeOptions({ canSwitchColumn: false }));
     const left = shortcuts.find((s) => s.key === 'left');
     expect(left?.condition?.()).toBe(false);
+  });
+});
+
+describe('createGlobalShortcuts preview confirmation (F31 section 4)', () => {
+  it('enables Enter to confirm the preview even when nothing else is navigable', () => {
+    const options = makeOptions({ canMovePending: false, canNavigateRuns: false, canNavigateGates: false, canConfirmPreview: true });
+    const shortcuts = createGlobalShortcuts(options);
+    const enter = shortcuts.find((s) => s.key === 'enter');
+    expect(enter?.condition?.()).toBe(true);
+    enter?.action();
+    expect(options.enter).toHaveBeenCalledTimes(1);
   });
 });

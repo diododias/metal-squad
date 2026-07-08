@@ -10,7 +10,7 @@ import { validateBacklogSkills } from '../core/skills/index.js';
 import { assertWritableDbPath } from '../db/index.js';
 import { abortPipeline, pausePipeline, requestFeatureAbort, resumePipeline } from '../db/repo.js';
 import type { RunSummary } from '../db/repo.js';
-import { getFeatureCatalog, getPendingFeatures } from './catalog.js';
+import { getBacklogSettings, getFeatureCatalog, getPendingFeatures } from './catalog.js';
 import { DASHBOARD_GROUP_ORDER, getRunGroup, sortRunsByGroup, type DashboardGroupId } from './dashboardGroups.js';
 import { buildCommandDefinitions } from './commands/definitions.js';
 import { createGatesShortcuts } from './commands/gatesShortcuts.js';
@@ -197,16 +197,22 @@ export function App(): React.ReactElement {
     selectedRun?.startedAt ?? null,
     selectedRun?.endedAt ?? null,
   );
+  // F31 section 4: 'preview' has no selectedRun (the feature never ran) —
+  // it must not fall through to 'overview' the way a stale 'run' view would
+  // once its selectedRun disappears.
   const activeView: ActiveView = ui.activeView === 'notifications'
     ? 'notifications'
-    : selectedRun
-      ? ui.activeView
-      : 'overview';
+    : ui.activeView === 'preview'
+      ? 'preview'
+      : selectedRun
+        ? ui.activeView
+        : 'overview';
   const dashboardOpen = Boolean(ui.dashboard);
   const dashboardPeriodIndex = Math.min(ui.dashboardPeriod ?? 1, DASHBOARD_PERIODS.length - 1);
   const dashboardPeriod = DASHBOARD_PERIODS[dashboardPeriodIndex] ?? DASHBOARD_PERIODS[1]!;
   const statsRows = useStatsRows(dashboardOpen, dashboardPeriod.days);
   const featureCatalog = getFeatureCatalog();
+  const backlogSettings = getBacklogSettings();
   const selectedFeature = selectedRun ? featureCatalog[selectedRun.featureId] ?? null : null;
   const totalRuns = runs.length;
   const doneRuns = runs.filter((run) => run.status === 'done').length;
@@ -238,12 +244,16 @@ export function App(): React.ReactElement {
   // capture regardless of which column is focused — so `focusContext`
   // resolves to 'gates' whenever there's a decision waiting, overriding
   // whatever the user last had focused. run-detail keeps priority (its own
-  // pause/abort bindings matter more once a run is actually open).
+  // pause/abort bindings matter more once a run is actually open). The TODO
+  // preview is the one exception (per item 2's own carve-out): it suppresses
+  // gate bindings entirely while open, so it never resolves to 'gates'.
   const focusContext: ShortcutContext = activeView === 'run' && focusPanel === 'columns'
     ? 'run-detail'
-    : gates.length > 0
-      ? 'gates'
-      : focusPanel;
+    : activeView === 'preview'
+      ? 'columns'
+      : gates.length > 0
+        ? 'gates'
+        : focusPanel;
   const hasTabs = false;
 
   const quit = useCallback(() => {
@@ -397,7 +407,9 @@ export function App(): React.ReactElement {
   }, [forceResolve, selectedGate]);
 
   const startSelectedFeature = useCallback(() => {
-    if (activeView !== 'overview' || !selectedPending) return;
+    // F31 section 4: reachable both from the direct 'n' shortcut (overview)
+    // and from confirming inside the TODO preview screen.
+    if ((activeView !== 'overview' && activeView !== 'preview') || !selectedPending) return;
     launchFeatureRun(selectedPending.id);
   }, [activeView, selectedPending]);
 
@@ -485,15 +497,18 @@ export function App(): React.ReactElement {
   const openSelection = useCallback(() => {
     if (dashboardOpen || activeView === 'notifications') return;
     // F31 item 3: Enter always "abre o que o card representa" — a run
-    // (EXECUTION/DONE/FALHA column) opens the run detail; a TODO card starts
-    // the feature directly today (the read-only preview screen lands in a
-    // later PR and will intercept this branch instead).
+    // (EXECUTION/DONE/FALHA column) opens the run detail; a TODO card opens
+    // the read-only preview. Enter *inside* the preview confirms and starts.
+    if (activeView === 'preview') {
+      startSelectedFeature();
+      return;
+    }
     if (selectedRun && focusPanel === 'columns' && activeColumn !== 'todo') {
       setUi((current) => ({ ...current, activeView: 'run', focusPanel: 'columns' }));
       return;
     }
     if (focusPanel === 'columns' && activeColumn === 'todo' && activeView === 'overview' && selectedPending) {
-      startSelectedFeature();
+      setUi((current) => ({ ...current, activeView: 'preview' }));
     }
   }, [activeColumn, activeView, dashboardOpen, focusPanel, selectedRun, selectedPending, startSelectedFeature]);
 
@@ -594,6 +609,7 @@ export function App(): React.ReactElement {
       canNavigateGates: focusPanel === 'gates' && gates.length > 0,
       canMovePending: activeView === 'overview' && focusPanel === 'columns' && activeColumn === 'todo' && pendingFeatures.length > 0,
       canSwitchColumn: !dashboardOpen && focusPanel === 'columns',
+      canConfirmPreview: activeView === 'preview' && Boolean(selectedPending),
       movePrevious,
       moveNext,
       moveColumnLeft,
@@ -619,6 +635,7 @@ export function App(): React.ReactElement {
       openSelection,
       pendingFeatures.length,
       quit,
+      selectedPending,
     ],
   );
 
@@ -733,6 +750,7 @@ export function App(): React.ReactElement {
               selectedRunIndex={selectedRunIndex}
               selectedFeature={selectedFeature}
               featureCatalog={featureCatalog}
+              backlogSettings={backlogSettings}
               activeView={activeView}
               output={liveOutput}
               outputPaused={ui.outputPaused}

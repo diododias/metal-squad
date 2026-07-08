@@ -7,6 +7,8 @@ import { CommandBar } from '../../src/ui/components/CommandBar.js';
 import { HeaderBar } from '../../src/ui/components/HeaderBar.js';
 import { StatsBar } from '../../src/ui/components/StatsBar.js';
 import { KanbanCard } from '../../src/ui/components/KanbanCard.js';
+import { FeaturePreview } from '../../src/ui/components/FeaturePreview.js';
+import { FeatureConfigSection } from '../../src/ui/components/FeatureConfigSection.js';
 import { NotificationsFeed } from '../../src/ui/components/NotificationsFeed.js';
 import { StatusBar } from '../../src/ui/components/StatusBar.js';
 import { CommandPalette } from '../../src/ui/components/CommandPalette.js';
@@ -241,6 +243,55 @@ describe('KanbanCard', () => {
     );
     expect(lastFrame()).toContain('feat-alpha');
     expect(lastFrame()).toContain('codex · gpt-5 · high');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// FeaturePreview + FeatureConfigSection (F31 sections 4 and 5b)
+// ---------------------------------------------------------------------------
+describe('FeaturePreview', () => {
+  const previewFeature = {
+    id: 'feat-preview',
+    title: 'F31 Preview',
+    skills: ['implement'],
+    tool: 'codex',
+    model: 'gpt-5',
+    effort: 'high' as const,
+    description: 'Read-only preview of the feature spec.',
+    tasks: [{ id: 'T1', title: 'Wire the preview', status: 'todo' as const, dependsOn: [] }],
+    dependsOn: ['feat-earlier'],
+    workflow: {
+      mode: 'staged' as const,
+      stages: ['specify', 'plan', 'tasks', 'implement', 'validate'],
+      approvals: { channel: 'telegram' as const, autoAdvance: false },
+      syncTasksToBacklog: true,
+    },
+    retry: undefined,
+    specFile: undefined,
+    context: undefined,
+  };
+  const settings = { stageSkills: {} };
+
+  it('shows the spec, declared tasks, and config without starting anything', () => {
+    const { lastFrame } = renderWithTheme(
+      <FeaturePreview feature={previewFeature} settings={settings} mode="full" width={100} />,
+    );
+    expect(lastFrame()).toContain('F31 Preview');
+    expect(lastFrame()).toContain('not started yet');
+    expect(lastFrame()).toContain('Read-only preview of the feature spec.');
+    expect(lastFrame()).toContain('Wire the preview');
+    expect(lastFrame()).toContain('Feature Config');
+    expect(lastFrame()).toContain('Enter confirms and starts');
+  });
+
+  it('shows resolved retry defaults (muted) when the feature declares none', () => {
+    const { lastFrame } = renderWithTheme(
+      <FeatureConfigSection feature={previewFeature} settings={settings} width={60} />,
+    );
+    // RetrySchema defaults: maxAttempts 1, backoffMs 5000, onFail 'stop'.
+    expect(lastFrame()).toContain('maxAttempts: 1');
+    expect(lastFrame()).toContain('onFail: stop');
+    expect(lastFrame()).toContain('feat-earlier');
   });
 });
 

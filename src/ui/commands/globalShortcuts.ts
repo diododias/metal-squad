@@ -5,6 +5,8 @@ interface GlobalShortcutOptions {
   canNavigateGates: boolean;
   canMovePending: boolean;
   canSwitchColumn: boolean;
+  /** F31 section 4: Enter confirms/starts from inside the TODO preview screen. */
+  canConfirmPreview: boolean;
   movePrevious: () => void;
   moveNext: () => void;
   moveColumnLeft: () => void;
@@ -21,6 +23,7 @@ export function createGlobalShortcuts(options: GlobalShortcutOptions): KeyboardS
     canNavigateGates,
     canMovePending,
     canSwitchColumn,
+    canConfirmPreview,
     movePrevious,
     moveNext,
     moveColumnLeft,
@@ -96,7 +99,7 @@ export function createGlobalShortcuts(options: GlobalShortcutOptions): KeyboardS
       key: 'enter',
       scope: 'global',
       label: 'Select',
-      condition: () => canNavigateRuns || canMovePending,
+      condition: () => canNavigateRuns || canMovePending || canConfirmPreview,
       action: enter,
     },
     {

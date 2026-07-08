@@ -3,7 +3,7 @@ import { Box, Text } from 'ink';
 import type { RunningTaskSummary, RunOutputRow, RunSummary, TaskRun } from '../../db/repo.js';
 import type { PendingApproval } from '../hooks/useGates.js';
 import type { NotificationEntry } from '../hooks/useNotifications.js';
-import type { FeatureCatalogEntry } from '../catalog.js';
+import type { BacklogSettings, FeatureCatalogEntry } from '../catalog.js';
 import type { LayoutMode } from '../format.js';
 import {
   STATUS_ICON,
@@ -19,6 +19,7 @@ import {
 } from '../format.js';
 import { DASHBOARD_GROUP_LABEL, DASHBOARD_GROUP_ORDER, getRunGroup, type DashboardGroupId } from '../dashboardGroups.js';
 import { EmptyState } from './EmptyState.js';
+import { FeaturePreview } from './FeaturePreview.js';
 import { KanbanCard } from './KanbanCard.js';
 import { KanbanColumn } from './KanbanColumn.js';
 import { NotificationsFeed } from './NotificationsFeed.js';
@@ -33,7 +34,7 @@ import {
 } from '../theme/styles.js';
 import type { ThemeRoleName } from '../theme/types.js';
 
-export type ActiveView = 'overview' | 'run' | 'notifications';
+export type ActiveView = 'overview' | 'run' | 'notifications' | 'preview';
 
 const BACKLOG_TASK_ICON: Record<string, string> = {
   todo: '○',
@@ -51,6 +52,8 @@ interface Props {
   selectedFeature: FeatureCatalogEntry | null;
   /** F31 section 3: resolves model/effort per-row for every kanban card, not just the selected run. */
   featureCatalog?: Record<string, FeatureCatalogEntry>;
+  /** F31 section 5b: backlog-level budget/stageSkills shown in the config section. */
+  backlogSettings?: BacklogSettings;
   activeView: ActiveView;
   output: RunOutputRow[];
   outputPaused: boolean;
@@ -113,6 +116,7 @@ export function MainPanel({
   selectedRunIndex,
   selectedFeature,
   featureCatalog = {},
+  backlogSettings = { stageSkills: {} },
   activeView,
   output,
   outputPaused,
@@ -149,6 +153,7 @@ export function MainPanel({
     : '—';
   const metricWidth = mode === 'stacked' ? innerWidth : Math.max(11, Math.floor(innerWidth / 7) - 1);
   const declaredTasks = selectedFeature?.tasks ?? [];
+  const selectedPending = pendingFeatures[selectedPendingIndex] ?? null;
 
   return (
     <Box
@@ -162,7 +167,13 @@ export function MainPanel({
       marginBottom={mode === 'stacked' ? 1 : 0}
     >
       <Text {...getSurfaceTitleStyle(theme)}>
-        {activeView === 'notifications' ? 'Notifications' : activeView === 'run' && selectedRun ? 'Run Detail' : 'Overview'}
+        {activeView === 'notifications'
+          ? 'Notifications'
+          : activeView === 'preview' && selectedPending
+            ? 'Preview'
+            : activeView === 'run' && selectedRun
+              ? 'Run Detail'
+              : 'Overview'}
       </Text>
       {runs.length === 0 && pendingFeatures.length === 0 ? (
         <EmptyState />
@@ -179,6 +190,8 @@ export function MainPanel({
             />
           </Box>
         </Box>
+      ) : activeView === 'preview' && selectedPending ? (
+        <FeaturePreview feature={selectedPending} settings={backlogSettings} mode={mode} width={innerWidth} />
       ) : activeView === 'run' && selectedRun ? (
         <Box flexDirection="column" marginTop={1}>
           <Text {...theme.role('text')} bold>{selectedFeature?.title ?? selectedRun.featureId}</Text>
