@@ -159,10 +159,15 @@ export function MainPanel({
   // F31 item 1 degradation order: activity feed goes first, then stats
   // density (StatsBar's own concern), then cards-per-column (here) — gates
   // never cut. Taller terminals raise the cap; short ones lower it.
+  // Caps stay conservative even in 'tall' terminals: a 14"-16" laptop's
+  // fullscreen terminal reports as 'tall' (>40 rows) but each card still
+  // costs 3 lines, so the old 10/6 caps could push a single dense column
+  // past the visible height (Ink has no scroll). 6/4 keeps every budget
+  // tier fitting a common laptop window.
   const maxPerColumn = verticalBudget === 'short'
     ? (mode === 'stacked' ? 2 : 3)
     : verticalBudget === 'tall'
-      ? (mode === 'stacked' ? 6 : 10)
+      ? (mode === 'stacked' ? 4 : 6)
       : (mode === 'stacked' ? 3 : 5);
   const columnGap = mode === 'stacked' ? 0 : 1;
   const columnWidth = mode === 'stacked'
