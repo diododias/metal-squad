@@ -6,8 +6,11 @@ function makeOptions(overrides: Partial<Parameters<typeof createGlobalShortcuts>
     canNavigateRuns: false,
     canNavigateGates: false,
     canMovePending: true,
+    canSwitchColumn: true,
     movePrevious: vi.fn(),
     moveNext: vi.fn(),
+    moveColumnLeft: vi.fn(),
+    moveColumnRight: vi.fn(),
     enter: vi.fn(),
     escape: vi.fn(),
     cycleFocus: vi.fn(),
@@ -53,5 +56,26 @@ describe('createGlobalShortcuts arrow navigation', () => {
     );
     const down = shortcuts.find((s) => s.key === 'down');
     expect(down?.condition?.()).toBe(true);
+  });
+});
+
+describe('createGlobalShortcuts column switching (F31 novo modelo de foco)', () => {
+  it('binds left/right to column switching', () => {
+    const options = makeOptions();
+    const shortcuts = createGlobalShortcuts(options);
+    const left = shortcuts.find((s) => s.key === 'left');
+    const right = shortcuts.find((s) => s.key === 'right');
+
+    left?.action();
+    right?.action();
+
+    expect(options.moveColumnLeft).toHaveBeenCalledTimes(1);
+    expect(options.moveColumnRight).toHaveBeenCalledTimes(1);
+  });
+
+  it('disables column switching when canSwitchColumn is false', () => {
+    const shortcuts = createGlobalShortcuts(makeOptions({ canSwitchColumn: false }));
+    const left = shortcuts.find((s) => s.key === 'left');
+    expect(left?.condition?.()).toBe(false);
   });
 });

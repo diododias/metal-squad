@@ -9,8 +9,9 @@ import { resolveRepo } from '../core/repo.js';
 import { validateBacklogSkills } from '../core/skills/index.js';
 import { assertWritableDbPath } from '../db/index.js';
 import { abortPipeline, pausePipeline, requestFeatureAbort, resumePipeline } from '../db/repo.js';
+import type { RunSummary } from '../db/repo.js';
 import { getFeatureCatalog, getPendingFeatures } from './catalog.js';
-import { getRunGroup, sortRunsByGroup } from './dashboardGroups.js';
+import { DASHBOARD_GROUP_ORDER, getRunGroup, sortRunsByGroup, type DashboardGroupId } from './dashboardGroups.js';
 import { buildCommandDefinitions } from './commands/definitions.js';
 import { createGatesShortcuts } from './commands/gatesShortcuts.js';
 import { createGlobalShortcuts } from './commands/globalShortcuts.js';
@@ -58,6 +59,8 @@ interface UiState {
   selectedGate: number;
   selectedPending: number;
   focusPanel: FocusPanel;
+  /** F31 "novo modelo de foco": which kanban column has the cursor when focusPanel === 'columns'. */
+  activeColumn: DashboardGroupId;
   activeView: ActiveView;
   outputPaused: boolean;
   logsVisible: boolean;
@@ -138,9 +141,11 @@ export function App(): React.ReactElement {
     selectedRun: 0,
     selectedGate: 0,
     selectedPending: 0,
-    // Foco inicial na lista de features (painel principal): setas navegam entre
-    // features; Tab cicla para runs/gates.
-    focusPanel: 'main',
+    // Foco inicial no board de colunas, comecando pela coluna TODO: setas
+    // navegam entre features pendentes; ←/→ troca de coluna; Tab cicla
+    // columns/gates/activity.
+    focusPanel: 'columns',
+    activeColumn: 'todo',
     activeView: 'overview',
     outputPaused: false,
     logsVisible: true,
@@ -153,11 +158,34 @@ export function App(): React.ReactElement {
   }, [themeResolution.message]);
 
   const layoutMode = getLayoutMode(width);
-  const selectedRunIndex = clampIndex(ui.selectedRun, runs.length);
   const selectedGateIndex = clampIndex(ui.selectedGate, gates.length);
-  const focusOrder: FocusPanel[] = gates.length > 0 ? ['main', 'runs', 'gates'] : ['main', 'runs'];
-  const focusPanel = ui.focusPanel === 'gates' && gates.length === 0 ? 'runs' : ui.focusPanel;
-  const selectedRun = runs[selectedRunIndex] ?? null;
+  const activeColumn = ui.activeColumn;
+  // F31 "novo modelo de foco": EXECUTION/DONE/FALHA columns each navigate
+  // their own slice of `runs` (already grouped by sortRunsByGroup) rather
+  // than one flat index shared across every group — switching columns
+  // resets to that column's own cursor position instead of jumping to
+  // whatever run happens to sit at the same global offset.
+  const executionRuns = useMemo(() => runs.filter((run) => getRunGroup(run.status) === 'execution'), [runs]);
+  const doneRunsList = useMemo(() => runs.filter((run) => getRunGroup(run.status) === 'done'), [runs]);
+  const falhaRunsList = useMemo(() => runs.filter((run) => getRunGroup(run.status) === 'canceled'), [runs]);
+  const columnRunLists: Partial<Record<DashboardGroupId, RunSummary[]>> = {
+    execution: executionRuns,
+    done: doneRunsList,
+    canceled: falhaRunsList,
+  };
+  const activeColumnRuns = columnRunLists[activeColumn] ?? [];
+  const selectedRunIndex = clampIndex(ui.selectedRun, activeColumnRuns.length);
+  const focusOrder: FocusPanel[] = [
+    'columns',
+    ...(gates.length > 0 ? (['gates'] as const) : []),
+    ...(notifications.length > 0 ? (['activity'] as const) : []),
+  ];
+  const focusPanel = ui.focusPanel === 'gates' && gates.length === 0
+    ? 'columns'
+    : ui.focusPanel === 'activity' && notifications.length === 0
+      ? 'columns'
+      : ui.focusPanel;
+  const selectedRun = activeColumnRuns[selectedRunIndex] ?? null;
   const selectedGate = gates[selectedGateIndex] ?? null;
   const liveOutput = useRunOutput(
     selectedRun ? selectedRun.runId : null,
@@ -204,9 +232,18 @@ export function App(): React.ReactElement {
   // F31 section 1: same grouping the kanban columns use (getRunGroup), so the
   // header stats and the columns can never disagree on what counts as
   // "execução" vs. "falha".
-  const executionCount = runs.filter((run) => getRunGroup(run.status) === 'execution').length;
-  const falhaCount = runs.filter((run) => getRunGroup(run.status) === 'canceled').length;
-  const focusContext: ShortcutContext = activeView === 'run' && focusPanel === 'main' ? 'run-detail' : focusPanel;
+  const executionCount = executionRuns.length;
+  const falhaCount = falhaRunsList.length;
+  // F31 "Riscos de UX resolvidos" item 2: while a gate is pending, a/s/r/F
+  // capture regardless of which column is focused — so `focusContext`
+  // resolves to 'gates' whenever there's a decision waiting, overriding
+  // whatever the user last had focused. run-detail keeps priority (its own
+  // pause/abort bindings matter more once a run is actually open).
+  const focusContext: ShortcutContext = activeView === 'run' && focusPanel === 'columns'
+    ? 'run-detail'
+    : gates.length > 0
+      ? 'gates'
+      : focusPanel;
   const hasTabs = false;
 
   const quit = useCallback(() => {
@@ -217,7 +254,7 @@ export function App(): React.ReactElement {
     if (dashboardOpen) return;
 
     const currentIndex = focusOrder.indexOf(focusPanel);
-    const nextFocus = focusOrder[(currentIndex + 1) % focusOrder.length] ?? 'runs';
+    const nextFocus = focusOrder[(currentIndex + 1) % focusOrder.length] ?? 'columns';
     setUi((current) => ({ ...current, focusPanel: nextFocus }));
   }, [dashboardOpen, focusOrder, focusPanel]);
 
@@ -225,7 +262,7 @@ export function App(): React.ReactElement {
     setUi((current) => ({
       ...current,
       activeView: 'overview',
-      focusPanel: 'main',
+      focusPanel: 'columns',
       outputPaused: false,
       dashboard: false,
     }));
@@ -236,7 +273,7 @@ export function App(): React.ReactElement {
       ...current,
       dashboard: false,
       activeView: current.activeView === 'notifications' ? 'overview' : 'notifications',
-      focusPanel: 'main',
+      focusPanel: 'columns',
     }));
   }, []);
 
@@ -245,9 +282,41 @@ export function App(): React.ReactElement {
       ...current,
       dashboard: !current.dashboard,
       activeView: 'overview',
-      focusPanel: 'main',
+      focusPanel: 'columns',
     }));
   }, []);
+
+  // F31 "Navegacao e casos de borda": ←/→ pula colunas vazias em vez de parar
+  // nelas; se todas estiverem vazias, mantem a coluna atual.
+  const columnLength = useCallback(
+    (groupId: DashboardGroupId): number => (groupId === 'todo' ? pendingFeatures.length : (columnRunLists[groupId]?.length ?? 0)),
+    [columnRunLists, pendingFeatures.length],
+  );
+
+  const findNextNonEmptyColumn = useCallback(
+    (from: DashboardGroupId, step: 1 | -1): DashboardGroupId => {
+      const startIndex = DASHBOARD_GROUP_ORDER.indexOf(from);
+      for (let offset = 1; offset <= DASHBOARD_GROUP_ORDER.length; offset += 1) {
+        const index = (startIndex + step * offset + DASHBOARD_GROUP_ORDER.length * DASHBOARD_GROUP_ORDER.length) % DASHBOARD_GROUP_ORDER.length;
+        const candidate = DASHBOARD_GROUP_ORDER[index] ?? from;
+        if (columnLength(candidate) > 0) return candidate;
+      }
+      return from;
+    },
+    [columnLength],
+  );
+
+  const moveColumnLeft = useCallback(() => {
+    if (dashboardOpen || focusPanel !== 'columns') return;
+    const nextColumn = findNextNonEmptyColumn(activeColumn, -1);
+    setUi((current) => ({ ...current, activeColumn: nextColumn, selectedRun: 0, selectedPending: 0 }));
+  }, [activeColumn, dashboardOpen, findNextNonEmptyColumn, focusPanel]);
+
+  const moveColumnRight = useCallback(() => {
+    if (dashboardOpen || focusPanel !== 'columns') return;
+    const nextColumn = findNextNonEmptyColumn(activeColumn, 1);
+    setUi((current) => ({ ...current, activeColumn: nextColumn, selectedRun: 0, selectedPending: 0 }));
+  }, [activeColumn, dashboardOpen, findNextNonEmptyColumn, focusPanel]);
 
   const previousDashboardPeriod = useCallback(() => {
     setUi((current) => ({
@@ -332,10 +401,25 @@ export function App(): React.ReactElement {
     launchFeatureRun(selectedPending.id);
   }, [activeView, selectedPending]);
 
+  // F31 "novo modelo de foco": j/k always act on whichever panel is
+  // currently focused — the gates strip (independent of column, per item 2's
+  // rule that gate keys never no-op) when focusPanel === 'gates', otherwise
+  // the active column's own list (pending features for TODO, that column's
+  // own run slice for EXECUTION/DONE/FALHA).
   const movePrevious = useCallback(() => {
     if (dashboardOpen || activeView === 'notifications') return;
 
-    if (activeView === 'overview' && pendingFeatures.length > 0 && focusPanel === 'main') {
+    if (focusPanel === 'gates') {
+      setUi((current) => ({
+        ...current,
+        selectedGate: clampIndex(selectedGateIndex - 1, gates.length),
+      }));
+      return;
+    }
+
+    if (focusPanel !== 'columns') return;
+
+    if (activeColumn === 'todo') {
       setUi((current) => ({
         ...current,
         selectedPending: clampIndex(selectedPendingIndex - 1, pendingFeatures.length),
@@ -343,27 +427,18 @@ export function App(): React.ReactElement {
       return;
     }
 
-    if (focusPanel === 'runs') {
-      setUi((current) => ({
-        ...current,
-        selectedRun: clampIndex(selectedRunIndex - 1, runs.length),
-      }));
-      return;
-    }
-
-    if (focusPanel === 'gates') {
-      setUi((current) => ({
-        ...current,
-        selectedGate: clampIndex(selectedGateIndex - 1, gates.length),
-      }));
-    }
+    setUi((current) => ({
+      ...current,
+      selectedRun: clampIndex(selectedRunIndex - 1, activeColumnRuns.length),
+    }));
   }, [
+    activeColumn,
+    activeColumnRuns.length,
     activeView,
     dashboardOpen,
     focusPanel,
     gates.length,
     pendingFeatures.length,
-    runs.length,
     selectedGateIndex,
     selectedPendingIndex,
     selectedRunIndex,
@@ -372,7 +447,17 @@ export function App(): React.ReactElement {
   const moveNext = useCallback(() => {
     if (dashboardOpen || activeView === 'notifications') return;
 
-    if (activeView === 'overview' && pendingFeatures.length > 0 && focusPanel === 'main') {
+    if (focusPanel === 'gates') {
+      setUi((current) => ({
+        ...current,
+        selectedGate: clampIndex(selectedGateIndex + 1, gates.length),
+      }));
+      return;
+    }
+
+    if (focusPanel !== 'columns') return;
+
+    if (activeColumn === 'todo') {
       setUi((current) => ({
         ...current,
         selectedPending: clampIndex(selectedPendingIndex + 1, pendingFeatures.length),
@@ -380,27 +465,18 @@ export function App(): React.ReactElement {
       return;
     }
 
-    if (focusPanel === 'runs') {
-      setUi((current) => ({
-        ...current,
-        selectedRun: clampIndex(selectedRunIndex + 1, runs.length),
-      }));
-      return;
-    }
-
-    if (focusPanel === 'gates') {
-      setUi((current) => ({
-        ...current,
-        selectedGate: clampIndex(selectedGateIndex + 1, gates.length),
-      }));
-    }
+    setUi((current) => ({
+      ...current,
+      selectedRun: clampIndex(selectedRunIndex + 1, activeColumnRuns.length),
+    }));
   }, [
+    activeColumn,
+    activeColumnRuns.length,
     activeView,
     dashboardOpen,
     focusPanel,
     gates.length,
     pendingFeatures.length,
-    runs.length,
     selectedGateIndex,
     selectedPendingIndex,
     selectedRunIndex,
@@ -408,14 +484,18 @@ export function App(): React.ReactElement {
 
   const openSelection = useCallback(() => {
     if (dashboardOpen || activeView === 'notifications') return;
-    if (selectedRun && focusPanel === 'runs') {
-      setUi((current) => ({ ...current, activeView: 'run', focusPanel: 'main' }));
+    // F31 item 3: Enter always "abre o que o card representa" — a run
+    // (EXECUTION/DONE/FALHA column) opens the run detail; a TODO card starts
+    // the feature directly today (the read-only preview screen lands in a
+    // later PR and will intercept this branch instead).
+    if (selectedRun && focusPanel === 'columns' && activeColumn !== 'todo') {
+      setUi((current) => ({ ...current, activeView: 'run', focusPanel: 'columns' }));
       return;
     }
-    if (focusPanel === 'main' && activeView === 'overview' && selectedPending) {
+    if (focusPanel === 'columns' && activeColumn === 'todo' && activeView === 'overview' && selectedPending) {
       startSelectedFeature();
     }
-  }, [activeView, dashboardOpen, focusPanel, selectedRun, selectedPending, startSelectedFeature]);
+  }, [activeColumn, activeView, dashboardOpen, focusPanel, selectedRun, selectedPending, startSelectedFeature]);
 
   const switchToTab = useCallback((_tabIndex: number) => {
     // The current TUI does not expose numbered tabs yet.
@@ -510,17 +590,36 @@ export function App(): React.ReactElement {
 
   const globalShortcuts = useMemo(
     () => createGlobalShortcuts({
-      canNavigateRuns: focusPanel === 'runs' && runs.length > 0,
+      canNavigateRuns: focusPanel === 'columns' && activeColumn !== 'todo' && activeColumnRuns.length > 0,
       canNavigateGates: focusPanel === 'gates' && gates.length > 0,
-      canMovePending: activeView === 'overview' && focusPanel === 'main' && pendingFeatures.length > 0,
+      canMovePending: activeView === 'overview' && focusPanel === 'columns' && activeColumn === 'todo' && pendingFeatures.length > 0,
+      canSwitchColumn: !dashboardOpen && focusPanel === 'columns',
       movePrevious,
       moveNext,
+      moveColumnLeft,
+      moveColumnRight,
       enter: openSelection,
       escape: escapeView,
       cycleFocus,
       quit,
     }),
-    [activeView, cycleFocus, escapeView, focusPanel, gates.length, moveNext, movePrevious, openSelection, pendingFeatures.length, quit, runs.length],
+    [
+      activeColumn,
+      activeColumnRuns.length,
+      activeView,
+      cycleFocus,
+      dashboardOpen,
+      escapeView,
+      focusPanel,
+      gates.length,
+      moveColumnLeft,
+      moveColumnRight,
+      moveNext,
+      movePrevious,
+      openSelection,
+      pendingFeatures.length,
+      quit,
+    ],
   );
 
   const viewShortcuts = useMemo(
@@ -639,6 +738,7 @@ export function App(): React.ReactElement {
               outputPaused={ui.outputPaused}
               logsVisible={ui.logsVisible}
               focusPanel={focusPanel}
+              activeColumn={activeColumn}
               mode={layoutMode}
               width={mainWidth}
               pendingFeatures={pendingFeatures}

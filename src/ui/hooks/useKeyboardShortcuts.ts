@@ -10,7 +10,7 @@ import { useInput } from 'ink';
 import type { KeyboardShortcut } from '../types/shortcuts.js';
 
 export interface UseKeyboardShortcutsOptions {
-  /** Current focus context (e.g., 'runs', 'gates', 'main') */
+  /** Current focus context (e.g., 'columns', 'gates', 'activity') */
   currentContext: string;
 
   /** Whether keyboard shortcuts are enabled (false when modals are open) */
@@ -131,6 +131,10 @@ function matchesShortcutBinding(binding: string, input: string, key: Record<stri
       return Boolean(key.upArrow);
     case 'down':
       return Boolean(key.downArrow);
+    case 'left':
+      return Boolean(key.leftArrow);
+    case 'right':
+      return Boolean(key.rightArrow);
     default:
       return input === binding;
   }
@@ -210,9 +214,9 @@ export function useKeyboardShortcuts(
             : ['tab', 'esc', '?', 'ctrl+p']),
         ])
       : uniqueShortcuts(
-          pickShortcuts(globalShortcuts, currentContext === 'runs'
-            ? ['j', 'k', 'enter', 'tab', '?', 'ctrl+p']
-            : currentContext === 'main'
+          pickShortcuts(globalShortcuts, currentContext === 'columns'
+            ? ['left', 'right', 'j', 'k', 'enter', 'tab', '?', 'ctrl+p']
+            : currentContext === 'activity'
               ? ['esc', 'tab', '?', 'ctrl+p', 'q']
               : ['tab', 'esc', '?', 'ctrl+p', 'q'])
         );

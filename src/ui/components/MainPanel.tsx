@@ -55,7 +55,9 @@ interface Props {
   output: RunOutputRow[];
   outputPaused: boolean;
   logsVisible: boolean;
-  focusPanel: 'runs' | 'gates' | 'main';
+  focusPanel: 'columns' | 'gates' | 'activity';
+  /** F31 "novo modelo de foco": which kanban column has the cursor. */
+  activeColumn: DashboardGroupId;
   mode: LayoutMode;
   width: number;
   pendingFeatures: FeatureCatalogEntry[];
@@ -116,6 +118,7 @@ export function MainPanel({
   outputPaused,
   logsVisible,
   focusPanel,
+  activeColumn,
   mode,
   width,
   pendingFeatures,
@@ -410,6 +413,8 @@ export function MainPanel({
               it's a pending feature (TODO) or an actual run. */}
           <Box flexDirection={mode === 'stacked' ? 'column' : 'row'}>
             {DASHBOARD_GROUP_ORDER.map((groupId) => {
+              const columnFocused = focusPanel === 'columns' && activeColumn === groupId;
+
               if (groupId === 'todo') {
                 const visiblePending = pendingFeatures.slice(0, maxPerColumn);
                 return (
@@ -417,7 +422,7 @@ export function MainPanel({
                     key={groupId}
                     label={DASHBOARD_GROUP_LABEL.todo}
                     count={pendingFeatures.length}
-                    focused={focusPanel === 'main'}
+                    focused={columnFocused}
                     width={columnWidth}
                     stacked={mode === 'stacked'}
                     emptyLabel={COLUMN_EMPTY_LABEL.todo}
@@ -427,8 +432,8 @@ export function MainPanel({
                       <KanbanCard
                         key={feature.id}
                         width={columnWidth}
-                        selected={focusPanel === 'main' && index === selectedPendingIndex}
-                        focused={focusPanel === 'main'}
+                        selected={columnFocused && index === selectedPendingIndex}
+                        focused={columnFocused}
                         pendingFeature={feature}
                       />
                     ))}
@@ -443,7 +448,7 @@ export function MainPanel({
                   key={groupId}
                   label={DASHBOARD_GROUP_LABEL[groupId]}
                   count={groupRuns.length}
-                  focused={focusPanel === 'runs'}
+                  focused={columnFocused}
                   width={columnWidth}
                   stacked={mode === 'stacked'}
                   emptyLabel={COLUMN_EMPTY_LABEL[groupId]}
@@ -456,7 +461,7 @@ export function MainPanel({
                         key={run.runId}
                         width={columnWidth}
                         selected={isSelected}
-                        focused={focusPanel === 'runs'}
+                        focused={columnFocused}
                         run={run}
                         feature={featureCatalog[run.featureId] ?? null}
                       >

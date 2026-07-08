@@ -45,7 +45,8 @@ let stateValue: {
   selectedRun: number;
   selectedGate: number;
   selectedPending: number;
-  focusPanel: 'runs' | 'gates' | 'main';
+  focusPanel: 'columns' | 'gates' | 'activity';
+  activeColumn: 'execution' | 'todo' | 'done' | 'canceled';
   activeView: 'overview' | 'run' | 'notifications';
   outputPaused: boolean;
   logsVisible: boolean;
@@ -252,7 +253,8 @@ describe('App', () => {
       selectedRun: 0,
       selectedGate: 0,
       selectedPending: 0,
-      focusPanel: 'runs',
+      focusPanel: 'columns',
+      activeColumn: 'execution',
       activeView: 'overview',
       outputPaused: false,
       logsVisible: true,
@@ -366,8 +368,8 @@ describe('App', () => {
   it('handles keyboard interactions for navigation', async () => {
     const resolve = vi.fn();
     mockUseRuns.mockReturnValue([
-      { runId: 1, featureId: 'feat-1' },
-      { runId: 2, featureId: 'feat-2' },
+      { runId: 1, featureId: 'feat-1', status: 'running' },
+      { runId: 2, featureId: 'feat-2', status: 'running' },
     ]);
     mockUseGates.mockReturnValue({
       gates: [{ id: 7, featureId: 'feat-1', repoId: 'repo-1' }],
@@ -389,7 +391,7 @@ describe('App', () => {
     const escapeRun = setUi.mock.calls[1]?.[0] as (state: typeof stateValue) => typeof stateValue;
 
     expect(moveRun(stateValue).selectedRun).toBe(1);
-    expect(escapeRun(stateValue)).toMatchObject({ activeView: 'overview', focusPanel: 'main', outputPaused: false });
+    expect(escapeRun(stateValue)).toMatchObject({ activeView: 'overview', focusPanel: 'columns', outputPaused: false });
     expect(resolve).not.toHaveBeenCalled();
   });
 
@@ -412,12 +414,13 @@ describe('App', () => {
       selectedRun: 0,
       selectedGate: 0,
       selectedPending: 0,
-      focusPanel: 'runs',
+      focusPanel: 'columns',
+      activeColumn: 'execution',
       activeView: 'overview',
       outputPaused: false,
       logsVisible: true,
     };
-    mockUseRuns.mockReturnValue([{ runId: 1, featureId: 'feat-1' }]);
+    mockUseRuns.mockReturnValue([{ runId: 1, featureId: 'feat-1', status: 'running' }]);
     mockUseGates.mockReturnValue({
       gates: [{ kind: 'gate', id: 7, featureId: 'feat-1', repoId: 'repo-1', prompt: '', createdAt: '' }],
       resolve: vi.fn(),
@@ -434,7 +437,7 @@ describe('App', () => {
     const cycleFocus = setUi.mock.calls[0]?.[0] as (state: typeof stateValue) => typeof stateValue;
     const openRun = setUi.mock.calls[1]?.[0] as (state: typeof stateValue) => typeof stateValue;
     expect(cycleFocus(stateValue).focusPanel).toBe('gates');
-    expect(openRun(stateValue)).toMatchObject({ activeView: 'run', focusPanel: 'main' });
+    expect(openRun(stateValue)).toMatchObject({ activeView: 'run', focusPanel: 'columns' });
   });
 
   it('opens the help overlay with ? and closes the palette first', async () => {
@@ -455,12 +458,13 @@ describe('App', () => {
       selectedRun: 0,
       selectedGate: 0,
       selectedPending: 0,
-      focusPanel: 'main',
+      focusPanel: 'columns',
+      activeColumn: 'execution',
       activeView: 'run',
       outputPaused: false,
       logsVisible: true,
     };
-    mockUseRuns.mockReturnValue([{ runId: 1, featureId: 'feat-1' }]);
+    mockUseRuns.mockReturnValue([{ runId: 1, featureId: 'feat-1', status: 'running' }]);
     mockUseGates.mockReturnValue({ gates: [], resolve: vi.fn() });
     const { App } = await import('../../src/ui/App.js');
 
@@ -478,12 +482,13 @@ describe('App', () => {
       selectedRun: 0,
       selectedGate: 0,
       selectedPending: 0,
-      focusPanel: 'main',
+      focusPanel: 'columns',
+      activeColumn: 'execution',
       activeView: 'run',
       outputPaused: false,
       logsVisible: true,
     };
-    mockUseRuns.mockReturnValue([{ runId: 1, featureId: 'feat-1' }]);
+    mockUseRuns.mockReturnValue([{ runId: 1, featureId: 'feat-1', status: 'running' }]);
     mockUseGates.mockReturnValue({ gates: [], resolve: vi.fn() });
     const { App } = await import('../../src/ui/App.js');
 
@@ -501,12 +506,13 @@ describe('App', () => {
       selectedRun: 0,
       selectedGate: 0,
       selectedPending: 0,
-      focusPanel: 'runs',
+      focusPanel: 'columns',
+      activeColumn: 'execution',
       activeView: 'overview',
       outputPaused: false,
       logsVisible: true,
     };
-    mockUseRuns.mockReturnValue([{ runId: 1, featureId: 'feat-1' }]);
+    mockUseRuns.mockReturnValue([{ runId: 1, featureId: 'feat-1', status: 'running' }]);
     mockUseGates.mockReturnValue({ gates: [], resolve: vi.fn() });
     const { App } = await import('../../src/ui/App.js');
 
@@ -524,12 +530,13 @@ describe('App', () => {
       selectedRun: 0,
       selectedGate: 0,
       selectedPending: 0,
-      focusPanel: 'runs',
+      focusPanel: 'columns',
+      activeColumn: 'execution',
       activeView: 'overview',
       outputPaused: false,
       logsVisible: true,
     };
-    mockUseRuns.mockReturnValue([{ runId: 1, featureId: 'feat-1' }]);
+    mockUseRuns.mockReturnValue([{ runId: 1, featureId: 'feat-1', status: 'running' }]);
     mockUseGates.mockReturnValue({ gates: [], resolve: vi.fn() });
     const { App } = await import('../../src/ui/App.js');
 
@@ -539,7 +546,7 @@ describe('App', () => {
 
     expect(setUi).toHaveBeenCalledTimes(1);
     const toggle = setUi.mock.calls[0]?.[0] as (state: typeof stateValue) => typeof stateValue;
-    expect(toggle(stateValue)).toMatchObject({ activeView: 'notifications', focusPanel: 'main' });
+    expect(toggle(stateValue)).toMatchObject({ activeView: 'notifications', focusPanel: 'columns' });
   });
 
   it('handles gate decisions when the gates panel is focused', async () => {
@@ -549,11 +556,12 @@ describe('App', () => {
       selectedGate: 0,
       selectedPending: 0,
       focusPanel: 'gates',
+      activeColumn: 'execution',
       activeView: 'overview',
       outputPaused: false,
       logsVisible: true,
     };
-    mockUseRuns.mockReturnValue([{ runId: 1, featureId: 'feat-1' }]);
+    mockUseRuns.mockReturnValue([{ runId: 1, featureId: 'feat-1', status: 'running' }]);
     const gateApproval = { kind: 'gate' as const, id: 7, featureId: 'feat-1', repoId: 'repo-1', prompt: '', createdAt: '' };
     mockUseGates.mockReturnValue({
       gates: [gateApproval],
@@ -580,11 +588,12 @@ describe('App', () => {
       selectedGate: 0,
       selectedPending: 0,
       focusPanel: 'gates',
+      activeColumn: 'execution',
       activeView: 'overview',
       outputPaused: false,
       logsVisible: true,
     };
-    mockUseRuns.mockReturnValue([{ runId: 1, featureId: 'feat-1' }]);
+    mockUseRuns.mockReturnValue([{ runId: 1, featureId: 'feat-1', status: 'running' }]);
     const gateApproval = { kind: 'gate' as const, id: 7, featureId: 'feat-1', repoId: 'repo-1', prompt: '', createdAt: '' };
     mockUseGates.mockReturnValue({
       gates: [gateApproval],
@@ -603,7 +612,12 @@ describe('App', () => {
     });
   });
 
-  it('ignores context shortcuts outside their active panels', async () => {
+  // F31 "Riscos de UX resolvidos" item 2: a pending gate used to be a
+  // silent no-op unless the gates panel had focus. That's the bug this
+  // rule fixes — a/s/r/F now capture globally whenever there's a gate
+  // pending, regardless of which column is focused. run-detail-only
+  // shortcuts (p/x) are unaffected and still require activeView === 'run'.
+  it('gate shortcuts act globally while a gate is pending, run-detail shortcuts still do not', async () => {
     const resolve = vi.fn();
     const forceResolve = vi.fn(() => ({ resumedPipelineId: null }));
     mockUseRuns.mockReturnValue([{
@@ -633,14 +647,12 @@ describe('App', () => {
     App();
     const handler = mockUseInput.mock.calls[0]?.[0] as (input: string, key: Record<string, boolean>) => void;
     handler('a', {});
-    handler('s', {});
-    handler('r', {});
-    handler('F', {});
+
+    expect(resolve).toHaveBeenCalledTimes(1);
+
     handler('p', {});
     handler('x', {});
 
-    expect(resolve).not.toHaveBeenCalled();
-    expect(forceResolve).not.toHaveBeenCalled();
     expect(mockPausePipeline).not.toHaveBeenCalled();
     expect(mockRequestFeatureAbort).not.toHaveBeenCalled();
     expect(mockAbortPipeline).not.toHaveBeenCalled();
@@ -652,11 +664,12 @@ describe('App', () => {
       selectedGate: 0,
       selectedPending: 0,
       focusPanel: 'gates',
+      activeColumn: 'execution',
       activeView: 'overview',
       outputPaused: false,
       logsVisible: true,
     };
-    mockUseRuns.mockReturnValue([{ runId: 1, featureId: 'feat-1' }]);
+    mockUseRuns.mockReturnValue([{ runId: 1, featureId: 'feat-1', status: 'running' }]);
     mockUseGates.mockReturnValue({
       gates: [{ kind: 'gate', id: 7, featureId: 'feat-1', repoId: 'repo-1', prompt: '', createdAt: '' }],
       resolve: vi.fn(),
@@ -678,7 +691,8 @@ describe('App', () => {
       selectedRun: 0,
       selectedGate: 0,
       selectedPending: 0,
-      focusPanel: 'main',
+      focusPanel: 'columns',
+      activeColumn: 'execution',
       activeView: 'run',
       outputPaused: false,
       logsVisible: true,
@@ -714,7 +728,8 @@ describe('App', () => {
       selectedRun: 0,
       selectedGate: 0,
       selectedPending: 0,
-      focusPanel: 'main',
+      focusPanel: 'columns',
+      activeColumn: 'execution',
       activeView: 'run',
       outputPaused: false,
       logsVisible: true,
@@ -751,7 +766,8 @@ describe('App', () => {
       selectedRun: 0,
       selectedGate: 0,
       selectedPending: 0,
-      focusPanel: 'main',
+      focusPanel: 'columns',
+      activeColumn: 'execution',
       activeView: 'run',
       outputPaused: false,
       logsVisible: true,
@@ -789,7 +805,8 @@ describe('App', () => {
       selectedRun: 0,
       selectedGate: 0,
       selectedPending: 0,
-      focusPanel: 'runs',
+      focusPanel: 'columns',
+      activeColumn: 'todo',
       activeView: 'overview',
       outputPaused: false,
       logsVisible: true,
