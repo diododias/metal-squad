@@ -70,7 +70,7 @@ O que ainda falta:
 | [F07 — Status Bar](features/F07-status-bar.md) | Low | Alta | Pendente |
 | [F08 — Session Navigation](features/F08-session-navigation.md) | Medium | Media | Pendente |
 | [F09 — Command Palette](features/F09-command-palette.md) | Medium | Media | Entregue |
-| [F24 — Task & Stage Progress](features/F24-task-stage-progress.md) | Medium | Alta | Pendente |
+| [F24 — Task & Stage Progress](features/F24-task-stage-progress.md) | Medium | Alta | Em progresso |
 | [F29 — TUI Shell Polish](features/F29-tui-shell-polish.md) | Medium | Alta | Entregue |
 
 **Entrega**: TUI multi-painel com streaming, status bar, navegacao rica,
