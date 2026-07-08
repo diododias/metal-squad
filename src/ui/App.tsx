@@ -168,6 +168,19 @@ export function App(): React.ReactElement {
     msqEventBus.emit('ui:notice', { message: themeResolution.message });
   }, [themeResolution.message]);
 
+  // H11: the gate-resolution focus fallback below (`gateJustResolved`) must
+  // fire only once, right when the gate strip disappears — otherwise it
+  // keeps reverting the user away from any column they browse to
+  // afterwards, forever, since `ui.focusPanel` never leaves 'gates' on its
+  // own. This effect performs that one-time reset as soon as the
+  // transition happens, so `gateJustResolved` goes false again once the
+  // redirect has been applied.
+  useEffect(() => {
+    if (ui.focusPanel === 'gates' && gates.length === 0) {
+      setUi((current) => (current.focusPanel === 'gates' ? { ...current, focusPanel: 'columns' } : current));
+    }
+  }, [gates.length, ui.focusPanel]);
+
   const layoutMode = getLayoutMode(width);
   // F31 section 5: page size for the detail screen's section-level paging —
   // taller terminals show more sections per page. This is distinct from the
@@ -211,14 +224,19 @@ export function App(): React.ReactElement {
     : storedActiveColumn;
   const activeColumnRuns = columnRunLists[activeColumn] ?? [];
   const selectedRunIndex = clampIndex(ui.selectedRun, activeColumnRuns.length);
+  // H11: MainPanel hides the "Recent activity" block whenever
+  // verticalBudget === 'short', regardless of notification count — the
+  // focus model must agree, or Tab-cycling can land focus on a panel that
+  // isn't actually rendered.
+  const activityVisible = notifications.length > 0 && verticalBudget !== 'short';
   const focusOrder: FocusPanel[] = [
     'columns',
     ...(gates.length > 0 ? (['gates'] as const) : []),
-    ...(notifications.length > 0 ? (['activity'] as const) : []),
+    ...(activityVisible ? (['activity'] as const) : []),
   ];
   const focusPanel = ui.focusPanel === 'gates' && gates.length === 0
     ? 'columns'
-    : ui.focusPanel === 'activity' && notifications.length === 0
+    : ui.focusPanel === 'activity' && !activityVisible
       ? 'columns'
       : ui.focusPanel;
   const selectedRun = activeColumnRuns[selectedRunIndex] ?? null;
@@ -353,16 +371,20 @@ export function App(): React.ReactElement {
   );
 
   const moveColumnLeft = useCallback(() => {
-    if (dashboardOpen || focusPanel !== 'columns') return;
+    // H11: a run's detail screen keeps focusPanel === 'columns' while open
+    // (see openSelection below), so this must also check activeView or the
+    // arrows silently reassign activeColumn/selectedRun behind the screen
+    // the user is actually looking at.
+    if (dashboardOpen || focusPanel !== 'columns' || activeView === 'run') return;
     const nextColumn = findNextNonEmptyColumn(activeColumn, -1);
     setUi((current) => ({ ...current, activeColumn: nextColumn, selectedRun: 0, selectedPending: 0 }));
-  }, [activeColumn, dashboardOpen, findNextNonEmptyColumn, focusPanel]);
+  }, [activeColumn, activeView, dashboardOpen, findNextNonEmptyColumn, focusPanel]);
 
   const moveColumnRight = useCallback(() => {
-    if (dashboardOpen || focusPanel !== 'columns') return;
+    if (dashboardOpen || focusPanel !== 'columns' || activeView === 'run') return;
     const nextColumn = findNextNonEmptyColumn(activeColumn, 1);
     setUi((current) => ({ ...current, activeColumn: nextColumn, selectedRun: 0, selectedPending: 0 }));
-  }, [activeColumn, dashboardOpen, findNextNonEmptyColumn, focusPanel]);
+  }, [activeColumn, activeView, dashboardOpen, findNextNonEmptyColumn, focusPanel]);
 
   const previousDashboardPeriod = useCallback(() => {
     setUi((current) => ({
@@ -681,7 +703,7 @@ export function App(): React.ReactElement {
       canNavigateRuns: activeView !== 'run' && focusPanel === 'columns' && activeColumn !== 'todo' && activeColumnRuns.length > 0,
       canNavigateGates: activeView !== 'run' && focusPanel === 'gates' && gates.length > 0,
       canMovePending: activeView === 'overview' && focusPanel === 'columns' && activeColumn === 'todo' && pendingFeatures.length > 0,
-      canSwitchColumn: !dashboardOpen && focusPanel === 'columns',
+      canSwitchColumn: !dashboardOpen && focusPanel === 'columns' && activeView !== 'run',
       canConfirmPreview: activeView === 'preview' && Boolean(selectedPending),
       movePrevious,
       moveNext,

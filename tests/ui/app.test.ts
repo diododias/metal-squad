@@ -1039,6 +1039,109 @@ describe('App', () => {
     expect(mainPanel?.props.focusPanel).toBe('columns');
   });
 
+  // H11: the fallback above must be edge-triggered — it should reset
+  // ui.focusPanel back to 'columns' as soon as the last gate resolves,
+  // rather than staying derived from stale state forever (which would keep
+  // reverting a later, deliberate navigation to an empty column).
+  it('resets ui.focusPanel away from "gates" once the last gate resolves (H11)', async () => {
+    stateValue = {
+      selectedRun: 0,
+      selectedGate: 0,
+      selectedPending: 0,
+      focusPanel: 'gates',
+      activeColumn: 'execution',
+      activeView: 'overview',
+      outputPaused: false,
+      logsVisible: true,
+      detailSectionIndex: 0,
+      detailDense: false,
+    };
+    mockUseRuns.mockReturnValue([{ runId: 1, featureId: 'feat-1', status: 'running' }]);
+    mockUseGates.mockReturnValue({ gates: [], resolve: vi.fn() });
+    const { App } = await import('../../src/ui/App.js');
+
+    App();
+
+    const resetCall = setUi.mock.calls.find((call) => {
+      const updater = call[0] as (state: typeof stateValue) => typeof stateValue;
+      return updater(stateValue).focusPanel === 'columns';
+    });
+    expect(resetCall).toBeDefined();
+  });
+
+  // H11: MainPanel hides the "Recent activity" block whenever the vertical
+  // budget is 'short' (terminal height < 24), regardless of how many
+  // notifications are pending. The focus model must agree, or focus can
+  // land on a panel that isn't actually rendered.
+  it('does not resolve focus to "activity" when the vertical budget is short, even with notifications pending (H11)', async () => {
+    stateValue = {
+      selectedRun: 0,
+      selectedGate: 0,
+      selectedPending: 0,
+      focusPanel: 'activity',
+      activeColumn: 'execution',
+      activeView: 'overview',
+      outputPaused: false,
+      logsVisible: true,
+      detailSectionIndex: 0,
+      detailDense: false,
+    };
+    mockUseTerminalHeight.mockReturnValue(20);
+    mockUseNotifications.mockReturnValue([{ id: 1, message: 'something happened', createdAt: '2026-07-08T00:00:00Z' }]);
+    const { App } = await import('../../src/ui/App.js');
+
+    const element = App();
+    const rootChildren = (element.props as { children: React.ReactNode }).children;
+    const mainPanel = findElement(rootChildren, mockMainPanel);
+
+    expect(mainPanel?.props.focusPanel).toBe('columns');
+  });
+
+  // H11: opening a run's detail screen keeps ui.focusPanel === 'columns'
+  // (see openSelection), so canSwitchColumn/moveColumnLeft/moveColumnRight
+  // must also check activeView, or ←/→ silently reassign activeColumn and
+  // selectedRun behind the screen the user is actually looking at.
+  it('does not switch the active column with arrow keys while a run detail is open (H11)', async () => {
+    stateValue = {
+      selectedRun: 0,
+      selectedGate: 0,
+      selectedPending: 0,
+      focusPanel: 'columns',
+      activeColumn: 'execution',
+      activeView: 'run',
+      outputPaused: false,
+      logsVisible: true,
+      detailSectionIndex: 0,
+      detailDense: false,
+    };
+    mockUseRuns.mockReturnValue([{
+      runId: 1,
+      pipelineId: 42,
+      pipelineStatus: 'running',
+      featureId: 'feat-1',
+      tool: 'codex',
+      status: 'running',
+      startedAt: '2026-07-06T10:00:00Z',
+      endedAt: null,
+      totalTokens: null,
+      inputTokens: null,
+      outputTokens: null,
+      gateId: null,
+      gateDecision: null,
+      repoId: 'repo-1',
+      pipelineResumeSummary: null,
+    }]);
+    mockUseGates.mockReturnValue({ gates: [], resolve: vi.fn() });
+    const { App } = await import('../../src/ui/App.js');
+
+    App();
+    const handler = mockUseInput.mock.calls[0]?.[0] as (input: string, key: Record<string, boolean>) => void;
+    handler('', { rightArrow: true });
+    handler('', { leftArrow: true });
+
+    expect(setUi).not.toHaveBeenCalled();
+  });
+
   it('starts the selected pending feature with the current runtime args', async () => {
     stateValue = {
       selectedRun: 0,
