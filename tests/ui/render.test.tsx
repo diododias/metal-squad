@@ -4,7 +4,6 @@ import { render, cleanup } from 'ink-testing-library';
 
 import { EmptyState } from '../../src/ui/components/EmptyState.js';
 import { CommandBar } from '../../src/ui/components/CommandBar.js';
-import { GatePanel } from '../../src/ui/components/GatePanel.js';
 import { RunTable } from '../../src/ui/components/RunTable.js';
 import { NotificationsFeed } from '../../src/ui/components/NotificationsFeed.js';
 import { StatusBar } from '../../src/ui/components/StatusBar.js';
@@ -128,41 +127,6 @@ describe('CommandBar', () => {
     const { lastFrame } = renderWithTheme(<CommandBar {...base} hasPending />);
     expect(lastFrame()).toContain('n start');
     expect(lastFrame()).toContain('↑/↓ select');
-  });
-});
-
-// ---------------------------------------------------------------------------
-// GatePanel
-// ---------------------------------------------------------------------------
-describe('GatePanel', () => {
-  const gates = [
-    { id: 1, runId: 10, featureId: 'feat-1', repoId: 'repo-1', createdAt: '', resolvedAt: null, decision: null },
-    { id: 2, runId: 11, featureId: 'feat-2', repoId: 'repo-2', createdAt: '', resolvedAt: null, decision: null },
-  ];
-
-  it('renders the header and shortcut hints', () => {
-    const { lastFrame } = renderWithTheme(<GatePanel gates={gates} selectedIndex={0} />);
-    expect(lastFrame()).toContain('Gates awaiting decision');
-    expect(lastFrame()).toContain('[a]pprove');
-    expect(lastFrame()).toContain('[s]kip');
-    expect(lastFrame()).toContain('[r]etry');
-  });
-
-  it('prefixes the selected gate with the ▶ indicator', () => {
-    const { lastFrame } = renderWithTheme(<GatePanel gates={gates} selectedIndex={0} />);
-    expect(lastFrame()).toContain('▶ feat-1');
-  });
-
-  it('moves the ▶ indicator when selection changes', () => {
-    const { lastFrame } = renderWithTheme(<GatePanel gates={gates} selectedIndex={1} />);
-    expect(lastFrame()).toContain('▶ feat-2');
-    expect(lastFrame()).not.toContain('▶ feat-1');
-  });
-
-  it('renders all gate feature ids', () => {
-    const { lastFrame } = renderWithTheme(<GatePanel gates={gates} selectedIndex={0} />);
-    expect(lastFrame()).toContain('feat-1');
-    expect(lastFrame()).toContain('feat-2');
   });
 });
 

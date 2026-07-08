@@ -4,10 +4,8 @@ import { cleanup, render } from 'ink-testing-library';
 import { CommandBar } from '../../src/ui/components/CommandBar.js';
 import { CostDashboard } from '../../src/ui/components/CostDashboard.js';
 import { EmptyState } from '../../src/ui/components/EmptyState.js';
-import { GatePanel } from '../../src/ui/components/GatePanel.js';
 import { MainPanel } from '../../src/ui/components/MainPanel.js';
 import { RunTable } from '../../src/ui/components/RunTable.js';
-import { Sidebar } from '../../src/ui/components/Sidebar.js';
 import { StatusBar } from '../../src/ui/components/StatusBar.js';
 import { ThemeProvider } from '../../src/ui/theme/context.js';
 import { resolveThemePreference } from '../../src/ui/theme/resolve.js';
@@ -28,38 +26,6 @@ describe('ui components', () => {
     const { lastFrame } = renderWithTheme(<EmptyState />, 'light');
     expect(lastFrame()).toContain('No runs yet');
     expect(lastFrame()).toContain('msq run');
-  });
-
-  it('renders gate panel rows and highlights the selected gate', () => {
-    const { lastFrame } = renderWithTheme(
-      <GatePanel
-        gates={[
-          {
-            id: 1,
-            runId: 10,
-            featureId: 'feat-1',
-            repoId: 'repo-1',
-            createdAt: '2026-07-06T10:00:00Z',
-            resolvedAt: null,
-            decision: null,
-          },
-          {
-            id: 2,
-            runId: 11,
-            featureId: 'feat-2',
-            repoId: 'repo-2',
-            createdAt: '2026-07-06T10:01:00Z',
-            resolvedAt: null,
-            decision: null,
-          },
-        ]}
-        selectedIndex={1}
-      />,
-      'minimal',
-    );
-
-    expect(lastFrame()).toContain('Gates awaiting decision');
-    expect(lastFrame()).toContain('▶ feat-2');
   });
 
   it('renders compact and full tables', () => {
@@ -117,7 +83,7 @@ describe('ui components', () => {
     expect(renderWithTheme(<RunTable runs={runs} width={100} />, 'dark').lastFrame()).toContain('duration');
   });
 
-  it('renders sidebar, main panel, status bar, and command bar with theme-aware content', () => {
+  it('renders main panel, status bar, and command bar with theme-aware content', () => {
     const runs = [
       {
         runId: 1,
@@ -160,27 +126,6 @@ describe('ui components', () => {
       tool: 'codex',
       effort: 'medium' as const,
     };
-
-    // D1: the workflow board used to be duplicated in the sidebar. It now
-    // shows only declared skills — the live workflow stage summary lives
-    // solely in MainPanel's run detail screen (asserted below).
-    const sidebarFrame = renderWithTheme(
-      <Sidebar
-        runs={runs}
-        gates={gates as any}
-        notifications={[]}
-        selectedRunIndex={0}
-        selectedGateIndex={0}
-        focusPanel="runs"
-        activeView="overview"
-        skills={selectedFeature.skills}
-        width={32}
-        mode="full"
-      />,
-      'dark',
-    ).lastFrame();
-    expect(sidebarFrame).toContain('Skills');
-    expect(sidebarFrame).not.toContain('Workflow');
 
     const mainPanelFrame = renderWithTheme(
       <MainPanel

@@ -37,12 +37,12 @@ import { useRunningTasks, useRuns, useTaskRuns } from './hooks/useRuns.js';
 import { useStatsRows } from './hooks/useStatsRows.js';
 import { useTerminalWidth } from './hooks/useTerminalWidth.js';
 import type { ActiveView } from './components/MainPanel.js';
+import type { FocusPanel as ShortcutContext } from './types/shortcuts.js';
 import { ThemeProvider } from './theme/context.js';
 import { resolveThemePreference } from './theme/resolve.js';
 import { mergeInkStyles } from './theme/styles.js';
 
-type FocusPanel = 'runs' | 'gates' | 'main';
-type ShortcutContext = FocusPanel | 'run-detail';
+type FocusPanel = Exclude<ShortcutContext, 'run-detail'>;
 
 // Wordmark aligned as two full-width rows; sliced at a fixed column so the
 // "METAL" (primary) and "SQUAD" (accent) halves stay column-aligned between rows.
