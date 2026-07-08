@@ -63,6 +63,19 @@ function discoverDirectorySkills(root: string, source: SkillSource): Skill[] {
     .filter((skill): skill is Skill => skill !== null);
 }
 
+function discoverFilteredDirectorySkills(
+  root: string,
+  source: SkillSource,
+  includeEntry: (name: string) => boolean,
+): Skill[] {
+  if (!existsSync(root)) return [];
+
+  return readdirSync(root, { withFileTypes: true })
+    .filter((entry) => entry.isDirectory() && includeEntry(entry.name))
+    .map((entry) => loadFileSkill(join(root, entry.name), source))
+    .filter((skill): skill is Skill => skill !== null);
+}
+
 function discoverSpecKitSkills(cwd: string): Skill[] {
   const skills = new Map<string, Skill>();
   const agentsRoot = join(cwd, '.agents', 'skills');
@@ -107,6 +120,8 @@ export function createSkillRegistry(): SkillRegistry {
   const discover = (cwd: string): Skill[] =>
     mergeByPriority([
       discoverDirectorySkills(join(cwd, '.msq', 'skills'), 'repo'),
+      discoverDirectorySkills(join(cwd, '.claude', 'skills'), 'repo'),
+      discoverFilteredDirectorySkills(join(cwd, '.agents', 'skills'), 'repo', (name) => !name.startsWith('speckit-')),
       discoverDirectorySkills(join(homedir(), '.config', 'metal-squad', 'skills'), 'global'),
       discoverSpecKitSkills(cwd),
       BUILTIN_SKILLS,

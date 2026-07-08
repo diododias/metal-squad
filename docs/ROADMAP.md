@@ -101,9 +101,9 @@ O que ainda falta:
 | [F18 — Duration Tracking](features/F18-duration-tracking.md) | Low | Media | Entregue |
 | [F19 — Notifications v2](features/F19-notifications-v2.md) | Medium | Media | Pendente |
 | [F13 — Execution Graph](features/F13-execution-graph.md) | Medium | Media | Pendente |
-| [F10 — Theme System](features/F10-theme-system.md) | Low | Baixa | Pendente |
+| [F10 — Theme System](features/F10-theme-system.md) | Low | Baixa | Entregue |
 
-**Entrega**: dashboard de custos, analytics CLI, multi-channel notifications.
+**Entrega**: dashboard de custos, analytics CLI, multi-channel notifications, theme system.
 
 ---
 

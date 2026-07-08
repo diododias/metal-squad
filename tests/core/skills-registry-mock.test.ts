@@ -169,7 +169,7 @@ describe('createSkillRegistry — discover', () => {
     expect(specSkill?.name).toBe('specify'); // name without speckit- prefix
   });
 
-  it('skips non-speckit- directories in .agents/skills', async () => {
+  it('treats non-speckit directories in .agents/skills as legacy repo skills', async () => {
     mockExistsSync.mockImplementation((p: string) => p.includes('.agents/skills') || p.endsWith('SKILL.md'));
     mockReaddirSync.mockImplementation((p: string) => {
       if (p.includes('.agents/skills')) return [
@@ -183,7 +183,7 @@ describe('createSkillRegistry — discover', () => {
     const { createSkillRegistry } = await import('../../src/core/skills/registry.js');
     const registry = createSkillRegistry();
     const skills = registry.discover('/cwd');
-    expect(skills.find((s) => s.name === 'other-skill')).toBeUndefined();
+    expect(skills.find((s) => s.name === 'other-skill')?.source).toBe('repo');
     expect(skills.find((s) => s.name === 'plan')).toBeDefined();
   });
 

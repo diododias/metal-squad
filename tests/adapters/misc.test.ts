@@ -345,7 +345,7 @@ describe('opencode adapter', () => {
 });
 
 describe('codex adapter', () => {
-  it('places all options before the prompt positional arg, separated by --', async () => {
+  it('places supported options before the prompt positional arg, separated by --', async () => {
     mockRunCli.mockResolvedValue({ code: 0, stdout: '', stderr: '' });
     const { codexAdapter } = await import('../../src/core/adapters/codex.js');
     const frontMatterPrompt = '---\nname: "speckit-specify"\n---\nprompt body';
@@ -365,11 +365,10 @@ describe('codex adapter', () => {
     const optionArgs = args.slice(0, doubleDashIdx);
     expect(optionArgs).toContain('--json');
     expect(optionArgs).toContain('--skip-git-repo-check');
-    expect(optionArgs).toContain('--ask-for-approval');
-    expect(optionArgs).toContain('never');
     expect(optionArgs).toContain('--sandbox');
     expect(optionArgs).toContain('workspace-write');
     expect(optionArgs).toContain('-m');
+    expect(optionArgs).not.toContain('--ask-for-approval');
   });
 
   it('maps effort tiers via -c config flag', async () => {
