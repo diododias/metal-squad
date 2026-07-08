@@ -17,16 +17,18 @@ type ContentBlock =
   | { type: 'thinking'; thinking: string }
   | { type: 'tool_use'; name: string; input: unknown };
 
+interface StreamUsage {
+  input_tokens?: number;
+  output_tokens?: number;
+  cache_read_input_tokens?: number;
+}
+
 interface StreamJsonEvent {
   type: string;
   subtype?: string;
-  message?: { content?: ContentBlock[] };
+  message?: { content?: ContentBlock[]; usage?: StreamUsage };
   result?: string;
-  usage?: {
-    input_tokens?: number;
-    output_tokens?: number;
-    cache_read_input_tokens?: number;
-  };
+  usage?: StreamUsage;
 }
 
 export const claudeAdapter: ToolAdapter = {
@@ -219,6 +221,8 @@ interface ProgressUpdate {
     source: 'agent' | 'tool' | 'stderr';
   };
   usage?: TokenUsage;
+  /** true quando `usage` ja e o total autoritativo (evento `result`). */
+  usageTotal?: boolean;
   stage?: string;
 }
 
@@ -232,6 +236,11 @@ function createClaudeProgress(): {
   let lastAgentSnippet = '';
   let lastToolSnippet = '';
   let lastStderrSnippet = '';
+  // Acumula uso ao longo do stream para consumo de tokens em tempo real: os
+  // eventos `assistant` trazem uso por mensagem (delta de output; input e o
+  // contexto da vez); o evento `result` traz o total autoritativo no fim.
+  let cumulativeOutput = 0;
+  let latestInput = 0;
 
   return {
     onStdoutLine(line: string) {
@@ -241,6 +250,21 @@ function createClaudeProgress(): {
           eventCount += 1;
           if (u.output.source === 'tool') lastToolSnippet = u.output.line;
           else if (u.output.source === 'agent') lastAgentSnippet = u.output.line;
+        }
+        if (u.usage) {
+          if (u.usageTotal) {
+            // Total final do evento `result`: passa a valer como base acumulada.
+            cumulativeOutput = u.usage.output;
+            latestInput = u.usage.input;
+          } else {
+            cumulativeOutput += u.usage.output;
+            if (u.usage.input > 0) latestInput = u.usage.input;
+            u.usage = {
+              input: latestInput,
+              output: cumulativeOutput,
+              total: latestInput + cumulativeOutput,
+            };
+          }
         }
       }
       return updates;
@@ -273,12 +297,12 @@ function parseClaudeLine(line: string): ProgressUpdate[] {
     const input = evt.usage.input_tokens ?? 0;
     const output = evt.usage.output_tokens ?? 0;
     if (input === 0 && output === 0) return [];
-    return [{ usage: { input, output, total: input + output } }];
+    return [{ usage: { input, output, total: input + output }, usageTotal: true }];
   }
 
-  if (evt.type === 'assistant' && evt.message?.content) {
+  if (evt.type === 'assistant' && evt.message) {
     const updates: ProgressUpdate[] = [];
-    for (const block of evt.message.content) {
+    for (const block of evt.message.content ?? []) {
       if (block.type === 'thinking') {
         const text = normalizeSnippet(block.thinking);
         if (text) updates.push({ output: { line: `[thinking] ${text}`, source: 'agent' } });
@@ -294,6 +318,13 @@ function parseClaudeLine(line: string): ProgressUpdate[] {
           output: { line: outputLine, source: 'tool' },
           ...(stage ? { stage } : {}),
         });
+      }
+    }
+    if (evt.message.usage) {
+      const input = evt.message.usage.input_tokens ?? 0;
+      const output = evt.message.usage.output_tokens ?? 0;
+      if (input > 0 || output > 0) {
+        updates.push({ usage: { input, output, total: input + output }, usageTotal: false });
       }
     }
     return updates;

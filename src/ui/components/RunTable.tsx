@@ -44,7 +44,9 @@ export function RunTable({
         const icon = STATUS_ICON[run.status];
         const statusStyle = theme.statusTone(getRunStatusTone(run.status));
         const duration = formatElapsed(run.startedAt, run.endedAt);
-        const tokens = run.status === 'done' ? formatTokens(run.totalTokens) : '—';
+        // Mostra consumo em tempo real: qualquer run com tokens acumulados,
+        // nao apenas as concluidas. Runs recem-iniciadas (0 tokens) ficam com '—'.
+        const tokens = run.totalTokens && run.totalTokens > 0 ? formatTokens(run.totalTokens) : '—';
         const featureId = run.featureId.slice(0, compact ? 19 : 23);
         const stage = getRunStageLabel(run) ?? '—';
         const statusLabel = getRunStatusLabel(run);

@@ -143,6 +143,7 @@ O que ainda falta:
 |------|------|------------|--------|
 | [F25 — Hardening do fluxo `msq-develop`](features/F25-msq-develop-harness-hardening.md) | Feature | Alta | Pendente |
 | [F26 — Resume de pipeline a partir do estado persistido](features/F26-resume-pipeline-from-state.md) | Feature | Alta | Pendente |
+| [F28 — Task Context Blocks (packing + token analytics)](features/F28-task-context-blocks.md) | Feature | Alta | Em progresso |
 
 ---
 
