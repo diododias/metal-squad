@@ -815,17 +815,34 @@ export function App(): React.ReactElement {
   return (
     <ThemeProvider resolution={themeResolution}>
       <Box flexDirection="column" paddingX={1} paddingY={0}>
-        <Box marginTop={1} flexDirection="column">
-          <HeaderBar version={APP_VERSION} repoLabel={repoLabel} width={width} />
-          <StatsBar
-            done={doneRuns}
-            todo={pendingFeatures.length}
-            execution={executionCount}
-            falha={falhaCount}
-            gatesPending={gates.length}
-            tokenStats={tokenStats}
-            compact={verticalBudget === 'short'}
+        <Box marginTop={1} marginBottom={1} flexDirection="column">
+          <HeaderBar
+            version={APP_VERSION}
+            repoLabel={repoLabel}
+            width={width}
+            stats={layoutMode === 'stacked' ? undefined : (
+              <StatsBar
+                done={doneRuns}
+                todo={pendingFeatures.length}
+                execution={executionCount}
+                falha={falhaCount}
+                gatesPending={gates.length}
+                tokenStats={tokenStats}
+                compact={verticalBudget === 'short'}
+              />
+            )}
           />
+          {layoutMode === 'stacked' ? (
+            <StatsBar
+              done={doneRuns}
+              todo={pendingFeatures.length}
+              execution={executionCount}
+              falha={falhaCount}
+              gatesPending={gates.length}
+              tokenStats={tokenStats}
+              compact
+            />
+          ) : null}
         </Box>
         {dashboardOpen ? (
           <Box marginTop={1}>
