@@ -88,29 +88,6 @@ interface Props {
   notifications?: NotificationEntry[];
 }
 
-// C3: cross-run "In Progress Tasks" feed shown directly on the dashboard,
-// not just once a run is opened in the detail screen.
-function inProgressTasksSection(
-  theme: ReturnType<typeof useTheme>,
-  runningTasks: RunningTaskSummary[],
-  innerWidth: number,
-  maxVisible: number,
-): React.ReactElement {
-  return (
-    <Box marginTop={1} flexDirection="column">
-      <Text {...theme.role('text')} bold>In Progress Tasks</Text>
-      {runningTasks.slice(0, maxVisible).map((task) => (
-        <Text key={`${task.runId}:${task.taskId}`} {...theme.role('muted')}>
-          {truncateText(
-            `${task.featureId} > ${task.taskId}${task.stage ? ` (${task.stage})` : ''} — ${task.title}`,
-            Math.max(24, innerWidth - 2),
-          )}
-        </Text>
-      ))}
-    </Box>
-  );
-}
-
 function stageStatusLabel(stage: WorkflowStageSummary): string {
   if (stage.running > 0) return 'executing';
   if (stage.failed > 0) return 'failed';
@@ -150,7 +127,6 @@ export function MainPanel({
   selectedPendingIndex,
   breakdown = null,
   taskRuns = [],
-  runningTasks = [],
   notifications = [],
 }: Props): React.ReactElement {
   const theme = useTheme();
@@ -207,7 +183,7 @@ export function MainPanel({
             ? 'Preview'
             : activeView === 'run' && selectedRun
               ? 'Run Detail'
-              : 'Overview'}
+              : 'Kanban'}
       </Text>
       {runs.length === 0 && pendingFeatures.length === 0 ? (
         <EmptyState />
@@ -327,7 +303,6 @@ export function MainPanel({
         </Box>
       ) : (
         <Box flexDirection="column" marginTop={1}>
-          {runningTasks.length > 0 && inProgressTasksSection(theme, runningTasks, innerWidth, mode === 'stacked' ? 4 : 6)}
           {runs.length > 0 && (
             <Text {...theme.role('muted')}>
               Select a run with arrows or j/k, then press Enter to inspect it. Esc returns here.
