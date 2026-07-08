@@ -20,6 +20,7 @@ O que ja funciona:
 - ~~Command palette & shortcuts~~ (F09 entregue)
 - ~~Resume de pipeline a partir do estado persistido~~ (F26 entregue)
 - ~~Hardening do fluxo `msq-develop`~~ (F25 entregue)
+- ~~Overview em colunas kanban com foco unificado~~ (F31 entregue)
 
 O que ainda falta:
 - Acoplado ao spec-kit (prompt hardcoded) → F01/F02/F03
@@ -72,9 +73,11 @@ O que ainda falta:
 | [F09 — Command Palette](features/F09-command-palette.md) | Medium | Media | Entregue |
 | [F24 — Task & Stage Progress](features/F24-task-stage-progress.md) | Medium | Alta | Em progresso |
 | [F29 — TUI Shell Polish](features/F29-tui-shell-polish.md) | Medium | Alta | Entregue |
+| [F31 — Dashboard Kanban Overview](features/F31-dashboard-kanban-overview.md) | High | Alta | Entregue |
 
 **Entrega**: TUI multi-painel com streaming, status bar, navegacao rica,
-progresso granular por task/stage e casca operacional mais polida.
+progresso granular por task/stage, casca operacional mais polida e overview
+em colunas kanban com modelo de foco unificado.
 
 ---
 
@@ -187,6 +190,11 @@ F24 (task & stage progress)
 
 F28 (task context blocks)
  └→ F30 (token/context telemetry)
+
+F09 (command palette) ✅
+ ├→ F24 (task & stage progress)
+ ├→ F29 (tui shell polish) ✅
+ └→ F31 (dashboard kanban overview) ✅
 
 Independentes:
  F10 (theme) ✅, F11 (retry) ✅, F17 (analytics) ✅, F18 (duration) ✅,
