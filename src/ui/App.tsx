@@ -135,9 +135,9 @@ export function App(): React.ReactElement {
   const repoLabel = useMemo(() => basename(resolveRepo().path), []);
   const tokenStats = useTokenStats(7);
   const rawRuns = useRuns(2000);
-  // C1: EXECUTION/BLOCKED, TODO, DONE, CANCELED — display order and keyboard
-  // navigation order must stay in sync, so this reorder happens once and
-  // `runs` (used everywhere below) is always the grouped array.
+  // C1: TODO, EXECUTION/BLOCKED, DONE, FALHA/CANCELED — display order and
+  // keyboard navigation order must stay in sync, so this reorder happens once
+  // and `runs` (used everywhere below) is always the grouped array.
   const runs = useMemo(() => sortRunsByGroup(rawRuns), [rawRuns]);
   const doneFeatureIds = useCompletedFeatures(2000);
   const { gates, resolve, forceResolve } = useGates(2000);
