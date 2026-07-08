@@ -22,6 +22,7 @@ interface CommandDefinitionOptions {
   retrySelectedGate: () => void;
   forceApproveSelectedGate: () => void;
   startSelectedFeature: () => void;
+  toggleDetailDensity: () => void;
   quit: () => void;
 }
 
@@ -52,6 +53,7 @@ export function buildCommandDefinitions(options: CommandDefinitionOptions): Comm
     retrySelectedGate,
     forceApproveSelectedGate,
     startSelectedFeature,
+    toggleDetailDensity,
     quit,
   } = options;
 
@@ -135,6 +137,17 @@ export function buildCommandDefinitions(options: CommandDefinitionOptions): Comm
       shortcut: 'F',
       available: () => canResolveGate,
       execute: forceApproveSelectedGate,
+    },
+    {
+      // F31 section 5: `i` toggle — collapses/expands long detail sections.
+      id: 'view-toggle-density',
+      name: 'Toggle detail density',
+      description: 'Collapse or expand the long sections in the run detail screen.',
+      category: 'view',
+      keywords: ['density', 'expand', 'collapse', 'detail', 'compact'],
+      shortcut: focusContext === 'run-detail' ? 'i' : null,
+      available: () => focusContext === 'run-detail',
+      execute: toggleDetailDensity,
     },
     {
       id: 'view-stats',

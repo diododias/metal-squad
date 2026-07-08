@@ -1,14 +1,18 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { Box, Text } from 'ink';
+import { Box } from 'ink';
 import { spawn } from 'node:child_process';
+import { basename } from 'node:path';
 import { loadConfig } from '../config/index.js';
 import { loadBacklog } from '../core/backlog/load.js';
 import { msqEventBus } from '../core/events/index.js';
+import { resolveRepo } from '../core/repo.js';
 import { validateBacklogSkills } from '../core/skills/index.js';
 import { assertWritableDbPath } from '../db/index.js';
 import { abortPipeline, pausePipeline, requestFeatureAbort, resumePipeline } from '../db/repo.js';
-import { getFeatureCatalog, getPendingFeatures } from './catalog.js';
-import { sortRunsByGroup } from './dashboardGroups.js';
+import type { RunSummary } from '../db/repo.js';
+import { getBacklogSettings, getFeatureCatalog, getPendingFeatures } from './catalog.js';
+import { DASHBOARD_GROUP_ORDER, getRunGroup, sortRunsByGroup, type DashboardGroupId } from './dashboardGroups.js';
+import { DETAIL_SECTION_ORDER } from './detailSections.js';
 import { buildCommandDefinitions } from './commands/definitions.js';
 import { createGatesShortcuts } from './commands/gatesShortcuts.js';
 import { createGlobalShortcuts } from './commands/globalShortcuts.js';
@@ -19,11 +23,13 @@ import { CommandBar } from './components/CommandBar.js';
 import { CommandPalette } from './components/CommandPalette.js';
 import { CostDashboard } from './components/CostDashboard.js';
 import { GateFooter } from './components/GateFooter.js';
+import { HeaderBar } from './components/HeaderBar.js';
 import { HelpOverlay } from './components/HelpOverlay.js';
 import { MainPanel } from './components/MainPanel.js';
+import { StatsBar } from './components/StatsBar.js';
 import { StatusBar } from './components/StatusBar.js';
 import { ToastStack } from './components/ToastStack.js';
-import { getLayoutMode } from './format.js';
+import { getLayoutMode, getVerticalBudget } from './format.js';
 import { useCommandPalette } from './hooks/useCommandPalette.js';
 import { useCompletedFeatures } from './hooks/useCompletedFeatures.js';
 import { useGates } from './hooks/useGates.js';
@@ -35,43 +41,39 @@ import { useRunBreakdown } from './hooks/useRunBreakdown.js';
 import { useRunOutput } from './hooks/useRunOutput.js';
 import { useRunningTasks, useRuns, useTaskRuns } from './hooks/useRuns.js';
 import { useStatsRows } from './hooks/useStatsRows.js';
+import { useTokenStats } from './hooks/useTokenStats.js';
+import { useTerminalHeight } from './hooks/useTerminalHeight.js';
 import { useTerminalWidth } from './hooks/useTerminalWidth.js';
 import type { ActiveView } from './components/MainPanel.js';
+import type { FocusPanel as ShortcutContext } from './types/shortcuts.js';
 import { ThemeProvider } from './theme/context.js';
 import { resolveThemePreference } from './theme/resolve.js';
-import { mergeInkStyles } from './theme/styles.js';
 
-type FocusPanel = 'runs' | 'gates' | 'main';
-type ShortcutContext = FocusPanel | 'run-detail';
+type FocusPanel = Exclude<ShortcutContext, 'run-detail'>;
 
-// Wordmark aligned as two full-width rows; sliced at a fixed column so the
-// "METAL" (primary) and "SQUAD" (accent) halves stay column-aligned between rows.
-const WORDMARK_TOP = '█▀▄▀█ █▀▀ ▀█▀ ▄▀█ █   ▀   █▀ █▀█ █ █ ▄▀█ █▀▄';
-const WORDMARK_BOTTOM = '█░▀░█ ██▄  █  █▀█ █▄▄     ▄█ ▀▀█ █▄█ █▀█ █▄▀';
-const SQUAD_COLUMN = 26;
-
-const BANNER = {
-  metalTop: WORDMARK_TOP.slice(0, SQUAD_COLUMN),
-  metalBottom: WORDMARK_BOTTOM.slice(0, SQUAD_COLUMN),
-  squadTop: WORDMARK_TOP.slice(SQUAD_COLUMN),
-  squadBottom: WORDMARK_BOTTOM.slice(SQUAD_COLUMN),
-} as const;
-
-function bannerRule(width: number): string {
-  const span = Math.min(Math.max(WORDMARK_TOP.length, 32), Math.max(0, width - 2));
-  return '─'.repeat(span);
-}
+// F31 section 1: cli.ts pins the same literal for `--version` — there is no
+// package.json read at runtime today, so this mirrors that existing pattern
+// rather than introducing a new one.
+const APP_VERSION = '0.0.1';
 
 interface UiState {
   selectedRun: number;
   selectedGate: number;
   selectedPending: number;
   focusPanel: FocusPanel;
+  /** F31 "novo modelo de foco": which kanban column has the cursor when focusPanel === 'columns'. */
+  activeColumn: DashboardGroupId;
   activeView: ActiveView;
   outputPaused: boolean;
   logsVisible: boolean;
   dashboard?: boolean;
   dashboardPeriod?: number;
+  /** F31 section 5: index of the first visible section in the run-detail
+   * scrollable body (header/stepper/gates stay anchored, only this scrolls). */
+  detailSectionIndex: number;
+  /** F31 section 5: `i` toggles this — collapses long sections for a quick
+   * read; default is rich/complete, nothing hidden. */
+  detailDense: boolean;
 }
 
 const DASHBOARD_PERIODS: Array<{ label: string; days: number | null }> = [
@@ -130,6 +132,8 @@ function launchFeatureRun(featureId: string): void {
 export function App(): React.ReactElement {
   const config = useMemo(() => loadConfig(), []);
   const themeResolution = useMemo(() => resolveThemePreference(config.theme), [config.theme]);
+  const repoLabel = useMemo(() => basename(resolveRepo().path), []);
+  const tokenStats = useTokenStats(7);
   const rawRuns = useRuns(2000);
   // C1: EXECUTION/BLOCKED, TODO, DONE, CANCELED — display order and keyboard
   // navigation order must stay in sync, so this reorder happens once and
@@ -141,16 +145,21 @@ export function App(): React.ReactElement {
   const notifications = useNotifications(40);
   const toasts = useToasts(4);
   const width = useTerminalWidth();
+  const height = useTerminalHeight();
   const [ui, setUi] = useState<UiState>({
     selectedRun: 0,
     selectedGate: 0,
     selectedPending: 0,
-    // Foco inicial na lista de features (painel principal): setas navegam entre
-    // features; Tab cicla para runs/gates.
-    focusPanel: 'main',
+    // Foco inicial no board de colunas, comecando pela coluna TODO: setas
+    // navegam entre features pendentes; ←/→ troca de coluna; Tab cicla
+    // columns/gates/activity.
+    focusPanel: 'columns',
+    activeColumn: 'todo',
     activeView: 'overview',
     outputPaused: false,
     logsVisible: true,
+    detailSectionIndex: 0,
+    detailDense: false,
   });
   const [helpOpen, setHelpOpen] = useState(false);
 
@@ -160,11 +169,59 @@ export function App(): React.ReactElement {
   }, [themeResolution.message]);
 
   const layoutMode = getLayoutMode(width);
-  const selectedRunIndex = clampIndex(ui.selectedRun, runs.length);
+  // F31 section 5: page size for the detail screen's section-level paging —
+  // taller terminals show more sections per page. This is distinct from the
+  // overview's own vertical-budget wiring (cards-per-column, stats density),
+  // which stays untouched here.
+  const verticalBudget = getVerticalBudget(height);
+  const detailPageSize = verticalBudget === 'short' ? 1 : verticalBudget === 'regular' ? 2 : 3;
+  const detailSectionIndex = clampIndex(ui.detailSectionIndex, DETAIL_SECTION_ORDER.length);
   const selectedGateIndex = clampIndex(ui.selectedGate, gates.length);
-  const focusOrder: FocusPanel[] = gates.length > 0 ? ['main', 'runs', 'gates'] : ['main', 'runs'];
-  const focusPanel = ui.focusPanel === 'gates' && gates.length === 0 ? 'runs' : ui.focusPanel;
-  const selectedRun = runs[selectedRunIndex] ?? null;
+  const storedActiveColumn = ui.activeColumn;
+  // F31 "novo modelo de foco": EXECUTION/DONE/FALHA columns each navigate
+  // their own slice of `runs` (already grouped by sortRunsByGroup) rather
+  // than one flat index shared across every group — switching columns
+  // resets to that column's own cursor position instead of jumping to
+  // whatever run happens to sit at the same global offset.
+  const executionRuns = useMemo(() => runs.filter((run) => getRunGroup(run.status) === 'execution'), [runs]);
+  const doneRunsList = useMemo(() => runs.filter((run) => getRunGroup(run.status) === 'done'), [runs]);
+  const falhaRunsList = useMemo(() => runs.filter((run) => getRunGroup(run.status) === 'canceled'), [runs]);
+  const columnRunLists: Partial<Record<DashboardGroupId, RunSummary[]>> = {
+    execution: executionRuns,
+    done: doneRunsList,
+    canceled: falhaRunsList,
+  };
+  // F31 "Riscos de UX resolvidos" item 5 / "Navegacao e casos de borda":
+  // resolving the last gate must never leave focus orphaned on a now-empty
+  // column — it falls back to EXECUTION, or the first non-empty non-TODO
+  // column. Scoped to the moment the gate strip itself just disappeared
+  // (ui.focusPanel was 'gates', now there are none), so it doesn't fight a
+  // user who deliberately browses an empty column for unrelated reasons.
+  const gateJustResolved = ui.focusPanel === 'gates' && gates.length === 0;
+  const activeColumn = gateJustResolved
+    && storedActiveColumn !== 'todo'
+    && (columnRunLists[storedActiveColumn]?.length ?? 0) === 0
+    ? executionRuns.length > 0
+      ? 'execution'
+      : doneRunsList.length > 0
+        ? 'done'
+        : falhaRunsList.length > 0
+          ? 'canceled'
+          : storedActiveColumn
+    : storedActiveColumn;
+  const activeColumnRuns = columnRunLists[activeColumn] ?? [];
+  const selectedRunIndex = clampIndex(ui.selectedRun, activeColumnRuns.length);
+  const focusOrder: FocusPanel[] = [
+    'columns',
+    ...(gates.length > 0 ? (['gates'] as const) : []),
+    ...(notifications.length > 0 ? (['activity'] as const) : []),
+  ];
+  const focusPanel = ui.focusPanel === 'gates' && gates.length === 0
+    ? 'columns'
+    : ui.focusPanel === 'activity' && notifications.length === 0
+      ? 'columns'
+      : ui.focusPanel;
+  const selectedRun = activeColumnRuns[selectedRunIndex] ?? null;
   const selectedGate = gates[selectedGateIndex] ?? null;
   const liveOutput = useRunOutput(
     selectedRun ? selectedRun.runId : null,
@@ -176,16 +233,22 @@ export function App(): React.ReactElement {
     selectedRun?.startedAt ?? null,
     selectedRun?.endedAt ?? null,
   );
+  // F31 section 4: 'preview' has no selectedRun (the feature never ran) —
+  // it must not fall through to 'overview' the way a stale 'run' view would
+  // once its selectedRun disappears.
   const activeView: ActiveView = ui.activeView === 'notifications'
     ? 'notifications'
-    : selectedRun
-      ? ui.activeView
-      : 'overview';
+    : ui.activeView === 'preview'
+      ? 'preview'
+      : selectedRun
+        ? ui.activeView
+        : 'overview';
   const dashboardOpen = Boolean(ui.dashboard);
   const dashboardPeriodIndex = Math.min(ui.dashboardPeriod ?? 1, DASHBOARD_PERIODS.length - 1);
   const dashboardPeriod = DASHBOARD_PERIODS[dashboardPeriodIndex] ?? DASHBOARD_PERIODS[1]!;
   const statsRows = useStatsRows(dashboardOpen, dashboardPeriod.days);
   const featureCatalog = getFeatureCatalog();
+  const backlogSettings = getBacklogSettings();
   const selectedFeature = selectedRun ? featureCatalog[selectedRun.featureId] ?? null : null;
   const totalRuns = runs.length;
   const doneRuns = runs.filter((run) => run.status === 'done').length;
@@ -208,7 +271,25 @@ export function App(): React.ReactElement {
   const pendingFeatures = getPendingFeatures(featureCatalog, doneFeatureIds, activeFeatureIds);
   const selectedPendingIndex = clampIndex(ui.selectedPending, pendingFeatures.length);
   const selectedPending = pendingFeatures[selectedPendingIndex] ?? null;
-  const focusContext: ShortcutContext = activeView === 'run' && focusPanel === 'main' ? 'run-detail' : focusPanel;
+  // F31 section 1: same grouping the kanban columns use (getRunGroup), so the
+  // header stats and the columns can never disagree on what counts as
+  // "execução" vs. "falha".
+  const executionCount = executionRuns.length;
+  const falhaCount = falhaRunsList.length;
+  // F31 "Riscos de UX resolvidos" item 2: while a gate is pending, a/s/r/F
+  // capture regardless of which column is focused — so `focusContext`
+  // resolves to 'gates' whenever there's a decision waiting, overriding
+  // whatever the user last had focused. run-detail keeps priority (its own
+  // pause/abort bindings matter more once a run is actually open). The TODO
+  // preview is the one exception (per item 2's own carve-out): it suppresses
+  // gate bindings entirely while open, so it never resolves to 'gates'.
+  const focusContext: ShortcutContext = activeView === 'run' && focusPanel === 'columns'
+    ? 'run-detail'
+    : activeView === 'preview'
+      ? 'columns'
+      : gates.length > 0
+        ? 'gates'
+        : focusPanel;
   const hasTabs = false;
 
   const quit = useCallback(() => {
@@ -219,7 +300,7 @@ export function App(): React.ReactElement {
     if (dashboardOpen) return;
 
     const currentIndex = focusOrder.indexOf(focusPanel);
-    const nextFocus = focusOrder[(currentIndex + 1) % focusOrder.length] ?? 'runs';
+    const nextFocus = focusOrder[(currentIndex + 1) % focusOrder.length] ?? 'columns';
     setUi((current) => ({ ...current, focusPanel: nextFocus }));
   }, [dashboardOpen, focusOrder, focusPanel]);
 
@@ -227,7 +308,7 @@ export function App(): React.ReactElement {
     setUi((current) => ({
       ...current,
       activeView: 'overview',
-      focusPanel: 'main',
+      focusPanel: 'columns',
       outputPaused: false,
       dashboard: false,
     }));
@@ -238,7 +319,7 @@ export function App(): React.ReactElement {
       ...current,
       dashboard: false,
       activeView: current.activeView === 'notifications' ? 'overview' : 'notifications',
-      focusPanel: 'main',
+      focusPanel: 'columns',
     }));
   }, []);
 
@@ -247,9 +328,41 @@ export function App(): React.ReactElement {
       ...current,
       dashboard: !current.dashboard,
       activeView: 'overview',
-      focusPanel: 'main',
+      focusPanel: 'columns',
     }));
   }, []);
+
+  // F31 "Navegacao e casos de borda": ←/→ pula colunas vazias em vez de parar
+  // nelas; se todas estiverem vazias, mantem a coluna atual.
+  const columnLength = useCallback(
+    (groupId: DashboardGroupId): number => (groupId === 'todo' ? pendingFeatures.length : (columnRunLists[groupId]?.length ?? 0)),
+    [columnRunLists, pendingFeatures.length],
+  );
+
+  const findNextNonEmptyColumn = useCallback(
+    (from: DashboardGroupId, step: 1 | -1): DashboardGroupId => {
+      const startIndex = DASHBOARD_GROUP_ORDER.indexOf(from);
+      for (let offset = 1; offset <= DASHBOARD_GROUP_ORDER.length; offset += 1) {
+        const index = (startIndex + step * offset + DASHBOARD_GROUP_ORDER.length * DASHBOARD_GROUP_ORDER.length) % DASHBOARD_GROUP_ORDER.length;
+        const candidate = DASHBOARD_GROUP_ORDER[index] ?? from;
+        if (columnLength(candidate) > 0) return candidate;
+      }
+      return from;
+    },
+    [columnLength],
+  );
+
+  const moveColumnLeft = useCallback(() => {
+    if (dashboardOpen || focusPanel !== 'columns') return;
+    const nextColumn = findNextNonEmptyColumn(activeColumn, -1);
+    setUi((current) => ({ ...current, activeColumn: nextColumn, selectedRun: 0, selectedPending: 0 }));
+  }, [activeColumn, dashboardOpen, findNextNonEmptyColumn, focusPanel]);
+
+  const moveColumnRight = useCallback(() => {
+    if (dashboardOpen || focusPanel !== 'columns') return;
+    const nextColumn = findNextNonEmptyColumn(activeColumn, 1);
+    setUi((current) => ({ ...current, activeColumn: nextColumn, selectedRun: 0, selectedPending: 0 }));
+  }, [activeColumn, dashboardOpen, findNextNonEmptyColumn, focusPanel]);
 
   const previousDashboardPeriod = useCallback(() => {
     setUi((current) => ({
@@ -274,6 +387,38 @@ export function App(): React.ReactElement {
     if (activeView !== 'run' || !selectedRun) return;
     setUi((current) => ({ ...current, outputPaused: !current.outputPaused }));
   }, [activeView, selectedRun]);
+
+  const scrollSectionUp = useCallback(() => {
+    setUi((current) => ({
+      ...current,
+      detailSectionIndex: clampIndex(current.detailSectionIndex - 1, DETAIL_SECTION_ORDER.length),
+    }));
+  }, []);
+
+  const scrollSectionDown = useCallback(() => {
+    setUi((current) => ({
+      ...current,
+      detailSectionIndex: clampIndex(current.detailSectionIndex + 1, DETAIL_SECTION_ORDER.length),
+    }));
+  }, []);
+
+  const pageSectionUp = useCallback(() => {
+    setUi((current) => ({
+      ...current,
+      detailSectionIndex: clampIndex(current.detailSectionIndex - detailPageSize, DETAIL_SECTION_ORDER.length),
+    }));
+  }, [detailPageSize]);
+
+  const pageSectionDown = useCallback(() => {
+    setUi((current) => ({
+      ...current,
+      detailSectionIndex: clampIndex(current.detailSectionIndex + detailPageSize, DETAIL_SECTION_ORDER.length),
+    }));
+  }, [detailPageSize]);
+
+  const toggleDetailDensity = useCallback(() => {
+    setUi((current) => ({ ...current, detailDense: !current.detailDense }));
+  }, []);
 
   const pauseSelectedRun = useCallback(() => {
     if (canPause && selectedRun?.pipelineId) {
@@ -330,14 +475,31 @@ export function App(): React.ReactElement {
   }, [forceResolve, selectedGate]);
 
   const startSelectedFeature = useCallback(() => {
-    if (activeView !== 'overview' || !selectedPending) return;
+    // F31 section 4: reachable both from the direct 'n' shortcut (overview)
+    // and from confirming inside the TODO preview screen.
+    if ((activeView !== 'overview' && activeView !== 'preview') || !selectedPending) return;
     launchFeatureRun(selectedPending.id);
   }, [activeView, selectedPending]);
 
+  // F31 "novo modelo de foco": j/k always act on whichever panel is
+  // currently focused — the gates strip (independent of column, per item 2's
+  // rule that gate keys never no-op) when focusPanel === 'gates', otherwise
+  // the active column's own list (pending features for TODO, that column's
+  // own run slice for EXECUTION/DONE/FALHA).
   const movePrevious = useCallback(() => {
     if (dashboardOpen || activeView === 'notifications') return;
 
-    if (activeView === 'overview' && pendingFeatures.length > 0 && focusPanel === 'main') {
+    if (focusPanel === 'gates') {
+      setUi((current) => ({
+        ...current,
+        selectedGate: clampIndex(selectedGateIndex - 1, gates.length),
+      }));
+      return;
+    }
+
+    if (focusPanel !== 'columns') return;
+
+    if (activeColumn === 'todo') {
       setUi((current) => ({
         ...current,
         selectedPending: clampIndex(selectedPendingIndex - 1, pendingFeatures.length),
@@ -345,27 +507,18 @@ export function App(): React.ReactElement {
       return;
     }
 
-    if (focusPanel === 'runs') {
-      setUi((current) => ({
-        ...current,
-        selectedRun: clampIndex(selectedRunIndex - 1, runs.length),
-      }));
-      return;
-    }
-
-    if (focusPanel === 'gates') {
-      setUi((current) => ({
-        ...current,
-        selectedGate: clampIndex(selectedGateIndex - 1, gates.length),
-      }));
-    }
+    setUi((current) => ({
+      ...current,
+      selectedRun: clampIndex(selectedRunIndex - 1, activeColumnRuns.length),
+    }));
   }, [
+    activeColumn,
+    activeColumnRuns.length,
     activeView,
     dashboardOpen,
     focusPanel,
     gates.length,
     pendingFeatures.length,
-    runs.length,
     selectedGateIndex,
     selectedPendingIndex,
     selectedRunIndex,
@@ -374,7 +527,17 @@ export function App(): React.ReactElement {
   const moveNext = useCallback(() => {
     if (dashboardOpen || activeView === 'notifications') return;
 
-    if (activeView === 'overview' && pendingFeatures.length > 0 && focusPanel === 'main') {
+    if (focusPanel === 'gates') {
+      setUi((current) => ({
+        ...current,
+        selectedGate: clampIndex(selectedGateIndex + 1, gates.length),
+      }));
+      return;
+    }
+
+    if (focusPanel !== 'columns') return;
+
+    if (activeColumn === 'todo') {
       setUi((current) => ({
         ...current,
         selectedPending: clampIndex(selectedPendingIndex + 1, pendingFeatures.length),
@@ -382,27 +545,18 @@ export function App(): React.ReactElement {
       return;
     }
 
-    if (focusPanel === 'runs') {
-      setUi((current) => ({
-        ...current,
-        selectedRun: clampIndex(selectedRunIndex + 1, runs.length),
-      }));
-      return;
-    }
-
-    if (focusPanel === 'gates') {
-      setUi((current) => ({
-        ...current,
-        selectedGate: clampIndex(selectedGateIndex + 1, gates.length),
-      }));
-    }
+    setUi((current) => ({
+      ...current,
+      selectedRun: clampIndex(selectedRunIndex + 1, activeColumnRuns.length),
+    }));
   }, [
+    activeColumn,
+    activeColumnRuns.length,
     activeView,
     dashboardOpen,
     focusPanel,
     gates.length,
     pendingFeatures.length,
-    runs.length,
     selectedGateIndex,
     selectedPendingIndex,
     selectedRunIndex,
@@ -410,14 +564,21 @@ export function App(): React.ReactElement {
 
   const openSelection = useCallback(() => {
     if (dashboardOpen || activeView === 'notifications') return;
-    if (selectedRun && focusPanel === 'runs') {
-      setUi((current) => ({ ...current, activeView: 'run', focusPanel: 'main' }));
+    // F31 item 3: Enter always "abre o que o card representa" — a run
+    // (EXECUTION/DONE/FALHA column) opens the run detail; a TODO card opens
+    // the read-only preview. Enter *inside* the preview confirms and starts.
+    if (activeView === 'preview') {
+      startSelectedFeature();
       return;
     }
-    if (focusPanel === 'main' && activeView === 'overview' && selectedPending) {
-      startSelectedFeature();
+    if (selectedRun && focusPanel === 'columns' && activeColumn !== 'todo') {
+      setUi((current) => ({ ...current, activeView: 'run', focusPanel: 'columns', detailSectionIndex: 0 }));
+      return;
     }
-  }, [activeView, dashboardOpen, focusPanel, selectedRun, selectedPending, startSelectedFeature]);
+    if (focusPanel === 'columns' && activeColumn === 'todo' && activeView === 'overview' && selectedPending) {
+      setUi((current) => ({ ...current, activeView: 'preview' }));
+    }
+  }, [activeColumn, activeView, dashboardOpen, focusPanel, selectedRun, selectedPending, startSelectedFeature]);
 
   const switchToTab = useCallback((_tabIndex: number) => {
     // The current TUI does not expose numbered tabs yet.
@@ -444,6 +605,7 @@ export function App(): React.ReactElement {
       retrySelectedGate,
       forceApproveSelectedGate,
       startSelectedFeature,
+      toggleDetailDensity,
       quit,
     }),
     [
@@ -465,6 +627,7 @@ export function App(): React.ReactElement {
       skipSelectedGate,
       startSelectedFeature,
       toggleDashboard,
+      toggleDetailDensity,
       toggleNotifications,
     ],
   );
@@ -512,17 +675,41 @@ export function App(): React.ReactElement {
 
   const globalShortcuts = useMemo(
     () => createGlobalShortcuts({
-      canNavigateRuns: focusPanel === 'runs' && runs.length > 0,
-      canNavigateGates: focusPanel === 'gates' && gates.length > 0,
-      canMovePending: activeView === 'overview' && focusPanel === 'main' && pendingFeatures.length > 0,
+      // F31 section 5: while a run's detail is open, j/k/up/down scroll its
+      // sections instead (run-detail-scoped shortcuts in runShortcuts.ts) —
+      // these global bindings must yield so both don't fire on the same key.
+      canNavigateRuns: activeView !== 'run' && focusPanel === 'columns' && activeColumn !== 'todo' && activeColumnRuns.length > 0,
+      canNavigateGates: activeView !== 'run' && focusPanel === 'gates' && gates.length > 0,
+      canMovePending: activeView === 'overview' && focusPanel === 'columns' && activeColumn === 'todo' && pendingFeatures.length > 0,
+      canSwitchColumn: !dashboardOpen && focusPanel === 'columns',
+      canConfirmPreview: activeView === 'preview' && Boolean(selectedPending),
       movePrevious,
       moveNext,
+      moveColumnLeft,
+      moveColumnRight,
       enter: openSelection,
       escape: escapeView,
       cycleFocus,
       quit,
     }),
-    [activeView, cycleFocus, escapeView, focusPanel, gates.length, moveNext, movePrevious, openSelection, pendingFeatures.length, quit, runs.length],
+    [
+      activeColumn,
+      activeColumnRuns.length,
+      activeView,
+      cycleFocus,
+      dashboardOpen,
+      escapeView,
+      focusPanel,
+      gates.length,
+      moveColumnLeft,
+      moveColumnRight,
+      moveNext,
+      movePrevious,
+      openSelection,
+      pendingFeatures.length,
+      quit,
+      selectedPending,
+    ],
   );
 
   const viewShortcuts = useMemo(
@@ -580,8 +767,24 @@ export function App(): React.ReactElement {
       canAbort: canAbortFeature || canAbortPipeline,
       pause: pauseSelectedRun,
       abort: abortSelectedRun,
+      scrollSectionUp,
+      scrollSectionDown,
+      pageSectionUp,
+      pageSectionDown,
+      toggleDensity: toggleDetailDensity,
     }),
-    [abortSelectedRun, canAbortFeature, canAbortPipeline, canPause, pauseSelectedRun],
+    [
+      abortSelectedRun,
+      canAbortFeature,
+      canAbortPipeline,
+      canPause,
+      pageSectionDown,
+      pageSectionUp,
+      pauseSelectedRun,
+      scrollSectionDown,
+      scrollSectionUp,
+      toggleDetailDensity,
+    ],
   );
 
   useEffect(() => {
@@ -609,32 +812,21 @@ export function App(): React.ReactElement {
       ? ['type:search', 'enter:execute', 'esc:close', 'j/k:navigate']
       : getStatusBarHints();
 
-  const metalStyle = mergeInkStyles(themeResolution.profile.roles.primary, { bold: true });
-  const squadStyle = mergeInkStyles(themeResolution.profile.roles.accent, { bold: true });
-  const accentStyle = themeResolution.profile.roles.accent;
-  const subtitleStyle = themeResolution.profile.roles.muted;
-  const layoutLabel = layoutMode === 'stacked' ? 'single-column' : `${layoutMode} split`;
-
   return (
     <ThemeProvider resolution={themeResolution}>
       <Box flexDirection="column" paddingX={1} paddingY={0}>
         <Box marginTop={1} flexDirection="column">
-          <Box>
-            <Text {...metalStyle}>{BANNER.metalTop}</Text>
-            <Text {...squadStyle}>{BANNER.squadTop}</Text>
-          </Box>
-          <Box>
-            <Text {...metalStyle}>{BANNER.metalBottom}</Text>
-            <Text {...squadStyle}>{BANNER.squadBottom}</Text>
-          </Box>
-          <Box marginTop={1}>
-            <Text {...accentStyle}>Automated pipeline orchestrator</Text>
-          </Box>
-          <Box>
-            <Text {...subtitleStyle}>{layoutLabel}</Text>
-          </Box>
+          <HeaderBar version={APP_VERSION} repoLabel={repoLabel} width={width} />
+          <StatsBar
+            done={doneRuns}
+            todo={pendingFeatures.length}
+            execution={executionCount}
+            falha={falhaCount}
+            gatesPending={gates.length}
+            tokenStats={tokenStats}
+            compact={verticalBudget === 'short'}
+          />
         </Box>
-        <Text {...accentStyle}>{bannerRule(width)}</Text>
         {dashboardOpen ? (
           <Box marginTop={1}>
             <CostDashboard rows={statsRows} periodLabel={dashboardPeriod.label} width={width - 2} />
@@ -647,11 +839,18 @@ export function App(): React.ReactElement {
               selectedRun={selectedRun}
               selectedRunIndex={selectedRunIndex}
               selectedFeature={selectedFeature}
+              featureCatalog={featureCatalog}
+              backlogSettings={backlogSettings}
               activeView={activeView}
               output={liveOutput}
               outputPaused={ui.outputPaused}
               logsVisible={ui.logsVisible}
               focusPanel={focusPanel}
+              activeColumn={activeColumn}
+              detailSectionIndex={detailSectionIndex}
+              detailPageSize={detailPageSize}
+              detailDense={ui.detailDense}
+              verticalBudget={verticalBudget}
               mode={layoutMode}
               width={mainWidth}
               pendingFeatures={pendingFeatures}

@@ -100,6 +100,19 @@ export function getLayoutMode(width: number): LayoutMode {
   return 'full';
 }
 
+// F31 item 1: getLayoutMode only decides by WIDTH. H10 was a HEIGHT overflow
+// (detail screen taller than common terminal windows). getVerticalBudget adds
+// the second axis so callers can degrade the dashboard chrome (activity feed,
+// stats density, cards-per-column) before content overflows vertically,
+// without ever cutting the gates strip or the detail stepper/header.
+export type VerticalBudget = 'short' | 'regular' | 'tall';
+
+export function getVerticalBudget(height: number): VerticalBudget {
+  if (height < 24) return 'short';
+  if (height <= 40) return 'regular';
+  return 'tall';
+}
+
 export function formatCost(cost: number | null): string {
   if (cost === null) return '—';
   if (cost < 0.001) return '<$0.001';

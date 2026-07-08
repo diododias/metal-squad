@@ -10,11 +10,14 @@ export type DashboardGroupId = 'execution' | 'todo' | 'done' | 'canceled';
 
 export const DASHBOARD_GROUP_ORDER: DashboardGroupId[] = ['execution', 'todo', 'done', 'canceled'];
 
+// F31 section 3: the 'canceled' group (failed + aborted, unchanged) is
+// relabeled FALHA — the id stays 'canceled' so run-status mapping below and
+// any persisted references don't shift, only the on-screen label changes.
 export const DASHBOARD_GROUP_LABEL: Record<DashboardGroupId, string> = {
   execution: 'EXECUTION / BLOCKED',
   todo: 'TODO',
   done: 'DONE',
-  canceled: 'CANCELED',
+  canceled: 'FALHA',
 };
 
 type RunGroup = Exclude<DashboardGroupId, 'todo'>;
