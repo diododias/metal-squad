@@ -4,11 +4,11 @@ import type { MsqEvents } from './types.js';
 export class TypedEventBus<Events extends object> {
   private readonly emitter = new EventEmitter();
 
-  emit<K extends keyof Events & string>(event: K, payload: Events[K]): void {
+  public emit<K extends keyof Events & string>(event: K, payload: Events[K]): void {
     this.emitter.emit(event, payload);
   }
 
-  subscribe<K extends keyof Events & string>(
+  public subscribe<K extends keyof Events & string>(
     event: K,
     listener: (payload: Events[K]) => void,
   ): () => void {
@@ -19,7 +19,7 @@ export class TypedEventBus<Events extends object> {
     };
   }
 
-  removeAllListeners(): void {
+  public removeAllListeners(): void {
     this.emitter.removeAllListeners();
   }
 }

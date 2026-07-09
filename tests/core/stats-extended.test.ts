@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
-  aggregateCosts,
+  aggregateTokens,
   computeRunBreakdown,
   computeStats,
   formatBreakdown,
@@ -166,12 +166,12 @@ describe('computeStats — edge cases', () => {
     expect(stats.avgDurationMs).toBe(120_000); // (60+180)/2 * 1000
   });
 
-  it('limits topFeaturesByCost to topN (default 5)', () => {
+  it('limits topFeaturesByTokens to topN (default 5)', () => {
     const rows = Array.from({ length: 10 }, (_, i) =>
       run({ id: i + 1, featureId: `feat-${i}` }),
     );
     const stats = computeStats(rows);
-    expect(stats.topFeaturesByCost).toHaveLength(5);
+    expect(stats.topFeaturesByTokens).toHaveLength(5);
   });
 
   it('respects custom topN parameter', () => {
@@ -179,7 +179,7 @@ describe('computeStats — edge cases', () => {
       run({ id: i + 1, featureId: `feat-${i}` }),
     );
     const stats = computeStats(rows, 3);
-    expect(stats.topFeaturesByCost).toHaveLength(3);
+    expect(stats.topFeaturesByTokens).toHaveLength(3);
   });
 
   it('returns successRatePercent 100 when all done', () => {
@@ -315,13 +315,13 @@ describe('formatBreakdown — edge cases', () => {
   });
 });
 
-describe('aggregateCosts — sort orders and edge cases', () => {
-  it('sorts byRepoTool by costUsd descending', () => {
+describe('aggregateTokens — sort orders and edge cases', () => {
+  it('sorts byRepoTool by tokens descending', () => {
     const rows = [
       run({ id: 1, repoId: 'repo-1', tool: 'codex', inputTokens: 100, outputTokens: 50, totalTokens: 150 }),
       run({ id: 2, repoId: 'repo-1', tool: 'claude', inputTokens: 10000, outputTokens: 5000, totalTokens: 15000 }),
     ];
-    const agg = aggregateCosts(rows);
+    const agg = aggregateTokens(rows);
     expect(agg.byRepoTool[0]?.tool).toBe('claude');
     expect(agg.byRepoTool[1]?.tool).toBe('codex');
   });
@@ -331,24 +331,24 @@ describe('aggregateCosts — sort orders and edge cases', () => {
       run({ id: 1, featureId: 'feat-small', totalTokens: 100 }),
       run({ id: 2, featureId: 'feat-large', totalTokens: 10000 }),
     ];
-    const agg = aggregateCosts(rows);
+    const agg = aggregateTokens(rows);
     expect(agg.byFeature[0]?.featureId).toBe('feat-large');
     expect(agg.byFeature[1]?.featureId).toBe('feat-small');
   });
 
-  it('sorts byStatus by costUsd descending', () => {
+  it('sorts byStatus by tokens descending', () => {
     const rows = [
       run({ id: 1, status: 'done', inputTokens: 10000, outputTokens: 5000, totalTokens: 15000 }),
       run({ id: 2, status: 'failed', inputTokens: 100, outputTokens: 50, totalTokens: 150 }),
     ];
-    const agg = aggregateCosts(rows);
+    const agg = aggregateTokens(rows);
     expect(agg.byStatus[0]?.status).toBe('done');
     expect(agg.byStatus[1]?.status).toBe('failed');
   });
 
   it('uses totalTokens ?? 0 when totalTokens is null', () => {
     const rows = [run({ totalTokens: null })];
-    const agg = aggregateCosts(rows);
+    const agg = aggregateTokens(rows);
     expect(agg.totalTokens).toBe(0);
     expect(agg.byRepoTool[0]?.tokens).toBe(0);
   });
@@ -358,7 +358,7 @@ describe('aggregateCosts — sort orders and edge cases', () => {
       run({ id: 1, repoId: 'repo-a', tool: 'claude', totalTokens: 1000 }),
       run({ id: 2, repoId: 'repo-a', tool: 'claude', totalTokens: 2000 }),
     ];
-    const agg = aggregateCosts(rows);
+    const agg = aggregateTokens(rows);
     expect(agg.byRepoTool).toHaveLength(1);
     expect(agg.byRepoTool[0]?.tokens).toBe(3000);
     expect(agg.byRepoTool[0]?.runs).toBe(2);
@@ -369,17 +369,17 @@ describe('aggregateCosts — sort orders and edge cases', () => {
       run({ id: 1, repoId: 'repo-a', tool: 'claude', totalTokens: 1000 }),
       run({ id: 2, repoId: 'repo-a', tool: 'codex', totalTokens: 2000 }),
     ];
-    const agg = aggregateCosts(rows);
+    const agg = aggregateTokens(rows);
     expect(agg.byRepoTool).toHaveLength(2);
   });
 
-  it('accumulates totalCostUsd across all rows', () => {
+  it('accumulates totalTokens across all rows', () => {
     const rows = [
-      run({ id: 1, inputTokens: 1_000_000, outputTokens: 0, totalTokens: 1_000_000 }), // $3
-      run({ id: 2, featureId: 'feat-2', inputTokens: 0, outputTokens: 1_000_000, totalTokens: 1_000_000 }), // $15
+      run({ id: 1, inputTokens: 1_000_000, outputTokens: 0, totalTokens: 1_000_000 }),
+      run({ id: 2, featureId: 'feat-2', inputTokens: 0, outputTokens: 1_000_000, totalTokens: 1_000_000 }),
     ];
-    const agg = aggregateCosts(rows);
-    expect(agg.totalCostUsd).toBeCloseTo(18, 5);
+    const agg = aggregateTokens(rows);
+    expect(agg.totalTokens).toBe(2_000_000);
   });
 });
 

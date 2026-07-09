@@ -3,14 +3,14 @@ import { loadConfig } from '../../config/index.js';
 import type { NotificationChannel } from './types.js';
 
 export class TelegramChannel implements NotificationChannel {
-  readonly name = 'telegram';
+  public readonly name = 'telegram';
 
-  constructor(
+  public constructor(
     private readonly chatId: string,
     private readonly forumTopicId?: number,
   ) {}
 
-  async send(message: string, metadata?: Record<string, unknown>): Promise<void> {
+  public async send(message: string, metadata?: Record<string, unknown>): Promise<void> {
     const token = await getSecret('telegram-bot-token');
     if (!token) return;
 

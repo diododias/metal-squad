@@ -45,7 +45,7 @@ export function useRunOutput(
         maybeRefresh(event.runId);
       }),
     ];
-    return () => {
+    return (): void => {
       clearInterval(timer);
       for (const unsubscribe of unsubscribers) unsubscribe();
     };

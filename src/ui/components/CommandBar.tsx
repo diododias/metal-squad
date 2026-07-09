@@ -1,7 +1,7 @@
 import React from 'react';
 import { Box, Text } from 'ink';
 import type { ActiveView } from './MainPanel.js';
-import type { FocusPanel } from './Sidebar.js';
+import type { FocusPanel } from '../types/shortcuts.js';
 import { truncateText } from '../format.js';
 import { useTheme } from '../theme/context.js';
 

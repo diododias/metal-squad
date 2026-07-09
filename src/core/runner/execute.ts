@@ -21,7 +21,6 @@ import {
   listStageRequestsForFeature,
   pausePipeline,
   recordUsage,
-  requestFeatureAbort,
   resumePipeline,
   setPipelineStatus,
   cleanupStaleRuns,
@@ -101,9 +100,9 @@ export async function executeBacklog(
   };
 
   const pipelineId = opts.resumePipelineId
-    ? (() => {
+    ? ((): number => {
         const existing = getPipeline(opts.resumePipelineId);
-        if (!existing) throw new Error(`Pipeline ${opts.resumePipelineId} not found for resume.`);
+        if (!existing) throw new Error(`Pipeline ${String(opts.resumePipelineId)} not found for resume.`);
         resumePipeline(existing.id);
         return existing.id;
       })()
@@ -115,7 +114,7 @@ export async function executeBacklog(
       );
   const persistedPipeline = getPipeline(pipelineId);
   if (!persistedPipeline) {
-    throw new Error(`Pipeline ${pipelineId} could not be loaded after creation.`);
+    throw new Error(`Pipeline ${String(pipelineId)} could not be loaded after creation.`);
   }
   const persistedSnapshot = getPipelineSnapshot(persistedPipeline);
   const initialDone = new Set(persistedSnapshot.done);
@@ -147,7 +146,7 @@ export async function executeBacklog(
   };
 
   const applyBudgetUsage = (feature: Feature, usage: NonNullable<RunResult['usage']>, runId: number): void => {
-    const { violations, alerts } = budget.record(feature.id, usage, feature.model ?? feature.tool);
+    const { violations, alerts } = budget.record(feature.id, usage);
     for (const alert of alerts) {
       msqEventBus.emit('budget:alert', {
         percent: alert.percent,
@@ -169,7 +168,7 @@ export async function executeBacklog(
     prompt: string,
     stage?: string,
     abortSignal?: AbortSignal,
-  ) => {
+  ): Promise<{ runId: number; res: RunResult }> => {
     const runId = createRun(repoId, feature.id, feature.tool, { pipelineId, stage });
     activeRunIds.add(runId);
     msqEventBus.emit('run:start', { runId, featureId: feature.id, tool: feature.tool, stage });
@@ -420,7 +419,7 @@ export async function executeBacklog(
     finishPipeline(pipelineId, pipelineStatus);
     const msg = err instanceof Error ? err.message : String(err);
     if (!msg.startsWith('Feature ')) {
-      void dispatch('run:failed', `metal-squad: execution stopped — ${msg}`).catch(() => {});
+      void dispatch('run:failed', `metal-squad: execution stopped — ${msg}`).catch(() => { /* ignore dispatch errors */ });
     }
     throw err;
   } finally {
@@ -499,12 +498,9 @@ async function executeStagedFeature(
   executeStageRun: StageExecutor,
   stageSkills: Record<string, string[]>,
   abortSignal?: AbortSignal,
-) {
+): Promise<RunResult> {
   const workflow = feature.workflow;
-  if (!workflow) {
-    throw new Error(`Feature ${feature.id} configured as staged but workflow is missing.`);
-  }
-  const autoAdvance = opts.autoAdvanceStages || workflow.approvals.autoAdvance || config.workflow.autoAdvanceStages;
+  const autoAdvance = (opts.autoAdvanceStages ?? workflow.approvals.autoAdvance) || config.workflow.autoAdvanceStages;
   const stages = workflow.stages;
   const persistedRequests = listStageRequestsForFeature(pipelineId, feature.id);
   const stageInputs = loadPersistedStageInputs(persistedRequests);
@@ -792,6 +788,6 @@ export function backoffWithJitter(baseMs: number, attempt: number): number {
   return exp * (0.5 + Math.random() * 0.5);
 }
 
-function sleep(ms: number): Promise<void> {
+async function sleep(ms: number): Promise<void> {
   return new Promise((resolveSleep) => setTimeout(resolveSleep, ms));
 }

@@ -2,7 +2,7 @@ import type { BacklogV2 } from '../backlog/schema.js';
 import { createSkillRegistry } from './registry.js';
 
 export function collectBacklogSkillNames(backlog: BacklogV2): string[] {
-  const names = new Set<string>(backlog.defaults.skills ?? []);
+  const names = new Set<string>(backlog.defaults?.skills ?? []);
 
   for (const epic of backlog.epics) {
     for (const feature of epic.features) {

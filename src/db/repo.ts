@@ -4,6 +4,8 @@ import type { TokenUsage } from '../core/adapters/types.js';
 import { resolveDbPath } from '../config/index.js';
 import { msqEventBus } from '../core/events/index.js';
 import type { OutputSource, OutputStream, RunOutputEvent, TokensUpdateEvent } from '../core/events/types.js';
+import { resolveContextWindow } from '../core/tasks/blocks.js';
+import type { Tool } from '../core/backlog/schema.js';
 
 export function registerRepo(repoId: string, path: string): void {
   getDb('readwrite')
@@ -72,19 +74,52 @@ export function cleanupStaleRuns(olderThanMinutes: number): number {
 
 export function recordUsage(runId: number, usage: TokenUsage): void {
   updateRunUsage(runId, usage);
-  getDb('readwrite')
-    .prepare(`INSERT INTO token_usage (run_id, input, cached_input, output, total) VALUES (?, ?, ?, ?, ?)`)
-    .run(runId, usage.input, usage.cachedInput ?? 0, usage.output, usage.total);
 }
 
 export function updateRunUsage(runId: number, usage: TokenUsage | TokensUpdateEvent): void {
-  getDb('readwrite')
+  const db = getDb('readwrite');
+  const previous = db
+    .prepare(
+      `SELECT tool,
+              COALESCE(input_tokens, 0) AS inputTokens,
+              COALESCE(cached_input_tokens, 0) AS cachedInputTokens,
+              COALESCE(output_tokens, 0) AS outputTokens,
+              COALESCE(total_tokens, 0) AS totalTokens
+       FROM runs
+       WHERE id = ?`,
+    )
+    .get(runId) as {
+      tool?: Tool;
+      inputTokens?: number;
+      cachedInputTokens?: number;
+      outputTokens?: number;
+      totalTokens?: number;
+    } | undefined;
+
+  db
     .prepare(
       `UPDATE runs
        SET input_tokens = ?, cached_input_tokens = ?, output_tokens = ?, total_tokens = ?
        WHERE id = ?`,
     )
     .run(usage.input, usage.cachedInput ?? null, usage.output, usage.total, runId);
+
+  const tool = (('tool' in usage ? usage.tool : undefined) ?? previous?.tool);
+  if (tool) {
+    const contextWindowTokens = resolveContextWindow({ tool });
+    const contextWindowPercent = computeContextWindowPercent(usage.total, contextWindowTokens);
+    db.prepare(
+      `UPDATE runs
+       SET context_window_tokens = ?, context_window_percent = ?
+       WHERE id = ?`,
+    ).run(contextWindowTokens, contextWindowPercent, runId);
+  }
+
+  db
+    .prepare(`INSERT INTO token_usage (run_id, input, cached_input, output, total) VALUES (?, ?, ?, ?, ?)`)
+    .run(runId, usage.input, usage.cachedInput ?? 0, usage.output, usage.total);
+
+  applyTaskUsageDelta(db, runId, previous, usage, tool);
 }
 
 export interface RunOutputRow {
@@ -149,9 +184,18 @@ export function listRuns(limit = 50): RunRow[] {
   if (!hasDbFile()) return [];
   return getDb('readonly')
     .prepare(
-      `SELECT r.*, u.total
+      `WITH latest_usage AS (
+         SELECT u.run_id AS runId, u.total
+         FROM token_usage u
+         JOIN (
+           SELECT run_id, MAX(id) AS id
+           FROM token_usage
+           GROUP BY run_id
+         ) latest_token_usage ON latest_token_usage.id = u.id
+       )
+       SELECT r.*, lu.total
          FROM runs r
-         LEFT JOIN token_usage u ON u.run_id = r.id
+         LEFT JOIN latest_usage lu ON lu.runId = r.id
         ORDER BY r.id DESC
         LIMIT ?`,
     )
@@ -174,6 +218,12 @@ export interface RunSummary {
   inputTokens: number | null;
   cachedInputTokens?: number | null;
   outputTokens: number | null;
+  contextWindowTokens?: number | null;
+  contextWindowPercent?: number | null;
+  pipelineTotalTokens?: number | null;
+  pipelineInputTokens?: number | null;
+  pipelineCachedInputTokens?: number | null;
+  pipelineOutputTokens?: number | null;
   gateId: number | null;
   gateDecision: string | null;
   pipelineStatus: PipelineStatus | null;
@@ -197,6 +247,27 @@ export function listRunsForTui(limit = 50, repoId?: string): RunSummary[] {
          FROM runs
          ${repoFilter}
          GROUP BY repo_id, feature_id
+       ),
+       latest_usage AS (
+         SELECT u.run_id AS runId, u.input, u.cached_input AS cachedInput, u.output, u.total
+         FROM token_usage u
+         JOIN (
+           SELECT run_id, MAX(id) AS id
+           FROM token_usage
+           GROUP BY run_id
+         ) latest_token_usage ON latest_token_usage.id = u.id
+       ),
+       pipeline_totals AS (
+         SELECT
+           r.pipeline_id AS pipelineId,
+           SUM(COALESCE(r.input_tokens, lu.input, 0)) AS pipelineInputTokens,
+           SUM(COALESCE(r.cached_input_tokens, lu.cachedInput, 0)) AS pipelineCachedInputTokens,
+           SUM(COALESCE(r.output_tokens, lu.output, 0)) AS pipelineOutputTokens,
+           SUM(COALESCE(r.total_tokens, lu.total, 0)) AS pipelineTotalTokens
+         FROM runs r
+         LEFT JOIN latest_usage lu ON lu.runId = r.id
+         WHERE r.pipeline_id IS NOT NULL
+         GROUP BY r.pipeline_id
        ),
        pending_stage_requests AS (
          SELECT sr.*
@@ -226,10 +297,16 @@ export function listRunsForTui(limit = 50, repoId?: string): RunSummary[] {
          END           AS status,
          r.started_at  AS startedAt,
          r.ended_at      AS endedAt,
-         COALESCE(r.total_tokens, u.total) AS totalTokens,
-         r.input_tokens  AS inputTokens,
-         r.cached_input_tokens AS cachedInputTokens,
-         r.output_tokens AS outputTokens,
+         COALESCE(r.total_tokens, lu.total) AS totalTokens,
+         COALESCE(r.input_tokens, lu.input) AS inputTokens,
+         COALESCE(r.cached_input_tokens, lu.cachedInput) AS cachedInputTokens,
+         COALESCE(r.output_tokens, lu.output) AS outputTokens,
+         r.context_window_tokens AS contextWindowTokens,
+         r.context_window_percent AS contextWindowPercent,
+         COALESCE(pt.pipelineTotalTokens, COALESCE(r.total_tokens, lu.total)) AS pipelineTotalTokens,
+         COALESCE(pt.pipelineInputTokens, COALESCE(r.input_tokens, lu.input)) AS pipelineInputTokens,
+         COALESCE(pt.pipelineCachedInputTokens, COALESCE(r.cached_input_tokens, lu.cachedInput)) AS pipelineCachedInputTokens,
+         COALESCE(pt.pipelineOutputTokens, COALESCE(r.output_tokens, lu.output)) AS pipelineOutputTokens,
          g.id            AS gateId,
          g.decision    AS gateDecision,
          p.status      AS pipelineStatus,
@@ -241,9 +318,10 @@ export function listRunsForTui(limit = 50, repoId?: string): RunSummary[] {
          psr.created_at AS pendingStageRequestCreatedAt
        FROM runs r
        JOIN latest ON latest.id = r.id
-       LEFT JOIN token_usage u ON u.run_id = r.id
+       LEFT JOIN latest_usage lu ON lu.runId = r.id
        LEFT JOIN gates g ON g.run_id = r.id AND g.resolved_at IS NULL
        LEFT JOIN pipelines p ON p.id = r.pipeline_id
+       LEFT JOIN pipeline_totals pt ON pt.pipelineId = r.pipeline_id
        LEFT JOIN pending_stage_requests psr
          ON psr.pipeline_id = r.pipeline_id
         AND psr.feature_id = r.feature_id
@@ -402,6 +480,34 @@ export function resolveGate(id: number, decision: GateDecision): void {
   }
 }
 
+// F1: force-bypass an approval gate. Plain resolveGate only records a
+// decision — it does not unblock execution, since a budget-violation or
+// on-fail 'gate' policy pauses the whole pipeline separately (see
+// core/runner/execute.ts handleGlobalBudgetViolation). Today the user has to
+// approve the gate *and then* separately find the paused run in the run
+// detail screen to hit resume. forceResolveGate consolidates both steps: it
+// resolves the gate as 'approved' and, if that gate's pipeline is paused or
+// blocked, resumes it immediately.
+export function forceResolveGate(id: number): { resumedPipelineId: number | null } {
+  resolveGate(id, 'approved');
+  const gate = getDb('readonly')
+    .prepare(`SELECT run_id AS runId FROM gates WHERE id = ?`)
+    .get(id) as { runId: number } | undefined;
+  if (!gate) return { resumedPipelineId: null };
+
+  const run = getDb('readonly')
+    .prepare(`SELECT pipeline_id AS pipelineId FROM runs WHERE id = ?`)
+    .get(gate.runId) as { pipelineId: number | null } | undefined;
+  if (!run?.pipelineId) return { resumedPipelineId: null };
+
+  const pipeline = getPipeline(run.pipelineId);
+  if (pipeline && (pipeline.status === 'paused' || pipeline.status === 'blocked')) {
+    resumePipeline(run.pipelineId);
+    return { resumedPipelineId: run.pipelineId };
+  }
+  return { resumedPipelineId: null };
+}
+
 // T007: createGate — INSERT, returns new gate id
 export function createGate(runId: number, featureId: string, repoId: string): number {
   const info = getDb('readwrite')
@@ -460,7 +566,7 @@ export function listRunEvents(runId: number): RunEventRow[] {
        WHERE run_id = ?
        ORDER BY id ASC`,
     )
-    .all(runId) as Array<Omit<RunEventRow, 'metadata'> & { metadata: string | null }>;
+    .all(runId) as (Omit<RunEventRow, 'metadata'> & { metadata: string | null })[];
   return rows.map((row) => ({
     ...row,
     metadata: row.metadata ? safeJsonParse(row.metadata) : null,
@@ -488,6 +594,8 @@ export interface StatsRunRow {
   cachedInputTokens: number | null;
   outputTokens: number | null;
   totalTokens: number | null;
+  contextWindowTokens?: number | null;
+  contextWindowPercent?: number | null;
 }
 
 export interface StatsFilters {
@@ -499,7 +607,7 @@ export interface StatsFilters {
 export function listRunsForStats(filters: StatsFilters = {}): StatsRunRow[] {
   if (!hasDbFile()) return [];
   const clauses: string[] = [];
-  const params: Array<string | number> = [];
+  const params: (string | number)[] = [];
   if (filters.sinceDays !== undefined) {
     clauses.push(`r.started_at >= datetime('now', '-' || ? || ' days')`);
     params.push(filters.sinceDays);
@@ -515,7 +623,16 @@ export function listRunsForStats(filters: StatsFilters = {}): StatsRunRow[] {
   const where = clauses.length > 0 ? `WHERE ${clauses.join(' AND ')}` : '';
   return getDb('readonly')
     .prepare(
-      `SELECT
+      `WITH latest_usage AS (
+         SELECT u.run_id AS runId, u.input, u.cached_input AS cachedInput, u.output, u.total
+         FROM token_usage u
+         JOIN (
+           SELECT run_id, MAX(id) AS id
+           FROM token_usage
+           GROUP BY run_id
+         ) latest_token_usage ON latest_token_usage.id = u.id
+       )
+       SELECT
          r.id,
          r.repo_id AS repoId,
          r.feature_id AS featureId,
@@ -523,12 +640,14 @@ export function listRunsForStats(filters: StatsFilters = {}): StatsRunRow[] {
          r.status,
          r.started_at AS startedAt,
          r.ended_at AS endedAt,
-         COALESCE(r.input_tokens, u.input) AS inputTokens,
-         COALESCE(r.cached_input_tokens, u.cached_input) AS cachedInputTokens,
-         COALESCE(r.output_tokens, u.output) AS outputTokens,
-         COALESCE(r.total_tokens, u.total) AS totalTokens
+         COALESCE(r.input_tokens, lu.input) AS inputTokens,
+         COALESCE(r.cached_input_tokens, lu.cachedInput) AS cachedInputTokens,
+         COALESCE(r.output_tokens, lu.output) AS outputTokens,
+         COALESCE(r.total_tokens, lu.total) AS totalTokens,
+         r.context_window_tokens AS contextWindowTokens,
+         r.context_window_percent AS contextWindowPercent
        FROM runs r
-       LEFT JOIN token_usage u ON u.run_id = r.id
+       LEFT JOIN latest_usage lu ON lu.runId = r.id
        ${where}
        ORDER BY r.id DESC`,
     )
@@ -544,6 +663,12 @@ export interface TaskRun {
   stage: string | null;
   startedAt: string | null;
   endedAt: string | null;
+  inputTokens?: number;
+  cachedInputTokens?: number;
+  outputTokens?: number;
+  totalTokens?: number;
+  contextWindowTokens?: number | null;
+  contextWindowPercent?: number | null;
 }
 
 export function upsertTaskRun(
@@ -573,12 +698,127 @@ export function listTaskRunsForRun(runId: number): TaskRun[] {
   return getDb('readonly')
     .prepare(
       `SELECT id, run_id AS runId, task_id AS taskId, title, status, stage,
-              started_at AS startedAt, ended_at AS endedAt
+              started_at AS startedAt, ended_at AS endedAt,
+              input_tokens AS inputTokens,
+              cached_input_tokens AS cachedInputTokens,
+              output_tokens AS outputTokens,
+              total_tokens AS totalTokens,
+              context_window_tokens AS contextWindowTokens,
+              context_window_percent AS contextWindowPercent
        FROM task_runs
        WHERE run_id = ?
        ORDER BY id ASC`,
     )
     .all(runId) as TaskRun[];
+}
+
+interface PreviousUsageSnapshot {
+  tool?: Tool;
+  inputTokens?: number;
+  cachedInputTokens?: number;
+  outputTokens?: number;
+  totalTokens?: number;
+}
+
+function applyTaskUsageDelta(
+  db: ReturnType<typeof getDb>,
+  runId: number,
+  previous: PreviousUsageSnapshot | undefined,
+  usage: TokenUsage | TokensUpdateEvent,
+  tool?: Tool,
+): void {
+  const deltaInput = clampUsageDelta(usage.input, previous?.inputTokens);
+  const deltaCachedInput = clampUsageDelta(usage.cachedInput ?? 0, previous?.cachedInputTokens);
+  const deltaOutput = clampUsageDelta(usage.output, previous?.outputTokens);
+  const deltaTotal = clampUsageDelta(usage.total, previous?.totalTokens);
+
+  if (deltaInput === 0 && deltaCachedInput === 0 && deltaOutput === 0 && deltaTotal === 0) {
+    return;
+  }
+
+  const activeTask = db
+    .prepare(
+      `SELECT id,
+              COALESCE(input_tokens, 0) AS inputTokens,
+              COALESCE(cached_input_tokens, 0) AS cachedInputTokens,
+              COALESCE(output_tokens, 0) AS outputTokens,
+              COALESCE(total_tokens, 0) AS totalTokens
+       FROM task_runs
+       WHERE run_id = ? AND status = 'running'
+       ORDER BY id DESC
+       LIMIT 1`,
+    )
+    .get(runId) as {
+      id: number;
+      inputTokens: number;
+      cachedInputTokens: number;
+      outputTokens: number;
+      totalTokens: number;
+    } | undefined;
+
+  if (!activeTask) return;
+
+  const nextTotal = activeTask.totalTokens + deltaTotal;
+  const contextWindowTokens = tool ? resolveContextWindow({ tool }) : null;
+  const contextWindowPercent = contextWindowTokens
+    ? computeContextWindowPercent(nextTotal, contextWindowTokens)
+    : null;
+
+  db.prepare(
+    `UPDATE task_runs
+     SET input_tokens = COALESCE(input_tokens, 0) + ?,
+         cached_input_tokens = COALESCE(cached_input_tokens, 0) + ?,
+         output_tokens = COALESCE(output_tokens, 0) + ?,
+         total_tokens = COALESCE(total_tokens, 0) + ?,
+         context_window_tokens = COALESCE(?, context_window_tokens),
+         context_window_percent = COALESCE(?, context_window_percent)
+     WHERE id = ?`,
+  ).run(
+    deltaInput,
+    deltaCachedInput,
+    deltaOutput,
+    deltaTotal,
+    contextWindowTokens,
+    contextWindowPercent,
+    activeTask.id,
+  );
+}
+
+function clampUsageDelta(next: number, previous: number | undefined): number {
+  return Math.max(0, next - (previous ?? 0));
+}
+
+function computeContextWindowPercent(totalTokens: number, contextWindowTokens: number): number {
+  if (contextWindowTokens <= 0) return 0;
+  return Math.round(((totalTokens / contextWindowTokens) * 100) * 10) / 10;
+}
+
+// C3 (folded into F24 — task & stage progress): cross-run view of tasks
+// currently running, so the main dashboard can surface in-progress task
+// titles without requiring the user to first open a specific run's detail
+// screen (listTaskRunsForRun above is scoped to a single runId).
+export interface RunningTaskSummary {
+  runId: number;
+  featureId: string;
+  taskId: string;
+  title: string;
+  stage: string | null;
+  startedAt: string | null;
+}
+
+export function listRunningTaskRuns(limit = 20): RunningTaskSummary[] {
+  if (!hasDbFile()) return [];
+  return getDb('readonly')
+    .prepare(
+      `SELECT t.run_id AS runId, r.feature_id AS featureId, t.task_id AS taskId,
+              t.title, t.stage, t.started_at AS startedAt
+       FROM task_runs t
+       JOIN runs r ON r.id = t.run_id
+       WHERE t.status = 'running'
+       ORDER BY t.started_at DESC, t.id DESC
+       LIMIT ?`,
+    )
+    .all(limit) as RunningTaskSummary[];
 }
 
 function hasDbFile(): boolean {
@@ -939,7 +1179,7 @@ export function resolveStageRequest(id: number, response: string): void {
        WHERE id = ? AND status = 'pending'`,
     )
     .run(response, id);
-  if (row && row.status === 'pending') {
+  if (row?.status === 'pending') {
     msqEventBus.emit('stage:request-resolved', {
       requestId: id,
       kind: row.kind,
@@ -1051,7 +1291,7 @@ function summarizeSnapshot(snapshot: PipelineSnapshot): string {
   const done = snapshot.done.length;
   const active = snapshot.active[0];
   const pending = snapshot.pending[0] ?? snapshot.aborted[0] ?? null;
-  if (active) return `${done}/${total} done · active ${active}`;
-  if (pending) return `${done}/${total} done · next ${pending}`;
-  return `${done}/${total} done`;
+  if (active) return `${String(done)}/${String(total)} done · active ${active}`;
+  if (pending) return `${String(done)}/${String(total)} done · next ${pending}`;
+  return `${String(done)}/${String(total)} done`;
 }

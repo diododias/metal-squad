@@ -11,7 +11,7 @@ export function attachDefaultEventLogger(
     }),
     eventBus.subscribe('run:output', (event) => {
       const prefix = formatOutputPrefix(event.source, event.stream);
-      const target = `${event.tool ?? 'tool'} ${event.featureId ?? `run-${event.runId}`}`;
+      const target = `${event.tool ?? 'tool'} ${event.featureId ?? `run-${String(event.runId)}`}`;
       console.log(`[msq] ${target} ${prefix}: ${event.line}`);
     }),
     eventBus.subscribe('run:done', ({ featureId, result }) => {

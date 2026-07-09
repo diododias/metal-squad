@@ -22,6 +22,8 @@ Reconstruir a TUI para ser o centro de controle do msq — onde o usuario monito
 - [F08 — Navegacao por Sessoes/Runs](../features/F08-session-navigation.md)
 - [F09 — Command Palette & Shortcuts](../features/F09-command-palette.md)
 - [F10 — Theme System](../features/F10-theme-system.md)
+- [F24 — Task & Stage Progress na TUI](../features/F24-task-stage-progress.md)
+- [F29 — TUI Shell Polish](../features/F29-tui-shell-polish.md)
 
 ## Impacto
 
@@ -29,3 +31,5 @@ Reconstruir a TUI para ser o centro de controle do msq — onde o usuario monito
 - `src/ui/hooks/` — novos hooks para streaming, sessoes, navegacao
 - `src/db/` — novas queries para sessoes e logs
 - `src/core/runner/execute.ts` — precisa emitir eventos para streaming
+- feedback efemero e redistribuicao de layout agora tambem impactam shell
+  global, gates e historico de notificacoes

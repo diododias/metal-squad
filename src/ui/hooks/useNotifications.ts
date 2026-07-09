@@ -13,7 +13,7 @@ export function useNotifications(maxItems = 12): NotificationEntry[] {
   const counter = useRef(0);
 
   useEffect(() => {
-    const push = (event: string, message: string) => {
+    const push = (event: string, message: string): void => {
       const entry: NotificationEntry = {
         id: ++counter.current,
         event,
@@ -29,36 +29,36 @@ export function useNotifications(maxItems = 12): NotificationEntry[] {
 
     const unsubscribers = [
       msqEventBus.subscribe('run:start', ({ featureId }) =>
-        push('run:start', `${featureId} started`)),
+        { push('run:start', `${featureId} started`); }),
       msqEventBus.subscribe('gate:created', ({ gateId, featureId }) =>
-        push('gate:created', `gate ${gateId} → ${featureId}`)),
+        { push('gate:created', `gate ${String(gateId)} → ${featureId}`); }),
       msqEventBus.subscribe('gate:resolved', ({ gateId, decision }) =>
-        push('gate:resolved', `gate ${gateId} ${decision}`)),
+        { push('gate:resolved', `gate ${String(gateId)} ${decision}`); }),
       msqEventBus.subscribe('stage:request-created', ({ requestId, featureId, stage, prompt }) =>
-        push('stage:request-created', `stage:${requestId} ${featureId} ${stage} · ${prompt}`)),
+        { push('stage:request-created', `stage:${String(requestId)} ${featureId} ${stage} · ${prompt}`); }),
       msqEventBus.subscribe('stage:request-resolved', ({ requestId, response }) =>
-        push('stage:request-resolved', formatStageResponse(requestId, response))),
+        { push('stage:request-resolved', formatStageResponse(requestId, response)); }),
       msqEventBus.subscribe('run:failed', ({ featureId }) =>
-        push('run:failed', `${featureId} failed`)),
+        { push('run:failed', `${featureId} failed`); }),
       msqEventBus.subscribe('budget:alert', ({ percent }) =>
-        push('budget:alert', `budget ${percent}% reached`)),
+        { push('budget:alert', `budget ${String(percent)}% reached`); }),
       msqEventBus.subscribe('run:done', ({ featureId }) =>
-        push('run:done', `${featureId} done`)),
+        { push('run:done', `${featureId} done`); }),
       msqEventBus.subscribe('ui:info', ({ message }) =>
-        push('ui:info', message)),
+        { push('ui:info', message); }),
       msqEventBus.subscribe('ui:notice', ({ message }) =>
-        push('ui:notice', message)),
+        { push('ui:notice', message); }),
     ];
 
-    return () => { for (const u of unsubscribers) u(); };
+    return (): void => { for (const u of unsubscribers) u(); };
   }, [maxItems]);
 
   return items;
 }
 
 function formatStageResponse(requestId: number, response: string): string {
-  if (response === 'advance') return `stage:${requestId} approved and advanced`;
-  if (response === 'hold') return `stage:${requestId} skipped for now and kept on hold`;
-  if (response === 'retry') return `stage:${requestId} requested retry`;
-  return `stage:${requestId} resolved as ${response}`;
+  if (response === 'advance') return `stage:${String(requestId)} approved and advanced`;
+  if (response === 'hold') return `stage:${String(requestId)} skipped for now and kept on hold`;
+  if (response === 'retry') return `stage:${String(requestId)} requested retry`;
+  return `stage:${String(requestId)} resolved as ${response}`;
 }

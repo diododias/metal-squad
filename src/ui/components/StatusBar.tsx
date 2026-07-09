@@ -5,9 +5,9 @@ import type { FeatureCatalogEntry } from '../catalog.js';
 import type { ActiveView } from './MainPanel.js';
 import {
   STATUS_ICON,
-  estimateCost,
-  formatCost,
   formatElapsed,
+  formatPercent,
+  formatTokens,
   formatTokensIO,
   getRunStatusTone,
   getRunStatusLabel,
@@ -42,7 +42,7 @@ export function StatusBar({
   themeNotice = null,
 }: Props): React.ReactElement {
   const theme = useTheme();
-  const progress = `${doneRuns}/${totalRuns} done`;
+  const progress = `${String(doneRuns)}/${String(totalRuns)} done`;
 
   const featureLabel = selectedRun
     ? currentStage
@@ -52,29 +52,29 @@ export function StatusBar({
 
   const modelLabel = selectedFeature?.model ?? selectedRun?.tool ?? null;
   const effortLabel = selectedFeature ? `effort:${selectedFeature.effort}` : null;
+  const pipelineTokens = selectedRun?.pipelineTotalTokens ?? selectedRun?.totalTokens ?? null;
+  const contextLabel = selectedRun?.contextWindowTokens
+    ? `ctx:${formatPercent(selectedRun.contextWindowPercent)}`
+    : null;
 
   const summary = selectedRun
     ? [
         featureLabel,
         modelLabel,
         effortLabel,
-        selectedRun ? getRunStatusLabel(selectedRun) : null,
+        selectedRun ? getRunStatusLabel(selectedRun) : null, // eslint-disable-line @typescript-eslint/no-unnecessary-condition
         formatTokensIO(selectedRun.inputTokens, selectedRun.cachedInputTokens ?? null, selectedRun.outputTokens),
+        pipelineTokens !== null ? `pipeline:${formatTokens(pipelineTokens)}` : null,
+        contextLabel,
         formatElapsed(selectedRun.startedAt, selectedRun.endedAt),
-        formatCost(estimateCost(
-          selectedRun.inputTokens,
-          selectedRun.cachedInputTokens ?? null,
-          selectedRun.outputTokens,
-          selectedFeature?.model ?? selectedRun.tool,
-        )),
         progress,
         selectedRun.pipelineResumeSummary ?? null,
-        gateCount > 0 ? `${gateCount} gates` : null,
+        gateCount > 0 ? `${String(gateCount)} gates` : null,
         activeView === 'notifications' ? 'notifications view' : null,
       ]
         .filter(Boolean)
         .join(' | ')
-    : `Idle | ${progress}${gateCount > 0 ? ` | ${gateCount} gates open` : ''}${activeView === 'notifications' ? ' | notifications view' : ''}`;
+    : `Idle | ${progress}${gateCount > 0 ? ` | ${String(gateCount)} gates open` : ''}${activeView === 'notifications' ? ' | notifications view' : ''}`;
 
   return (
     <Box

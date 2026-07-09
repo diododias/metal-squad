@@ -20,13 +20,15 @@ interface CommandDefinitionOptions {
   approveSelectedGate: () => void;
   skipSelectedGate: () => void;
   retrySelectedGate: () => void;
+  forceApproveSelectedGate: () => void;
   startSelectedFeature: () => void;
+  toggleDetailDensity: () => void;
   quit: () => void;
 }
 
 function showConfigSummary(): void {
   const config = loadConfig();
-  const concurrency = typeof config.concurrency === 'number' ? config.concurrency : 'default';
+  const concurrency = typeof config.concurrency === 'number' ? String(config.concurrency) : 'default';
   msqEventBus.emit('ui:info', { message: `Config loaded: concurrency ${concurrency}` });
 }
 
@@ -49,7 +51,9 @@ export function buildCommandDefinitions(options: CommandDefinitionOptions): Comm
     approveSelectedGate,
     skipSelectedGate,
     retrySelectedGate,
+    forceApproveSelectedGate,
     startSelectedFeature,
+    toggleDetailDensity,
     quit,
   } = options;
 
@@ -125,11 +129,32 @@ export function buildCommandDefinitions(options: CommandDefinitionOptions): Comm
       execute: retrySelectedGate,
     },
     {
-      id: 'view-stats',
-      name: 'Toggle stats dashboard',
-      description: 'Open or close the cost analytics dashboard.',
+      id: 'gate-force-approve',
+      name: 'Force-approve gate (bypass)',
+      description: 'Force past the selected gate: approves it and, if it left the pipeline paused, resumes execution immediately.',
+      category: 'gate',
+      keywords: ['force', 'approve', 'gate', 'bypass', 'unblock', 'resume'],
+      shortcut: 'F',
+      available: () => canResolveGate,
+      execute: forceApproveSelectedGate,
+    },
+    {
+      // F31 section 5: `i` toggle — collapses/expands long detail sections.
+      id: 'view-toggle-density',
+      name: 'Toggle detail density',
+      description: 'Collapse or expand the long sections in the run detail screen.',
       category: 'view',
-      keywords: ['stats', 'dashboard', 'analytics', 'cost'],
+      keywords: ['density', 'expand', 'collapse', 'detail', 'compact'],
+      shortcut: focusContext === 'run-detail' ? 'i' : null,
+      available: () => focusContext === 'run-detail',
+      execute: toggleDetailDensity,
+    },
+    {
+      id: 'view-stats',
+      name: 'Toggle telemetry dashboard',
+      description: 'Open or close the token and context telemetry dashboard.',
+      category: 'view',
+      keywords: ['stats', 'dashboard', 'analytics', 'tokens', 'context'],
       shortcut: 'd',
       available: () => true,
       execute: toggleDashboard,

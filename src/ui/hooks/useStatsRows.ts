@@ -19,7 +19,7 @@ export function useStatsRows(
     };
     refresh();
     const timer = setInterval(refresh, intervalMs);
-    return () => clearInterval(timer);
+    return (): void => { clearInterval(timer); };
   }, [enabled, intervalMs, sinceDays]);
 
   return rows;

@@ -12,14 +12,14 @@ import type { Command } from '../types/commands.js';
  * Command registry state.
  */
 class CommandRegistry {
-  private commands: Map<string, Command> = new Map();
+  private readonly commands = new Map<string, Command>();
 
   /**
    * Register a command in the registry.
    *
    * @param command - Command to register
    */
-  register(command: Command): void {
+  public register(command: Command): void {
     this.commands.set(command.id, command);
   }
 
@@ -28,7 +28,7 @@ class CommandRegistry {
    *
    * @param commandId - ID of command to unregister
    */
-  unregister(commandId: string): void {
+  public unregister(commandId: string): void {
     this.commands.delete(commandId);
   }
 
@@ -37,7 +37,7 @@ class CommandRegistry {
    *
    * @returns Array of all commands
    */
-  getAll(): Command[] {
+  public getAll(): Command[] {
     return Array.from(this.commands.values());
   }
 
@@ -46,7 +46,7 @@ class CommandRegistry {
    *
    * @returns Array of available commands
    */
-  getAvailable(): Command[] {
+  public getAvailable(): Command[] {
     return this.getAll().filter((cmd) => cmd.available());
   }
 
@@ -56,14 +56,14 @@ class CommandRegistry {
    * @param commandId - ID of command to retrieve
    * @returns Command if found, undefined otherwise
    */
-  get(commandId: string): Command | undefined {
+  public get(commandId: string): Command | undefined {
     return this.commands.get(commandId);
   }
 
   /**
    * Clear all commands from the registry.
    */
-  clear(): void {
+  public clear(): void {
     this.commands.clear();
   }
 }

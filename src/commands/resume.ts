@@ -16,12 +16,12 @@ export function registerResume(program: Command): void {
         throw new Error(`Nenhuma pipeline retomável encontrada para "${target}".`);
       }
       if (!pipeline.cwd) {
-        throw new Error(`Pipeline ${pipeline.id} não possui cwd persistido para resume.`);
+        throw new Error(`Pipeline ${String(pipeline.id)} não possui cwd persistido para resume.`);
       }
 
       const snapshot = getPipelineSnapshot(pipeline);
       console.log(
-        `Retomando pipeline ${pipeline.id} em ${pipeline.cwd}. `
+        `Retomando pipeline ${String(pipeline.id)} em ${pipeline.cwd}. `
           + `Reaproveita done=[${snapshot.done.join(', ') || '-'}]; `
           + `reexecuta=[${[...snapshot.active, ...snapshot.aborted, ...snapshot.pending].join(', ') || '-'}].`,
       );

@@ -1,8 +1,6 @@
 import type { RunSummary } from '../db/repo.js';
 import type { RunStatusTone } from './theme/types.js';
 
-export { PRICING, estimateCost } from '../core/budget/pricing.js';
-
 export type LayoutMode = 'stacked' | 'compact' | 'full';
 type RunStatus = RunSummary['status'];
 
@@ -31,9 +29,9 @@ export function formatElapsed(startedAt: string, endedAt: string | null): string
   if (start === null) return '—';
   const end = endedAt ? parseTimestampMs(endedAt) : Date.now();
   const secs = Math.max(0, Math.floor(((end ?? Date.now()) - start) / 1000));
-  if (secs < 60) return `${secs}s`;
+  if (secs < 60) return `${String(secs)}s`;
   const mins = Math.floor(secs / 60);
-  return `${mins}m${secs % 60}s`;
+  return `${String(mins)}m${String(secs % 60)}s`;
 }
 
 export function getRunStatusLabel(run: RunSummary): string {
@@ -59,6 +57,12 @@ export function formatTokens(total: number | null): string {
   return String(total);
 }
 
+export function formatPercent(value: number | null | undefined): string {
+  if (value === null || value === undefined || !Number.isFinite(value)) return '—';
+  const rounded = Math.round(value * 10) / 10;
+  return Number.isInteger(rounded) ? `${String(rounded)}%` : `${rounded.toFixed(1)}%`;
+}
+
 export function formatClock(iso: string | null): string {
   if (!iso) return '--:--';
   const ms = parseTimestampMs(iso);
@@ -72,16 +76,42 @@ export function truncateText(value: string, max: number): string {
   return `${value.slice(0, max - 3)}...`;
 }
 
+// D5 / US6: heartbeat lines carry a verbose diagnostic payload from
+// core/adapters/spawn.ts (`[msq] <label> running for Ns (stdout XB stderr YB
+// idle Zs) <suffix>`). FR-010 requires hiding the diagnostic metrics (stdout
+// byte counts, stderr byte counts, elapsed seconds and idle seconds) for
+// normal heartbeats, surfacing ONLY the agent's activity message suffix.
+// Error heartbeats (anything that does NOT match the diagnostic pattern) are
+// rendered as the raw line truncated to the available width, preserving the
+// signal that something went wrong — diagnostics are hidden only when the
+// recognized "running for Ns (stdout … idle Zs)" shape is present, which is
+// the runaway-diagnostic-nose case the spec explicitly calls out.
+const HEARTBEAT_PATTERN = /^\[msq\]\s+(.+?)\s+running for\s+(\d+)s\s+\(stdout\s+\d+B\s+stderr\s+\d+B\s+idle\s+(\d+)s\)\s*(.*)$/;
+
+export function formatHeartbeatLine(line: string, maxWidth: number): string {
+  const match = HEARTBEAT_PATTERN.exec(line.trim());
+  if (!match) return truncateText(line, maxWidth);
+  const suffix = (match[4] ?? '').trim();
+  return truncateText(suffix || 'thinking...', maxWidth);
+}
+
 export function getLayoutMode(width: number): LayoutMode {
   if (width < 80) return 'stacked';
   if (width < 120) return 'compact';
   return 'full';
 }
 
-export function formatCost(cost: number | null): string {
-  if (cost === null) return '—';
-  if (cost < 0.001) return '<$0.001';
-  return `~$${cost.toFixed(3)}`;
+// F31 item 1: getLayoutMode only decides by WIDTH. H10 was a HEIGHT overflow
+// (detail screen taller than common terminal windows). getVerticalBudget adds
+// the second axis so callers can degrade the dashboard chrome (activity feed,
+// stats density, cards-per-column) before content overflows vertically,
+// without ever cutting the gates strip or the detail stepper/header.
+export type VerticalBudget = 'short' | 'regular' | 'tall';
+
+export function getVerticalBudget(height: number): VerticalBudget {
+  if (height < 24) return 'short';
+  if (height <= 40) return 'regular';
+  return 'tall';
 }
 
 export function formatTokensIO(

@@ -28,7 +28,7 @@ export function registerInit(program: Command): void {
   program
     .command('init')
     .description('Create backlog.yaml in the current repo and register it in the global DB')
-    .action(async () => {
+    .action(async () => { // eslint-disable-line @typescript-eslint/require-await
       assertWritableDbPath();
       const cwd = process.cwd();
       if (existsSync(BACKLOG_FILE)) {

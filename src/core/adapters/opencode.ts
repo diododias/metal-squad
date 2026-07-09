@@ -4,9 +4,29 @@ import { CliAbortError, runCli } from './spawn.js';
 import { msqEventBus } from '../events/index.js';
 import { parseControlSignal } from './control.js';
 
-// OpenCode não expõe reasoning-effort direto (depende do provider/modelo).
-// Convenção: modelo no formato "provider/model" (ex: anthropic/claude-sonnet-4-5).
-const EFFORT_HINT: Record<Effort, string> = {
+interface OpenCodeUsage {
+  input?: number;
+  input_tokens?: number;
+  cached_input_tokens?: number;
+  cache_read_input_tokens?: number;
+  output?: number;
+  output_tokens?: number;
+}
+
+interface OpenCodeResponse {
+  response?: string;
+  usage?: OpenCodeUsage;
+  tokens?: OpenCodeUsage;
+  tool?: string;
+  toolName?: string;
+  input?: unknown;
+  args?: unknown;
+  arguments?: unknown;
+  result?: string;
+  message?: string;
+}
+
+const _EFFORT_HINT: Record<Effort, string> = {
   low: 'small_model',
   medium: 'model',
   high: 'model',
@@ -16,7 +36,6 @@ export const opencodeAdapter: ToolAdapter = {
   tool: 'opencode',
 
   effortFlag(_effort: Effort): string[] {
-    // efeito via seleção de modelo, não via flag
     return [];
   },
 
@@ -53,15 +72,15 @@ export const opencodeAdapter: ToolAdapter = {
         return {
           ok: false,
           aborted: true,
-          summary: `abortado manualmente após ${Math.round(error.runtimeMs / 1000)}s`,
+          summary: `abortado manualmente após ${String(Math.round(error.runtimeMs / 1000))}s`,
           usage,
         };
       }
       throw error;
     }
-    if (code !== 0) return { ok: false, summary: stderr.slice(-500) || `exit ${code}` };
+    if (code !== 0) return { ok: false, summary: stderr.slice(-500) || `exit ${String(code)}` };
 
-    const json = safeJson<{ response?: string }>(stdout);
+    const json = safeJson<OpenCodeResponse>(stdout);
     const usage = this.parseUsage?.(stdout) ?? undefined;
     if (usage) emitUsage(opts.runId, feature, usage);
     return {
@@ -72,19 +91,18 @@ export const opencodeAdapter: ToolAdapter = {
     };
   },
 
-  // TODO: `opencode run --format json` nem sempre traz usage;
-  // alternativa: parsear `opencode export <session>` ou `opencode stats`.
   parseUsage(transcript: string): TokenUsage | null {
-    const json = safeJson<any>(transcript);
+    const json = safeJson<OpenCodeResponse>(transcript);
     const u = json?.usage ?? json?.tokens;
     if (!u) return null;
     const input = u.input ?? u.input_tokens ?? 0;
+    const cachedInput = u.cached_input_tokens ?? u.cache_read_input_tokens ?? 0;
     const output = u.output ?? u.output_tokens ?? 0;
-    return { input, output, total: input + output };
+    return { input, cachedInput, output, total: input + cachedInput + output };
   },
 };
 
-function safeJson<T>(s: string): T | null {
+function safeJson<T>(s: string): T | null { // eslint-disable-line @typescript-eslint/no-unnecessary-type-parameters
   try {
     return JSON.parse(s) as T;
   } catch {
@@ -103,7 +121,7 @@ function parseOpenCodeLine(line: string): {
   };
   usage?: TokenUsage;
 } {
-  const json = safeJson<any>(line);
+  const json = safeJson<OpenCodeResponse>(line);
   if (!json) {
     const text = normalizeSnippet(line);
     return text ? { output: { line: text, source: 'stdout' } } : {};
