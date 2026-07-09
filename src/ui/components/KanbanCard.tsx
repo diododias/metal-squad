@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { memo } from 'react';
 import { Box, Text } from 'ink';
 import type { RunSummary } from '../../db/repo.js';
 import type { FeatureCatalogEntry } from '../catalog.js';
@@ -36,7 +36,7 @@ function toolModelEffort(tool: string, model: string | undefined, effort: string
  * to be RunTable rows plus the inline EXECUTION-only row markup. `run` and
  * `pendingFeature` are mutually exclusive — TODO cards have no run yet.
  */
-export function KanbanCard({ width, selected, focused, run, pendingFeature, feature, children }: Props): React.ReactElement {
+function KanbanCardComponent({ width, selected, focused, run, pendingFeature, feature, children }: Props): React.ReactElement {
   const theme = useTheme();
   const labelStyle = selected && focused ? theme.role('focus') : theme.role('text');
   const prefix = selected ? '>' : ' ';
@@ -77,3 +77,5 @@ export function KanbanCard({ width, selected, focused, run, pendingFeature, feat
     </Box>
   );
 }
+
+export const KanbanCard = memo(KanbanCardComponent);
