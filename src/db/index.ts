@@ -7,8 +7,8 @@ let db: Database.Database | null = null;
 let dbMode: 'readonly' | 'readwrite' | null = null;
 
 export class DbAccessError extends Error {
-  constructor(
-    readonly dbPath: string,
+  public constructor(
+    public readonly dbPath: string,
     detail: string,
   ) {
     super(
@@ -28,7 +28,7 @@ export function assertWritableDbPath(dbPath = resolveDbPath()): void {
 
   try {
     ensureDataDir(dbPath);
-  } catch (error) {
+  } catch {
     throw new DbAccessError(
       dbPath,
       `Nao foi possivel criar ou acessar o diretório do banco: ${dataDir}`,
@@ -116,7 +116,9 @@ function migrate(d: Database.Database): void {
       input_tokens INTEGER,
       cached_input_tokens INTEGER,
       output_tokens INTEGER,
-      total_tokens INTEGER
+      total_tokens INTEGER,
+      context_window_tokens INTEGER,
+      context_window_percent REAL
     );
 
     CREATE TABLE IF NOT EXISTS token_usage (
@@ -165,7 +167,13 @@ function migrate(d: Database.Database): void {
       status     TEXT NOT NULL DEFAULT 'pending',
       stage      TEXT,
       started_at TEXT,
-      ended_at   TEXT
+      ended_at   TEXT,
+      input_tokens INTEGER NOT NULL DEFAULT 0,
+      cached_input_tokens INTEGER NOT NULL DEFAULT 0,
+      output_tokens INTEGER NOT NULL DEFAULT 0,
+      total_tokens INTEGER NOT NULL DEFAULT 0,
+      context_window_tokens INTEGER,
+      context_window_percent REAL
     );
 
     CREATE TABLE IF NOT EXISTS pipelines (
@@ -213,9 +221,9 @@ function migrate(d: Database.Database): void {
     );
   `);
 
-  const runColumns = (d
+  const runColumns = d
     .prepare(`PRAGMA table_info(runs)`)
-    .all() ?? []) as Array<{ name?: string }>;
+    .all() as { name?: string }[];
   const hasSummary = runColumns.some((column) => column.name === 'summary');
   if (!hasSummary) {
     d.exec(`ALTER TABLE runs ADD COLUMN summary TEXT`);
@@ -236,6 +244,14 @@ function migrate(d: Database.Database): void {
   if (!hasTotalTokens) {
     d.exec(`ALTER TABLE runs ADD COLUMN total_tokens INTEGER`);
   }
+  const hasContextWindowTokens = runColumns.some((column) => column.name === 'context_window_tokens');
+  if (!hasContextWindowTokens) {
+    d.exec(`ALTER TABLE runs ADD COLUMN context_window_tokens INTEGER`);
+  }
+  const hasContextWindowPercent = runColumns.some((column) => column.name === 'context_window_percent');
+  if (!hasContextWindowPercent) {
+    d.exec(`ALTER TABLE runs ADD COLUMN context_window_percent REAL`);
+  }
   const hasPipelineId = runColumns.some((column) => column.name === 'pipeline_id');
   if (!hasPipelineId) {
     d.exec(`ALTER TABLE runs ADD COLUMN pipeline_id INTEGER REFERENCES pipelines(id)`);
@@ -245,17 +261,32 @@ function migrate(d: Database.Database): void {
     d.exec(`ALTER TABLE runs ADD COLUMN stage TEXT`);
   }
 
-  const usageColumns = (d
+  const usageColumns = d
     .prepare(`PRAGMA table_info(token_usage)`)
-    .all() ?? []) as Array<{ name?: string }>;
+    .all() as { name?: string }[];
   const hasCachedInputUsage = usageColumns.some((column) => column.name === 'cached_input');
   if (!hasCachedInputUsage) {
     d.exec(`ALTER TABLE token_usage ADD COLUMN cached_input INTEGER NOT NULL DEFAULT 0`);
   }
 
-  const pipelineColumns = (d
+  const taskRunColumns = d
+    .prepare(`PRAGMA table_info(task_runs)`)
+    .all() as { name?: string }[];
+  const ensureTaskRunColumn = (name: string, sql: string): void => {
+    if (!taskRunColumns.some((column) => column.name === name)) {
+      d.exec(sql);
+    }
+  };
+  ensureTaskRunColumn('input_tokens', `ALTER TABLE task_runs ADD COLUMN input_tokens INTEGER NOT NULL DEFAULT 0`);
+  ensureTaskRunColumn('cached_input_tokens', `ALTER TABLE task_runs ADD COLUMN cached_input_tokens INTEGER NOT NULL DEFAULT 0`);
+  ensureTaskRunColumn('output_tokens', `ALTER TABLE task_runs ADD COLUMN output_tokens INTEGER NOT NULL DEFAULT 0`);
+  ensureTaskRunColumn('total_tokens', `ALTER TABLE task_runs ADD COLUMN total_tokens INTEGER NOT NULL DEFAULT 0`);
+  ensureTaskRunColumn('context_window_tokens', `ALTER TABLE task_runs ADD COLUMN context_window_tokens INTEGER`);
+  ensureTaskRunColumn('context_window_percent', `ALTER TABLE task_runs ADD COLUMN context_window_percent REAL`);
+
+  const pipelineColumns = d
     .prepare(`PRAGMA table_info(pipelines)`)
-    .all() ?? []) as Array<{ name?: string }>;
+    .all() as { name?: string }[];
   const ensurePipelineColumn = (name: string, sql: string): void => {
     if (!pipelineColumns.some((column) => column.name === name)) {
       d.exec(sql);

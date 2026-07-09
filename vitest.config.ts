@@ -5,8 +5,9 @@ export default defineConfig({
     exclude: [
       '.claude/**',
       '.stryker-tmp/**',
+      '.worktrees/**',
       'dist/**',
-      'node_modules/**',
+      '**/node_modules/**',
     ],
     coverage: {
       exclude: [

@@ -2,8 +2,9 @@ import type { RunControl } from './types.js';
 
 const INPUT_REQUIRED_PREFIX = 'MSQ_INPUT_REQUIRED:';
 
-export function parseControlSignal(text: string): RunControl | undefined {
-  const normalized = String(text ?? '').trim();
+export function parseControlSignal(text: string | null | undefined): RunControl | undefined {
+  if (!text) return undefined;
+  const normalized = text.trim();
   if (!normalized) return undefined;
 
   const index = normalized.lastIndexOf(INPUT_REQUIRED_PREFIX);

@@ -21,7 +21,7 @@ function parseDecision(raw: string): GateDecision | null {
   return null;
 }
 
-function sleep(ms: number): Promise<void> {
+async function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
@@ -30,11 +30,11 @@ export class TelegramPoller {
   private stopped = false;
   private current: AbortController | null = null;
 
-  start(): void {
+  public start(): void {
     void this.loop();
   }
 
-  stop(): void {
+  public stop(): void {
     this.stopped = true;
     this.current?.abort();
   }
@@ -44,7 +44,7 @@ export class TelegramPoller {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ callback_query_id: callbackQueryId }),
-    }).catch(() => {});
+    }).catch(() => { /* ignore answer errors */ });
   }
 
   private async loop(): Promise<void> {
@@ -54,7 +54,7 @@ export class TelegramPoller {
     while (!this.stopped) {
       try {
         this.current = new AbortController();
-        const url = `https://api.telegram.org/bot${token}/getUpdates?offset=${this.offset}&timeout=25`;
+        const url = `https://api.telegram.org/bot${token}/getUpdates?offset=${String(this.offset)}&timeout=25`;
         const res = await fetch(url, { signal: this.current.signal });
         if (!res.ok) { await sleep(5_000); continue; }
 
@@ -96,7 +96,7 @@ export class TelegramPoller {
           }
         }
       } catch {
-        if (this.stopped) break;
+        if (this.stopped) break; // eslint-disable-line @typescript-eslint/no-unnecessary-condition -- stopped may change during await
         await sleep(5_000);
       }
     }

@@ -67,7 +67,7 @@ export function CommandPalette({
         return;
       }
 
-      if (isPrintableInput(input, key as Record<string, boolean>)) {
+      if (isPrintableInput(input, key)) {
         onQueryChange(`${state.query}${input}`);
       }
     },

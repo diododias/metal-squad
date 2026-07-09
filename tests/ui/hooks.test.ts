@@ -256,7 +256,12 @@ describe('ui hooks', () => {
     expect(startedUpdater([{ taskId: 'T1', title: 'Task 1', status: 'running', stage: null, endedAt: null }])).toEqual([
       { taskId: 'T1', title: 'Task 1', status: 'running', stage: null, endedAt: null },
       {
+        cachedInputTokens: 0,
+        contextWindowPercent: null,
+        contextWindowTokens: null,
         id: 0,
+        inputTokens: 0,
+        outputTokens: 0,
         runId: 7,
         taskId: 'T2',
         title: 'Task 2',
@@ -264,6 +269,7 @@ describe('ui hooks', () => {
         stage: 'implement',
         startedAt: expect.any(String),
         endedAt: null,
+        totalTokens: 0,
       },
     ]);
 
@@ -288,7 +294,9 @@ describe('ui hooks', () => {
 
   it('useTerminalWidth subscribes to resize events', async () => {
     const setWidth = vi.fn();
-    let cleanup: (() => void) | void;
+    let cleanup: (() => void) | void = undefined;
+    const originalColumns = process.stdout.columns;
+    Object.defineProperty(process.stdout, 'columns', { value: 80, writable: true, configurable: true });
     const on = vi.spyOn(process.stdout, 'on');
     const off = vi.spyOn(process.stdout, 'off');
 
@@ -302,13 +310,84 @@ describe('ui hooks', () => {
     const { useTerminalWidth } = await import('../../src/ui/hooks/useTerminalWidth.js');
     const width = useTerminalWidth();
 
-    expect(width).toBe(process.stdout.columns ?? 80);
+    expect(width).toBe(80);
     expect(on).toHaveBeenCalledWith('resize', expect.any(Function));
     const listener = on.mock.calls[0]?.[1] as (() => void);
     listener();
-    expect(setWidth).toHaveBeenCalledWith(process.stdout.columns ?? 80);
-    cleanup?.();
+    expect(setWidth).toHaveBeenCalledWith(80);
+    (cleanup as (() => void) | undefined)?.();
     expect(off).toHaveBeenCalledWith('resize', expect.any(Function));
+    Object.defineProperty(process.stdout, 'columns', { value: originalColumns, writable: true, configurable: true });
+  });
+
+  it('useTerminalHeight subscribes to resize events (F31 vertical budget)', async () => {
+    const setHeight = vi.fn();
+    let cleanup: (() => void) | void = undefined;
+    const originalRows = process.stdout.rows;
+    Object.defineProperty(process.stdout, 'rows', { value: 24, writable: true, configurable: true });
+    const on = vi.spyOn(process.stdout, 'on');
+    const off = vi.spyOn(process.stdout, 'off');
+
+    vi.doMock('react', () => ({
+      useState: (value: unknown) => [typeof value === 'function' ? (value as () => unknown)() : value, setHeight],
+      useEffect: (effect: () => (() => void) | void) => {
+        cleanup = effect();
+      },
+    }));
+
+    const { useTerminalHeight } = await import('../../src/ui/hooks/useTerminalHeight.js');
+    const height = useTerminalHeight();
+
+    expect(height).toBe(24);
+    expect(on).toHaveBeenCalledWith('resize', expect.any(Function));
+    const listener = on.mock.calls[0]?.[1] as (() => void);
+    listener();
+    expect(setHeight).toHaveBeenCalledWith(24);
+    (cleanup as (() => void) | undefined)?.();
+    expect(off).toHaveBeenCalledWith('resize', expect.any(Function));
+    Object.defineProperty(process.stdout, 'rows', { value: originalRows, writable: true, configurable: true });
+  });
+
+  it('useTokenStats sums the 7-day window and keeps the last total on error (F31 item 7)', async () => {
+    let setState: (updater: unknown) => void = () => {};
+    const setIntervalSpy = vi.spyOn(globalThis, 'setInterval').mockReturnValue(1 as unknown as ReturnType<typeof setInterval>);
+    vi.spyOn(globalThis, 'clearInterval').mockImplementation(() => {});
+
+    vi.doMock('react', () => ({
+      useState: (value: unknown) => {
+        const initial = typeof value === 'function' ? (value as () => unknown)() : value;
+        let current = initial;
+        setState = (updater: unknown) => {
+          current = typeof updater === 'function' ? (updater as (prev: unknown) => unknown)(current) : updater;
+        };
+        return [current, (updater: unknown) => setState(updater)];
+      },
+      useEffect: (effect: () => (() => void) | void) => {
+        effect();
+      },
+    }));
+
+    const listRunsForStats = vi.fn()
+      .mockReturnValueOnce([{ totalTokens: 1000 }, { totalTokens: 500 }])
+      .mockImplementationOnce(() => {
+        throw new Error('db locked');
+      });
+
+    vi.doMock('../../src/db/repo.js', () => ({ listRunsForStats }));
+    vi.doMock('../../src/db/index.js', () => ({
+      DbAccessError: class DbAccessError extends Error {},
+    }));
+
+    const { useTokenStats } = await import('../../src/ui/hooks/useTokenStats.js');
+    useTokenStats(7);
+
+    expect(listRunsForStats).toHaveBeenCalledWith({ sinceDays: 7 });
+    expect(setIntervalSpy).toHaveBeenCalledWith(expect.any(Function), 5000);
+
+    const refresh = setIntervalSpy.mock.calls[0]?.[0] as () => void;
+    refresh();
+
+    expect(listRunsForStats).toHaveBeenCalledTimes(2);
   });
 
   it('useCommandPalette filters available commands, fuzzy matches queries, and executes the selection', async () => {

@@ -18,7 +18,7 @@ export function registerStatus(program: Command): void {
       '--stale-minutes <n>',
       'threshold in minutes to consider a running run as orphan',
     )
-    .action(async (opts: { limit: string; repairStale?: boolean; staleMinutes?: string }) => {
+    .action(async (opts: { limit: string; repairStale?: boolean; staleMinutes?: string }) => { // eslint-disable-line @typescript-eslint/require-await
       const staleRunThresholdMinutes = opts.staleMinutes
         ? Number(opts.staleMinutes)
         : loadConfig().staleRunThresholdMinutes;
@@ -32,8 +32,8 @@ export function registerStatus(program: Command): void {
       }
       if (repaired > 0) {
         console.log(
-          `[msq] ${repaired} orphan run(s) marked as failed `
-            + `(${staleRunThresholdMinutes} min threshold).`,
+          `[msq] ${String(repaired)} orphan run(s) marked as failed `
+            + `(${String(staleRunThresholdMinutes)} min threshold).`,
         );
       }
       console.table(
@@ -63,7 +63,7 @@ export function registerStatus(program: Command): void {
             active: pipeline.activeFeature ?? '-',
             pending: pipeline.pendingFeature ?? '-',
             wait: pipeline.pendingStageRequestKind
-              ? `${pipeline.pendingStageRequestKind}:${pipeline.pendingStageRequestId ?? '-'}`
+              ? `${pipeline.pendingStageRequestKind}:${String(pipeline.pendingStageRequestId ?? '-')}`
               : '-',
             prompt: pipeline.pendingStageRequestPrompt ?? '-',
             summary: pipeline.resumeSummary ?? '-',

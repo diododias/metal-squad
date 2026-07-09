@@ -113,12 +113,12 @@ function toBacklogTask(task: DecomposeTask, existing: Task[]): Task {
 }
 
 export function formatDecomposeSummary(featureId: string, output: DecomposeOutput): string {
-  const lines = [`Decomposicao sugerida para ${featureId} (${output.tasks.length} tasks):`, ''];
+  const lines = [`Decomposicao sugerida para ${featureId} (${String(output.tasks.length)} tasks):`, ''];
   for (const task of output.tasks) {
     const estimate = task.estimate;
     const details = [
-      estimate?.tokens !== undefined ? `tokens ${estimate.tokens}` : null,
-      estimate?.duration !== undefined ? `duracao ${estimate.duration}` : null,
+      estimate?.tokens !== undefined ? `tokens ${String(estimate.tokens)}` : null,
+      estimate?.duration !== undefined ? `duracao ${String(estimate.duration)}` : null,
       estimate && estimate.files.length > 0 ? `arquivos ${estimate.files.join(', ')}` : null,
       task.dependsOn.length > 0 ? `depende de ${task.dependsOn.join(', ')}` : null,
     ].filter(Boolean).join(' | ');

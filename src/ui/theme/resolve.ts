@@ -16,7 +16,7 @@ export function isThemeName(value: string): value is ThemeName {
 }
 
 export function resolveThemePreference(preference: ThemePreferenceInput['theme']): ThemeResolution {
-  const requested = preference?.trim() || null;
+  const requested = preference?.trim() ?? null;
   if (!requested) {
     return {
       requested: null,

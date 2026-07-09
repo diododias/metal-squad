@@ -4,14 +4,21 @@ import { render, cleanup } from 'ink-testing-library';
 
 import { EmptyState } from '../../src/ui/components/EmptyState.js';
 import { CommandBar } from '../../src/ui/components/CommandBar.js';
-import { GatePanel } from '../../src/ui/components/GatePanel.js';
-import { RunTable } from '../../src/ui/components/RunTable.js';
+import { HeaderBar } from '../../src/ui/components/HeaderBar.js';
+import { StatsBar } from '../../src/ui/components/StatsBar.js';
+import { KanbanCard } from '../../src/ui/components/KanbanCard.js';
+import { FeaturePreview } from '../../src/ui/components/FeaturePreview.js';
+import { FeatureConfigSection } from '../../src/ui/components/FeatureConfigSection.js';
+import { WorkflowStepper } from '../../src/ui/components/WorkflowStepper.js';
 import { NotificationsFeed } from '../../src/ui/components/NotificationsFeed.js';
 import { StatusBar } from '../../src/ui/components/StatusBar.js';
 import { CommandPalette } from '../../src/ui/components/CommandPalette.js';
+import { HelpOverlay } from '../../src/ui/components/HelpOverlay.js';
+import { MainPanel } from '../../src/ui/components/MainPanel.js';
 import { ThemeProvider } from '../../src/ui/theme/context.js';
 import { resolveThemePreference } from '../../src/ui/theme/resolve.js';
 import type { RunSummary } from '../../src/db/repo.js';
+import type { DetailSectionId } from '../../src/ui/detailSections.js';
 
 afterEach(() => cleanup());
 
@@ -58,10 +65,95 @@ const baseRun: RunSummary = {
 // EmptyState
 // ---------------------------------------------------------------------------
 describe('EmptyState', () => {
-  it('renders the idle message', () => {
+  it('renders the onboarding message when the backlog is empty', () => {
     const { lastFrame } = renderWithTheme(<EmptyState />);
-    expect(lastFrame()).toContain('No runs yet');
-    expect(lastFrame()).toContain('msq run');
+    expect(lastFrame()).toContain('Backlog vazio');
+    expect(lastFrame()).toContain('msq init');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// HeaderBar (F31 section 1: replaces the ASCII banner with a 1-line title)
+// ---------------------------------------------------------------------------
+describe('HeaderBar', () => {
+  it('renders the product name, version, and active repo on one line', () => {
+    const { lastFrame } = renderWithTheme(<HeaderBar version="0.0.1" repoLabel="metal-squad" width={80} />);
+    expect(lastFrame()).toContain('METAL SQUAD');
+    expect(lastFrame()).toContain('v0.0.1');
+    expect(lastFrame()).toContain('metal-squad');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// StatsBar (F31 section 1: always-visible done/todo/execução/falha/gates/tokens)
+// ---------------------------------------------------------------------------
+describe('StatsBar', () => {
+  it('renders the always-visible stats row', () => {
+    const { lastFrame } = renderWithTheme(
+      <StatsBar
+        done={3}
+        todo={5}
+        execution={2}
+        falha={1}
+        gatesPending={4}
+        tokenStats={{ status: 'ready', totalTokens: 1500, error: null }}
+      />,
+    );
+    expect(lastFrame()).toContain('3 done');
+    expect(lastFrame()).toContain('5 todo');
+    expect(lastFrame()).toContain('2 execução');
+    expect(lastFrame()).toContain('1 falha');
+    expect(lastFrame()).toContain('4 aprovações');
+    expect(lastFrame()).toContain('tokens (7d) 1.5k');
+  });
+
+  it('shows a loading placeholder instead of 0 while token stats are pending', () => {
+    const { lastFrame } = renderWithTheme(
+      <StatsBar
+        done={0}
+        todo={0}
+        execution={0}
+        falha={0}
+        gatesPending={0}
+        tokenStats={{ status: 'loading', totalTokens: null, error: null }}
+      />,
+    );
+    expect(lastFrame()).toContain('tokens (7d) —');
+  });
+
+  it('keeps the last known total visible when the token stats query errors', () => {
+    const { lastFrame } = renderWithTheme(
+      <StatsBar
+        done={0}
+        todo={0}
+        execution={0}
+        falha={0}
+        gatesPending={0}
+        tokenStats={{ status: 'error', totalTokens: 900, error: 'db locked' }}
+      />,
+    );
+    expect(lastFrame()).toContain('tokens (7d) 900');
+    expect(lastFrame()).toContain('stats unavailable');
+  });
+
+  // F31 item 1: short terminals drop the tokens segment first to keep the
+  // stats row a single dense line — the counts themselves are never cut.
+  it('drops the tokens segment in compact mode, keeping the counts', () => {
+    const { lastFrame } = renderWithTheme(
+      <StatsBar
+        done={3}
+        todo={5}
+        execution={2}
+        falha={1}
+        gatesPending={4}
+        tokenStats={{ status: 'ready', totalTokens: 1500, error: null }}
+        compact
+      />,
+    );
+    const frame = lastFrame();
+    expect(frame).toContain('3 done');
+    expect(frame).toContain('4 aprovações');
+    expect(frame).not.toContain('tokens (7d)');
   });
 });
 
@@ -132,75 +224,130 @@ describe('CommandBar', () => {
 });
 
 // ---------------------------------------------------------------------------
-// GatePanel
+// KanbanCard (F31 section 3 + "componente de card unico": absorbs RunTable)
 // ---------------------------------------------------------------------------
-describe('GatePanel', () => {
-  const gates = [
-    { id: 1, runId: 10, featureId: 'feat-1', repoId: 'repo-1', createdAt: '', resolvedAt: null, decision: null },
-    { id: 2, runId: 11, featureId: 'feat-2', repoId: 'repo-2', createdAt: '', resolvedAt: null, decision: null },
-  ];
+describe('KanbanCard', () => {
+  const run: RunSummary = { ...baseRun, runId: 1, featureId: 'feat-alpha', status: 'running', rawStatus: 'running' };
+  const feature = {
+    id: 'feat-alpha',
+    title: 'Alpha',
+    skills: [],
+    tool: 'codex',
+    model: 'gpt-5',
+    effort: 'high' as const,
+  };
 
-  it('renders the header and shortcut hints', () => {
-    const { lastFrame } = renderWithTheme(<GatePanel gates={gates} selectedIndex={0} />);
-    expect(lastFrame()).toContain('Gates awaiting decision');
-    expect(lastFrame()).toContain('[a]pprove');
-    expect(lastFrame()).toContain('[s]kip');
-    expect(lastFrame()).toContain('[r]etry');
+  it('shows tool · model · effort for a run row, not just the tool', () => {
+    const { lastFrame } = renderWithTheme(
+      <KanbanCard width={40} selected={false} focused={false} run={run} feature={feature} />,
+    );
+    expect(lastFrame()).toContain('feat-alpha');
+    // The tool is the run's own adapter (baseRun.tool === 'claude'), while
+    // model/effort resolve from the feature catalog entry passed in.
+    expect(lastFrame()).toContain('claude · gpt-5 · high');
   });
 
-  it('prefixes the selected gate with the ▶ indicator', () => {
-    const { lastFrame } = renderWithTheme(<GatePanel gates={gates} selectedIndex={0} />);
-    expect(lastFrame()).toContain('▶ feat-1');
+  it('falls back to the tool name when no model is configured', () => {
+    const { lastFrame } = renderWithTheme(
+      <KanbanCard width={40} selected={false} focused={false} run={run} feature={{ ...feature, model: undefined }} />,
+    );
+    expect(lastFrame()).toContain('claude · claude · high');
   });
 
-  it('moves the ▶ indicator when selection changes', () => {
-    const { lastFrame } = renderWithTheme(<GatePanel gates={gates} selectedIndex={1} />);
-    expect(lastFrame()).toContain('▶ feat-2');
-    expect(lastFrame()).not.toContain('▶ feat-1');
+  it('marks the selected row with the > indicator', () => {
+    const { lastFrame } = renderWithTheme(
+      <KanbanCard width={40} selected focused run={run} feature={feature} />,
+    );
+    expect(lastFrame()).toContain('> ');
   });
 
-  it('renders all gate feature ids', () => {
-    const { lastFrame } = renderWithTheme(<GatePanel gates={gates} selectedIndex={0} />);
-    expect(lastFrame()).toContain('feat-1');
-    expect(lastFrame()).toContain('feat-2');
+  it('renders a pending (TODO) feature without a run', () => {
+    const { lastFrame } = renderWithTheme(
+      <KanbanCard width={40} selected={false} focused={false} pendingFeature={feature} />,
+    );
+    expect(lastFrame()).toContain('feat-alpha');
+    expect(lastFrame()).toContain('codex · gpt-5 · high');
   });
 });
 
 // ---------------------------------------------------------------------------
-// RunTable
+// FeaturePreview + FeatureConfigSection (F31 sections 4 and 5b)
 // ---------------------------------------------------------------------------
-describe('RunTable', () => {
-  const runs: RunSummary[] = [
-    { ...baseRun, runId: 1, featureId: 'feat-alpha', status: 'running', rawStatus: 'running' },
-    { ...baseRun, runId: 2, featureId: 'feat-beta', status: 'done', rawStatus: 'done', totalTokens: 2000, endedAt: '2026-01-01T00:05:00Z' },
+describe('FeaturePreview', () => {
+  const previewFeature = {
+    id: 'feat-preview',
+    title: 'F31 Preview',
+    skills: ['implement'],
+    tool: 'codex',
+    model: 'gpt-5',
+    effort: 'high' as const,
+    description: 'Read-only preview of the feature spec.',
+    tasks: [{ id: 'T1', title: 'Wire the preview', status: 'todo' as const, dependsOn: [] }],
+    dependsOn: ['feat-earlier'],
+    workflow: {
+      mode: 'staged' as const,
+      stages: ['specify', 'plan', 'tasks', 'implement', 'validate'],
+      approvals: { channel: 'telegram' as const, autoAdvance: false },
+      syncTasksToBacklog: true,
+    },
+    retry: undefined,
+    specFile: undefined,
+    context: undefined,
+  };
+  const settings = { stageSkills: {} };
+
+  it('shows the spec, declared tasks, and config without starting anything', () => {
+    const { lastFrame } = renderWithTheme(
+      <FeaturePreview feature={previewFeature} settings={settings} mode="full" width={100} />,
+    );
+    expect(lastFrame()).toContain('F31 Preview');
+    expect(lastFrame()).toContain('not started yet');
+    expect(lastFrame()).toContain('Read-only preview of the feature spec.');
+    expect(lastFrame()).toContain('Wire the preview');
+    expect(lastFrame()).toContain('Feature Config');
+    expect(lastFrame()).toContain('Enter confirms and starts');
+  });
+
+  it('shows resolved retry defaults (muted) when the feature declares none', () => {
+    const { lastFrame } = renderWithTheme(
+      <FeatureConfigSection feature={previewFeature} settings={settings} width={60} />,
+    );
+    // RetrySchema defaults: maxAttempts 1, backoffMs 5000, onFail 'stop'.
+    expect(lastFrame()).toContain('maxAttempts: 1');
+    expect(lastFrame()).toContain('onFail: stop');
+    expect(lastFrame()).toContain('feat-earlier');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// WorkflowStepper (F31 section 5: compact, always-visible stepper)
+// ---------------------------------------------------------------------------
+describe('WorkflowStepper', () => {
+  const stages = ['specify', 'plan', 'tasks', 'implement', 'validate'];
+  const workflowStages = [
+    { stage: 'specify', tasks: [], total: 2, totalTokens: 0, maxContextPercent: null, done: 2, running: 0, failed: 0, blocked: 0, pending: 0, skipped: 0 },
+    { stage: 'plan', tasks: [], total: 3, totalTokens: 0, maxContextPercent: null, done: 1, running: 1, failed: 0, blocked: 0, pending: 1, skipped: 0 },
   ];
 
-  it('renders full header row at wide width', () => {
-    const { lastFrame } = renderWithTheme(<RunTable runs={runs} width={120} />);
-    expect(lastFrame()).toContain('feature_id');
-    expect(lastFrame()).toContain('tool');
-    expect(lastFrame()).toContain('status');
-    expect(lastFrame()).toContain('duration');
-    expect(lastFrame()).toContain('tokens');
+  it('marks completed stages done and the current stage as active', () => {
+    const { lastFrame } = renderWithTheme(
+      <WorkflowStepper stages={stages} workflowStages={workflowStages} currentStage="plan" width={80} />,
+    );
+    const frame = lastFrame();
+    expect(frame).toContain('✓ specify');
+    expect(frame).toContain('▸ plan 1/3');
+    expect(frame).toContain('· tasks');
+    expect(frame).toContain('· implement');
+    expect(frame).toContain('· validate');
   });
 
-  it('renders compact header at narrow width', () => {
-    const { lastFrame } = renderWithTheme(<RunTable runs={runs} width={50} />);
-    expect(lastFrame()).toContain('feature_id');
-    expect(lastFrame()).toContain('status');
-    expect(lastFrame()).not.toContain('duration');
-    expect(lastFrame()).not.toContain('tokens');
-  });
-
-  it('marks the selected row with > indicator', () => {
-    const { lastFrame } = renderWithTheme(<RunTable runs={runs} width={120} selectedIndex={0} isFocused />);
-    expect(lastFrame()).toContain('> feat-alpha');
-  });
-
-  it('shows all feature ids', () => {
-    const { lastFrame } = renderWithTheme(<RunTable runs={runs} width={120} />);
-    expect(lastFrame()).toContain('feat-alpha');
-    expect(lastFrame()).toContain('feat-beta');
+  it('shows every declared stage even when none has run yet', () => {
+    const { lastFrame } = renderWithTheme(
+      <WorkflowStepper stages={stages} workflowStages={[]} currentStage={null} width={80} />,
+    );
+    for (const stage of stages) {
+      expect(lastFrame()).toContain(stage);
+    }
   });
 });
 
@@ -342,5 +489,109 @@ describe('CommandPalette', () => {
       <CommandPalette state={closedState} width={120} {...noopHandlers} />
     );
     expect(lastFrame()).toBe('');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// HelpOverlay
+// ---------------------------------------------------------------------------
+// Same `position="absolute"` limitation as CommandPalette above — the F31
+// stacked-mode note and dynamic shortcut list are exercised via the mock in
+// app.test.ts instead of asserting on lastFrame() content here.
+describe('HelpOverlay', () => {
+  it('renders nothing when closed', () => {
+    const { lastFrame } = renderWithTheme(
+      <HelpOverlay
+        isOpen={false}
+        currentContext="columns"
+        shortcuts={[]}
+        width={120}
+        onClose={vi.fn()}
+        onOpenPalette={vi.fn()}
+      />,
+    );
+    expect(lastFrame()).toBe('');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// MainPanel vertical budget (H10)
+// ---------------------------------------------------------------------------
+describe('MainPanel vertical budget', () => {
+  function makePending(id: string) {
+    return {
+      id,
+      title: `${id} title`,
+      skills: [] as string[],
+      tool: 'codex' as const,
+      model: 'gpt-5',
+      effort: 'medium' as const,
+      dependsOn: [] as string[],
+      workflow: {
+        mode: 'staged' as const,
+        stages: ['specify', 'plan', 'tasks', 'implement', 'validate'],
+        approvals: { channel: 'telegram' as const, autoAdvance: false },
+        syncTasksToBacklog: true,
+      },
+    };
+  }
+
+  it('truncates kanban cards when availableHeight is small', () => {
+    const pendingFeatures = Array.from({ length: 10 }, (_, index) => makePending(`feat-${String(index).padStart(2, '0')}`));
+    const { lastFrame } = renderWithTheme(
+      <MainPanel
+        runs={[]}
+        gates={[]}
+        selectedRun={null}
+        selectedRunIndex={0}
+        selectedFeature={null}
+        activeView="overview"
+        output={[]}
+        outputPaused={false}
+        logsVisible
+        focusPanel="columns"
+        activeColumn="todo"
+        mode="full"
+        width={80}
+        pendingFeatures={pendingFeatures}
+        selectedPendingIndex={0}
+        notifications={[]}
+        availableHeight={12}
+      />,
+    );
+    expect(lastFrame()).toContain('+7 more');
+  });
+
+  it('truncates run-detail output lines to fit the section budget', () => {
+    const output = Array.from({ length: 14 }, (_, index) => ({
+      ...baseRun,
+      id: index + 1,
+      source: 'agent' as const,
+      line: `output-line-${String(index).padStart(2, '0')}`,
+    }));
+    const { lastFrame } = renderWithTheme(
+      <MainPanel
+        runs={[baseRun]}
+        gates={[]}
+        selectedRun={baseRun}
+        selectedRunIndex={0}
+        selectedFeature={null}
+        activeView="run"
+        output={output as any}
+        outputPaused={false}
+        logsVisible
+        focusPanel="columns"
+        activeColumn="execution"
+        activeTab={'output' as DetailSectionId}
+        mode="full"
+        width={80}
+        pendingFeatures={[]}
+        selectedPendingIndex={0}
+        notifications={[]}
+        availableHeight={24}
+      />,
+    );
+    expect(lastFrame()).toContain('output-line-13');
+    expect(lastFrame()).not.toContain('output-line-05');
   });
 });

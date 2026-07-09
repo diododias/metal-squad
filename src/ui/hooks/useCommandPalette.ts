@@ -175,7 +175,7 @@ export function useCommandPalette(options: UseCommandPaletteOptions): UseCommand
     if (filteredCommands.length === 0) return;
 
     const command = filteredCommands[selectedIndex];
-    if (command && command.available()) {
+    if (command?.available()) {
       command.execute();
       onExecute?.(command);
       close();

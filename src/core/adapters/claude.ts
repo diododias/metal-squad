@@ -67,7 +67,7 @@ export const claudeAdapter: ToolAdapter = {
         heartbeatMs: 30_000,
         logLabel: `claude ${feature.id}`,
         heartbeatSuffix: () => progress.heartbeatSuffix(),
-        onHeartbeat: (message) => emitRunOutput(opts.runId, feature, message, 'stderr', 'heartbeat'),
+        onHeartbeat: (message) => { emitRunOutput(opts.runId, feature, message, 'stderr', 'heartbeat'); },
         signal: opts.signal,
         onStdoutLine: (line) => {
           const updates = progress.onStdoutLine(line);
@@ -92,7 +92,7 @@ export const claudeAdapter: ToolAdapter = {
         if (usage) emitUsage(opts.runId, feature, usage);
         return {
           ok: false,
-          summary: `timeout após ${Math.round(error.runtimeMs / 1000)}s. ${partial}`,
+          summary: `timeout após ${String(Math.round(error.runtimeMs / 1000))}s. ${partial}`,
           usage,
         };
       }
@@ -102,7 +102,7 @@ export const claudeAdapter: ToolAdapter = {
         return {
           ok: false,
           aborted: true,
-          summary: `abortado manualmente após ${Math.round(error.runtimeMs / 1000)}s`,
+          summary: `abortado manualmente após ${String(Math.round(error.runtimeMs / 1000))}s`,
           usage,
         };
       }
@@ -111,14 +111,14 @@ export const claudeAdapter: ToolAdapter = {
 
     if (code !== 0) {
       const partial = summarizePartialOutput(stdout, stderr, detectTouchedFiles(opts.cwd));
-      return { ok: false, summary: `exit ${code}. ${partial}` };
+      return { ok: false, summary: `exit ${String(code)}. ${partial}` };
     }
 
     const resultEvent = findResultEvent(stdout);
     const usage = this.parseUsage?.(stdout) ?? undefined;
     if (usage) emitUsage(opts.runId, feature, usage);
     return {
-      ok: resultEvent?.subtype !== 'error_max_turns' && code === 0,
+      ok: resultEvent?.subtype !== 'error_max_turns',
       summary: (resultEvent?.result ?? '').slice(0, 200),
       usage,
       control: parseControlSignal(resultEvent?.result ?? ''),
@@ -128,13 +128,15 @@ export const claudeAdapter: ToolAdapter = {
   parseUsage(transcript: string): TokenUsage | null {
     const evt = findResultEvent(transcript);
     if (!evt?.usage) return null;
-    const input = evt.usage.input_tokens ?? 0;
+    const totalInput = evt.usage.input_tokens ?? 0;
+    const cachedInput = evt.usage.cache_read_input_tokens ?? 0;
+    const input = totalInput - cachedInput;
     const output = evt.usage.output_tokens ?? 0;
-    return { input, output, total: input + output };
+    return { input, cachedInput, output, total: input + cachedInput + output };
   },
 };
 
-function safeJson<T>(s: string): T | null {
+function safeJson<T>(s: string): T | null { // eslint-disable-line @typescript-eslint/no-unnecessary-type-parameters
   try {
     return JSON.parse(s) as T;
   } catch {
@@ -207,7 +209,7 @@ function formatTouchedFiles(files: string[]): string {
   const shown = files.slice(0, 5).join(', ');
   const remaining = files.length - Math.min(files.length, 5);
   return remaining > 0
-    ? `arquivos tocados: ${shown} (+${remaining})`
+    ? `arquivos tocados: ${shown} (+${String(remaining)})`
     : `arquivos tocados: ${shown}`;
 }
 
@@ -241,9 +243,10 @@ function createClaudeProgress(): {
   // contexto da vez); o evento `result` traz o total autoritativo no fim.
   let cumulativeOutput = 0;
   let latestInput = 0;
+  let latestCachedInput = 0;
 
   return {
-    onStdoutLine(line: string) {
+    onStdoutLine(line: string): ProgressUpdate[] {
       const updates = parseClaudeLine(line);
       for (const u of updates) {
         if (u.output) {
@@ -256,30 +259,33 @@ function createClaudeProgress(): {
             // Total final do evento `result`: passa a valer como base acumulada.
             cumulativeOutput = u.usage.output;
             latestInput = u.usage.input;
+            latestCachedInput = u.usage.cachedInput ?? 0;
           } else {
             cumulativeOutput += u.usage.output;
             if (u.usage.input > 0) latestInput = u.usage.input;
+            if ((u.usage.cachedInput ?? 0) > 0) latestCachedInput = u.usage.cachedInput ?? 0;
             u.usage = {
               input: latestInput,
+              cachedInput: latestCachedInput,
               output: cumulativeOutput,
-              total: latestInput + cumulativeOutput,
+              total: latestInput + latestCachedInput + cumulativeOutput,
             };
           }
         }
       }
       return updates;
     },
-    onStderrLine(line: string) {
+    onStderrLine(line: string): ProgressUpdate[] {
       const text = normalizeSnippet(line);
       if (!text) return [];
       stderrCount += 1;
       lastStderrSnippet = text;
       return [{ output: { line: text, source: 'stderr' } }];
     },
-    heartbeatSuffix() {
+    heartbeatSuffix(): string | undefined {
       const parts: string[] = [];
-      if (eventCount > 0) parts.push(`eventos=${eventCount}`);
-      if (stderrCount > 0) parts.push(`stderr=${stderrCount}`);
+      if (eventCount > 0) parts.push(`eventos=${String(eventCount)}`);
+      if (stderrCount > 0) parts.push(`stderr=${String(stderrCount)}`);
       if (lastAgentSnippet) parts.push(`agente="${lastAgentSnippet}"`);
       else if (lastToolSnippet) parts.push(`tool="${lastToolSnippet}"`);
       else if (lastStderrSnippet) parts.push(`stderr="${lastStderrSnippet}"`);
@@ -294,10 +300,12 @@ function parseClaudeLine(line: string): ProgressUpdate[] {
 
   if (evt.type === 'result') {
     if (!evt.usage) return [];
-    const input = evt.usage.input_tokens ?? 0;
+    const totalInput = evt.usage.input_tokens ?? 0;
+    const cachedInput = evt.usage.cache_read_input_tokens ?? 0;
+    const input = totalInput - cachedInput;
     const output = evt.usage.output_tokens ?? 0;
-    if (input === 0 && output === 0) return [];
-    return [{ usage: { input, output, total: input + output }, usageTotal: true }];
+    if (input === 0 && cachedInput === 0 && output === 0) return [];
+    return [{ usage: { input, cachedInput, output, total: input + cachedInput + output }, usageTotal: true }];
   }
 
   if (evt.type === 'assistant' && evt.message) {
@@ -309,7 +317,7 @@ function parseClaudeLine(line: string): ProgressUpdate[] {
       } else if (block.type === 'text') {
         const text = normalizeSnippet(block.text);
         if (text) updates.push({ output: { line: text, source: 'agent' } });
-      } else if (block.type === 'tool_use') {
+      } else {
         const name = normalizeSnippet(block.name);
         const input = normalizeSnippet(JSON.stringify(block.input ?? {}));
         const stage = detectStageFromSkill(name);
@@ -321,10 +329,12 @@ function parseClaudeLine(line: string): ProgressUpdate[] {
       }
     }
     if (evt.message.usage) {
-      const input = evt.message.usage.input_tokens ?? 0;
+      const totalInput = evt.message.usage.input_tokens ?? 0;
+      const cachedInput = evt.message.usage.cache_read_input_tokens ?? 0;
+      const input = totalInput - cachedInput;
       const output = evt.message.usage.output_tokens ?? 0;
-      if (input > 0 || output > 0) {
-        updates.push({ usage: { input, output, total: input + output }, usageTotal: false });
+      if (input > 0 || cachedInput > 0 || output > 0) {
+        updates.push({ usage: { input, cachedInput, output, total: input + cachedInput + output }, usageTotal: false });
       }
     }
     return updates;

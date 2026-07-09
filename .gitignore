@@ -1,5 +1,6 @@
 node_modules/
 .stryker-tmp/
+.worktrees/
 reports/
 dist/
 build/
@@ -14,3 +15,6 @@ coverage/
 .vscode/
 *.tmp
 *.swp
+
+# dora code context index
+.dora/

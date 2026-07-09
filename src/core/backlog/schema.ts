@@ -13,7 +13,6 @@ export const RetrySchema = z.object({
 
 export const BudgetSchema = z.object({
   maxTokens: z.number().int().positive().optional(),
-  maxCostUsd: z.number().positive().optional(),
   perFeatureMaxTokens: z.number().int().positive().optional(),
 });
 

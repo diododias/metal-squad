@@ -4,6 +4,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 let prepareCallIndex = 0;
 let pragmaRunsColumns: Array<{ name: string }> = [];
 let pragmaTokenUsageColumns: Array<{ name: string }> = [];
+let pragmaTaskRunColumns: Array<{ name: string }> = [];
 let pragmaPipelinesColumns: Array<{ name: string }> = [];
 const mockExecCalls: string[] = [];
 
@@ -21,6 +22,9 @@ const mockPrepare = vi.fn((sql: string) => {
   }
   if (sql.includes('PRAGMA table_info(token_usage)')) {
     return { all: makeMockAll(pragmaTokenUsageColumns), run: vi.fn(), get: vi.fn() };
+  }
+  if (sql.includes('PRAGMA table_info(task_runs)')) {
+    return { all: makeMockAll(pragmaTaskRunColumns), run: vi.fn(), get: vi.fn() };
   }
   if (sql.includes('PRAGMA table_info(pipelines)')) {
     return { all: makeMockAll(pragmaPipelinesColumns), run: vi.fn(), get: vi.fn() };
@@ -50,6 +54,14 @@ function resetAll() {
   prepareCallIndex = 0;
   pragmaRunsColumns = [];
   pragmaTokenUsageColumns = [];
+  pragmaTaskRunColumns = [
+    { name: 'input_tokens' },
+    { name: 'cached_input_tokens' },
+    { name: 'output_tokens' },
+    { name: 'total_tokens' },
+    { name: 'context_window_tokens' },
+    { name: 'context_window_percent' },
+  ];
   pragmaPipelinesColumns = [];
   mockExecCalls.length = 0;
   mockDatabase.mockReset();
@@ -76,7 +88,7 @@ describe('getDb migration — column checks', () => {
     const ALL_RUN_COLS = [
       { name: 'summary' }, { name: 'input_tokens' }, { name: 'output_tokens' },
       { name: 'cached_input_tokens' }, { name: 'total_tokens' }, { name: 'pipeline_id' },
-      { name: 'stage' },
+      { name: 'context_window_tokens' }, { name: 'context_window_percent' }, { name: 'stage' },
     ];
     pragmaRunsColumns = ALL_RUN_COLS;
     pragmaTokenUsageColumns = [{ name: 'cached_input' }];

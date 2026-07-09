@@ -1,13 +1,10 @@
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
 import React from 'react';
 import { cleanup, render } from 'ink-testing-library';
 import { CommandBar } from '../../src/ui/components/CommandBar.js';
 import { CostDashboard } from '../../src/ui/components/CostDashboard.js';
 import { EmptyState } from '../../src/ui/components/EmptyState.js';
-import { GatePanel } from '../../src/ui/components/GatePanel.js';
 import { MainPanel } from '../../src/ui/components/MainPanel.js';
-import { RunTable } from '../../src/ui/components/RunTable.js';
-import { Sidebar } from '../../src/ui/components/Sidebar.js';
 import { StatusBar } from '../../src/ui/components/StatusBar.js';
 import { ThemeProvider } from '../../src/ui/theme/context.js';
 import { resolveThemePreference } from '../../src/ui/theme/resolve.js';
@@ -26,98 +23,11 @@ function renderWithTheme(node: React.ReactElement, theme = 'default') {
 describe('ui components', () => {
   it('renders the empty state message', () => {
     const { lastFrame } = renderWithTheme(<EmptyState />, 'light');
-    expect(lastFrame()).toContain('No runs yet');
-    expect(lastFrame()).toContain('msq run');
+    expect(lastFrame()).toContain('Backlog vazio');
+    expect(lastFrame()).toContain('msq init');
   });
 
-  it('renders gate panel rows and highlights the selected gate', () => {
-    const { lastFrame } = renderWithTheme(
-      <GatePanel
-        gates={[
-          {
-            id: 1,
-            runId: 10,
-            featureId: 'feat-1',
-            repoId: 'repo-1',
-            createdAt: '2026-07-06T10:00:00Z',
-            resolvedAt: null,
-            decision: null,
-          },
-          {
-            id: 2,
-            runId: 11,
-            featureId: 'feat-2',
-            repoId: 'repo-2',
-            createdAt: '2026-07-06T10:01:00Z',
-            resolvedAt: null,
-            decision: null,
-          },
-        ]}
-        selectedIndex={1}
-      />,
-      'minimal',
-    );
-
-    expect(lastFrame()).toContain('Gates awaiting decision');
-    expect(lastFrame()).toContain('▶ feat-2');
-  });
-
-  it('renders compact and full tables', () => {
-    vi.useFakeTimers();
-    vi.setSystemTime(new Date('2026-07-06T10:02:00Z'));
-
-    const runs = [
-      {
-        runId: 1,
-        repoId: 'repo-1',
-        featureId: 'feat-a-very-long-id',
-        tool: 'claude' as const,
-        status: 'running' as const,
-        rawStatus: 'running' as const,
-        startedAt: '2026-07-06T10:01:30Z',
-        endedAt: null,
-        totalTokens: null,
-        inputTokens: null,
-        cachedInputTokens: null,
-        outputTokens: null,
-        gateId: null,
-        gateDecision: null,
-        pipelineId: null,
-        pipelineStatus: null,
-        pipelineCurrentStage: null,
-        pipelineResumeSummary: null,
-        stage: null,
-        pendingStageRequestKind: null,
-      },
-      {
-        runId: 2,
-        repoId: 'repo-1',
-        featureId: 'feat-2',
-        tool: 'codex' as const,
-        status: 'done' as const,
-        rawStatus: 'done' as const,
-        startedAt: '2026-07-06T10:00:00Z',
-        endedAt: '2026-07-06T10:01:00Z',
-        totalTokens: 1200,
-        inputTokens: 900,
-        cachedInputTokens: null,
-        outputTokens: 300,
-        gateId: null,
-        gateDecision: null,
-        pipelineId: null,
-        pipelineStatus: null,
-        pipelineCurrentStage: null,
-        pipelineResumeSummary: null,
-        stage: null,
-        pendingStageRequestKind: null,
-      },
-    ];
-
-    expect(renderWithTheme(<RunTable runs={runs} width={40} />, 'dark').lastFrame()).toContain('feature_id');
-    expect(renderWithTheme(<RunTable runs={runs} width={100} />, 'dark').lastFrame()).toContain('duration');
-  });
-
-  it('renders sidebar, main panel, status bar, and command bar with theme-aware content', () => {
+  it('renders main panel, status bar, and command bar with theme-aware content', () => {
     const runs = [
       {
         runId: 1,
@@ -161,23 +71,7 @@ describe('ui components', () => {
       effort: 'medium' as const,
     };
 
-    expect(renderWithTheme(
-      <Sidebar
-        runs={runs}
-        gates={gates as any}
-        notifications={[]}
-        selectedRunIndex={0}
-        selectedGateIndex={0}
-        focusPanel="runs"
-        activeView="overview"
-        skills={selectedFeature.skills}
-        width={32}
-        mode="full"
-      />,
-      'dark',
-    ).lastFrame()).toContain('Workflow');
-
-    expect(renderWithTheme(
+    const mainPanelFrame = renderWithTheme(
       <MainPanel
         runs={runs}
         gates={gates as any}
@@ -197,7 +91,9 @@ describe('ui components', () => {
         }]}
         outputPaused={false}
         logsVisible
-        focusPanel="main"
+        focusPanel="columns"
+        activeColumn="execution"
+        detailPageSize={7}
         mode="full"
         width={72}
         pendingFeatures={[]}
@@ -205,7 +101,12 @@ describe('ui components', () => {
         notifications={[]}
       />,
       'dark',
-    ).lastFrame()).toContain('Run Detail');
+    ).lastFrame();
+    expect(mainPanelFrame).toContain('Run Detail');
+    expect(mainPanelFrame).toContain('Workflow');
+    // D5: AI> and TOOL> prefixes are hidden from log output.
+    expect(mainPanelFrame).not.toContain('AI>');
+    expect(mainPanelFrame).toContain('Updating the TUI shell.');
 
     expect(renderWithTheme(
       <StatusBar
@@ -254,7 +155,7 @@ describe('ui components', () => {
       },
     ];
     const { lastFrame } = renderWithTheme(<CostDashboard rows={rows} periodLabel="last 7 days" width={100} />, 'dark');
-    expect(lastFrame()).toContain('Token Usage');
+    expect(lastFrame()).toContain('Usage Telemetry');
     expect(lastFrame()).toContain('By feature');
   });
 
