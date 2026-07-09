@@ -116,7 +116,6 @@ export function FeatureConfigSection({ feature, settings, width }: Props): React
         <Box marginTop={1} flexDirection="column">
           <Text {...theme.role('muted')} bold>Budget (backlog)</Text>
           {settings.budget.maxTokens !== undefined && row(theme, 'maxTokens', String(settings.budget.maxTokens))}
-          {settings.budget.maxCostUsd !== undefined && row(theme, 'maxCostUsd', `$${settings.budget.maxCostUsd}`)}
           {settings.budget.perFeatureMaxTokens !== undefined
             && row(theme, 'perFeatureMaxTokens', String(settings.budget.perFeatureMaxTokens))}
         </Box>

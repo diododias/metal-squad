@@ -1,5 +1,4 @@
 import type { RunEventRow, StatsRunRow } from '../db/repo.js';
-import { estimateCost } from './budget/pricing.js';
 
 export interface RunStats {
   runs: {
@@ -20,10 +19,9 @@ export interface RunStats {
     avgPercent: number | null;
     maxPercent: number | null;
   };
-  costUsd: number;
   avgDurationMs: number | null;
   successRatePercent: number | null;
-  topFeaturesByCost: Array<{ featureId: string; costUsd: number; runs: number }>;
+  topFeaturesByTokens: Array<{ featureId: string; tokens: number; runs: number }>;
 }
 
 export function computeStats(rows: StatsRunRow[], topN = 5): RunStats {
@@ -32,10 +30,9 @@ export function computeStats(rows: StatsRunRow[], topN = 5): RunStats {
   let contextPercentTotal = 0;
   let contextPercentCount = 0;
   let contextPercentMax: number | null = null;
-  let costUsd = 0;
   let durationTotal = 0;
   let durationCount = 0;
-  const byFeature = new Map<string, { costUsd: number; runs: number }>();
+  const byFeature = new Map<string, { tokens: number; runs: number }>();
 
   for (const row of rows) {
     if (row.status in runs) runs[row.status as keyof typeof runs] += 1;
@@ -51,16 +48,8 @@ export function computeStats(rows: StatsRunRow[], topN = 5): RunStats {
         : Math.max(contextPercentMax, row.contextWindowPercent);
     }
 
-    const cost = estimateCost(
-      row.inputTokens,
-      row.cachedInputTokens,
-      row.outputTokens,
-      row.tool,
-    ) ?? 0;
-    costUsd += cost;
-
-    const feature = byFeature.get(row.featureId) ?? { costUsd: 0, runs: 0 };
-    feature.costUsd += cost;
+    const feature = byFeature.get(row.featureId) ?? { tokens: 0, runs: 0 };
+    feature.tokens += row.totalTokens ?? 0;
     feature.runs += 1;
     byFeature.set(row.featureId, feature);
 
@@ -79,12 +68,11 @@ export function computeStats(rows: StatsRunRow[], topN = 5): RunStats {
       avgPercent: contextPercentCount > 0 ? contextPercentTotal / contextPercentCount : null,
       maxPercent: contextPercentMax,
     },
-    costUsd,
     avgDurationMs: durationCount > 0 ? durationTotal / durationCount : null,
     successRatePercent: finished > 0 ? Math.round((runs.done / finished) * 100) : null,
-    topFeaturesByCost: [...byFeature.entries()]
+    topFeaturesByTokens: [...byFeature.entries()]
       .map(([featureId, entry]) => ({ featureId, ...entry }))
-      .sort((a, b) => b.costUsd - a.costUsd)
+      .sort((a, b) => b.tokens - a.tokens)
       .slice(0, topN),
   };
 }
@@ -191,71 +179,57 @@ function durationMs(startedAt: string, endedAt: string | null): number | null {
   return Math.max(0, (end ?? Date.now()) - start);
 }
 
-export interface CostLine {
+export interface TokenLine {
   tokens: number;
-  costUsd: number;
   runs: number;
   maxContextPercent: number | null;
 }
 
-export interface CostAggregates {
-  byRepoTool: Array<CostLine & { repoId: string; tool: string }>;
-  byFeature: Array<CostLine & { featureId: string }>;
-  byStatus: Array<CostLine & { status: string }>;
+export interface TokenAggregates {
+  byRepoTool: Array<TokenLine & { repoId: string; tool: string }>;
+  byFeature: Array<TokenLine & { featureId: string }>;
+  byStatus: Array<TokenLine & { status: string }>;
   totalTokens: number;
-  totalCostUsd: number;
 }
 
-export function aggregateCosts(rows: StatsRunRow[]): CostAggregates {
-  const byRepoTool = new Map<string, CostLine & { repoId: string; tool: string }>();
-  const byFeature = new Map<string, CostLine & { featureId: string }>();
-  const byStatus = new Map<string, CostLine & { status: string }>();
+export function aggregateTokens(rows: StatsRunRow[]): TokenAggregates {
+  const byRepoTool = new Map<string, TokenLine & { repoId: string; tool: string }>();
+  const byFeature = new Map<string, TokenLine & { featureId: string }>();
+  const byStatus = new Map<string, TokenLine & { status: string }>();
   let totalTokens = 0;
-  let totalCostUsd = 0;
 
   for (const row of rows) {
     const tokens = row.totalTokens ?? 0;
-    const costUsd = estimateCost(
-      row.inputTokens,
-      row.cachedInputTokens,
-      row.outputTokens,
-      row.tool,
-    ) ?? 0;
     totalTokens += tokens;
-    totalCostUsd += costUsd;
 
     const repoToolKey = `${row.repoId} ${row.tool}`;
     const repoTool = byRepoTool.get(repoToolKey)
-      ?? { repoId: row.repoId, tool: row.tool, tokens: 0, costUsd: 0, runs: 0, maxContextPercent: null };
+      ?? { repoId: row.repoId, tool: row.tool, tokens: 0, runs: 0, maxContextPercent: null };
     repoTool.tokens += tokens;
-    repoTool.costUsd += costUsd;
     repoTool.runs += 1;
     repoTool.maxContextPercent = maxContext(repoTool.maxContextPercent, row.contextWindowPercent ?? null);
     byRepoTool.set(repoToolKey, repoTool);
 
     const feature = byFeature.get(row.featureId)
-      ?? { featureId: row.featureId, tokens: 0, costUsd: 0, runs: 0, maxContextPercent: null };
+      ?? { featureId: row.featureId, tokens: 0, runs: 0, maxContextPercent: null };
     feature.tokens += tokens;
-    feature.costUsd += costUsd;
     feature.runs += 1;
     feature.maxContextPercent = maxContext(feature.maxContextPercent, row.contextWindowPercent ?? null);
     byFeature.set(row.featureId, feature);
 
     const status = byStatus.get(row.status)
-      ?? { status: row.status, tokens: 0, costUsd: 0, runs: 0, maxContextPercent: null };
+      ?? { status: row.status, tokens: 0, runs: 0, maxContextPercent: null };
     status.tokens += tokens;
-    status.costUsd += costUsd;
     status.runs += 1;
     status.maxContextPercent = maxContext(status.maxContextPercent, row.contextWindowPercent ?? null);
     byStatus.set(row.status, status);
   }
 
   return {
-    byRepoTool: [...byRepoTool.values()].sort((a, b) => b.costUsd - a.costUsd),
+    byRepoTool: [...byRepoTool.values()].sort((a, b) => b.tokens - a.tokens),
     byFeature: [...byFeature.values()].sort((a, b) => b.tokens - a.tokens),
-    byStatus: [...byStatus.values()].sort((a, b) => b.costUsd - a.costUsd),
+    byStatus: [...byStatus.values()].sort((a, b) => b.tokens - a.tokens),
     totalTokens,
-    totalCostUsd,
   };
 }
 

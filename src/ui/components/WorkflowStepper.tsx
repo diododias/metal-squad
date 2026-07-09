@@ -39,6 +39,17 @@ const MARKER_ICON: Record<StageMarker, string> = {
 export function WorkflowStepper({ stages, workflowStages, currentStage, width }: Props): React.ReactElement {
   const theme = useTheme();
   const summaryByStage = new Map(workflowStages.map((summary) => [summary.stage, summary]));
+  // US2 (FR-003): "✓ Done" indicator — appears once every declared stage has
+  // reached its own done count AND there is no in-progress stage. The per-stage
+  // marks already exist (✓ via markerFor), this adds the explicit overall
+  // completion marker after the last stage so users see a distinct "Done"
+  // state instead of inferring it from a row of silent checkmarks.
+  const allStagesComplete = stages.length > 0
+    && currentStage === null
+    && stages.every((stage) => {
+      const summary = summaryByStage.get(stage);
+      return summary !== undefined && summary.total > 0 && summary.done === summary.total;
+    });
 
   return (
     <Box width={width}>
@@ -58,6 +69,11 @@ export function WorkflowStepper({ stages, workflowStages, currentStage, width }:
           </Text>
         );
       })}
+      {allStagesComplete ? (
+        <Text {...theme.role('success')} bold>
+          {'  →  '}✓ Done
+        </Text>
+      ) : null}
     </Box>
   );
 }

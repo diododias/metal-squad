@@ -72,7 +72,7 @@ describe('opencodeAdapter.parseUsage', () => {
     const result = opencodeAdapter.parseUsage?.(JSON.stringify({
       usage: { input: 100, output: 50 },
     }));
-    expect(result).toEqual({ input: 100, output: 50, total: 150 });
+    expect(result).toEqual({ input: 100, cachedInput: 0, output: 50, total: 150 });
   });
 
   it('parses usage from .tokens field', async () => {
@@ -80,7 +80,7 @@ describe('opencodeAdapter.parseUsage', () => {
     const result = opencodeAdapter.parseUsage?.(JSON.stringify({
       tokens: { input: 200, output: 80 },
     }));
-    expect(result).toEqual({ input: 200, output: 80, total: 280 });
+    expect(result).toEqual({ input: 200, cachedInput: 0, output: 80, total: 280 });
   });
 
   it('parses usage from input_tokens/output_tokens aliases', async () => {
@@ -88,13 +88,13 @@ describe('opencodeAdapter.parseUsage', () => {
     const result = opencodeAdapter.parseUsage?.(JSON.stringify({
       usage: { input_tokens: 300, output_tokens: 120 },
     }));
-    expect(result).toEqual({ input: 300, output: 120, total: 420 });
+    expect(result).toEqual({ input: 300, cachedInput: 0, output: 120, total: 420 });
   });
 
   it('defaults input/output to 0 when missing', async () => {
     const { opencodeAdapter } = await import('../../src/core/adapters/opencode.js');
     const result = opencodeAdapter.parseUsage?.(JSON.stringify({ usage: {} }));
-    expect(result).toEqual({ input: 0, output: 0, total: 0 });
+    expect(result).toEqual({ input: 0, cachedInput: 0, output: 0, total: 0 });
   });
 });
 

@@ -147,7 +147,7 @@ export async function executeBacklog(
   };
 
   const applyBudgetUsage = (feature: Feature, usage: NonNullable<RunResult['usage']>, runId: number): void => {
-    const { violations, alerts } = budget.record(feature.id, usage, feature.model ?? feature.tool);
+    const { violations, alerts } = budget.record(feature.id, usage);
     for (const alert of alerts) {
       msqEventBus.emit('budget:alert', {
         percent: alert.percent,

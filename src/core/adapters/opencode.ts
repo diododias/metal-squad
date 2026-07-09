@@ -79,8 +79,9 @@ export const opencodeAdapter: ToolAdapter = {
     const u = json?.usage ?? json?.tokens;
     if (!u) return null;
     const input = u.input ?? u.input_tokens ?? 0;
+    const cachedInput = u.cached_input_tokens ?? u.cache_read_input_tokens ?? 0;
     const output = u.output ?? u.output_tokens ?? 0;
-    return { input, output, total: input + output };
+    return { input, cachedInput, output, total: input + cachedInput + output };
   },
 };
 

@@ -1,8 +1,6 @@
 import type { RunSummary } from '../db/repo.js';
 import type { RunStatusTone } from './theme/types.js';
 
-export { PRICING, estimateCost } from '../core/budget/pricing.js';
-
 export type LayoutMode = 'stacked' | 'compact' | 'full';
 type RunStatus = RunSummary['status'];
 
@@ -78,20 +76,23 @@ export function truncateText(value: string, max: number): string {
   return `${value.slice(0, max - 3)}...`;
 }
 
-// D5: heartbeat lines carry a verbose diagnostic payload from
+// D5 / US6: heartbeat lines carry a verbose diagnostic payload from
 // core/adapters/spawn.ts (`[msq] <label> running for Ns (stdout XB stderr YB
-// idle Zs) <suffix>`). Rendered raw and then hard-truncated by width, this
-// read as garbled noise (e.g. "...[msq] codex feat-10 running for 42s
-// (stdout 1..." cut mid-token). This condenses it into one clean, bounded
-// line instead of dumping+truncating the raw diagnostic string.
+// idle Zs) <suffix>`). FR-010 requires hiding the diagnostic metrics (stdout
+// byte counts, stderr byte counts, elapsed seconds and idle seconds) for
+// normal heartbeats, surfacing ONLY the agent's activity message suffix.
+// Error heartbeats (anything that does NOT match the diagnostic pattern) are
+// rendered as the raw line truncated to the available width, preserving the
+// signal that something went wrong — diagnostics are hidden only when the
+// recognized "running for Ns (stdout … idle Zs)" shape is present, which is
+// the runaway-diagnostic-nose case the spec explicitly calls out.
 const HEARTBEAT_PATTERN = /^\[msq\]\s+(.+?)\s+running for\s+(\d+)s\s+\(stdout\s+\d+B\s+stderr\s+\d+B\s+idle\s+(\d+)s\)\s*(.*)$/;
 
 export function formatHeartbeatLine(line: string, maxWidth: number): string {
   const match = HEARTBEAT_PATTERN.exec(line.trim());
   if (!match) return truncateText(line, maxWidth);
-  const [, label, elapsed, idle, suffix] = match;
-  const summary = `thinking... ${label} running ${elapsed}s (idle ${idle}s)${suffix ? ` — ${suffix}` : ''}`;
-  return truncateText(summary, maxWidth);
+  const suffix = (match[4] ?? '').trim();
+  return truncateText(suffix || 'thinking...', maxWidth);
 }
 
 export function getLayoutMode(width: number): LayoutMode {
@@ -111,12 +112,6 @@ export function getVerticalBudget(height: number): VerticalBudget {
   if (height < 24) return 'short';
   if (height <= 40) return 'regular';
   return 'tall';
-}
-
-export function formatCost(cost: number | null): string {
-  if (cost === null) return '—';
-  if (cost < 0.001) return '<$0.001';
-  return `~$${cost.toFixed(3)}`;
 }
 
 export function formatTokensIO(

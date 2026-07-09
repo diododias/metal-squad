@@ -22,8 +22,12 @@ interface Props {
 // F31 section 3: cards used to show only the tool (`codex`/`claude`). Every
 // column now shows the full tripla so a user can tell at a glance which
 // model/effort a run (or a not-yet-started feature) is configured with.
+// US5 (FR-009): `tool` is the canonical adapter field from RunSummary — both
+// branches below feed it through here untouched. US7 (FR-011): the line is
+// also indented under the feature name (marginLeft set on the parent Box
+// branch) and inter-card marginBottom drops to 0 for tighter stacking.
 function toolModelEffort(tool: string, model: string | undefined, effort: string): string {
-  return `${tool} · ${model ?? tool} · ${effort}`;
+  return `${tool || 'unknown'} · ${model ?? tool ?? 'unknown'} · ${effort}`;
 }
 
 /**
@@ -39,13 +43,15 @@ export function KanbanCard({ width, selected, focused, run, pendingFeature, feat
 
   if (pendingFeature) {
     return (
-      <Box flexDirection="column" marginBottom={1}>
+      <Box flexDirection="column" marginBottom={0}>
         <Text {...labelStyle} bold>
           {prefix} {truncateText(`${pendingFeature.id}  ${pendingFeature.title}`, Math.max(18, width - 2))}
         </Text>
-        <Text {...theme.role('muted')} dimColor>
-          {'  '}{toolModelEffort(pendingFeature.tool, pendingFeature.model, pendingFeature.effort)}
-        </Text>
+        <Box marginLeft={2}>
+          <Text {...theme.role('muted')} dimColor>
+            {toolModelEffort(pendingFeature.tool, pendingFeature.model, pendingFeature.effort)}
+          </Text>
+        </Box>
       </Box>
     );
   }
@@ -58,13 +64,15 @@ export function KanbanCard({ width, selected, focused, run, pendingFeature, feat
   const stageLabel = getRunStageLabel(run);
 
   return (
-    <Box flexDirection="column" marginBottom={1}>
+    <Box flexDirection="column" marginBottom={0}>
       <Text {...labelStyle} bold>
         {prefix} {STATUS_ICON[run.status]} {truncateText(run.featureId, Math.max(14, width - 4))}
       </Text>
-      <Text {...statusStyle} dimColor>
-        {'  '}{toolModelEffort(run.tool, feature?.model, feature?.effort ?? '—')}{stageLabel ? `  ·  ${stageLabel}` : ''}
-      </Text>
+      <Box marginLeft={2}>
+        <Text {...statusStyle} dimColor>
+          {toolModelEffort(run.tool, feature?.model, feature?.effort ?? '—')}{stageLabel ? `  ·  ${stageLabel}` : ''}
+        </Text>
+      </Box>
       {children}
     </Box>
   );

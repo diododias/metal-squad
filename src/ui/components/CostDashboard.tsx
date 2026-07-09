@@ -2,7 +2,7 @@ import React from 'react';
 import { Box, Text } from 'ink';
 import type { StatsRunRow } from '../../db/repo.js';
 import {
-  aggregateCosts,
+  aggregateTokens,
   formatTokensCompact,
   renderUsageBar,
 } from '../../core/stats.js';
@@ -21,7 +21,7 @@ const MAX_FEATURES = 8;
 export function CostDashboard({ rows, periodLabel, width }: Props): React.ReactElement {
   const theme = useTheme();
   const innerWidth = Math.max(40, width - 4);
-  const aggregates = aggregateCosts(rows);
+  const aggregates = aggregateTokens(rows);
   const maxFeatureTokens = aggregates.byFeature[0]?.tokens ?? 0;
   const averageContextPercent = summarizeContext(rows);
 

@@ -128,9 +128,11 @@ export const claudeAdapter: ToolAdapter = {
   parseUsage(transcript: string): TokenUsage | null {
     const evt = findResultEvent(transcript);
     if (!evt?.usage) return null;
-    const input = evt.usage.input_tokens ?? 0;
+    const totalInput = evt.usage.input_tokens ?? 0;
+    const cachedInput = evt.usage.cache_read_input_tokens ?? 0;
+    const input = totalInput - cachedInput;
     const output = evt.usage.output_tokens ?? 0;
-    return { input, output, total: input + output };
+    return { input, cachedInput, output, total: input + cachedInput + output };
   },
 };
 
@@ -241,6 +243,7 @@ function createClaudeProgress(): {
   // contexto da vez); o evento `result` traz o total autoritativo no fim.
   let cumulativeOutput = 0;
   let latestInput = 0;
+  let latestCachedInput = 0;
 
   return {
     onStdoutLine(line: string) {
@@ -256,13 +259,16 @@ function createClaudeProgress(): {
             // Total final do evento `result`: passa a valer como base acumulada.
             cumulativeOutput = u.usage.output;
             latestInput = u.usage.input;
+            latestCachedInput = u.usage.cachedInput ?? 0;
           } else {
             cumulativeOutput += u.usage.output;
             if (u.usage.input > 0) latestInput = u.usage.input;
+            if ((u.usage.cachedInput ?? 0) > 0) latestCachedInput = u.usage.cachedInput!;
             u.usage = {
               input: latestInput,
+              cachedInput: latestCachedInput,
               output: cumulativeOutput,
-              total: latestInput + cumulativeOutput,
+              total: latestInput + latestCachedInput + cumulativeOutput,
             };
           }
         }
@@ -294,10 +300,12 @@ function parseClaudeLine(line: string): ProgressUpdate[] {
 
   if (evt.type === 'result') {
     if (!evt.usage) return [];
-    const input = evt.usage.input_tokens ?? 0;
+    const totalInput = evt.usage.input_tokens ?? 0;
+    const cachedInput = evt.usage.cache_read_input_tokens ?? 0;
+    const input = totalInput - cachedInput;
     const output = evt.usage.output_tokens ?? 0;
-    if (input === 0 && output === 0) return [];
-    return [{ usage: { input, output, total: input + output }, usageTotal: true }];
+    if (input === 0 && cachedInput === 0 && output === 0) return [];
+    return [{ usage: { input, cachedInput, output, total: input + cachedInput + output }, usageTotal: true }];
   }
 
   if (evt.type === 'assistant' && evt.message) {
@@ -321,10 +329,12 @@ function parseClaudeLine(line: string): ProgressUpdate[] {
       }
     }
     if (evt.message.usage) {
-      const input = evt.message.usage.input_tokens ?? 0;
+      const totalInput = evt.message.usage.input_tokens ?? 0;
+      const cachedInput = evt.message.usage.cache_read_input_tokens ?? 0;
+      const input = totalInput - cachedInput;
       const output = evt.message.usage.output_tokens ?? 0;
-      if (input > 0 || output > 0) {
-        updates.push({ usage: { input, output, total: input + output }, usageTotal: false });
+      if (input > 0 || cachedInput > 0 || output > 0) {
+        updates.push({ usage: { input, cachedInput, output, total: input + cachedInput + output }, usageTotal: false });
       }
     }
     return updates;

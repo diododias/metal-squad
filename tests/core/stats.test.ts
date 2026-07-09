@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
-  aggregateCosts,
+  aggregateTokens,
   computeRunBreakdown,
   computeStats,
   formatBreakdown,
@@ -39,7 +39,7 @@ const event = (
 });
 
 describe('computeStats', () => {
-  it('aggregates runs, tokens, cost, duration and success rate', () => {
+  it('aggregates runs, tokens, duration and success rate', () => {
     const rows = [
       run({ id: 1, status: 'done' }),
       run({ id: 2, status: 'failed', featureId: 'feat-2', endedAt: '2026-07-06 10:02:00' }),
@@ -51,11 +51,9 @@ describe('computeStats', () => {
     expect(stats.tokens.total).toBe(3000);
     expect(stats.tokens.input).toBe(2000);
     expect(stats.tokens.output).toBe(1000);
-    // claude: (1000*3 + 500*15)/1M = 0.0105 per completed run
-    expect(stats.costUsd).toBeCloseTo(0.021, 5);
     expect(stats.successRatePercent).toBe(50);
-    expect(stats.topFeaturesByCost[0]?.featureId).toBe('feat-1');
-    expect(stats.topFeaturesByCost[0]?.runs).toBe(2);
+    expect(stats.topFeaturesByTokens[0]?.featureId).toBe('feat-1');
+    expect(stats.topFeaturesByTokens[0]?.runs).toBe(2);
   });
 
   it('handles empty input', () => {
@@ -63,7 +61,7 @@ describe('computeStats', () => {
     expect(stats.runs.total).toBe(0);
     expect(stats.avgDurationMs).toBeNull();
     expect(stats.successRatePercent).toBeNull();
-    expect(stats.topFeaturesByCost).toEqual([]);
+    expect(stats.topFeaturesByTokens).toEqual([]);
   });
 });
 
@@ -141,7 +139,7 @@ describe('parsePeriodDays', () => {
   });
 });
 
-describe('aggregateCosts', () => {
+describe('aggregateTokens', () => {
   const rows: StatsRunRow[] = [
     run({ id: 1, repoId: 'repo-1', tool: 'claude', featureId: 'feat-1', status: 'done', inputTokens: 1000, outputTokens: 500, totalTokens: 1500 }),
     run({ id: 2, repoId: 'repo-1', tool: 'codex', featureId: 'feat-2', status: 'failed', inputTokens: 2000, cachedInputTokens: 0, outputTokens: 1000, totalTokens: 3000 }),
@@ -149,7 +147,7 @@ describe('aggregateCosts', () => {
   ];
 
   it('aggregates by repo/tool, feature and status', () => {
-    const agg = aggregateCosts(rows);
+    const agg = aggregateTokens(rows);
     expect(agg.totalTokens).toBe(5500);
     const repoClaude = agg.byRepoTool.find((line) => line.tool === 'claude');
     expect(repoClaude).toMatchObject({ repoId: 'repo-1', runs: 2, tokens: 2500 });
@@ -160,7 +158,7 @@ describe('aggregateCosts', () => {
   });
 
   it('handles empty rows', () => {
-    const agg = aggregateCosts([]);
+    const agg = aggregateTokens([]);
     expect(agg.totalTokens).toBe(0);
     expect(agg.byFeature).toEqual([]);
   });

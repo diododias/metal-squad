@@ -888,10 +888,11 @@ describe('App', () => {
     const rootChildren = (element.props as { children: React.ReactNode }).children;
     const statusBar = findElement(rootChildren, mockStatusBar);
 
-    // F31 section 5: run-detail now also registers j/k (scroll), up/down,
-    // and PgUp/PgDn as context shortcuts — j/k merge into 'j/k:navigate'
-    // per the existing hint-building rule, pushing some hints past the cap.
-    expect(statusBar?.props.shortcutHints).toEqual(['j/k:navigate', 'p:pause', 'x:abort', 'up:scroll up', 'down:scroll down', 'pageup:page up']);
+    // F31 section 5 / US2: run-detail registers j/k (scroll), up/down,
+    // PgUp/PgDn, and Tab/Shift+Tab section cycling as context shortcuts —
+    // j/k merge into 'j/k:navigate' per the existing hint-building rule,
+    // pushing some hints past the 6-entry cap.
+    expect(statusBar?.props.shortcutHints).toEqual(['j/k:navigate', 'p:pause', 'x:abort', 'tab:next section', 'shift+tab:previous section', 'up:scroll up']);
   });
 
   it('aborts the selected feature with x in run detail context', async () => {

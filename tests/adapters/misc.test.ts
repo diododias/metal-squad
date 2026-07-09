@@ -105,7 +105,7 @@ describe('claude adapter', () => {
     ).resolves.toEqual({
       ok: true,
       summary: 'done',
-      usage: { input: 2, output: 3, total: 5 },
+      usage: { input: 2, cachedInput: 0, output: 3, total: 5 },
     });
     expect(mockRunCli).toHaveBeenCalledWith(
       'claude',
@@ -125,6 +125,7 @@ describe('claude adapter', () => {
       featureId: 'feat-1',
       tool: 'claude',
       input: 2,
+      cachedInput: 0,
       output: 3,
       total: 5,
     });
@@ -309,12 +310,13 @@ describe('claude adapter', () => {
     expect(result.summary).toContain(
       'arquivos tocados: src/core/adapters/claude.ts, tests/adapters/misc.test.ts',
     );
-    expect(result.usage).toEqual({ input: 8, output: 5, total: 13 });
+    expect(result.usage).toEqual({ input: 8, cachedInput: 0, output: 5, total: 13 });
     expect(mockEventEmit).toHaveBeenCalledWith('tokens:update', {
       runId: 5,
       featureId: 'feat-1',
       tool: 'claude',
       input: 8,
+      cachedInput: 0,
       output: 5,
       total: 13,
     });
@@ -371,17 +373,18 @@ describe('opencode adapter', () => {
     ).resolves.toEqual({
       ok: true,
       summary: 'ok',
-      usage: { input: 5, output: 7, total: 12 },
+      usage: { input: 5, cachedInput: 0, output: 7, total: 12 },
     });
     expect(opencodeAdapter.parseUsage?.(JSON.stringify({
       tokens: { input_tokens: 1, output_tokens: 4 },
-    }))).toEqual({ input: 1, output: 4, total: 5 });
+    }))).toEqual({ input: 1, cachedInput: 0, output: 4, total: 5 });
     expect(opencodeAdapter.parseUsage?.('not-json')).toBeNull();
     expect(mockEventEmit).toHaveBeenCalledWith('tokens:update', {
       runId: 7,
       featureId: 'feat-1',
       tool: 'opencode',
       input: 5,
+      cachedInput: 0,
       output: 7,
       total: 12,
     });

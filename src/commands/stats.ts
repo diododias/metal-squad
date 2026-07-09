@@ -19,7 +19,7 @@ interface StatsCliOptions {
 export function registerStats(program: Command): void {
   program
     .command('stats')
-    .description('Aggregated analytics for runs (tokens, cost, duration, success rate)')
+    .description('Aggregated analytics for runs (tokens, duration, success rate)')
     .option('--period <period>', 'time window, e.g. 7d, 24h, 30d')
     .option('--repo <repoId>', 'filter by repo id')
     .option('--tool <tool>', 'filter by tool (claude, codex, opencode)')
@@ -56,15 +56,14 @@ export function registerStats(program: Command): void {
         `  Runs: ${runs.total} total (${runs.done} done, ${runs.failed} failed, ${runs.running} running, ${runs.blocked} blocked, ${runs.aborted} aborted)`,
         `  Tokens: ${formatTokensCompact(tokens.total)} (${formatTokensCompact(tokens.input)} input, ${formatTokensCompact(tokens.output)} output${tokens.cachedInput > 0 ? `, ${formatTokensCompact(tokens.cachedInput)} cached` : ''})`,
         `  Context: avg ${formatContextPercent(stats.context.avgPercent)}${stats.context.maxPercent !== null ? `, max ${formatContextPercent(stats.context.maxPercent)}` : ''}`,
-        `  Cost: ~$${stats.costUsd.toFixed(2)}`,
         `  Avg duration: ${formatDurationMs(stats.avgDurationMs)}`,
         `  Success rate: ${stats.successRatePercent !== null ? `${stats.successRatePercent}%` : '—'}`,
       ];
 
-      if (stats.topFeaturesByCost.length > 0) {
-        lines.push('', '  Top features by cost:');
-        for (const feature of stats.topFeaturesByCost) {
-          lines.push(`    ${feature.featureId}  $${feature.costUsd.toFixed(2)}  (${feature.runs} run${feature.runs === 1 ? '' : 's'})`);
+      if (stats.topFeaturesByTokens.length > 0) {
+        lines.push('', '  Top features by tokens:');
+        for (const feature of stats.topFeaturesByTokens) {
+          lines.push(`    ${feature.featureId}  ${formatTokensCompact(feature.tokens)} tokens  (${feature.runs} run${feature.runs === 1 ? '' : 's'})`);
         }
       }
 

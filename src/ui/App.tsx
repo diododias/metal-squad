@@ -12,7 +12,7 @@ import { abortPipeline, pausePipeline, requestFeatureAbort, resumePipeline } fro
 import type { RunSummary } from '../db/repo.js';
 import { getBacklogSettings, getFeatureCatalog, getPendingFeatures } from './catalog.js';
 import { DASHBOARD_GROUP_ORDER, getRunGroup, sortRunsByGroup, type DashboardGroupId } from './dashboardGroups.js';
-import { DETAIL_SECTION_ORDER } from './detailSections.js';
+import { DETAIL_SECTION_ORDER, type DetailSectionId } from './detailSections.js';
 import { buildCommandDefinitions } from './commands/definitions.js';
 import { createGatesShortcuts } from './commands/gatesShortcuts.js';
 import { createGlobalShortcuts } from './commands/globalShortcuts.js';
@@ -74,6 +74,10 @@ interface UiState {
   /** F31 section 5: `i` toggles this — collapses long sections for a quick
    * read; default is rich/complete, nothing hidden. */
   detailDense: boolean;
+  /** US2: which detail section tab is currently active (`DETAIL_SECTION_ORDER`
+   *  index). Replaces scroll-based paging for section selection — Tab/Shift+Tab
+   *  cycle it, 1-7 jump directly. */
+  activeTab: number;
 }
 
 const DASHBOARD_PERIODS: Array<{ label: string; days: number | null }> = [
@@ -160,6 +164,7 @@ export function App(): React.ReactElement {
     logsVisible: true,
     detailSectionIndex: 0,
     detailDense: false,
+    activeTab: 0,
   });
   const [helpOpen, setHelpOpen] = useState(false);
 
@@ -188,7 +193,12 @@ export function App(): React.ReactElement {
   // which stays untouched here.
   const verticalBudget = getVerticalBudget(height);
   const detailPageSize = verticalBudget === 'short' ? 1 : verticalBudget === 'regular' ? 2 : 3;
-  const detailSectionIndex = clampIndex(ui.detailSectionIndex, DETAIL_SECTION_ORDER.length);
+  // US2: detailSectionIndex now follows the active tab. The legacy scroll offset
+  // (`ui.detailSectionIndex`) still exists for j/k fine-grained scroll, but the
+  // primary section selection is `ui.activeTab` (set via Tab/Shift+Tab/1-7).
+  const activeTabIndex = clampIndex(ui.activeTab, DETAIL_SECTION_ORDER.length);
+  const activeTab: DetailSectionId = DETAIL_SECTION_ORDER[activeTabIndex] ?? 'summary';
+  const detailSectionIndex = activeTabIndex;
   const selectedGateIndex = clampIndex(ui.selectedGate, gates.length);
   const storedActiveColumn = ui.activeColumn;
   // F31 "novo modelo de foco": EXECUTION/DONE/FALHA columns each navigate
@@ -442,6 +452,32 @@ export function App(): React.ReactElement {
     setUi((current) => ({ ...current, detailDense: !current.detailDense }));
   }, []);
 
+  // US2: section tab navigation. Tab/Shift+Tab cycle with wrap-around;
+  // number keys 1-7 select by 1-based index. All paths converge on setting
+  // `activeTab` (the canonical section selector — MainPanel renders exactly
+  // one section per tab instead of a scrollable page).
+  const cycleSectionTabNext = useCallback(() => {
+    setUi((current) => ({
+      ...current,
+      activeTab: (current.activeTab + 1) % DETAIL_SECTION_ORDER.length,
+      detailSectionIndex: 0,
+    }));
+  }, []);
+
+  const cycleSectionTabPrev = useCallback(() => {
+    setUi((current) => ({
+      ...current,
+      activeTab: (current.activeTab - 1 + DETAIL_SECTION_ORDER.length) % DETAIL_SECTION_ORDER.length,
+      detailSectionIndex: 0,
+    }));
+  }, []);
+
+  const selectSectionTab = useCallback((oneBasedIndex: number) => {
+    const zeroBased = oneBasedIndex - 1;
+    if (zeroBased < 0 || zeroBased >= DETAIL_SECTION_ORDER.length) return;
+    setUi((current) => ({ ...current, activeTab: zeroBased, detailSectionIndex: 0 }));
+  }, []);
+
   const pauseSelectedRun = useCallback(() => {
     if (canPause && selectedRun?.pipelineId) {
       pausePipeline(selectedRun.pipelineId);
@@ -602,9 +638,11 @@ export function App(): React.ReactElement {
     }
   }, [activeColumn, activeView, dashboardOpen, focusPanel, selectedRun, selectedPending, startSelectedFeature]);
 
-  const switchToTab = useCallback((_tabIndex: number) => {
-    // The current TUI does not expose numbered tabs yet.
-  }, []);
+  const switchToTab = useCallback((tabIndex: number) => {
+    // View-level numbered-tab binding — keep delegating to the section selector
+    // so the global hasTabs-driven shortcuts remain no-op until real tabs exist.
+    selectSectionTab(tabIndex + 1);
+  }, [selectSectionTab]);
 
   const commands = useMemo(
     () => buildCommandDefinitions({
@@ -794,17 +832,23 @@ export function App(): React.ReactElement {
       pageSectionUp,
       pageSectionDown,
       toggleDensity: toggleDetailDensity,
+      cycleSectionTabNext,
+      cycleSectionTabPrev,
+      selectSectionTab,
     }),
     [
       abortSelectedRun,
       canAbortFeature,
       canAbortPipeline,
       canPause,
+      cycleSectionTabNext,
+      cycleSectionTabPrev,
       pageSectionDown,
       pageSectionUp,
       pauseSelectedRun,
       scrollSectionDown,
       scrollSectionUp,
+      selectSectionTab,
       toggleDetailDensity,
     ],
   );
@@ -889,6 +933,7 @@ export function App(): React.ReactElement {
               detailSectionIndex={detailSectionIndex}
               detailPageSize={detailPageSize}
               detailDense={ui.detailDense}
+              activeTab={activeTab}
               verticalBudget={verticalBudget}
               mode={layoutMode}
               width={mainWidth}
