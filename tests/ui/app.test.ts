@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import React from 'react';
+import { getChromeHeight, getMainPanelContentHeight } from '../../src/ui/layout/budget.js';
 
 const mockUseRuns = vi.fn();
 const mockUseCompletedFeatures = vi.fn(() => new Set<string>());
@@ -310,6 +311,36 @@ describe('App', () => {
     expect(gateFooter).toBeUndefined();
     expect(statusBar?.props.selectedRun).toBeNull();
     expect(commandBar?.props.hasRuns).toBe(false);
+  });
+
+  // H10: the root app must be pinned to the terminal height and the main
+  // content area must receive the remaining budget after the fixed chrome.
+  it('fixes the app height to the terminal and passes available height to MainPanel', async () => {
+    mockUseTerminalHeight.mockReturnValue(40);
+    mockUseTerminalWidth.mockReturnValue(88);
+    mockUseGates.mockReturnValue({ gates: [], resolve: vi.fn(), forceResolve: vi.fn(() => ({ resumedPipelineId: null })) });
+    const { App } = await import('../../src/ui/App.js');
+    const { Box: InkBox } = await import('ink');
+
+    const element = App();
+    const rootChildren = (element.props as { children: React.ReactNode }).children;
+    const rootBox = findElement(rootChildren, InkBox);
+    const mainPanel = findElement(rootChildren, mockMainPanel);
+
+    const expectedChrome = getChromeHeight({
+      layoutMode: 'compact',
+      hasGateFooter: false,
+      gateCount: 0,
+      hasGatePrompt: false,
+      hasStatusHints: true,
+      hasThemeNotice: false,
+    });
+    const expectedAvailable = getMainPanelContentHeight(40, expectedChrome);
+
+    expect(rootBox?.props.height).toBe(40);
+    expect(mainPanel?.props.availableHeight).toBe(expectedAvailable);
+    expect(mainPanel?.props.availableHeight).toBeGreaterThan(0);
+    expect(mainPanel?.props.availableHeight).toBeLessThanOrEqual(40);
   });
 
   it('registers the density-toggle command with the command palette', async () => {
