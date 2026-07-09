@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { memo } from 'react';
 import { Box, Text } from 'ink';
 import type { RunningTaskSummary, RunOutputRow, RunSummary, TaskRun } from '../../db/repo.js';
 import type { PendingApproval } from '../hooks/useGates.js';
@@ -136,7 +136,7 @@ const COLUMN_EMPTY_LABEL: Record<DashboardGroupId, string> = {
   canceled: 'sem falhas',
 };
 
-export function MainPanel({
+function MainPanelComponent({
   runs,
   gates: _gates,
   selectedRun,
@@ -450,6 +450,8 @@ export function MainPanel({
     </Box>
   );
 }
+
+export const MainPanel = memo(MainPanelComponent);
 
 function DetailMetric({
   theme,

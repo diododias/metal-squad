@@ -306,6 +306,48 @@ epics:
             channel: telegram
             autoAdvance: false
           syncTasksToBacklog: true
+      - id: feat-11
+        title: F11 — Fix TUI flicker on iTerm2
+        tool: opencode
+        model: anthropic/claude-sonnet-4-5
+        effort: medium
+        skills:
+          - implement
+        specFile: docs/features/F11-tui-flicker-fix.md
+        context:
+          - docs/ROADMAP.md
+        dependsOn: []
+        tasks:
+          - id: T001
+            title: Remove manual alternate screen escape sequences from src/commands/ui.ts
+            status: done
+          - id: T002
+            title: Implement adaptive output polling with 750ms minimum in useRunOutput.ts
+            status: done
+          - id: T003
+            title: Stop full-screen redraw by removing fixed height from App.tsx root Box
+            status: done
+          - id: T004
+            title: Memoize high-impact components (MainPanel, StatsBar, KanbanCard)
+            status: done
+          - id: T005
+            title: Build and verify msq ui no longer flickers in iTerm2
+            status: done
+        retry:
+          maxAttempts: 1
+          backoffMs: 5000
+          onFail: stop
+        workflow:
+          mode: staged
+          stages:
+            - specify
+            - plan
+            - tasks
+            - implement
+          approvals:
+            channel: telegram
+            autoAdvance: false
+          syncTasksToBacklog: true
       - id: feat-10
         title: F10 — Theme System
         tool: claude
