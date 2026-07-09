@@ -8,19 +8,19 @@ export interface SpawnResult {
 }
 
 export class CliTimeoutError extends Error {
-  readonly stdout: string;
-  readonly stderr: string;
-  readonly timeoutMs: number;
-  readonly runtimeMs: number;
+  public readonly stdout: string;
+  public readonly stderr: string;
+  public readonly timeoutMs: number;
+  public readonly runtimeMs: number;
 
-  constructor(
+  public constructor(
     bin: string,
     timeoutMs: number,
     runtimeMs: number,
     stdout: string,
     stderr: string,
   ) {
-    super(`${bin} excedeu timeout (${timeoutMs}ms)`);
+    super(`${bin} excedeu timeout (${String(timeoutMs)}ms)`);
     this.name = 'CliTimeoutError';
     this.stdout = stdout;
     this.stderr = stderr;
@@ -30,12 +30,12 @@ export class CliTimeoutError extends Error {
 }
 
 export class CliAbortError extends Error {
-  readonly stdout: string;
-  readonly stderr: string;
-  readonly runtimeMs: number;
-  readonly signal: NodeJS.Signals | null;
+  public readonly stdout: string;
+  public readonly stderr: string;
+  public readonly runtimeMs: number;
+  public readonly signal: NodeJS.Signals | null;
 
-  constructor(
+  public constructor(
     bin: string,
     runtimeMs: number,
     stdout: string,
@@ -53,7 +53,7 @@ export class CliAbortError extends Error {
 
 export interface SpawnOptions {
   cwd: string;
-  timeoutMs?: number; // default 10min
+  timeoutMs?: number;
   env?: NodeJS.ProcessEnv;
   signal?: AbortSignal;
   heartbeatMs?: number;
@@ -64,8 +64,7 @@ export interface SpawnOptions {
   onStderrLine?: (line: string) => void;
 }
 
-/** Executa um CLI de forma não-interativa e captura stdout/stderr. */
-export function runCli(
+export async function runCli(
   bin: string,
   args: string[],
   opts: SpawnOptions,
@@ -103,13 +102,9 @@ export function runCli(
           const idleMs = Date.now() - lastOutputAt;
           const label = opts.logLabel ?? bin;
           const suffix = opts.heartbeatSuffix?.();
-          // D5: plain ASCII, single-sentence structure so the TUI can parse
-          // and condense this into a clean status line (see
-          // ui/format.ts#formatHeartbeatLine) instead of hard-truncating a
-          // long accented string mid-word.
           opts.onHeartbeat?.(
-            `[msq] ${label} running for ${Math.round(elapsedMs / 1000)}s `
-              + `(stdout ${stdout.length}B stderr ${stderr.length}B idle ${Math.round(idleMs / 1000)}s)`
+            `[msq] ${label} running for ${String(Math.round(elapsedMs / 1000))}s `
+              + `(stdout ${String(stdout.length)}B stderr ${String(stderr.length)}B idle ${String(Math.round(idleMs / 1000))}s)`
               + (suffix ? ` ${suffix}` : ''),
           );
         }, heartbeatMs)
@@ -149,25 +144,25 @@ export function runCli(
       }
     }
 
-    child.stdout.on('data', (d) => {
+    child.stdout.on('data', (d: Buffer) => {
       const chunk = d.toString();
       stdout += chunk;
       stdoutPending = drainLines(chunk, stdoutPending, opts.onStdoutLine);
       lastOutputAt = Date.now();
     });
-    child.stderr.on('data', (d) => {
+    child.stderr.on('data', (d: Buffer) => {
       const chunk = d.toString();
       stderr += chunk;
       stderrPending = drainLines(chunk, stderrPending, opts.onStderrLine);
       lastOutputAt = Date.now();
     });
-    child.on('error', (err) => {
+    child.on('error', (err: Error) => {
       if (settled) return;
       settled = true;
       cleanup();
       reject(err);
     });
-    child.on('close', (code, signal) => {
+    child.on('close', (code: number | null, signal: NodeJS.Signals | null) => {
       if (settled) return;
       settled = true;
       cleanup();

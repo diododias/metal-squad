@@ -53,17 +53,17 @@ export function registerStats(program: Command): void {
       const { runs, tokens } = stats;
       const lines = [
         scope,
-        `  Runs: ${runs.total} total (${runs.done} done, ${runs.failed} failed, ${runs.running} running, ${runs.blocked} blocked, ${runs.aborted} aborted)`,
+        `  Runs: ${String(runs.total)} total (${String(runs.done)} done, ${String(runs.failed)} failed, ${String(runs.running)} running, ${String(runs.blocked)} blocked, ${String(runs.aborted)} aborted)`,
         `  Tokens: ${formatTokensCompact(tokens.total)} (${formatTokensCompact(tokens.input)} input, ${formatTokensCompact(tokens.output)} output${tokens.cachedInput > 0 ? `, ${formatTokensCompact(tokens.cachedInput)} cached` : ''})`,
         `  Context: avg ${formatContextPercent(stats.context.avgPercent)}${stats.context.maxPercent !== null ? `, max ${formatContextPercent(stats.context.maxPercent)}` : ''}`,
         `  Avg duration: ${formatDurationMs(stats.avgDurationMs)}`,
-        `  Success rate: ${stats.successRatePercent !== null ? `${stats.successRatePercent}%` : '—'}`,
+        `  Success rate: ${stats.successRatePercent !== null ? `${String(stats.successRatePercent)}%` : '—'}`,
       ];
 
       if (stats.topFeaturesByTokens.length > 0) {
         lines.push('', '  Top features by tokens:');
         for (const feature of stats.topFeaturesByTokens) {
-          lines.push(`    ${feature.featureId}  ${formatTokensCompact(feature.tokens)} tokens  (${feature.runs} run${feature.runs === 1 ? '' : 's'})`);
+          lines.push(`    ${feature.featureId}  ${formatTokensCompact(feature.tokens)} tokens  (${String(feature.runs)} run${feature.runs === 1 ? '' : 's'})`);
         }
       }
 
@@ -77,7 +77,7 @@ function printRunBreakdown(runId: number, asJson: boolean): void {
   }
   const run = listRunsForStats().find((row) => row.id === runId);
   if (!run) {
-    throw new Error(`Run not found: ${runId}`);
+    throw new Error(`Run not found: ${String(runId)}`);
   }
   const breakdown = computeRunBreakdown(listRunEvents(runId), run.startedAt, run.endedAt);
   if (asJson) {
@@ -92,7 +92,7 @@ function printRunBreakdown(runId: number, asJson: boolean): void {
     return;
   }
   const header = [
-    `${run.featureId}`,
+    run.featureId,
     run.totalTokens !== null ? `${formatTokensCompact(run.totalTokens)} tokens` : null,
     run.contextWindowPercent !== null && run.contextWindowPercent !== undefined
       ? `${formatContextPercent(run.contextWindowPercent)} of context`
@@ -116,5 +116,5 @@ export function parsePeriodDays(period: string): number {
 function formatContextPercent(value: number | null): string {
   if (value === null || !Number.isFinite(value)) return '—';
   const rounded = Math.round(value * 10) / 10;
-  return Number.isInteger(rounded) ? `${rounded}%` : `${rounded.toFixed(1)}%`;
+  return Number.isInteger(rounded) ? `${String(rounded)}%` : `${rounded.toFixed(1)}%`;
 }

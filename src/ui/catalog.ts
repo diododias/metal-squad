@@ -42,7 +42,7 @@ const DEFAULT_BACKLOG_SETTINGS: BacklogSettings = { stageSkills: {} };
 
 function truncateDescription(text: string): string {
   if (text.length <= DESCRIPTION_CHAR_LIMIT) return text;
-  return `${text.slice(0, DESCRIPTION_CHAR_LIMIT)}\n... (truncated, ${text.length} chars total)`;
+  return `${text.slice(0, DESCRIPTION_CHAR_LIMIT)}\n... (truncated, ${String(text.length)} chars total)`;
 }
 
 function readFeatureDescription(
@@ -50,7 +50,7 @@ function readFeatureDescription(
   specFile: string | undefined,
   cwd: string,
 ): string | null {
-  if (spec && spec.trim()) return truncateDescription(spec.trim());
+  if (spec?.trim()) return truncateDescription(spec.trim());
   if (!specFile) return null;
   try {
     const abs = resolve(cwd, specFile);
@@ -94,8 +94,8 @@ function loadCatalogAndSettings(cwd: string): void {
             model: feature.model,
             effort: feature.effort,
             description: readFeatureDescription(feature.spec, feature.specFile, cwd),
-            tasks: feature.tasks ?? [],
-            dependsOn: feature.dependsOn ?? [],
+            tasks: feature.tasks,
+            dependsOn: feature.dependsOn,
             workflow: feature.workflow,
             retry: feature.retry,
             specFile: feature.specFile,

@@ -294,7 +294,9 @@ describe('ui hooks', () => {
 
   it('useTerminalWidth subscribes to resize events', async () => {
     const setWidth = vi.fn();
-    let cleanup: (() => void) | void;
+    let cleanup: (() => void) | void = undefined;
+    const originalColumns = process.stdout.columns;
+    Object.defineProperty(process.stdout, 'columns', { value: 80, writable: true, configurable: true });
     const on = vi.spyOn(process.stdout, 'on');
     const off = vi.spyOn(process.stdout, 'off');
 
@@ -308,18 +310,21 @@ describe('ui hooks', () => {
     const { useTerminalWidth } = await import('../../src/ui/hooks/useTerminalWidth.js');
     const width = useTerminalWidth();
 
-    expect(width).toBe(process.stdout.columns ?? 80);
+    expect(width).toBe(80);
     expect(on).toHaveBeenCalledWith('resize', expect.any(Function));
     const listener = on.mock.calls[0]?.[1] as (() => void);
     listener();
-    expect(setWidth).toHaveBeenCalledWith(process.stdout.columns ?? 80);
-    cleanup?.();
+    expect(setWidth).toHaveBeenCalledWith(80);
+    (cleanup as (() => void) | undefined)?.();
     expect(off).toHaveBeenCalledWith('resize', expect.any(Function));
+    Object.defineProperty(process.stdout, 'columns', { value: originalColumns, writable: true, configurable: true });
   });
 
   it('useTerminalHeight subscribes to resize events (F31 vertical budget)', async () => {
     const setHeight = vi.fn();
-    let cleanup: (() => void) | void;
+    let cleanup: (() => void) | void = undefined;
+    const originalRows = process.stdout.rows;
+    Object.defineProperty(process.stdout, 'rows', { value: 24, writable: true, configurable: true });
     const on = vi.spyOn(process.stdout, 'on');
     const off = vi.spyOn(process.stdout, 'off');
 
@@ -333,13 +338,14 @@ describe('ui hooks', () => {
     const { useTerminalHeight } = await import('../../src/ui/hooks/useTerminalHeight.js');
     const height = useTerminalHeight();
 
-    expect(height).toBe(process.stdout.rows ?? 24);
+    expect(height).toBe(24);
     expect(on).toHaveBeenCalledWith('resize', expect.any(Function));
     const listener = on.mock.calls[0]?.[1] as (() => void);
     listener();
-    expect(setHeight).toHaveBeenCalledWith(process.stdout.rows ?? 24);
-    cleanup?.();
+    expect(setHeight).toHaveBeenCalledWith(24);
+    (cleanup as (() => void) | undefined)?.();
     expect(off).toHaveBeenCalledWith('resize', expect.any(Function));
+    Object.defineProperty(process.stdout, 'rows', { value: originalRows, writable: true, configurable: true });
   });
 
   it('useTokenStats sums the 7-day window and keeps the last total on error (F31 item 7)', async () => {

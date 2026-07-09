@@ -15,7 +15,7 @@ const EVENT_TONE: Record<string, NotificationTone> = {
 };
 
 export function mergeInkStyles(
-  ...styles: Array<ThemeInkStyle | null | undefined>
+  ...styles: (ThemeInkStyle | null | undefined)[]
 ): ThemeInkStyle {
   const merged: ThemeInkStyle = {};
   for (const style of styles) {
@@ -67,7 +67,9 @@ export function getOutputStyle(
       return theme.role('muted');
     case 'stderr':
       return theme.role('error');
+    case 'stdout':
     case 'agent':
+      return theme.role('text');
     default:
       return theme.role('text');
   }

@@ -28,7 +28,7 @@ export function useCompletedFeatures(intervalMs = 2000): Set<string> {
       msqEventBus.subscribe('run:done', refresh),
       msqEventBus.subscribe('run:failed', refresh),
     ];
-    return () => {
+    return (): void => {
       clearInterval(timer);
       for (const unsubscribe of unsubscribers) unsubscribe();
     };

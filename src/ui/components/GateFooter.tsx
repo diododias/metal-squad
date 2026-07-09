@@ -37,7 +37,7 @@ export function GateFooter({
       <Text {...getSurfaceTitleStyle(theme, isFocused)}>Approvals Pending</Text>
       {visible.map((gate, index) => (
         <Text
-          key={`${gate.kind}:${gate.id}:${gate.featureId}`}
+          key={`${gate.kind}:${String(gate.id)}:${gate.featureId}`}
           {...(index === selectedIndex ? theme.role('warning') : theme.role('text'))}
           bold={index === selectedIndex}
         >

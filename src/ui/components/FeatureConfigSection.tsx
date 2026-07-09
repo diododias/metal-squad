@@ -15,7 +15,7 @@ const DEFAULT_RETRY: Required<Retry> = {
 // Matches WorkflowSchema's own defaults (schema.ts) — used defensively when a
 // catalog entry lacks a resolved workflow (e.g. a partial/stale lookup),
 // consistent with this component's own "never blank, show the default" rule.
-const DEFAULT_WORKFLOW: Workflow = {
+const _DEFAULT_WORKFLOW: Workflow = {
   mode: 'staged',
   stages: ['specify', 'plan', 'tasks', 'implement', 'validate'],
   approvals: { channel: 'telegram', autoAdvance: false },
@@ -48,8 +48,8 @@ export function FeatureConfigSection({ feature, settings, width }: Props): React
   const retry = feature.retry;
   const retryExplicit = Boolean(retry);
   const resolvedRetry = { ...DEFAULT_RETRY, ...retry };
-  const workflow = feature.workflow ?? DEFAULT_WORKFLOW;
-  const skills = feature.skills ?? [];
+  const workflow = feature.workflow ?? _DEFAULT_WORKFLOW;
+  const skills = feature.skills;
   const dependsOn = feature.dependsOn ?? [];
   const stageSkillEntries = Object.entries(settings.stageSkills);
   const innerWidth = Math.max(24, width - 4);

@@ -41,7 +41,7 @@ export function useRuns(intervalMs = 2000): RunSummary[] {
       msqEventBus.subscribe('stage:request-created', refresh),
       msqEventBus.subscribe('stage:request-resolved', refresh),
     ];
-    return () => {
+    return (): void => {
       clearInterval(timer);
       for (const unsubscribe of unsubscribers) unsubscribe();
     };
@@ -122,7 +122,7 @@ export function useTaskRuns(runId: number | null): TaskRun[] {
       );
     });
 
-    return () => {
+    return (): void => {
       clearInterval(timer);
       unsub1();
       unsub2();
@@ -161,7 +161,7 @@ export function useRunningTasks(intervalMs = 2000): RunningTaskSummary[] {
       msqEventBus.subscribe('run:done', refresh),
       msqEventBus.subscribe('run:failed', refresh),
     ];
-    return () => {
+    return (): void => {
       clearInterval(timer);
       for (const unsubscribe of unsubscribers) unsubscribe();
     };

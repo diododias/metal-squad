@@ -6,9 +6,9 @@ const execFileAsync = promisify(execFile);
 const TITLE = 'metal-squad';
 
 export class DesktopChannel implements NotificationChannel {
-  readonly name = 'desktop';
+  public readonly name = 'desktop';
 
-  async send(message: string, _metadata?: Record<string, unknown>): Promise<void> {
+  public async send(message: string, _metadata?: Record<string, unknown>): Promise<void> {
     try {
       const { platform } = process;
       if (platform === 'darwin') {

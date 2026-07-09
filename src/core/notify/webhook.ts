@@ -1,11 +1,11 @@
 import type { NotificationChannel } from './types.js';
 
 export class WebhookChannel implements NotificationChannel {
-  readonly name = 'webhook';
+  public readonly name = 'webhook';
 
-  constructor(private readonly url: string) {}
+  public constructor(private readonly url: string) {}
 
-  async send(message: string, metadata?: Record<string, unknown>): Promise<void> {
+  public async send(message: string, metadata?: Record<string, unknown>): Promise<void> {
     await fetch(this.url, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },

@@ -28,7 +28,7 @@ interface CommandDefinitionOptions {
 
 function showConfigSummary(): void {
   const config = loadConfig();
-  const concurrency = typeof config.concurrency === 'number' ? config.concurrency : 'default';
+  const concurrency = typeof config.concurrency === 'number' ? String(config.concurrency) : 'default';
   msqEventBus.emit('ui:info', { message: `Config loaded: concurrency ${concurrency}` });
 }
 

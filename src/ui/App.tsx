@@ -80,7 +80,7 @@ interface UiState {
   activeTab: number;
 }
 
-const DASHBOARD_PERIODS: Array<{ label: string; days: number | null }> = [
+const DASHBOARD_PERIODS: { label: string; days: number | null }[] = [
   { label: 'today', days: 1 },
   { label: 'last 7 days', days: 7 },
   { label: 'last 30 days', days: 30 },
@@ -209,11 +209,11 @@ export function App(): React.ReactElement {
   const executionRuns = useMemo(() => runs.filter((run) => getRunGroup(run.status) === 'execution'), [runs]);
   const doneRunsList = useMemo(() => runs.filter((run) => getRunGroup(run.status) === 'done'), [runs]);
   const falhaRunsList = useMemo(() => runs.filter((run) => getRunGroup(run.status) === 'canceled'), [runs]);
-  const columnRunLists: Partial<Record<DashboardGroupId, RunSummary[]>> = {
+  const columnRunLists = useMemo((): Partial<Record<DashboardGroupId, RunSummary[]>> => ({
     execution: executionRuns,
     done: doneRunsList,
     canceled: falhaRunsList,
-  };
+  }), [executionRuns, doneRunsList, falhaRunsList]);
   // F31 "Riscos de UX resolvidos" item 5 / "Navegacao e casos de borda":
   // resolving the last gate must never leave focus orphaned on a now-empty
   // column — it falls back to EXECUTION, or the first non-empty non-TODO
@@ -239,11 +239,11 @@ export function App(): React.ReactElement {
   // focus model must agree, or Tab-cycling can land focus on a panel that
   // isn't actually rendered.
   const activityVisible = notifications.length > 0 && verticalBudget !== 'short';
-  const focusOrder: FocusPanel[] = [
+  const focusOrder = useMemo((): FocusPanel[] => [
     'columns',
     ...(gates.length > 0 ? (['gates'] as const) : []),
     ...(activityVisible ? (['activity'] as const) : []),
-  ];
+  ], [gates.length, activityVisible]);
   const focusPanel = ui.focusPanel === 'gates' && gates.length === 0
     ? 'columns'
     : ui.focusPanel === 'activity' && !activityVisible
@@ -273,7 +273,7 @@ export function App(): React.ReactElement {
         : 'overview';
   const dashboardOpen = Boolean(ui.dashboard);
   const dashboardPeriodIndex = Math.min(ui.dashboardPeriod ?? 1, DASHBOARD_PERIODS.length - 1);
-  const dashboardPeriod = DASHBOARD_PERIODS[dashboardPeriodIndex] ?? DASHBOARD_PERIODS[1]!;
+  const dashboardPeriod = DASHBOARD_PERIODS[dashboardPeriodIndex] ?? DASHBOARD_PERIODS[1] ?? { label: 'last 7 days', days: 7 };
   const statsRows = useStatsRows(dashboardOpen, dashboardPeriod.days);
   const featureCatalog = getFeatureCatalog();
   const backlogSettings = getBacklogSettings();
@@ -654,7 +654,7 @@ export function App(): React.ReactElement {
       canRetryGate,
       focusContext,
       selectedFeatureId: selectedPending?.id ?? null,
-      togglePaletteHelp: () => setHelpOpen(true),
+      togglePaletteHelp: () => { setHelpOpen(true); },
       toggleDashboard,
       toggleNotifications,
       pauseSelectedRun,
@@ -698,7 +698,7 @@ export function App(): React.ReactElement {
       commandRegistry.register(command);
     }
 
-    return () => {
+    return (): void => {
       commandRegistry.clear();
     };
   }, [commands]);
@@ -859,7 +859,7 @@ export function App(): React.ReactElement {
       registerShortcut(shortcut);
     }
 
-    return () => {
+    return (): void => {
       for (const shortcut of allShortcuts) {
         unregisterShortcut(shortcut.key, shortcut.context);
       }
@@ -993,7 +993,7 @@ export function App(): React.ReactElement {
           currentContext={focusContext}
           shortcuts={getAllShortcuts()}
           width={width}
-          onClose={() => setHelpOpen(false)}
+          onClose={() => { setHelpOpen(false); }}
           onOpenPalette={openPalette}
         />
       </Box>

@@ -29,9 +29,9 @@ export function formatElapsed(startedAt: string, endedAt: string | null): string
   if (start === null) return '—';
   const end = endedAt ? parseTimestampMs(endedAt) : Date.now();
   const secs = Math.max(0, Math.floor(((end ?? Date.now()) - start) / 1000));
-  if (secs < 60) return `${secs}s`;
+  if (secs < 60) return `${String(secs)}s`;
   const mins = Math.floor(secs / 60);
-  return `${mins}m${secs % 60}s`;
+  return `${String(mins)}m${String(secs % 60)}s`;
 }
 
 export function getRunStatusLabel(run: RunSummary): string {
@@ -60,7 +60,7 @@ export function formatTokens(total: number | null): string {
 export function formatPercent(value: number | null | undefined): string {
   if (value === null || value === undefined || !Number.isFinite(value)) return '—';
   const rounded = Math.round(value * 10) / 10;
-  return Number.isInteger(rounded) ? `${rounded}%` : `${rounded.toFixed(1)}%`;
+  return Number.isInteger(rounded) ? `${String(rounded)}%` : `${rounded.toFixed(1)}%`;
 }
 
 export function formatClock(iso: string | null): string {

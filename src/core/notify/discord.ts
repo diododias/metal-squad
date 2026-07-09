@@ -1,11 +1,11 @@
 import type { NotificationChannel } from './types.js';
 
 export class DiscordChannel implements NotificationChannel {
-  readonly name = 'discord';
+  public readonly name = 'discord';
 
-  constructor(private readonly webhookUrl: string) {}
+  public constructor(private readonly webhookUrl: string) {}
 
-  async send(message: string): Promise<void> {
+  public async send(message: string): Promise<void> {
     await fetch(this.webhookUrl, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },

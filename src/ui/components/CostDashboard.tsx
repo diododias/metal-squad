@@ -88,7 +88,7 @@ export function CostDashboard({ rows, periodLabel, width }: Props): React.ReactE
             <Text {...theme.role('text')} bold>By status</Text>
             {aggregates.byStatus.map((line) => (
               <Text key={line.status} {...theme.role('text')}>
-                {`${line.status}`.padEnd(9)} {String(line.runs).padStart(3)} runs
+                {line.status.padEnd(9)} {String(line.runs).padStart(3)} runs
                 {'  '}{formatTokensCompact(line.tokens).padStart(8)}
                 {'  '}{formatPercent(line.maxContextPercent).padStart(7)}
               </Text>

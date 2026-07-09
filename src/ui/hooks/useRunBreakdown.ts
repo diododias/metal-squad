@@ -29,7 +29,7 @@ export function useRunBreakdown(
   useEffect(() => {
     if (runId === null || endedAt !== null) return undefined;
     const timer = setInterval(refresh, intervalMs);
-    return () => clearInterval(timer);
+    return (): void => { clearInterval(timer); };
   }, [endedAt, intervalMs, refresh, runId]);
 
   return breakdown;

@@ -106,9 +106,9 @@ export function createViewShortcuts(options: ViewShortcutOptions): KeyboardShort
     ...(['1', '2', '3', '4', '5'] as const).map((key, index) => ({
       key,
       scope: 'global' as const,
-      label: `Tab ${index + 1}`,
-      condition: () => hasTabs,
-      action: () => switchToTab(index),
+      label: `Tab ${String(index + 1)}`,
+      condition: (): boolean => hasTabs,
+      action: (): void => { switchToTab(index); },
     })),
   ];
 }

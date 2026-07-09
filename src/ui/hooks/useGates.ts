@@ -37,8 +37,8 @@ function gateToApproval(gate: GateRow): PendingApproval {
 
 function collectApprovals(): PendingApproval[] {
   const gates = openGates().map(gateToApproval);
-  const stageRequests = listPendingStageRequests().map((sr) => ({
-    kind: 'stage' as ApprovalKind,
+  const stageRequests = listPendingStageRequests().map((sr): PendingApproval => ({
+    kind: 'stage',
     id: sr.id,
     featureId: sr.featureId,
     repoId: '',
@@ -87,7 +87,7 @@ export function useGates(intervalMs = 2000): UseGatesResult {
       msqEventBus.subscribe('run:done', poll),
       msqEventBus.subscribe('run:failed', poll),
     ];
-    return () => {
+    return (): void => {
       clearInterval(timer);
       for (const unsubscribe of unsubscribers) unsubscribe();
     };

@@ -75,7 +75,7 @@ export function createBudgetTracker(limits: BudgetLimits): BudgetTracker {
   };
 
   return {
-    record(featureId, usage) {
+    record(featureId, usage): BudgetRecordResult {
       tokens += usage.total;
       const featureTotal = (perFeatureTokens.get(featureId) ?? 0) + usage.total;
       perFeatureTokens.set(featureId, featureTotal);
@@ -107,8 +107,8 @@ export function createBudgetTracker(limits: BudgetLimits): BudgetTracker {
 }
 
 export function formatBudgetViolation(violation: BudgetViolation): string {
-  const spent = `${violation.spent} tokens`;
-  const limit = `${violation.limit} tokens`;
-  const scope = violation.scope === 'feature' ? `feature ${violation.featureId}` : 'pipeline';
+  const spent = `${String(violation.spent)} tokens`;
+  const limit = `${String(violation.limit)} tokens`;
+  const scope = violation.scope === 'feature' ? `feature ${violation.featureId ?? ''}` : 'pipeline';
   return `budget exceeded for ${scope}: ${spent} >= ${limit}`;
 }
