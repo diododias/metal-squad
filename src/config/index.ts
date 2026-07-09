@@ -60,6 +60,12 @@ const BudgetConfig = z.object({
   alertAtPercent: z.number().int().min(1).max(100).default(80),
 });
 
+const WebConfig = z.object({
+  host: z.string().trim().min(1).default('127.0.0.1'),
+  port: z.number().int().min(1).max(65_535).default(8_743),
+  auth: z.enum(['token', 'none']).default('token'),
+});
+
 export const ConfigSchema = z.object({
   concurrency: z.number().int().positive().default(3),
   toolTimeoutMs: z.number().int().positive().default(600_000),
@@ -70,9 +76,11 @@ export const ConfigSchema = z.object({
   notifications: NotificationsConfig.default({}),
   workflow: WorkflowConfig.default({}),
   budget: BudgetConfig.default({}),
+  web: WebConfig.default({}),
   stageSkills: z.record(z.string(), z.array(z.string())).default({}),
 });
 export type Config = z.infer<typeof ConfigSchema>;
+export type WebConfig = z.infer<typeof WebConfig>;
 
 export function loadConfig(): Config {
   if (!existsSync(CONFIG_PATH)) return ConfigSchema.parse({});

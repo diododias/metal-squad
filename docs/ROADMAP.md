@@ -21,6 +21,7 @@ O que ja funciona:
 - ~~Resume de pipeline a partir do estado persistido~~ (F26 entregue)
 - ~~Hardening do fluxo `msq-develop`~~ (F25 entregue)
 - ~~Overview em colunas kanban com foco unificado~~ (F31 entregue)
+- ~~Web dashboard acessível pelo navegador~~ (F32 entregue)
 
 O que ainda falta:
 - Acoplado ao spec-kit (prompt hardcoded) → F01/F02/F03
@@ -41,6 +42,7 @@ O que ainda falta:
 | Fase 3 — Orquestracao robusta | 5 | 5 | 0 |
 | Fase 4 — Observability & DX | 7 | 5 | 2 |
 | Fase 5 — Extensibilidade | 4 | 0 | 4 |
+| Fase 6 — Web & Remote Control | 1 | 1 | 0 |
 | Backlog operacional | 3 | 2 | 1 |
 
 ---
@@ -131,6 +133,19 @@ contexto por sessao/step.
 
 ---
 
+## Fase 6 — Web & Remote Control
+
+**Objetivo**: acompanhar e controlar o `msq` pelo navegador
+
+| Feature | Esforco | Prioridade | Status |
+|---------|---------|------------|--------|
+| [F32 — Web Mode](features/F32-web-mode.md) | High | Alta | Entregue |
+
+**Entrega**: servidor HTTP/WebSocket com autenticação por token, dashboard kanban,
+gates, detalhe de run, command palette e daemon em background.
+
+---
+
 ## Hotfixes descobertos em validacao
 
 | Item | Status | Prioridade |
@@ -195,6 +210,9 @@ F09 (command palette) ✅
  ├→ F24 (task & stage progress)
  ├→ F29 (tui shell polish) ✅
  └→ F31 (dashboard kanban overview) ✅
+
+F31 (dashboard kanban overview) ✅
+ └→ F32 (web mode) ✅
 
 Independentes:
  F10 (theme) ✅, F11 (retry) ✅, F17 (analytics) ✅, F18 (duration) ✅,
