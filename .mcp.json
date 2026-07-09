@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "dora": {
+      "type": "stdio",
+      "command": "dora",
+      "args": ["mcp"]
+    }
+  }
+}

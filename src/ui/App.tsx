@@ -254,7 +254,7 @@ export function App(): React.ReactElement {
   const selectedGate = gates[selectedGateIndex] ?? null;
   const liveOutput = useRunOutput(
     selectedRun ? selectedRun.runId : null,
-    ui.outputPaused ? 1_500 : 350,
+    ui.outputPaused ? 2_000 : 750,
   );
   const taskRuns = useTaskRuns(selectedRun ? selectedRun.runId : null);
   const runBreakdown = useRunBreakdown(
@@ -891,7 +891,7 @@ export function App(): React.ReactElement {
 
   return (
     <ThemeProvider resolution={themeResolution}>
-      <Box flexDirection="column" paddingX={1} paddingY={0} height={height}>
+      <Box flexDirection="column" paddingX={1} paddingY={0}>
         <Box marginTop={1} marginBottom={1} flexDirection="column">
           <HeaderBar
             version={APP_VERSION}
