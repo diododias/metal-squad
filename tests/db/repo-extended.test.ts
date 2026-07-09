@@ -26,6 +26,7 @@ beforeEach(async () => {
   mockAll.mockReset();
   mockRun.mockReset();
   mockGet.mockReset();
+  mockAll.mockReturnValue([]);
   mockPrepare.mockImplementation(() => ({ all: mockAll, run: mockRun, get: mockGet }));
   mockEmit.mockReset();
   mockClose.mockReset();

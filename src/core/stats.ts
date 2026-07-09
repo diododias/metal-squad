@@ -21,7 +21,7 @@ export interface RunStats {
   };
   avgDurationMs: number | null;
   successRatePercent: number | null;
-  topFeaturesByTokens: Array<{ featureId: string; tokens: number; runs: number }>;
+  topFeaturesByTokens: { featureId: string; tokens: number; runs: number }[];
 }
 
 export function computeStats(rows: StatsRunRow[], topN = 5): RunStats {
@@ -135,8 +135,8 @@ export function formatBreakdown(breakdown: RunBreakdown): string {
   if (breakdown.wallMs === null) return '';
   const percent = (part: number): string =>
     breakdown.wallMs && breakdown.wallMs > 0
-      ? ` (${Math.round((part / breakdown.wallMs) * 100)}%)`
-      : '';
+    ? ` (${String(Math.round((part / breakdown.wallMs) * 100))}%)`
+    : '';
   const lines = [
     `total ${formatDurationMs(breakdown.wallMs)}`,
     `  Agent: ${formatDurationMs(breakdown.agentMs ?? 0)}${percent(breakdown.agentMs ?? 0)}`,
@@ -145,7 +145,7 @@ export function formatBreakdown(breakdown: RunBreakdown): string {
     lines.push(`  Gate wait: ${formatDurationMs(breakdown.gateWaitMs)}${percent(breakdown.gateWaitMs)}`);
   }
   if (breakdown.retryCount > 0) {
-    lines.push(`  Retry: ${formatDurationMs(breakdown.retryWaitMs)}${percent(breakdown.retryWaitMs)} (${breakdown.retryCount}x)`);
+    lines.push(`  Retry: ${formatDurationMs(breakdown.retryWaitMs)}${percent(breakdown.retryWaitMs)} (${String(breakdown.retryCount)}x)`);
   }
   return lines.join('\n');
 }
@@ -153,11 +153,11 @@ export function formatBreakdown(breakdown: RunBreakdown): string {
 export function formatDurationMs(ms: number | null): string {
   if (ms === null) return '—';
   const secs = Math.max(0, Math.round(ms / 1000));
-  if (secs < 60) return `${secs}s`;
+  if (secs < 60) return `${String(secs)}s`;
   const mins = Math.floor(secs / 60);
-  if (mins < 60) return `${mins}m${secs % 60}s`;
+  if (mins < 60) return `${String(mins)}m${String(secs % 60)}s`;
   const hours = Math.floor(mins / 60);
-  return `${hours}h${mins % 60}m`;
+  return `${String(hours)}h${String(mins % 60)}m`;
 }
 
 export function formatTokensCompact(total: number): string {
@@ -186,9 +186,9 @@ export interface TokenLine {
 }
 
 export interface TokenAggregates {
-  byRepoTool: Array<TokenLine & { repoId: string; tool: string }>;
-  byFeature: Array<TokenLine & { featureId: string }>;
-  byStatus: Array<TokenLine & { status: string }>;
+  byRepoTool: (TokenLine & { repoId: string; tool: string })[];
+  byFeature: (TokenLine & { featureId: string })[];
+  byStatus: (TokenLine & { status: string })[];
   totalTokens: number;
 }
 

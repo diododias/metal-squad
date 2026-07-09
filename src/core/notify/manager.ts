@@ -40,9 +40,9 @@ export async function dispatch(
   const channels = buildChannels();
 
   if (channels.length === 0) {
-    await new DesktopChannel().send(safeMessage, metadata).catch(() => {});
+    await new DesktopChannel().send(safeMessage, metadata).catch(() => { /* ignore */ });
     return;
   }
 
-  await Promise.allSettled(channels.map((ch) => ch.send(safeMessage, metadata)));
+  await Promise.allSettled(channels.map(async (ch) => ch.send(safeMessage, metadata)));
 }

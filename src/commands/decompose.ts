@@ -55,7 +55,7 @@ export function registerDecompose(program: Command): void {
 
         if (opts.apply) {
           const count = applyDecomposedTasks(feature.id, output.tasks, cwd);
-          console.log(`\nbacklog.yaml updated: ${count} tasks applied to ${feature.id}.`);
+          console.log(`\nbacklog.yaml updated: ${String(count)} tasks applied to ${feature.id}.`);
         } else {
           console.log('\nRun again with --apply to update backlog.yaml.');
         }

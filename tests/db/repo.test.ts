@@ -7,7 +7,10 @@ const mockGet = vi.fn();
 const mockPrepare = vi.fn(() => ({ all: mockAll, run: mockRun, get: mockGet }));
 const mockPragma = vi.fn();
 const mockExec = vi.fn();
-const mockDb = { prepare: mockPrepare, pragma: mockPragma, exec: mockExec };
+const mockClose = vi.fn();
+const mockDb = { prepare: mockPrepare, pragma: mockPragma, exec: mockExec, close: mockClose };
+
+mockAll.mockReturnValue([]);
 const mockDatabase = vi.fn(() => mockDb);
 
 vi.mock('better-sqlite3', () => ({ default: mockDatabase }));
@@ -23,6 +26,7 @@ beforeEach(async () => {
   mockAll.mockReset();
   mockRun.mockReset();
   mockGet.mockReset();
+  mockAll.mockReturnValue([]);
   mockPrepare.mockImplementation(() => ({ all: mockAll, run: mockRun, get: mockGet }));
 });
 

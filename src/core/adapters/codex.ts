@@ -6,7 +6,29 @@ import { CliAbortError, CliTimeoutError, runCli } from './spawn.js';
 import { msqEventBus } from '../events/index.js';
 import { parseControlSignal } from './control.js';
 
-// Codex tem effort nativo via config: model_reasoning_effort.
+interface CodexEvent {
+  type?: string;
+  usage?: {
+    input_tokens?: number;
+    cached_input_tokens?: number;
+    output_tokens?: number;
+    reasoning_output_tokens?: number;
+  };
+  item?: {
+    type?: string;
+    text?: string;
+    name?: string;
+    tool_name?: string;
+    arguments?: unknown;
+    input?: unknown;
+    output?: unknown;
+    result?: unknown;
+    command?: string;
+    aggregated_output?: string;
+    exit_code?: number;
+  };
+}
+
 const EFFORT: Record<Effort, string> = {
   low: 'low',
   medium: 'medium',
@@ -46,7 +68,7 @@ export const codexAdapter: ToolAdapter = {
         heartbeatMs: 30_000,
         logLabel: `codex ${feature.id}`,
         heartbeatSuffix: () => progress.heartbeatSuffix(),
-        onHeartbeat: (message) => emitRunOutput(opts.runId, feature, message, 'stderr', 'heartbeat'),
+        onHeartbeat: (message) => { emitRunOutput(opts.runId, feature, message, 'stderr', 'heartbeat'); },
         onStdoutLine: (line) => {
           const update = progress.onStdoutLine(line);
           if (update.output) emitRunOutput(opts.runId, feature, update.output.line, 'stdout', update.output.source);
@@ -65,7 +87,7 @@ export const codexAdapter: ToolAdapter = {
         if (usage) emitUsage(opts.runId, feature, usage);
         return {
           ok: false,
-          summary: `timeout após ${Math.round(error.runtimeMs / 1000)}s. ${partial}`,
+          summary: `timeout após ${String(Math.round(error.runtimeMs / 1000))}s. ${partial}`,
           usage,
         };
       }
@@ -75,14 +97,14 @@ export const codexAdapter: ToolAdapter = {
         return {
           ok: false,
           aborted: true,
-          summary: `abortado manualmente após ${Math.round(error.runtimeMs / 1000)}s`,
+          summary: `abortado manualmente após ${String(Math.round(error.runtimeMs / 1000))}s`,
           usage,
         };
       }
       throw error;
     }
 
-    if (code !== 0) return { ok: false, summary: stderr.slice(-500) || `exit ${code}` };
+    if (code !== 0) return { ok: false, summary: stderr.slice(-500) || `exit ${String(code)}` };
 
     const finalMsg = lastAgentMessage(stdout);
     const usage = this.parseUsage?.(stdout) ?? undefined;
@@ -95,11 +117,10 @@ export const codexAdapter: ToolAdapter = {
     };
   },
 
-  // JSONL: o evento turn.completed carrega usage.
   parseUsage(transcript: string): TokenUsage | null {
     let usage: TokenUsage | null = null;
     for (const line of transcript.split('\n')) {
-      const evt = safeJson<any>(line);
+      const evt = safeJson<CodexEvent>(line);
       if (evt?.type === 'turn.completed' && evt.usage) {
         const input = evt.usage.input_tokens ?? 0;
         const cachedInput = evt.usage.cached_input_tokens ?? 0;
@@ -114,7 +135,7 @@ export const codexAdapter: ToolAdapter = {
 function lastAgentMessage(transcript: string): string {
   let msg = '';
   for (const line of transcript.split('\n')) {
-    const evt = safeJson<any>(line);
+    const evt = safeJson<CodexEvent>(line);
     if (evt?.type === 'item.completed' && evt.item?.type === 'agent_message') {
       msg = evt.item.text ?? msg;
     }
@@ -145,7 +166,7 @@ function summarizePartialOutput(stdout: string, stderr: string, touchedFiles: st
   return 'sem saída útil capturada.';
 }
 
-function safeJson<T>(s: string): T | null {
+function safeJson<T>(s: string): T | null { // eslint-disable-line @typescript-eslint/no-unnecessary-type-parameters
   try {
     return JSON.parse(s) as T;
   } catch {
@@ -183,7 +204,7 @@ function formatTouchedFiles(files: string[]): string {
   const shown = files.slice(0, 5).join(', ');
   const remaining = files.length - Math.min(files.length, 5);
   return remaining > 0
-    ? `arquivos tocados: ${shown} (+${remaining})`
+    ? `arquivos tocados: ${shown} (+${String(remaining)})`
     : `arquivos tocados: ${shown}`;
 }
 
@@ -207,8 +228,8 @@ function createCodexProgress(): {
   let lastStderrSnippet = '';
 
   return {
-    onStdoutLine(line: string) {
-      const evt = safeJson<any>(line);
+    onStdoutLine(line: string): ProgressUpdate {
+      const evt = safeJson<CodexEvent>(line);
       if (!evt?.type) return {};
       eventCount += 1;
       lastEventType = evt.type;
@@ -245,7 +266,7 @@ function createCodexProgress(): {
 
       return {};
     },
-    onStderrLine(line: string) {
+    onStderrLine(line: string): ProgressUpdate {
       const text = normalizeSnippet(line);
       if (!text) return {};
       lastStderrSnippet = text;
@@ -256,9 +277,9 @@ function createCodexProgress(): {
         },
       };
     },
-    heartbeatSuffix() {
+    heartbeatSuffix(): string | undefined {
       const parts: string[] = [];
-      if (eventCount > 0) parts.push(`eventos=${eventCount}`);
+      if (eventCount > 0) parts.push(`eventos=${String(eventCount)}`);
       if (lastEventType) parts.push(`último=${lastEventType}`);
       if (lastAgentSnippet) parts.push(`agente="${lastAgentSnippet}"`);
       else if (lastToolSnippet) parts.push(`tool="${lastToolSnippet}"`);
@@ -269,12 +290,12 @@ function createCodexProgress(): {
 }
 
 function normalizeSnippet(text: unknown): string {
-  return String(text ?? '').replace(/\s+/g, ' ').trim().slice(0, 140);
+  return String(text ?? '').replace(/\s+/g, ' ').trim().slice(0, 140); // eslint-disable-line @typescript-eslint/no-base-to-string
 }
 
-function summarizeCodexToolEvent(evt: any): string | null {
-  if (evt?.type !== 'item.completed') return null;
-  const item = evt?.item;
+function summarizeCodexToolEvent(evt: CodexEvent): string | null {
+  if (evt.type !== 'item.completed') return null;
+  const item = evt.item;
   if (!item || item.type === 'agent_message') return null;
   if (item.type === 'command_execution') {
     return summarizeCommandExecution(item);
@@ -283,19 +304,20 @@ function summarizeCodexToolEvent(evt: any): string | null {
   const label = normalizeSnippet(item.name ?? item.tool_name ?? item.type ?? '');
   const payload = serializeToolPayload(item.arguments ?? item.input ?? item.output ?? item.result);
   if (!label && !payload) return null;
-  return normalizeSnippet(payload ? `tool ${label || item.type} ${payload}` : `tool ${label}`);
+  return normalizeSnippet(payload ? `tool ${(label || item.type) ?? 'unknown'} ${payload}` : `tool ${label}`);
 }
 
-function summarizeCommandExecution(item: Record<string, unknown>): string | null {
-  const command = normalizeSnippet(String(item.command ?? ''));
-  const output = normalizeSnippet(String(item.aggregated_output ?? ''));
+function summarizeCommandExecution(item: CodexEvent['item']): string | null {
+  if (!item) return null;
+  const command = normalizeSnippet(item.command ?? '');
+  const output = normalizeSnippet(item.aggregated_output ?? '');
   const exitCode = typeof item.exit_code === 'number' ? item.exit_code : null;
   if (!command && !output) return null;
   if (output) {
     return normalizeSnippet(`shell ${command} -> ${output}`);
   }
   if (exitCode !== null) {
-    return normalizeSnippet(`shell ${command} (exit ${exitCode})`);
+    return normalizeSnippet(`shell ${command} (exit ${String(exitCode)})`);
   }
   return normalizeSnippet(`shell ${command}`);
 }
@@ -306,7 +328,7 @@ function serializeToolPayload(payload: unknown): string {
   try {
     return normalizeSnippet(JSON.stringify(payload));
   } catch {
-    return normalizeSnippet(String(payload));
+    return normalizeSnippet(String(payload)); // eslint-disable-line @typescript-eslint/no-base-to-string
   }
 }
 

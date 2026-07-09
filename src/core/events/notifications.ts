@@ -13,24 +13,24 @@ export function attachEventNotifications(
         featureId,
         tool,
         stage,
-      }).catch(() => {});
+      }).catch(() => { /* ignore dispatch errors */ });
     }),
     eventBus.subscribe('gate:created', ({ gateId, featureId }) => {
       const message = [
-        `metal-squad: gate ${gateId} created for ${featureId}`,
-        `Or reply: gate:${gateId} approve | gate:${gateId} skip | gate:${gateId} retry`,
+        `metal-squad: gate ${String(gateId)} created for ${featureId}`,
+        `Or reply: gate:${String(gateId)} approve | gate:${String(gateId)} skip | gate:${String(gateId)} retry`,
       ].join('\n');
       void dispatch('gate:created', message, {
         gateId,
         featureId,
         reply_markup: {
           inline_keyboard: [[
-            { text: '✅ Approve', callback_data: `gate:${gateId} approve` },
-            { text: '⏭ Skip', callback_data: `gate:${gateId} skip` },
-            { text: '🔄 Retry', callback_data: `gate:${gateId} retry` },
+            { text: '✅ Approve', callback_data: `gate:${String(gateId)} approve` },
+            { text: '⏭ Skip', callback_data: `gate:${String(gateId)} skip` },
+            { text: '🔄 Retry', callback_data: `gate:${String(gateId)} retry` },
           ]],
         },
-      }).catch(() => {});
+      }).catch(() => { /* ignore dispatch errors */ });
     }),
     eventBus.subscribe('stage:request-created', ({ requestId, featureId, stage, kind, prompt, source }) => {
       if (kind === 'approval') {
@@ -45,14 +45,14 @@ export function attachEventNotifications(
             featureId,
             stage,
             source: 'auto',
-          }).catch(() => {});
+          }).catch(() => { /* ignore dispatch errors */ });
           return;
         }
 
         const message = [
           `metal-squad: ${featureId} completed stage "${stage}"`,
           prompt,
-          `Or reply: stage:${requestId} advance | stage:${requestId} retry | stage:${requestId} hold`,
+          `Or reply: stage:${String(requestId)} advance | stage:${String(requestId)} retry | stage:${String(requestId)} hold`,
         ].join('\n');
         void dispatch('stage:approval', message, {
           requestId,
@@ -61,43 +61,43 @@ export function attachEventNotifications(
           source: 'manual',
           reply_markup: {
             inline_keyboard: [[
-              { text: '✅ Advance', callback_data: `stage:${requestId} advance` },
-              { text: '🔄 Retry', callback_data: `stage:${requestId} retry` },
-              { text: '⏸ Hold', callback_data: `stage:${requestId} hold` },
+              { text: '✅ Advance', callback_data: `stage:${String(requestId)} advance` },
+              { text: '🔄 Retry', callback_data: `stage:${String(requestId)} retry` },
+              { text: '⏸ Hold', callback_data: `stage:${String(requestId)} hold` },
             ]],
           },
-        }).catch(() => {});
+        }).catch(() => { /* ignore dispatch errors */ });
         return;
       }
 
       const message = [
         `metal-squad: ${featureId} needs human input at stage ${stage}`,
         prompt,
-        `Reply: input:${requestId} <text>`,
+        `Reply: input:${String(requestId)} <text>`,
       ].join('\n');
       void dispatch('stage:input', message, {
         requestId,
         featureId,
         stage,
-      }).catch(() => {});
+      }).catch(() => { /* ignore dispatch errors */ });
     }),
     eventBus.subscribe('run:failed', ({ featureId, error }) => {
       void dispatch('run:failed', `metal-squad: ${featureId} failed — ${error}`, {
         featureId,
         error,
-      }).catch(() => {});
+      }).catch(() => { /* ignore dispatch errors */ });
     }),
     eventBus.subscribe('budget:alert', ({ percent, spent, limit }) => {
-      void dispatch('budget:alert', `metal-squad: budget ${percent}% reached (${spent}/${limit})`, {
+      void dispatch('budget:alert', `metal-squad: budget ${String(percent)}% reached (${String(spent)}/${String(limit)})`, {
         percent,
         spent,
         limit,
-      }).catch(() => {});
+      }).catch(() => { /* ignore dispatch errors */ });
     }),
     eventBus.subscribe('run:done', ({ featureId, result }) => {
       void dispatch('run:done', `metal-squad: ${featureId} done — ${result.summary}`, {
         featureId,
-      }).catch(() => {});
+      }).catch(() => { /* ignore dispatch errors */ });
     }),
   ];
 

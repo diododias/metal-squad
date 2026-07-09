@@ -40,7 +40,7 @@ export function useTokenStats(sinceDays = 7, intervalMs = 5000): TokenStatsState
 
     refresh();
     const timer = setInterval(refresh, intervalMs);
-    return () => {
+    return (): void => {
       cancelled = true;
       clearInterval(timer);
     };

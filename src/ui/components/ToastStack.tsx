@@ -19,7 +19,7 @@ export function ToastStack({ toasts, width }: Props): React.ReactElement | null 
     <Box position="absolute" flexDirection="column" marginTop={1} marginLeft={Math.max(0, width - toastWidth - 4)}>
       {toasts.map((toast) => (
         <Box
-          key={`${toast.event}:${toast.id}`}
+          key={`${toast.event}:${String(toast.id)}`}
           borderStyle="round"
           borderColor={theme.notificationTone(toast.tone).color ?? theme.surface.borderColor}
           flexDirection="column"

@@ -52,7 +52,7 @@ export function FeaturePreview({ feature, settings, mode, width }: Props): React
                   .split('\n')
                   .slice(0, mode === 'stacked' ? 10 : 18)
                   .map((line, index) => (
-                    // eslint-disable-next-line react/no-array-index-key
+                     
                     <Text key={index} {...theme.role('muted')}>
                       {truncateText(line || ' ', Math.max(24, columnWidth - 4))}
                     </Text>

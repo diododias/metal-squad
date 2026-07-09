@@ -88,7 +88,7 @@ export function schedule(
     }
 
     for (const feature of readyFeatures) {
-      if (active.size >= opts.concurrency || state !== 'running') break;
+      if (active.size >= opts.concurrency) break;
       remaining.splice(remaining.indexOf(feature), 1);
       active.set(feature.id, feature);
       opts.onStart?.(feature);
@@ -123,7 +123,7 @@ export function schedule(
           done.add(feature.id);
           pump();
         })
-        .catch((error) => {
+        .catch((error: unknown) => {
           active.delete(feature.id);
           settled = true;
           rejectResult(error);
@@ -135,23 +135,23 @@ export function schedule(
 
   return {
     result,
-    getState: () => state,
-    pause() {
+    getState: (): SchedulerState => state,
+    pause(): void {
       if (settled || state === 'aborting') return;
       setState('paused');
     },
-    resume() {
+    resume(): void {
       if (settled || state !== 'paused') return;
       setState('running');
       pump();
     },
-    abortFeature(featureId: string) {
+    abortFeature(featureId: string): boolean {
       const feature = active.get(featureId);
       if (!feature || settled) return false;
       opts.onAbortFeature?.(featureId);
       return true;
     },
-    abortAll() {
+    abortAll(): void {
       if (settled || state === 'aborting') return;
       setState('aborting');
       for (const featureId of active.keys()) {

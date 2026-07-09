@@ -67,7 +67,7 @@ export const claudeAdapter: ToolAdapter = {
         heartbeatMs: 30_000,
         logLabel: `claude ${feature.id}`,
         heartbeatSuffix: () => progress.heartbeatSuffix(),
-        onHeartbeat: (message) => emitRunOutput(opts.runId, feature, message, 'stderr', 'heartbeat'),
+        onHeartbeat: (message) => { emitRunOutput(opts.runId, feature, message, 'stderr', 'heartbeat'); },
         signal: opts.signal,
         onStdoutLine: (line) => {
           const updates = progress.onStdoutLine(line);
@@ -92,7 +92,7 @@ export const claudeAdapter: ToolAdapter = {
         if (usage) emitUsage(opts.runId, feature, usage);
         return {
           ok: false,
-          summary: `timeout após ${Math.round(error.runtimeMs / 1000)}s. ${partial}`,
+          summary: `timeout após ${String(Math.round(error.runtimeMs / 1000))}s. ${partial}`,
           usage,
         };
       }
@@ -102,7 +102,7 @@ export const claudeAdapter: ToolAdapter = {
         return {
           ok: false,
           aborted: true,
-          summary: `abortado manualmente após ${Math.round(error.runtimeMs / 1000)}s`,
+          summary: `abortado manualmente após ${String(Math.round(error.runtimeMs / 1000))}s`,
           usage,
         };
       }
@@ -111,14 +111,14 @@ export const claudeAdapter: ToolAdapter = {
 
     if (code !== 0) {
       const partial = summarizePartialOutput(stdout, stderr, detectTouchedFiles(opts.cwd));
-      return { ok: false, summary: `exit ${code}. ${partial}` };
+      return { ok: false, summary: `exit ${String(code)}. ${partial}` };
     }
 
     const resultEvent = findResultEvent(stdout);
     const usage = this.parseUsage?.(stdout) ?? undefined;
     if (usage) emitUsage(opts.runId, feature, usage);
     return {
-      ok: resultEvent?.subtype !== 'error_max_turns' && code === 0,
+      ok: resultEvent?.subtype !== 'error_max_turns',
       summary: (resultEvent?.result ?? '').slice(0, 200),
       usage,
       control: parseControlSignal(resultEvent?.result ?? ''),
@@ -136,7 +136,7 @@ export const claudeAdapter: ToolAdapter = {
   },
 };
 
-function safeJson<T>(s: string): T | null {
+function safeJson<T>(s: string): T | null { // eslint-disable-line @typescript-eslint/no-unnecessary-type-parameters
   try {
     return JSON.parse(s) as T;
   } catch {
@@ -209,7 +209,7 @@ function formatTouchedFiles(files: string[]): string {
   const shown = files.slice(0, 5).join(', ');
   const remaining = files.length - Math.min(files.length, 5);
   return remaining > 0
-    ? `arquivos tocados: ${shown} (+${remaining})`
+    ? `arquivos tocados: ${shown} (+${String(remaining)})`
     : `arquivos tocados: ${shown}`;
 }
 
@@ -246,7 +246,7 @@ function createClaudeProgress(): {
   let latestCachedInput = 0;
 
   return {
-    onStdoutLine(line: string) {
+    onStdoutLine(line: string): ProgressUpdate[] {
       const updates = parseClaudeLine(line);
       for (const u of updates) {
         if (u.output) {
@@ -263,7 +263,7 @@ function createClaudeProgress(): {
           } else {
             cumulativeOutput += u.usage.output;
             if (u.usage.input > 0) latestInput = u.usage.input;
-            if ((u.usage.cachedInput ?? 0) > 0) latestCachedInput = u.usage.cachedInput!;
+            if ((u.usage.cachedInput ?? 0) > 0) latestCachedInput = u.usage.cachedInput ?? 0;
             u.usage = {
               input: latestInput,
               cachedInput: latestCachedInput,
@@ -275,17 +275,17 @@ function createClaudeProgress(): {
       }
       return updates;
     },
-    onStderrLine(line: string) {
+    onStderrLine(line: string): ProgressUpdate[] {
       const text = normalizeSnippet(line);
       if (!text) return [];
       stderrCount += 1;
       lastStderrSnippet = text;
       return [{ output: { line: text, source: 'stderr' } }];
     },
-    heartbeatSuffix() {
+    heartbeatSuffix(): string | undefined {
       const parts: string[] = [];
-      if (eventCount > 0) parts.push(`eventos=${eventCount}`);
-      if (stderrCount > 0) parts.push(`stderr=${stderrCount}`);
+      if (eventCount > 0) parts.push(`eventos=${String(eventCount)}`);
+      if (stderrCount > 0) parts.push(`stderr=${String(stderrCount)}`);
       if (lastAgentSnippet) parts.push(`agente="${lastAgentSnippet}"`);
       else if (lastToolSnippet) parts.push(`tool="${lastToolSnippet}"`);
       else if (lastStderrSnippet) parts.push(`stderr="${lastStderrSnippet}"`);
@@ -317,7 +317,7 @@ function parseClaudeLine(line: string): ProgressUpdate[] {
       } else if (block.type === 'text') {
         const text = normalizeSnippet(block.text);
         if (text) updates.push({ output: { line: text, source: 'agent' } });
-      } else if (block.type === 'tool_use') {
+      } else {
         const name = normalizeSnippet(block.name);
         const input = normalizeSnippet(JSON.stringify(block.input ?? {}));
         const stage = detectStageFromSkill(name);

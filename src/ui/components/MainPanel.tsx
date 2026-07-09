@@ -7,7 +7,6 @@ import type { BacklogSettings, FeatureCatalogEntry } from '../catalog.js';
 import type { LayoutMode, VerticalBudget } from '../format.js';
 import {
   STATUS_ICON,
-  formatClock,
   formatElapsed,
   formatPercent,
   formatHeartbeatLine,
@@ -47,8 +46,6 @@ const BACKLOG_TASK_ICON: Record<string, string> = {
   blocked: '!',
 };
 
-// Matches WorkflowSchema's own default (schema.ts) — used only when a run
-// has no matching feature catalog entry to read workflow.stages from.
 const DEFAULT_STEPPER_STAGES = ['specify', 'plan', 'tasks', 'implement', 'validate'];
 
 interface Props {
@@ -57,31 +54,18 @@ interface Props {
   selectedRun: RunSummary | null;
   selectedRunIndex: number;
   selectedFeature: FeatureCatalogEntry | null;
-  /** F31 section 3: resolves model/effort per-row for every kanban card, not just the selected run. */
   featureCatalog?: Record<string, FeatureCatalogEntry>;
-  /** F31 section 5b: backlog-level budget/stageSkills shown in the config section. */
   backlogSettings?: BacklogSettings;
   activeView: ActiveView;
   output: RunOutputRow[];
   outputPaused: boolean;
   logsVisible: boolean;
   focusPanel: 'columns' | 'gates' | 'activity';
-  /** F31 "novo modelo de foco": which kanban column has the cursor. */
   activeColumn: DashboardGroupId;
-  /** F31 section 5: first visible section in the run-detail scrollable body. */
   detailSectionIndex?: number;
-  /** F31 section 5: how many sections fit per page (taller terminal → more). */
   detailPageSize?: number;
-  /** F31 section 5: `i` toggle — collapses long sections when true. */
   detailDense?: boolean;
-  /** US2: which detail-section tab is currently active. Replaces the
-   *  scroll-based page selector — only this section is rendered in the
-   *  body, with the TabBar above it. Matches a `DetailSectionId` (summary,
-   *  spec, workflow, config, skills, tasks, output). */
   activeTab?: DetailSectionId;
-  /** F31 "Riscos de UX resolvidos" item 1: degrades the overview's own
-   * chrome (cards-per-column, activity feed) under height pressure — never
-   * cuts the gates strip. Distinct from detailPageSize's own budget use. */
   verticalBudget?: VerticalBudget;
   mode: LayoutMode;
   width: number;
@@ -110,9 +94,9 @@ const COLUMN_EMPTY_LABEL: Record<DashboardGroupId, string> = {
 
 export function MainPanel({
   runs,
-  gates,
+  gates: _gates,
   selectedRun,
-  selectedRunIndex,
+  selectedRunIndex: _selectedRunIndex,
   selectedFeature,
   featureCatalog = {},
   backlogSettings = { stageSkills: {} },
@@ -138,14 +122,6 @@ export function MainPanel({
   const theme = useTheme();
   const innerWidth = Math.max(32, width - 4);
   const visibleOutput = output.slice(-(mode === 'stacked' ? 8 : 14));
-  // F31 item 1 degradation order: activity feed goes first, then stats
-  // density (StatsBar's own concern), then cards-per-column (here) — gates
-  // never cut. Taller terminals raise the cap; short ones lower it.
-  // Caps stay conservative even in 'tall' terminals: a 14"-16" laptop's
-  // fullscreen terminal reports as 'tall' (>40 rows) but each card still
-  // costs 3 lines, so the old 10/6 caps could push a single dense column
-  // past the visible height (Ink has no scroll). 6/4 keeps every budget
-  // tier fitting a common laptop window.
   const maxPerColumn = verticalBudget === 'short'
     ? (mode === 'stacked' ? 2 : 3)
     : verticalBudget === 'tall'
@@ -156,14 +132,9 @@ export function MainPanel({
     ? innerWidth
     : Math.max(18, Math.floor((innerWidth - columnGap * (DASHBOARD_GROUP_ORDER.length - 1)) / DASHBOARD_GROUP_ORDER.length));
   const nextDemands = collectNextDemands(runs);
-  const selectedRunStage = selectedRun ? getRunStageLabel(selectedRun) : null;
+  const _selectedRunStage = selectedRun ? getRunStageLabel(selectedRun) : null;
   const selectedRunStatusLabel = selectedRun ? getRunStatusLabel(selectedRun) : null;
-  // F31 item 4: pass the feature's declared stages so the stepper and this
-  // summary can never disagree on order, even when a feature customizes them.
-  const workflowStages = summarizeTaskRuns(taskRuns, selectedFeature?.workflow?.stages);
-  // US2: tab navigation replaces multi-section paging. When `activeTab` is
-  // provided, only that section is rendered; otherwise fall back to the
-  // legacy scroll-page window for callers that have not migrated yet.
+  const workflowStages = summarizeTaskRuns(taskRuns, selectedFeature?.workflow?.stages ?? []);
   const visibleDetailSections = activeTab
     ? [activeTab]
     : DETAIL_SECTION_ORDER.slice(detailSectionIndex, detailSectionIndex + detailPageSize);
@@ -215,8 +186,6 @@ export function MainPanel({
         <FeaturePreview feature={selectedPending} settings={backlogSettings} mode={mode} width={innerWidth} />
       ) : activeView === 'run' && selectedRun ? (
         <Box flexDirection="column" marginTop={1}>
-          {/* F31 section 5: anchored header — title, metrics, and the
-              workflow stepper never scroll away; only the body below does. */}
           <Text {...theme.role('text')} bold>{selectedFeature?.title ?? selectedRun.featureId}</Text>
           <Text {...theme.role('muted')}>{selectedRun.featureId} · {selectedRun.repoId}</Text>
           <Box
@@ -226,19 +195,15 @@ export function MainPanel({
             <DetailMetric
               theme={theme}
               label="Status"
-              value={`${STATUS_ICON[selectedRun.status]} ${selectedRunStatusLabel}`}
+              value={`${STATUS_ICON[selectedRun.status]} ${selectedRunStatusLabel ?? ''}`}
               accentRole={theme.resolution.profile.statusRoleByRun[getRunStatusTone(selectedRun.status)]}
               width={metricWidth}
               stacked={mode === 'stacked'}
             />
-            {/* D3: Tool (the adapter — claude/codex/opencode) and Model are
-                distinct facts. They used to share one "Tool"-labelled card
-                that actually preferred the model, hiding which adapter ran
-                the feature. Two separate cards fix that. */}
             <DetailMetric
               theme={theme}
               label="Tool"
-              value={selectedRun.tool || 'unknown'}
+              value={selectedRun.tool}
               width={metricWidth}
               stacked={mode === 'stacked'}
             />
@@ -286,11 +251,6 @@ export function MainPanel({
               width={innerWidth}
             />
           </Box>
-          {/* F31 section 5 / US2: scrollable body — Ink has no native scroll,
-              so the body now renders ONE section per tab (Tab/Shift+Tab/1-7
-              switch via App's activeTab state) instead of paging through
-              multiple sections. The legacy j/k fine-scroll fallback still
-              works when activeTab is not supplied. `i` toggles density. */}
           {activeTab ? (
             <TabBar
               theme={theme}
@@ -308,7 +268,7 @@ export function MainPanel({
                   selectedRun,
                   selectedFeature,
                   backlogSettings,
-                  selectedRunStage,
+                  selectedRunStage: _selectedRunStage,
                   breakdown,
                   sessionTokens,
                   pipelineTokens,
@@ -324,8 +284,8 @@ export function MainPanel({
             ))}
             <Text {...theme.role('muted')}>
               {activeTab
-                ? `Tab ${DETAIL_SECTION_ORDER.indexOf(activeTab) + 1}/${DETAIL_SECTION_ORDER.length} · Tab/Shift+Tab cycle · 1-7 jump · i density: ${detailDense ? 'dense' : 'rich'}`
-                : `Section ${detailSectionIndex + 1}-${Math.min(DETAIL_SECTION_ORDER.length, detailSectionIndex + detailPageSize)} of ${DETAIL_SECTION_ORDER.length}  ·  j/k scroll · PgUp/PgDn page · i density: ${detailDense ? 'dense' : 'rich'}`}
+                ? `Tab ${String(DETAIL_SECTION_ORDER.indexOf(activeTab) + 1)}/${String(DETAIL_SECTION_ORDER.length)} · Tab/Shift+Tab cycle · 1-7 jump · i density: ${detailDense ? 'dense' : 'rich'}`
+                : `Section ${String(detailSectionIndex + 1)}-${String(Math.min(DETAIL_SECTION_ORDER.length, detailSectionIndex + detailPageSize))} of ${String(DETAIL_SECTION_ORDER.length)}  ·  j/k scroll · PgUp/PgDn page · i density: ${detailDense ? 'dense' : 'rich'}`}
             </Text>
           </Box>
         </Box>
@@ -336,11 +296,6 @@ export function MainPanel({
               Select a run with arrows or j/k, then press Enter to inspect it. Esc returns here.
             </Text>
           )}
-          {/* F31 section 3 + "componente de card unico": columns render
-              side-by-side in full/compact layout, stacked in narrow
-              terminals — every group always renders (EmptyState instead of
-              being skipped), and every card is the same KanbanCard whether
-              it's a pending feature (TODO) or an actual run. */}
           <Box flexDirection={mode === 'stacked' ? 'column' : 'row'}>
             {DASHBOARD_GROUP_ORDER.map((groupId) => {
               const columnFocused = focusPanel === 'columns' && activeColumn === groupId;
@@ -416,12 +371,10 @@ export function MainPanel({
             <Box marginTop={1} flexDirection="column">
               <Text {...theme.role('text')} bold>Next demands</Text>
               {nextDemands.slice(0, mode === 'stacked' ? 3 : 5).map((entry, index) => (
-                <Text key={`${index}:${entry}`} {...theme.role('muted')}>{truncateText(entry, Math.max(24, innerWidth - 2))}</Text>
+                <Text key={`${String(index)}:${entry}`} {...theme.role('muted')}>{truncateText(entry, Math.max(24, innerWidth - 2))}</Text>
               ))}
             </Box>
           )}
-          {/* F31 item 1: first to go under height pressure — still reachable
-              via `o` (full notifications view), never truly lost. */}
           {notifications.length > 0 && verticalBudget !== 'short' && (
             <Box marginTop={1} flexDirection="column">
               <Text {...theme.role('text')} bold>Recent activity</Text>
@@ -493,13 +446,6 @@ function DetailSection({
   );
 }
 
-// US2: inline tab bar for the run-detail screen. Lives inside MainPanel.tsx
-// (not a separate file) per contracts/component-contracts.md — keeps the
-// active section's indicator anchored above the body so the user always
-// knows which section they are viewing, with Tab/Shift+Tab/1-7 as the
-// direct selectors. Active tab uses `theme.role('focus')`, inactive tabs
-// use `theme.role('muted')`. Each label is wrapped in brackets, so an
-// active tab reads `[Summary]` and an inactive one reads `Summary`.
 function TabBar({
   theme,
   sections,
@@ -515,7 +461,7 @@ function TabBar({
 }): React.ReactElement {
   const parts = sections.map((id, index) => {
     const isActive = id === activeTab;
-    const text = isActive ? `[${labels[id]}]` : labels[id] ?? id;
+    const text = isActive ? `[${labels[id]}]` : labels[id];
     return { id, text, isActive, index };
   });
 
@@ -533,13 +479,6 @@ function TabBar({
   );
 }
 
-// D5: AI log rendering. `AI>` and `TOOL>` prefixes are hidden entirely — the
-// color palette (getOutputStyle) already distinguishes sources. TOOL output
-// renders inside a bordered block (a markdown-fenced-code-block look, since
-// Ink has no real Markdown renderer) instead of an inline prefixed line.
-// Heartbeat lines go through formatHeartbeatLine so a long raw diagnostic
-// string (`[msq] codex running for 42s (stdout 1B stderr 0B idle 0s)`)
-// condenses into a short line instead of being truncated mid-word.
 function renderOutputEntry(
   theme: ReturnType<typeof useTheme>,
   entry: RunOutputRow,
@@ -576,7 +515,6 @@ function renderOutputEntry(
     );
   }
 
-  // 'agent' (and any other/default source): prefix hidden per D5.
   return (
     <Text key={entry.id} {...getOutputStyle(theme, entry.source)}>
       {truncateText(entry.line, maxWidth)}
@@ -602,17 +540,13 @@ interface DetailSectionContext {
   dense: boolean;
 }
 
-// F31 section 5: one of DETAIL_SECTION_ORDER's sections, rendered as its own
-// rich bordered Box (unchanged styling from before) — only the surrounding
-// paging logic in MainPanel decides which of these are currently visible.
-// `dense` (the `i` toggle) shortens previews without ever removing a section.
 function renderDetailSection(sectionId: DetailSectionId, ctx: DetailSectionContext): React.ReactElement {
   const {
     theme,
     selectedRun,
     selectedFeature,
     backlogSettings,
-    selectedRunStage,
+    selectedRunStage: _selectedRunStage,
     breakdown,
     sessionTokens,
     pipelineTokens,
@@ -627,22 +561,18 @@ function renderDetailSection(sectionId: DetailSectionId, ctx: DetailSectionConte
 
   switch (sectionId) {
     case 'summary': {
-      // US3 / FR-004: run summary collapses into a single line of key metrics
-      // joined by pipe separators. Extras (pending gate prompts, retry/gate-wait
-      // breakdowns) stay as short optional follow-ups so the main line stays
-      // scannable at a glance. Net effect: the body shrinks from ~5 lines to 1.
       const statusGlyph = STATUS_ICON[selectedRun.status];
       const elapsed = formatElapsed(selectedRun.startedAt, selectedRun.endedAt);
-      const ctx = selectedRun.contextWindowTokens
+      const ctxLabel = selectedRun.contextWindowTokens
         ? `${formatPercent(selectedRun.contextWindowPercent)} ctx`
         : '— ctx';
       const head: string = [
         `${statusGlyph} ${selectedRun.status}`,
-        `tool ${selectedRun.tool || 'unknown'}`,
+        `tool ${selectedRun.tool}`,
         `${formatTokens(sessionTokens)} session`,
         `${formatTokens(pipelineTokens)} pipeline`,
         `${elapsed} elapsed`,
-        ctx,
+        ctxLabel,
       ].join(' | ');
       return (
         <DetailSection theme={theme} title={DETAIL_SECTION_LABEL.summary} width={width}>
@@ -652,12 +582,12 @@ function renderDetailSection(sectionId: DetailSectionId, ctx: DetailSectionConte
               wait {truncateText(selectedRun.pendingStageRequestPrompt, Math.max(22, width - 6))}
             </Text>
           )}
-          {breakdown && breakdown.wallMs !== null && (
+          {breakdown?.wallMs != null && (
             <>
               <Text {...theme.role('muted')}>agent {formatDurationMs(breakdown.agentMs)}</Text>
               {breakdown.gateWaitMs > 0 && <Text {...theme.role('muted')}>gate wait {formatDurationMs(breakdown.gateWaitMs)}</Text>}
               {breakdown.retryCount > 0 && (
-                <Text {...theme.role('muted')}>retry wait {formatDurationMs(breakdown.retryWaitMs)} ({breakdown.retryCount}x)</Text>
+                <Text {...theme.role('muted')}>retry wait {formatDurationMs(breakdown.retryWaitMs)} ({String(breakdown.retryCount)}x)</Text>
               )}
             </>
           )}
@@ -673,7 +603,6 @@ function renderDetailSection(sectionId: DetailSectionId, ctx: DetailSectionConte
               .split('\n')
               .slice(0, dense ? 4 : 18)
               .map((line, index) => (
-                // eslint-disable-next-line react/no-array-index-key
                 <Text key={index} {...theme.role('muted')}>
                   {truncateText(line || ' ', Math.max(24, width - 4))}
                 </Text>
@@ -687,11 +616,6 @@ function renderDetailSection(sectionId: DetailSectionId, ctx: DetailSectionConte
       );
 
     case 'workflow':
-      // US5 / FR-005: the header's WorkflowStepper already shows per-stage
-      // done/total progress — the body used to duplicate that line per stage.
-      // The body now shows ONE pointer line plus the per-stage task breakdown
-      // (the drill-down the header doesn't have), so the tab stays accessible
-      // but does not re-render the elevator-pitch summary the user already saw.
       return (
         <DetailSection theme={theme} title={DETAIL_SECTION_LABEL.workflow} width={width}>
           <Text {...theme.role('muted')}>
@@ -708,15 +632,15 @@ function renderDetailSection(sectionId: DetailSectionId, ctx: DetailSectionConte
                   {[
                     stage.totalTokens > 0 ? `${formatTokens(stage.totalTokens)} tokens` : null,
                     stage.maxContextPercent !== null ? `${formatPercent(stage.maxContextPercent)} ctx` : null,
-                    stage.running > 0 ? `${stage.running} active` : null,
-                    stage.pending > 0 ? `${stage.pending} pending` : null,
-                    stage.blocked > 0 ? `${stage.blocked} blocked` : null,
-                    stage.failed > 0 ? `${stage.failed} failed` : null,
-                    stage.skipped > 0 ? `${stage.skipped} skipped` : null,
+                    stage.running > 0 ? `${String(stage.running)} active` : null,
+                    stage.pending > 0 ? `${String(stage.pending)} pending` : null,
+                    stage.blocked > 0 ? `${String(stage.blocked)} blocked` : null,
+                    stage.failed > 0 ? `${String(stage.failed)} failed` : null,
+                    stage.skipped > 0 ? `${String(stage.skipped)} skipped` : null,
                   ].filter(Boolean).join('  ·  ') || `${stage.stage}: completed`}
                 </Text>
                 {stage.tasks.slice(0, dense ? 1 : 6).map((task, index) => (
-                  <Text key={`${stage.stage}:${task.taskId}:${index}`} {...theme.role('muted')}>
+                  <Text key={`${stage.stage}:${task.taskId}:${String(index)}`} {...theme.role('muted')}>
                     {task.status === 'running' ? '>' : '-'} {truncateText(
                       [
                         task.title,
@@ -747,9 +671,9 @@ function renderDetailSection(sectionId: DetailSectionId, ctx: DetailSectionConte
     case 'skills':
       return (
         <DetailSection theme={theme} title={DETAIL_SECTION_LABEL.skills} width={width}>
-          {selectedFeature?.skills?.length ? (
+          {selectedFeature?.skills.length ? (
             selectedFeature.skills.map((skill, index) => (
-              <Text key={`${skill}:${index}`} {...theme.role('success')}>
+              <Text key={`${skill}:${String(index)}`} {...theme.role('success')}>
                 - {skill}
               </Text>
             ))
@@ -816,7 +740,7 @@ function collectNextDemands(runs: RunSummary[]): string[] {
   const next = runs
     .map((run) => {
       const summary = run.pipelineResumeSummary?.trim();
-      if (!summary || !summary.includes('next ')) return null;
+      if (!summary?.includes('next ')) return null;
       return `${run.featureId}: ${summary}`;
     })
     .filter((entry): entry is string => Boolean(entry))

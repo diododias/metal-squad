@@ -96,7 +96,7 @@ export function initConfig(): void {
 }
 
 export function resolveDbPath(): string {
-  return process.env[DB_PATH_ENV] || DEFAULT_DB_PATH;
+  return process.env[DB_PATH_ENV] ?? DEFAULT_DB_PATH;
 }
 
 export function ensureDataDir(dbPath = resolveDbPath()): void {
@@ -108,7 +108,7 @@ function normalizeLegacyConfig(raw: unknown): unknown {
   const cfg = structuredClone(raw) as {
     telegramChatId?: string;
     notifications?: {
-      channels?: Array<{ type: string; chatId?: string }>;
+      channels?: { type: string; chatId?: string }[];
       events?: string[];
     };
   };

@@ -56,7 +56,7 @@ export function WorkflowStepper({ stages, workflowStages, currentStage, width }:
       {stages.map((stage, index) => {
         const summary = summaryByStage.get(stage);
         const marker = markerFor(stage, currentStage, summary);
-        const countLabel = summary && summary.total > 0 ? ` ${summary.done}/${summary.total}` : '';
+        const countLabel = summary && summary.total > 0 ? ` ${String(summary.done)}/${String(summary.total)}` : '';
         const style = marker === 'current'
           ? theme.role('focus')
           : marker === 'done'

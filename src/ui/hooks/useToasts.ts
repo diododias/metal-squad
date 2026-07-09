@@ -21,7 +21,7 @@ export function useToasts(maxItems = 4): ToastEntry[] {
       message: string,
       tone: ToastEntry['tone'],
       ttlMs = DEFAULT_TTL_MS,
-    ) => {
+    ): void => {
       const entry: ToastEntry = {
         id: ++counter.current,
         event,
@@ -39,24 +39,24 @@ export function useToasts(maxItems = 4): ToastEntry[] {
 
     const unsubscribers = [
       msqEventBus.subscribe('run:start', ({ featureId }) =>
-        push('run:start', `${featureId} started`, 'info')),
+        { push('run:start', `${featureId} started`, 'info'); }),
       msqEventBus.subscribe('run:done', ({ featureId }) =>
-        push('run:done', `${featureId} done`, 'success')),
+        { push('run:done', `${featureId} done`, 'success'); }),
       msqEventBus.subscribe('run:failed', ({ featureId, error }) =>
-        push('run:failed', `${featureId} failed: ${error}`, 'error', 5200)),
+        { push('run:failed', `${featureId} failed: ${error}`, 'error', 5200); }),
       msqEventBus.subscribe('gate:resolved', ({ gateId, decision }) =>
-        push('gate:resolved', `Gate ${gateId} ${decision}`, 'warning')),
+        { push('gate:resolved', `Gate ${String(gateId)} ${decision}`, 'warning'); }),
       msqEventBus.subscribe('stage:request-resolved', ({ requestId, response }) =>
-        push('stage:request-resolved', `Stage request ${requestId} ${response}`, 'warning')),
+        { push('stage:request-resolved', `Stage request ${String(requestId)} ${response}`, 'warning'); }),
       msqEventBus.subscribe('budget:alert', ({ percent }) =>
-        push('budget:alert', `Budget ${percent}% reached`, 'warning', 5200)),
+        { push('budget:alert', `Budget ${String(percent)}% reached`, 'warning', 5200); }),
       msqEventBus.subscribe('ui:info', ({ message }) =>
-        push('ui:info', message, 'info')),
+        { push('ui:info', message, 'info'); }),
       msqEventBus.subscribe('ui:notice', ({ message }) =>
-        push('ui:notice', message, 'error', 5200)),
+        { push('ui:notice', message, 'error', 5200); }),
     ];
 
-    return () => {
+    return (): void => {
       clearInterval(cleanupTimer);
       for (const unsubscribe of unsubscribers) unsubscribe();
     };

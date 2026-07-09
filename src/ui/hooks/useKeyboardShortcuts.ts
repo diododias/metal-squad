@@ -115,6 +115,9 @@ function matchesShortcutBinding(binding: string, input: string, key: Record<stri
     if (modifier === 'ctrl') {
       return Boolean(key.ctrl) && input.toLowerCase() === value;
     }
+    if (modifier === 'shift') {
+      return Boolean(key.shift) && matchesShortcutBinding(value ?? '', input, key);
+    }
 
     return false;
   }
@@ -183,17 +186,19 @@ export function useKeyboardShortcuts(
    * Includes global shortcuts and context-specific shortcuts for current context.
    */
   const getActiveShortcuts = useCallback((): KeyboardShortcut[] => {
-    const shortcuts: KeyboardShortcut[] = [];
+    const contextShortcuts: KeyboardShortcut[] = [];
+    const globalShortcuts: KeyboardShortcut[] = [];
 
     for (const shortcut of shortcutsRef.current.values()) {
       if (shortcut.scope === 'global') {
-        shortcuts.push(shortcut);
-      } else if (shortcut.scope === 'context' && shortcut.context === currentContext) {
-        shortcuts.push(shortcut);
+        globalShortcuts.push(shortcut);
+      } else if (shortcut.scope === 'context' && shortcut.context === currentContext) { // eslint-disable-line @typescript-eslint/no-unnecessary-condition
+        contextShortcuts.push(shortcut);
       }
     }
 
-    return shortcuts;
+    // Context-specific shortcuts take priority over global shortcuts
+    return [...contextShortcuts, ...globalShortcuts];
   }, [currentContext]);
 
   const getAllShortcuts = useCallback((): KeyboardShortcut[] => {
@@ -236,9 +241,19 @@ export function useKeyboardShortcuts(
       if (!enabled) return;
 
       const activeShortcuts = getActiveShortcuts();
+      // Bindings with modifiers (e.g., 'shift+tab') must be evaluated before
+      // their plain counterparts (e.g., 'tab'), otherwise a plain 'tab' match
+      // — which only checks key.tab — would swallow Shift+Tab presses since
+      // ink sets key.tab=true for both. Sort by specificity (modifier bindings
+      // first) without mutating the registry order used for status-bar hints.
+      const orderedShortcuts = [...activeShortcuts].sort((a, b) => {
+        const aHasModifier = a.key.includes('+') ? 0 : 1;
+        const bHasModifier = b.key.includes('+') ? 0 : 1;
+        return aHasModifier - bHasModifier;
+      });
 
-      for (const shortcut of activeShortcuts) {
-        if (matchesShortcutBinding(shortcut.key, input, key as Record<string, boolean>)) {
+      for (const shortcut of orderedShortcuts) {
+        if (matchesShortcutBinding(shortcut.key, input, key)) {
           if (!shortcut.condition || shortcut.condition()) {
             shortcut.action();
             break;

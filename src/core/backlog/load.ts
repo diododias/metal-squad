@@ -78,19 +78,19 @@ function applyDefaultsBeforeParse(raw: unknown): unknown {
   const defaults = isRecord(raw.defaults) ? raw.defaults : {};
   const defaultTool = typeof defaults.tool === 'string' ? defaults.tool : undefined;
   const defaultEffort = typeof defaults.effort === 'string' ? defaults.effort : undefined;
-  const defaultSkills = Array.isArray(defaults.skills) ? defaults.skills : undefined;
+  const defaultSkills: unknown[] | undefined = Array.isArray(defaults.skills) ? defaults.skills : undefined;
   const epics = Array.isArray(raw.epics) ? raw.epics : [];
 
   return {
     ...raw,
-    epics: epics.map((epic) => {
+    epics: epics.map((epic): unknown => {
       if (!isRecord(epic)) return epic;
-      const features = Array.isArray(epic.features) ? epic.features : [];
+      const features: unknown[] = Array.isArray(epic.features) ? epic.features : [];
       return {
         ...epic,
         features: features.map((feature) => {
           if (!isRecord(feature)) return feature;
-          const tasks = Array.isArray(feature.tasks) ? feature.tasks : [];
+          const tasks: unknown[] = Array.isArray(feature.tasks) ? feature.tasks : [];
           return {
             ...feature,
             ...(feature.tool === undefined && defaultTool ? { tool: defaultTool } : {}),

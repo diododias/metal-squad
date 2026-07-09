@@ -27,7 +27,7 @@ interface Props {
 // also indented under the feature name (marginLeft set on the parent Box
 // branch) and inter-card marginBottom drops to 0 for tighter stacking.
 function toolModelEffort(tool: string, model: string | undefined, effort: string): string {
-  return `${tool || 'unknown'} · ${model ?? tool ?? 'unknown'} · ${effort}`;
+  return `${tool || 'unknown'} · ${model ?? tool} · ${effort}`;
 }
 
 /**

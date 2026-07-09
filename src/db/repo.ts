@@ -104,7 +104,7 @@ export function updateRunUsage(runId: number, usage: TokenUsage | TokensUpdateEv
     )
     .run(usage.input, usage.cachedInput ?? null, usage.output, usage.total, runId);
 
-  const tool = (('tool' in usage ? usage.tool : undefined) ?? previous?.tool) as Tool | undefined;
+  const tool = (('tool' in usage ? usage.tool : undefined) ?? previous?.tool);
   if (tool) {
     const contextWindowTokens = resolveContextWindow({ tool });
     const contextWindowPercent = computeContextWindowPercent(usage.total, contextWindowTokens);
@@ -566,7 +566,7 @@ export function listRunEvents(runId: number): RunEventRow[] {
        WHERE run_id = ?
        ORDER BY id ASC`,
     )
-    .all(runId) as Array<Omit<RunEventRow, 'metadata'> & { metadata: string | null }>;
+    .all(runId) as (Omit<RunEventRow, 'metadata'> & { metadata: string | null })[];
   return rows.map((row) => ({
     ...row,
     metadata: row.metadata ? safeJsonParse(row.metadata) : null,
@@ -607,7 +607,7 @@ export interface StatsFilters {
 export function listRunsForStats(filters: StatsFilters = {}): StatsRunRow[] {
   if (!hasDbFile()) return [];
   const clauses: string[] = [];
-  const params: Array<string | number> = [];
+  const params: (string | number)[] = [];
   if (filters.sinceDays !== undefined) {
     clauses.push(`r.started_at >= datetime('now', '-' || ? || ' days')`);
     params.push(filters.sinceDays);
@@ -1179,7 +1179,7 @@ export function resolveStageRequest(id: number, response: string): void {
        WHERE id = ? AND status = 'pending'`,
     )
     .run(response, id);
-  if (row && row.status === 'pending') {
+  if (row?.status === 'pending') {
     msqEventBus.emit('stage:request-resolved', {
       requestId: id,
       kind: row.kind,
@@ -1291,7 +1291,7 @@ function summarizeSnapshot(snapshot: PipelineSnapshot): string {
   const done = snapshot.done.length;
   const active = snapshot.active[0];
   const pending = snapshot.pending[0] ?? snapshot.aborted[0] ?? null;
-  if (active) return `${done}/${total} done · active ${active}`;
-  if (pending) return `${done}/${total} done · next ${pending}`;
-  return `${done}/${total} done`;
+  if (active) return `${String(done)}/${String(total)} done · active ${active}`;
+  if (pending) return `${String(done)}/${String(total)} done · next ${pending}`;
+  return `${String(done)}/${String(total)} done`;
 }
