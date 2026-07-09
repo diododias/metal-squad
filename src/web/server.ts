@@ -10,13 +10,16 @@ import { assertWritableDbPath } from '../db/index.js';
 import {
   abortPipeline,
   forceResolveGate,
+  listRunEvents,
   listRunOutput,
+  listTaskRunsForRun,
   pausePipeline,
   requestFeatureAbort,
   resolveGate,
   resolveStageRequest,
   resumePipeline,
 } from '../db/repo.js';
+import { computeRunBreakdown } from '../core/stats.js';
 import { loadBacklog } from '../core/backlog/load.js';
 import { validateBacklogSkills } from '../core/skills/index.js';
 import { loadConfig } from '../config/index.js';
@@ -31,6 +34,7 @@ interface Client {
   socket: WebSocket;
   authenticated: boolean;
   outputSubscriptions: Set<number>;
+  detailSubscriptions: Set<number>;
 }
 
 const BROADCAST_EVENTS: (keyof MsqEvents)[] = [
@@ -189,7 +193,12 @@ export function createWebServer(options: {
   const wss = new WebSocketServer({ server: httpServer, path: '/ws' });
 
   wss.on('connection', (socket) => {
-    const client: Client = { socket, authenticated: options.auth === 'none', outputSubscriptions: new Set() };
+    const client: Client = {
+      socket,
+      authenticated: options.auth === 'none',
+      outputSubscriptions: new Set(),
+      detailSubscriptions: new Set(),
+    };
     clients.set(socket, client);
 
     socket.on('message', (rawData) => {
@@ -214,7 +223,12 @@ export function createWebServer(options: {
       }
 
       if (message.type === 'auth') {
-        if (options.auth === 'none' || message.token === options.token) {
+        if (options.auth === 'none') {
+          client.authenticated = true;
+          // state:full was already sent on connection for auth=none
+          return;
+        }
+        if (message.token === options.token) {
           client.authenticated = true;
           sendTo(client, { type: 'state:full', payload: buildMsqWebState() });
         } else {
@@ -240,16 +254,29 @@ export function createWebServer(options: {
       sendTo(client, { type: 'state:full', payload: buildMsqWebState() });
     }
 
-    // Allow a short window for auth before closing unauthenticated sockets
+    // Allow a window for auth before closing unauthenticated sockets
     if (options.auth === 'token') {
       const timer = setTimeout(() => {
         if (!client.authenticated && socket.readyState === 1 /* OPEN */) {
           socket.close(1008, 'Authentication required');
         }
-      }, 10_000);
+      }, 60_000);
       timer.unref();
     }
   });
+
+  function sendRunDetail(client: Client, runId: number): void {
+    try {
+      const taskRuns = listTaskRunsForRun(runId);
+      const runEvents = listRunEvents(runId);
+      const startedAt = runEvents.find((event) => event.event === 'start')?.createdAt ?? null;
+      const endedAt = runEvents.find((event) => event.event === 'done' || event.event === 'failed')?.createdAt ?? null;
+      const breakdown = startedAt ? computeRunBreakdown(runEvents, startedAt, endedAt) : null;
+      sendTo(client, { type: 'run:detail', payload: { runId, taskRuns, breakdown } });
+    } catch {
+      // DB unavailable — skip this update
+    }
+  }
 
   function handleClientMessage(
     message: Exclude<WebSocketClientMessage, { type: 'auth' }>,
@@ -311,6 +338,15 @@ export function createWebServer(options: {
         client.outputSubscriptions.delete(message.runId);
         break;
       }
+      case 'subscribe:runDetail': {
+        client.detailSubscriptions.add(message.runId);
+        sendRunDetail(client, message.runId);
+        break;
+      }
+      case 'unsubscribe:runDetail': {
+        client.detailSubscriptions.delete(message.runId);
+        break;
+      }
       default: {
         break;
       }
@@ -329,6 +365,26 @@ export function createWebServer(options: {
       }
     }
   });
+
+  const DETAIL_REFRESH_EVENTS: (keyof MsqEvents)[] = [
+    'task:started',
+    'task:updated',
+    'run:done',
+    'run:failed',
+    'tokens:update',
+  ];
+
+  const detailUnsubscribers = DETAIL_REFRESH_EVENTS.map((eventName) =>
+    msqEventBus.subscribe(eventName, (event) => {
+      const runId = 'runId' in event && typeof event.runId === 'number' ? event.runId : null;
+      if (runId === null) return;
+      for (const client of clients.values()) {
+        if (client.authenticated && client.detailSubscriptions.has(runId) && client.socket.readyState === 1) {
+          sendRunDetail(client, runId);
+        }
+      }
+    }),
+  );
 
   function startFeature(featureId: string, featureCwd: string): void {
     try {
@@ -367,6 +423,7 @@ export function createWebServer(options: {
     close: async (): Promise<void> => {
       outputUnsubscribe();
       for (const unsubscribe of eventUnsubscribers) unsubscribe();
+      for (const unsubscribe of detailUnsubscribers) unsubscribe();
       for (const client of clients.values()) {
         client.socket.terminate();
       }

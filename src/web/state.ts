@@ -12,7 +12,7 @@ import {
   type StatsRunRow,
 } from '../db/repo.js';
 import { resolveRepo } from '../core/repo.js';
-import { getFeatureCatalog, getPendingFeatures, type FeatureCatalogEntry } from '../ui/catalog.js';
+import { getFeatureCatalog, getBacklogSettings, getPendingFeatures, type FeatureCatalogEntry } from '../ui/catalog.js';
 import { getRunGroup, sortRunsByGroup } from '../ui/dashboardGroups.js';
 import type { MsqWebState, TokenStats, UiNotification } from './types.js';
 
@@ -107,6 +107,8 @@ export function buildMsqWebState(): MsqWebState {
   const gates = collectGates();
   const pendingFeatures = collectPendingFeatures(runs);
   const runningTasks = collectRunningTasks();
+  const featureCatalog = getFeatureCatalog();
+  const backlogSettings = getBacklogSettings();
   const executionRuns = runs.filter((run) => getRunGroup(run.status) === 'execution');
   const doneRuns = runs.filter((run) => run.status === 'done');
   const falhaRunsList = runs.filter((run) => getRunGroup(run.status) === 'canceled');
@@ -117,6 +119,8 @@ export function buildMsqWebState(): MsqWebState {
     gates,
     pendingFeatures,
     runningTasks,
+    featureCatalog,
+    backlogSettings,
     stats: {
       totalRuns: runs.length,
       doneRuns: doneRuns.length,

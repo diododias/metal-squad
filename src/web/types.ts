@@ -1,7 +1,8 @@
 import type { MsqEvents } from '../core/events/types.js';
-import type { RunSummary, RunningTaskSummary, StatsRunRow } from '../db/repo.js';
+import type { RunSummary, RunningTaskSummary, StatsRunRow, TaskRun } from '../db/repo.js';
 import type { PendingApproval } from '../ui/hooks/useGates.js';
-import type { FeatureCatalogEntry } from '../ui/catalog.js';
+import type { FeatureCatalogEntry, BacklogSettings } from '../ui/catalog.js';
+import type { RunBreakdown } from '../core/stats.js';
 
 export interface TokenStats {
   status: 'loading' | 'ready' | 'error';
@@ -22,6 +23,8 @@ export interface MsqWebState {
   gates: PendingApproval[];
   pendingFeatures: FeatureCatalogEntry[];
   runningTasks: RunningTaskSummary[];
+  featureCatalog: Record<string, FeatureCatalogEntry>;
+  backlogSettings: BacklogSettings;
   stats: {
     totalRuns: number;
     doneRuns: number;
@@ -47,10 +50,13 @@ export type WebSocketClientMessage =
   | { type: 'action:forceResolveGate'; gateId: number }
   | { type: 'action:resolveStageRequest'; requestId: number; response: string }
   | { type: 'subscribe:output'; runId: number }
-  | { type: 'unsubscribe:output'; runId: number };
+  | { type: 'unsubscribe:output'; runId: number }
+  | { type: 'subscribe:runDetail'; runId: number }
+  | { type: 'unsubscribe:runDetail'; runId: number };
 
 export type WebSocketServerMessage =
   | { type: 'state:full'; payload: MsqWebState }
+  | { type: 'run:detail'; payload: { runId: number; taskRuns: TaskRun[]; breakdown: RunBreakdown | null } }
   | { type: keyof MsqEvents; payload: unknown };
 
 export interface WebServerOptions {
