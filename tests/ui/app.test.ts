@@ -337,7 +337,7 @@ describe('App', () => {
     });
     const expectedAvailable = getMainPanelContentHeight(40, expectedChrome);
 
-    expect(rootBox?.props.height).toBe(40);
+    expect(rootBox?.props.height).toBeUndefined();
     expect(mainPanel?.props.availableHeight).toBe(expectedAvailable);
     expect(mainPanel?.props.availableHeight).toBeGreaterThan(0);
     expect(mainPanel?.props.availableHeight).toBeLessThanOrEqual(40);

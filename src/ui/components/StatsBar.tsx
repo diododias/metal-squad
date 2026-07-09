@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { memo } from 'react';
 import { Box, Text } from 'ink';
 import { formatTokens } from '../format.js';
 import { useTheme } from '../theme/context.js';
@@ -22,7 +22,7 @@ interface Props {
  * Tokens are the current period (7d), not all-time (item 7) — all-time and
  * per-repo/feature breakdown stay in the Cost Dashboard (`d`).
  */
-export function StatsBar({ done, todo, execution, falha, gatesPending, tokenStats, compact = false }: Props): React.ReactElement {
+function StatsBarComponent({ done, todo, execution, falha, gatesPending, tokenStats, compact = false }: Props): React.ReactElement {
   const theme = useTheme();
   const tokensLabel = tokenStats.status === 'loading' ? '—' : formatTokens(tokenStats.totalTokens);
 
@@ -46,3 +46,5 @@ export function StatsBar({ done, todo, execution, falha, gatesPending, tokenStat
     </Box>
   );
 }
+
+export const StatsBar = memo(StatsBarComponent);

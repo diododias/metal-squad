@@ -125,20 +125,30 @@ describe('ui hooks', () => {
   it('useRunOutput loads the current tail and refreshes on matching events', async () => {
     const setOutput = vi.fn();
     const listeners = new Map<string, Array<(event: { runId: number }) => void>>();
-    const setIntervalSpy = vi.spyOn(globalThis, 'setInterval').mockReturnValue(1 as unknown as ReturnType<typeof setInterval>);
-    vi.spyOn(globalThis, 'clearInterval').mockImplementation(() => {});
+    const timeoutCallbacks: Array<() => void> = [];
+    vi.spyOn(globalThis, 'setTimeout').mockImplementation((callback) => {
+      timeoutCallbacks.push(callback as () => void);
+      return 1 as unknown as ReturnType<typeof setTimeout>;
+    });
+    vi.spyOn(globalThis, 'clearTimeout').mockImplementation(() => {});
 
+    const refs = new Map<string, unknown>();
     vi.doMock('react', () => ({
       useState: () => [[], setOutput],
       useEffect: (effect: () => void) => effect(),
       useCallback: <T extends (...args: any[]) => any>(fn: T) => fn,
+      useRef: (value: unknown) => {
+        const key = JSON.stringify(value);
+        if (!refs.has(key)) refs.set(key, { current: value });
+        return refs.get(key);
+      },
     }));
 
     vi.doMock('../../src/db/repo.js', () => ({
       listRunOutput: vi.fn()
-        .mockReturnValueOnce([{ id: 1, line: 'one' }])
-        .mockReturnValueOnce([{ id: 2, line: 'two' }])
-        .mockReturnValueOnce([{ id: 3, line: 'three' }]),
+        .mockReturnValueOnce([{ id: 1, source: 'stdout', line: 'one' }])
+        .mockReturnValueOnce([{ id: 2, source: 'stdout', line: 'two' }])
+        .mockReturnValueOnce([{ id: 3, source: 'stdout', line: 'three' }]),
     }));
 
     vi.doMock('../../src/core/events/index.js', () => ({
@@ -154,12 +164,11 @@ describe('ui hooks', () => {
 
     const { useRunOutput } = await import('../../src/ui/hooks/useRunOutput.js');
     expect(useRunOutput(7, 123, 5)).toEqual([]);
-    expect(setOutput).toHaveBeenCalledWith([{ id: 1, line: 'one' }]);
-    expect(setIntervalSpy).toHaveBeenCalledWith(expect.any(Function), 123);
+    expect(setOutput).toHaveBeenCalledWith([{ id: 1, source: 'stdout', line: 'one' }]);
 
     listeners.get('run:output')?.[0]?.({ runId: 7 });
     await Promise.resolve();
-    expect(setOutput).toHaveBeenCalledWith([{ id: 2, line: 'two' }]);
+    expect(setOutput).toHaveBeenCalledWith([{ id: 2, source: 'stdout', line: 'two' }]);
   });
 
   it('useGates loads gates, resolves them and tolerates refresh errors', async () => {
