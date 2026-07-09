@@ -14,9 +14,11 @@ import { NotificationsFeed } from '../../src/ui/components/NotificationsFeed.js'
 import { StatusBar } from '../../src/ui/components/StatusBar.js';
 import { CommandPalette } from '../../src/ui/components/CommandPalette.js';
 import { HelpOverlay } from '../../src/ui/components/HelpOverlay.js';
+import { MainPanel } from '../../src/ui/components/MainPanel.js';
 import { ThemeProvider } from '../../src/ui/theme/context.js';
 import { resolveThemePreference } from '../../src/ui/theme/resolve.js';
 import type { RunSummary } from '../../src/db/repo.js';
+import type { DetailSectionId } from '../../src/ui/detailSections.js';
 
 afterEach(() => cleanup());
 
@@ -509,5 +511,87 @@ describe('HelpOverlay', () => {
       />,
     );
     expect(lastFrame()).toBe('');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// MainPanel vertical budget (H10)
+// ---------------------------------------------------------------------------
+describe('MainPanel vertical budget', () => {
+  function makePending(id: string) {
+    return {
+      id,
+      title: `${id} title`,
+      skills: [] as string[],
+      tool: 'codex' as const,
+      model: 'gpt-5',
+      effort: 'medium' as const,
+      dependsOn: [] as string[],
+      workflow: {
+        mode: 'staged' as const,
+        stages: ['specify', 'plan', 'tasks', 'implement', 'validate'],
+        approvals: { channel: 'telegram' as const, autoAdvance: false },
+        syncTasksToBacklog: true,
+      },
+    };
+  }
+
+  it('truncates kanban cards when availableHeight is small', () => {
+    const pendingFeatures = Array.from({ length: 10 }, (_, index) => makePending(`feat-${String(index).padStart(2, '0')}`));
+    const { lastFrame } = renderWithTheme(
+      <MainPanel
+        runs={[]}
+        gates={[]}
+        selectedRun={null}
+        selectedRunIndex={0}
+        selectedFeature={null}
+        activeView="overview"
+        output={[]}
+        outputPaused={false}
+        logsVisible
+        focusPanel="columns"
+        activeColumn="todo"
+        mode="full"
+        width={80}
+        pendingFeatures={pendingFeatures}
+        selectedPendingIndex={0}
+        notifications={[]}
+        availableHeight={12}
+      />,
+    );
+    expect(lastFrame()).toContain('+7 more');
+  });
+
+  it('truncates run-detail output lines to fit the section budget', () => {
+    const output = Array.from({ length: 14 }, (_, index) => ({
+      ...baseRun,
+      id: index + 1,
+      source: 'agent' as const,
+      line: `output-line-${String(index).padStart(2, '0')}`,
+    }));
+    const { lastFrame } = renderWithTheme(
+      <MainPanel
+        runs={[baseRun]}
+        gates={[]}
+        selectedRun={baseRun}
+        selectedRunIndex={0}
+        selectedFeature={null}
+        activeView="run"
+        output={output as any}
+        outputPaused={false}
+        logsVisible
+        focusPanel="columns"
+        activeColumn="execution"
+        activeTab={'output' as DetailSectionId}
+        mode="full"
+        width={80}
+        pendingFeatures={[]}
+        selectedPendingIndex={0}
+        notifications={[]}
+        availableHeight={24}
+      />,
+    );
+    expect(lastFrame()).toContain('output-line-13');
+    expect(lastFrame()).not.toContain('output-line-05');
   });
 });

@@ -30,6 +30,7 @@ import { StatsBar } from './components/StatsBar.js';
 import { StatusBar } from './components/StatusBar.js';
 import { ToastStack } from './components/ToastStack.js';
 import { getLayoutMode, getVerticalBudget } from './format.js';
+import { getChromeHeight, getMainPanelContentHeight } from './layout/budget.js';
 import { useCommandPalette } from './hooks/useCommandPalette.js';
 import { useCompletedFeatures } from './hooks/useCompletedFeatures.js';
 import { useGates } from './hooks/useGates.js';
@@ -878,9 +879,19 @@ export function App(): React.ReactElement {
       ? ['type:search', 'enter:execute', 'esc:close', 'j/k:navigate']
       : getStatusBarHints();
 
+  const chromeHeight = getChromeHeight({
+    layoutMode,
+    hasGateFooter: !dashboardOpen && gates.length > 0,
+    gateCount: gates.length,
+    hasGatePrompt: Boolean(selectedGate?.prompt),
+    hasStatusHints: shortcutHints.length > 0,
+    hasThemeNotice: Boolean(themeResolution.message),
+  });
+  const availableHeight = getMainPanelContentHeight(height, chromeHeight);
+
   return (
     <ThemeProvider resolution={themeResolution}>
-      <Box flexDirection="column" paddingX={1} paddingY={0}>
+      <Box flexDirection="column" paddingX={1} paddingY={0} height={height}>
         <Box marginTop={1} marginBottom={1} flexDirection="column">
           <HeaderBar
             version={APP_VERSION}
@@ -943,6 +954,7 @@ export function App(): React.ReactElement {
               taskRuns={taskRuns}
               runningTasks={runningTasks}
               notifications={notifications}
+              availableHeight={availableHeight}
             />
           </Box>
         )}

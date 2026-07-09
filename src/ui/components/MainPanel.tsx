@@ -35,6 +35,7 @@ import {
   getWorkflowRole,
 } from '../theme/styles.js';
 import type { ThemeRoleName } from '../theme/types.js';
+import { MAIN_PANEL_CHROME_HEIGHT } from '../layout/budget.js';
 
 export type ActiveView = 'overview' | 'run' | 'notifications' | 'preview';
 
@@ -47,6 +48,48 @@ const BACKLOG_TASK_ICON: Record<string, string> = {
 };
 
 const DEFAULT_STEPPER_STAGES = ['specify', 'plan', 'tasks', 'implement', 'validate'];
+
+const OVERVIEW_HINT_OVERHEAD = 2;
+const COLUMN_CHROME_HEIGHT = 2;
+const CARD_HEIGHT = 2;
+const COLUMN_OVERFLOW_HEIGHT = 1;
+const DEMAND_HEADER_HEIGHT = 2;
+const ACTIVITY_HEADER_HEIGHT = 2;
+
+const DETAIL_FIXED_OVERHEAD: Record<LayoutMode, number> = {
+  full: 18,
+  compact: 18,
+  stacked: 42,
+};
+
+function fitOverviewCards(
+  budget: number,
+  notifications: NotificationEntry[],
+  nextDemands: string[],
+  mode: LayoutMode,
+  verticalBudget: VerticalBudget,
+): number {
+  const maxDemandCount = mode === 'stacked' ? 3 : 5;
+  const demandHeight = nextDemands.length > 0
+    ? DEMAND_HEADER_HEIGHT + Math.min(nextDemands.length, maxDemandCount)
+    : 0;
+
+  const maxActivityCount = mode === 'stacked' ? 4 : 6;
+  const activityVisibleCount = verticalBudget === 'short'
+    ? 0
+    : Math.min(notifications.length, maxActivityCount);
+  const activityHeight = activityVisibleCount > 0
+    ? ACTIVITY_HEADER_HEIGHT + activityVisibleCount * 2 + 1
+    : 0;
+
+  const remaining = Math.max(0, budget - OVERVIEW_HINT_OVERHEAD - demandHeight - activityHeight);
+  return Math.max(1, Math.floor((remaining - COLUMN_CHROME_HEIGHT - COLUMN_OVERFLOW_HEIGHT) / CARD_HEIGHT));
+}
+
+function getDetailContentHeight(budget: number, mode: LayoutMode): number {
+  const overhead = DETAIL_FIXED_OVERHEAD[mode];
+  return Math.max(5, budget - overhead);
+}
 
 interface Props {
   runs: RunSummary[];
@@ -69,6 +112,7 @@ interface Props {
   verticalBudget?: VerticalBudget;
   mode: LayoutMode;
   width: number;
+  availableHeight?: number;
   pendingFeatures: FeatureCatalogEntry[];
   selectedPendingIndex: number;
   breakdown?: RunBreakdown | null;
@@ -118,20 +162,30 @@ export function MainPanel({
   breakdown = null,
   taskRuns = [],
   notifications = [],
+  availableHeight,
 }: Props): React.ReactElement {
   const theme = useTheme();
   const innerWidth = Math.max(32, width - 4);
   const visibleOutput = output.slice(-(mode === 'stacked' ? 8 : 14));
-  const maxPerColumn = verticalBudget === 'short'
-    ? (mode === 'stacked' ? 2 : 3)
-    : verticalBudget === 'tall'
-      ? (mode === 'stacked' ? 4 : 6)
-      : (mode === 'stacked' ? 3 : 5);
   const columnGap = mode === 'stacked' ? 0 : 1;
   const columnWidth = mode === 'stacked'
     ? innerWidth
     : Math.max(18, Math.floor((innerWidth - columnGap * (DASHBOARD_GROUP_ORDER.length - 1)) / DASHBOARD_GROUP_ORDER.length));
   const nextDemands = collectNextDemands(runs);
+  const contentBudget = availableHeight ?? (verticalBudget === 'short'
+    ? (mode === 'stacked' ? 9 : 11)
+    : verticalBudget === 'tall'
+      ? (mode === 'stacked' ? 13 : 17)
+      : (mode === 'stacked' ? 11 : 15));
+  const detailContentHeight = getDetailContentHeight(contentBudget, mode);
+  const baseMaxPerColumn = verticalBudget === 'short'
+    ? (mode === 'stacked' ? 2 : 3)
+    : verticalBudget === 'tall'
+      ? (mode === 'stacked' ? 4 : 6)
+      : (mode === 'stacked' ? 3 : 5);
+  const maxPerColumn = availableHeight !== undefined
+    ? Math.min(baseMaxPerColumn, fitOverviewCards(contentBudget, notifications, nextDemands, mode, verticalBudget))
+    : baseMaxPerColumn;
   const _selectedRunStage = selectedRun ? getRunStageLabel(selectedRun) : null;
   const selectedRunStatusLabel = selectedRun ? getRunStatusLabel(selectedRun) : null;
   const workflowStages = summarizeTaskRuns(taskRuns, selectedFeature?.workflow?.stages ?? []);
@@ -146,6 +200,9 @@ export function MainPanel({
   const metricWidth = mode === 'stacked' ? innerWidth : Math.max(11, Math.floor(innerWidth / 7) - 1);
   const declaredTasks = selectedFeature?.tasks ?? [];
   const selectedPending = pendingFeatures[selectedPendingIndex] ?? null;
+  const panelMinHeight = availableHeight !== undefined
+    ? Math.max(MAIN_PANEL_CHROME_HEIGHT + 1, availableHeight + MAIN_PANEL_CHROME_HEIGHT)
+    : undefined;
 
   return (
     <Box
@@ -155,6 +212,7 @@ export function MainPanel({
       paddingY={0}
       flexDirection="column"
       width={width}
+      minHeight={panelMinHeight}
       marginRight={mode === 'stacked' ? 0 : 1}
       marginBottom={mode === 'stacked' ? 1 : 0}
     >
@@ -279,6 +337,7 @@ export function MainPanel({
                   logsVisible,
                   width: innerWidth,
                   dense: detailDense,
+                  detailContentHeight,
                 })}
               </Box>
             ))}
@@ -538,6 +597,7 @@ interface DetailSectionContext {
   logsVisible: boolean;
   width: number;
   dense: boolean;
+  detailContentHeight: number;
 }
 
 function renderDetailSection(sectionId: DetailSectionId, ctx: DetailSectionContext): React.ReactElement {
@@ -557,6 +617,7 @@ function renderDetailSection(sectionId: DetailSectionId, ctx: DetailSectionConte
     logsVisible,
     width,
     dense,
+    detailContentHeight,
   } = ctx;
 
   switch (sectionId) {
@@ -595,13 +656,16 @@ function renderDetailSection(sectionId: DetailSectionId, ctx: DetailSectionConte
       );
     }
 
-    case 'spec':
+    case 'spec': {
+      const specLines = selectedFeature?.description
+        ? selectedFeature.description.split('\n')
+        : [];
+      const specLimit = Math.max(1, detailContentHeight - 1);
       return (
         <DetailSection theme={theme} title={DETAIL_SECTION_LABEL.spec} width={width}>
-          {selectedFeature?.description ? (
-            selectedFeature.description
-              .split('\n')
-              .slice(0, dense ? 4 : 18)
+          {specLines.length > 0 ? (
+            specLines
+              .slice(0, dense ? Math.min(4, specLimit) : specLimit)
               .map((line, index) => (
                 <Text key={index} {...theme.role('muted')}>
                   {truncateText(line || ' ', Math.max(24, width - 4))}
@@ -614,8 +678,12 @@ function renderDetailSection(sectionId: DetailSectionId, ctx: DetailSectionConte
           )}
         </DetailSection>
       );
+    }
 
-    case 'workflow':
+    case 'workflow': {
+      const tasksPerStage = workflowStages.length > 0
+        ? Math.max(0, Math.floor((detailContentHeight - 1 - workflowStages.length) / workflowStages.length))
+        : 0;
       return (
         <DetailSection theme={theme} title={DETAIL_SECTION_LABEL.workflow} width={width}>
           <Text {...theme.role('muted')}>
@@ -639,7 +707,7 @@ function renderDetailSection(sectionId: DetailSectionId, ctx: DetailSectionConte
                     stage.skipped > 0 ? `${String(stage.skipped)} skipped` : null,
                   ].filter(Boolean).join('  ·  ') || `${stage.stage}: completed`}
                 </Text>
-                {stage.tasks.slice(0, dense ? 1 : 6).map((task, index) => (
+                {stage.tasks.slice(0, dense ? Math.min(1, tasksPerStage) : Math.min(6, tasksPerStage)).map((task, index) => (
                   <Text key={`${stage.stage}:${task.taskId}:${String(index)}`} {...theme.role('muted')}>
                     {task.status === 'running' ? '>' : '-'} {truncateText(
                       [
@@ -658,6 +726,7 @@ function renderDetailSection(sectionId: DetailSectionId, ctx: DetailSectionConte
           ) : null}
         </DetailSection>
       );
+    }
 
     case 'config':
       return selectedFeature ? (
@@ -683,11 +752,12 @@ function renderDetailSection(sectionId: DetailSectionId, ctx: DetailSectionConte
         </DetailSection>
       );
 
-    case 'tasks':
+    case 'tasks': {
+      const taskLimit = Math.max(1, detailContentHeight - 1);
       return (
         <DetailSection theme={theme} title={DETAIL_SECTION_LABEL.tasks} width={width}>
           {declaredTasks.length > 0 ? (
-            declaredTasks.slice(0, dense ? 5 : 14).map((task) => (
+            declaredTasks.slice(0, dense ? Math.min(5, taskLimit) : taskLimit).map((task) => (
               <Text key={task.id} {...theme.role('muted')}>
                 {BACKLOG_TASK_ICON[task.status] ?? '○'} {task.id} — {truncateText(task.title, Math.max(20, width - 12))}
               </Text>
@@ -697,8 +767,13 @@ function renderDetailSection(sectionId: DetailSectionId, ctx: DetailSectionConte
           )}
         </DetailSection>
       );
+    }
 
-    case 'output':
+    case 'output': {
+      const outputLimit = Math.max(1, detailContentHeight - 2);
+      const outputToRender = visibleOutput.length > 0
+        ? (dense ? visibleOutput.slice(-Math.min(6, outputLimit)) : visibleOutput.slice(-outputLimit))
+        : [];
       return (
         <DetailSection theme={theme} title={DETAIL_SECTION_LABEL.output} width={width}>
           {logsVisible ? (
@@ -713,8 +788,8 @@ function renderDetailSection(sectionId: DetailSectionId, ctx: DetailSectionConte
                   : 'Run finished. Tail below shows the latest captured output.'}
               </Text>
               <Box marginTop={1} flexDirection="column">
-                {visibleOutput.length > 0 ? (
-                  (dense ? visibleOutput.slice(-6) : visibleOutput).map((entry) => renderOutputEntry(theme, entry, Math.max(28, width - 6)))
+                {outputToRender.length > 0 ? (
+                  outputToRender.map((entry) => renderOutputEntry(theme, entry, Math.max(28, width - 6)))
                 ) : (
                   <Text {...theme.role('muted')}>
                     {selectedRun.status === 'running'
@@ -729,6 +804,7 @@ function renderDetailSection(sectionId: DetailSectionId, ctx: DetailSectionConte
           )}
         </DetailSection>
       );
+    }
 
     default:
       return <Text {...theme.role('muted')}>Unknown section.</Text>;
