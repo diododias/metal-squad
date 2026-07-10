@@ -297,6 +297,7 @@ export async function executeBacklog(
     }
     const controller = new AbortController();
     activeControllers.set(feature.id, controller);
+    // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- workflow set by Zod default, but callers may pass raw objects
     if (feature.workflow?.mode === 'staged') {
       try {
         return await executeStagedFeature(

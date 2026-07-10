@@ -48,8 +48,10 @@ export function FeatureConfigSection({ feature, settings, width }: Props): React
   const retry = feature.retry;
   const retryExplicit = Boolean(retry);
   const resolvedRetry = { ...DEFAULT_RETRY, ...retry };
+  // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- workflow/dependsOn set by Zod defaults
   const workflow = feature.workflow ?? _DEFAULT_WORKFLOW;
   const skills = feature.skills;
+  // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
   const dependsOn = feature.dependsOn ?? [];
   const stageSkillEntries = Object.entries(settings.stageSkills);
   const innerWidth = Math.max(24, width - 4);
