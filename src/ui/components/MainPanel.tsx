@@ -188,6 +188,7 @@ function MainPanelComponent({
     : baseMaxPerColumn;
   const _selectedRunStage = selectedRun ? getRunStageLabel(selectedRun) : null;
   const selectedRunStatusLabel = selectedRun ? getRunStatusLabel(selectedRun) : null;
+  // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- workflow set by Zod default
   const workflowStages = summarizeTaskRuns(taskRuns, selectedFeature?.workflow?.stages ?? []);
   const visibleDetailSections = activeTab
     ? [activeTab]
@@ -303,7 +304,7 @@ function MainPanelComponent({
           </Box>
           <Box marginTop={1}>
             <WorkflowStepper
-              stages={selectedFeature?.workflow?.stages ?? DEFAULT_STEPPER_STAGES}
+              stages={selectedFeature?.workflow?.stages ?? DEFAULT_STEPPER_STAGES} // eslint-disable-line @typescript-eslint/no-unnecessary-condition
               workflowStages={workflowStages}
               currentStage={selectedRun.pipelineCurrentStage ?? selectedRun.stage}
               width={innerWidth}

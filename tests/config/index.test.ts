@@ -9,6 +9,7 @@ const DEFAULT_NOTIFICATIONS = {
 };
 const DEFAULT_WORKFLOW = { autoAdvanceStages: false, pollIntervalMs: 2_000 };
 const DEFAULT_BUDGET = { alertAtPercent: 80 };
+const DEFAULT_WEB = { host: '127.0.0.1', port: 8_743, auth: 'token' };
 
 describe('config', () => {
   const previousHome = process.env.HOME;
@@ -45,6 +46,7 @@ describe('config', () => {
       notifications: DEFAULT_NOTIFICATIONS,
       workflow: DEFAULT_WORKFLOW,
       budget: DEFAULT_BUDGET,
+      web: DEFAULT_WEB,
     });
   });
 
@@ -111,6 +113,7 @@ describe('config', () => {
       notifications: DEFAULT_NOTIFICATIONS,
       workflow: DEFAULT_WORKFLOW,
       budget: DEFAULT_BUDGET,
+      web: DEFAULT_WEB,
     });
     expect(existsSync(DB_PATH.replace(/\/app\.db$/, ''))).toBe(true);
   });
