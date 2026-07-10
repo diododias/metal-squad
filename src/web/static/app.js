@@ -37,6 +37,7 @@ function useWebSocket(token, onMessage) {
   const [error, setError] = useState(null);
   const onMessageRef = useRef(onMessage);
   const shouldReconnectRef = useRef(true);
+  const connectedTimeoutRef = useRef(null);
 
   useEffect(() => {
     onMessageRef.current = onMessage;
@@ -54,14 +55,17 @@ function useWebSocket(token, onMessage) {
 
       ws.addEventListener('open', () => {
         console.log('[msq web] ws open');
-        setConnected(true);
-        setError(null);
         ws.send(JSON.stringify({ type: 'auth', token }));
       });
 
       ws.addEventListener('message', (event) => {
         try {
           const message = JSON.parse(event.data);
+          if (message.type === 'state:full') {
+            clearTimeout(connectedTimeoutRef.current);
+            connectedTimeoutRef.current = setTimeout(() => setConnected(true), 500);
+            setError(null);
+          }
           onMessageRef.current(message);
         } catch {
           // ignore invalid JSON
@@ -70,6 +74,7 @@ function useWebSocket(token, onMessage) {
 
       ws.addEventListener('close', (event) => {
         console.log('[msq web] ws close', event.code, event.reason);
+        clearTimeout(connectedTimeoutRef.current);
         setConnected(false);
         clearInterval(heartbeatTimer);
         heartbeatTimer = null;
@@ -101,6 +106,7 @@ function useWebSocket(token, onMessage) {
     return () => {
       closed = true;
       clearTimeout(reconnectTimer);
+      clearTimeout(connectedTimeoutRef.current);
       clearInterval(heartbeatTimer);
       if (wsRef.current) {
         wsRef.current.close(1000);

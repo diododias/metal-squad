@@ -1295,3 +1295,33 @@ function summarizeSnapshot(snapshot: PipelineSnapshot): string {
   if (pending) return `${String(done)}/${String(total)} done · next ${pending}`;
   return `${String(done)}/${String(total)} done`;
 }
+
+export function loadBudgetState(key: string): number | null {
+  if (!hasDbFile()) return null;
+  const row = getDb('readonly')
+    .prepare(`SELECT tokens FROM budget_state WHERE key = ?`)
+    .get(key) as { tokens: number } | undefined;
+  return row?.tokens ?? null;
+}
+
+export function saveBudgetState(key: string, tokens: number): void {
+  getDb('readwrite')
+    .prepare(`
+      INSERT INTO budget_state (key, tokens) VALUES (?, ?)
+      ON CONFLICT(key) DO UPDATE SET tokens = excluded.tokens, updated_at = datetime('now')
+    `)
+    .run(key, tokens);
+}
+
+export function getPausedPipelineIdForBudget(): number | null {
+  if (!hasDbFile()) return null;
+  const row = getDb('readonly')
+    .prepare(`
+      SELECT id FROM pipelines
+      WHERE status = 'paused'
+      ORDER BY updated_at DESC
+      LIMIT 1
+    `)
+    .get() as { id: number } | undefined;
+  return row?.id ?? null;
+}

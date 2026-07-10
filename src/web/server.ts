@@ -30,8 +30,12 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 const STATIC_DIR = join(__dirname, 'static');
 
+interface HeartbeatWebSocket extends WebSocket {
+  isAlive: boolean;
+}
+
 interface Client {
-  socket: WebSocket;
+  socket: HeartbeatWebSocket;
   authenticated: boolean;
   outputSubscriptions: Set<number>;
   detailSubscriptions: Set<number>;
@@ -68,7 +72,7 @@ export function createWebServer(options: {
   token: string;
   cwd?: string;
 }): RunningWebServer {
-  const clients = new Map<WebSocket, Client>();
+  const clients = new Map<HeartbeatWebSocket, Client>();
   let latestState = buildMsqWebState();
   const cwd = options.cwd ?? process.cwd();
 
@@ -192,7 +196,22 @@ export function createWebServer(options: {
 
   const wss = new WebSocketServer({ server: httpServer, path: '/ws' });
 
-  wss.on('connection', (socket) => {
+  wss.on('connection', (rawSocket) => {
+    const socket = rawSocket as HeartbeatWebSocket;
+    socket.isAlive = true;
+    socket.on('pong', () => { socket.isAlive = true; });
+
+    const heartbeat = setInterval(() => {
+      if (socket.readyState !== 1 /* OPEN */) return;
+      if (!socket.isAlive) {
+        socket.terminate();
+        clearInterval(heartbeat);
+        return;
+      }
+      socket.isAlive = false;
+      socket.ping();
+    }, 60_000);
+
     const client: Client = {
       socket,
       authenticated: options.auth === 'none',
@@ -246,6 +265,7 @@ export function createWebServer(options: {
     });
 
     socket.on('close', () => {
+      clearInterval(heartbeat);
       clients.delete(socket);
     });
 

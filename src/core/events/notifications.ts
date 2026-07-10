@@ -2,6 +2,7 @@ import { dispatch } from '../notify/manager.js';
 import { msqEventBus } from './bus.js';
 import type { TypedEventBus } from './bus.js';
 import type { MsqEvents } from './types.js';
+import { getPausedPipelineIdForBudget } from '../../db/repo.js';
 
 export function attachEventNotifications(
   eventBus: TypedEventBus<MsqEvents> = msqEventBus,
@@ -88,10 +89,20 @@ export function attachEventNotifications(
       }).catch(() => { /* ignore dispatch errors */ });
     }),
     eventBus.subscribe('budget:alert', ({ percent, spent, limit }) => {
+      const pipelineId = getPausedPipelineIdForBudget();
+      const reply_markup = pipelineId
+        ? {
+            inline_keyboard: [[
+              { text: '\u25b6\ufe0f Resume Pipeline', callback_data: `resume_pipeline:${String(pipelineId)}` },
+            ]],
+          }
+        : undefined;
+
       void dispatch('budget:alert', `metal-squad: budget ${String(percent)}% reached (${String(spent)}/${String(limit)})`, {
         percent,
         spent,
         limit,
+        reply_markup,
       }).catch(() => { /* ignore dispatch errors */ });
     }),
     eventBus.subscribe('run:done', ({ featureId, result }) => {
