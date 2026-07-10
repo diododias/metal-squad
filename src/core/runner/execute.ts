@@ -48,6 +48,8 @@ import {
   attachRunPersistence,
   msqEventBus,
 } from '../events/index.js';
+import { loadBudgetState, saveBudgetState } from '../../db/repo.js';
+import { saveConfig } from '../../config/index.js';
 
 const SYSTEM_STAGE_SKILLS: Record<string, string[]> = {
   specify: ['speckit-specify'],
@@ -78,7 +80,12 @@ export async function executeBacklog(
   const budget = createBudgetTracker(resolveBudgetLimits(
     backlog.version === 2 ? backlog.budget : undefined,
     config.budget,
-  ));
+  ), {
+    config,
+    saveConfig,
+    loadState: loadBudgetState,
+    saveState: saveBudgetState,
+  });
   let budgetPauseTriggered = false;
 
   const repoStageSkills = backlog.version === 2 ? backlog.defaults.stageSkills : {};
@@ -297,6 +304,7 @@ export async function executeBacklog(
     }
     const controller = new AbortController();
     activeControllers.set(feature.id, controller);
+    // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- workflow set by Zod default, but callers may pass raw objects
     if (feature.workflow?.mode === 'staged') {
       try {
         return await executeStagedFeature(

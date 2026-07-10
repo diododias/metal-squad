@@ -17,6 +17,7 @@ repositories, and can ask for human approval or input through Telegram.
 - Persists runs, token usage, output, retry history, gates, and pipelines in SQLite
 - Streams notifications to Telegram, Slack, Discord, webhook, or desktop
 - Exposes a TUI for monitoring runs, gates, output, and costs
+- Exposes a web dashboard for remote monitoring and control
 - Lets you customize prompts via builtin, global, repo, and Spec Kit skills
 
 ## Requirements
@@ -215,6 +216,40 @@ Starts the interactive TUI.
 ```bash
 msq ui
 ```
+
+### `msq web`
+
+Starts the web dashboard in the foreground.
+
+```bash
+msq web
+msq web --host 0.0.0.0 --port 8743
+msq web --no-auth
+```
+
+Options:
+
+- `--host <host>`: bind address (default `127.0.0.1`)
+- `--port <port>`: port number (default `8743`)
+- `--no-auth`: disable token authentication
+
+The first run generates a token stored in the OS keychain (fallback to
+`~/.config/metal-squad/config.json` under `webToken`). The token is appended to
+the printed URL; clients can also authenticate with `Authorization: Bearer <token>`
+or by sending `{ type: 'auth', token: '...' }` over WebSocket.
+
+### `msq daemon`
+
+Manages a background web daemon.
+
+```bash
+msq daemon start
+msq daemon stop
+msq daemon status
+msq daemon restart
+```
+
+The daemon stores its PID in `~/.local/share/metal-squad/daemon.pid`.
 
 ## Backlog Model
 
@@ -577,6 +612,11 @@ It is created automatically on first run.
     "plan": ["speckit-plan", "speckit-tasks"],
     "implement": ["speckit-implement", "dev-flow"],
     "validate": ["reviewr"]
+  },
+  "web": {
+    "host": "127.0.0.1",
+    "port": 8743,
+    "auth": "token"
   }
 }
 ```
@@ -596,6 +636,9 @@ It is created automatically on first run.
 - `budget.defaultMaxCostUsd`: fallback cost cap when backlog has no `budget.maxCostUsd`
 - `budget.alertAtPercent`: alert threshold percentage
 - `stageSkills`: global stage-to-skill overrides
+- `web.host`: bind address for the web dashboard
+- `web.port`: port for the web dashboard
+- `web.auth`: `token` or `none`
 
 ### Precedence
 

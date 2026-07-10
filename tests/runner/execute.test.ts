@@ -53,6 +53,8 @@ vi.mock('../../src/db/repo.js', () => ({
   setPipelineStatus: mockSetPipelineStatus,
   updatePipelineStage: vi.fn(),
   updatePipelineSnapshot: mockUpdatePipelineSnapshot,
+  loadBudgetState: vi.fn(() => null),
+  saveBudgetState: vi.fn(),
 }));
 
 vi.mock('../../src/core/adapters/index.js', () => ({
@@ -81,7 +83,9 @@ vi.mock('../../src/config/index.js', () => ({
     staleRunThresholdMinutes: 120,
     promptContextCharLimit: 20_000,
     workflow: { autoAdvanceStages: false, pollIntervalMs: 1 },
+    budget: {},
   }),
+  saveConfig: vi.fn(),
 }));
 
 beforeEach(() => {
@@ -191,7 +195,7 @@ describe('executeBacklog failure persistence', () => {
     const backlog: Backlog = {
       version: 2,
       repo: 'repo',
-      defaults: { tool: 'codex', effort: 'medium', skills: ['implement'] },
+      defaults: { tool: 'codex', effort: 'medium', skills: ['implement'], stageSkills: {} },
       epics: [
         {
           id: 'epic-1',
@@ -205,6 +209,7 @@ describe('executeBacklog failure persistence', () => {
               tool: 'codex',
               effort: 'medium',
               dependsOn: [],
+              workflow: { mode: 'single', stages: [], approvals: { channel: 'telegram', autoAdvance: false }, syncTasksToBacklog: true },
             },
           ],
         },
@@ -259,7 +264,7 @@ describe('executeBacklog failure persistence', () => {
     const backlog: Backlog = {
       version: 2,
       repo: 'repo',
-      defaults: { tool: 'codex', effort: 'medium', skills: ['implement'] },
+      defaults: { tool: 'codex', effort: 'medium', skills: ['implement'], stageSkills: {} },
       epics: [
         {
           id: 'epic-1',
@@ -273,6 +278,7 @@ describe('executeBacklog failure persistence', () => {
               tool: 'codex',
               effort: 'medium',
               dependsOn: [],
+              workflow: { mode: 'single', stages: [], approvals: { channel: 'telegram', autoAdvance: false }, syncTasksToBacklog: true },
               retry: {
                 maxAttempts: 3,
                 backoffMs: 10,
@@ -309,7 +315,7 @@ describe('executeBacklog failure persistence', () => {
     const backlog: Backlog = {
       version: 2,
       repo: 'repo',
-      defaults: { tool: 'codex', effort: 'medium', skills: ['implement'] },
+      defaults: { tool: 'codex', effort: 'medium', skills: ['implement'], stageSkills: {} },
       epics: [
         {
           id: 'epic-1',
@@ -323,6 +329,7 @@ describe('executeBacklog failure persistence', () => {
               tool: 'codex',
               effort: 'medium',
               dependsOn: [],
+              workflow: { mode: 'single', stages: [], approvals: { channel: 'telegram', autoAdvance: false }, syncTasksToBacklog: true },
               retry: {
                 maxAttempts: 1,
                 backoffMs: 0,
@@ -337,6 +344,7 @@ describe('executeBacklog failure persistence', () => {
               tool: 'codex',
               effort: 'medium',
               dependsOn: ['feat-11'],
+              workflow: { mode: 'single', stages: [], approvals: { channel: 'telegram', autoAdvance: false }, syncTasksToBacklog: true },
             },
           ],
         },
@@ -363,7 +371,7 @@ describe('executeBacklog failure persistence', () => {
     const backlog: Backlog = {
       version: 2,
       repo: 'repo',
-      defaults: { tool: 'codex', effort: 'medium', skills: ['implement'] },
+      defaults: { tool: 'codex', effort: 'medium', skills: ['implement'], stageSkills: {} },
       epics: [
         {
           id: 'epic-1',
@@ -377,6 +385,7 @@ describe('executeBacklog failure persistence', () => {
               tool: 'codex',
               effort: 'medium',
               dependsOn: [],
+              workflow: { mode: 'single', stages: [], approvals: { channel: 'telegram', autoAdvance: false }, syncTasksToBacklog: true },
               retry: {
                 maxAttempts: 1,
                 backoffMs: 0,
@@ -410,7 +419,7 @@ describe('executeBacklog failure persistence', () => {
     const backlog: Backlog = {
       version: 2,
       repo: 'repo',
-      defaults: { tool: 'codex', effort: 'medium', skills: ['implement'] },
+      defaults: { tool: 'codex', effort: 'medium', skills: ['implement'], stageSkills: {} },
       epics: [
         {
           id: 'epic-1',
@@ -484,7 +493,7 @@ describe('executeBacklog failure persistence', () => {
     const backlog: Backlog = {
       version: 2,
       repo: 'repo',
-      defaults: { tool: 'codex', effort: 'medium', skills: ['implement'] },
+      defaults: { tool: 'codex', effort: 'medium', skills: ['implement'], stageSkills: {} },
       epics: [
         {
           id: 'epic-1',
@@ -546,7 +555,7 @@ describe('executeBacklog failure persistence', () => {
     const backlog: Backlog = {
       version: 2,
       repo: 'repo',
-      defaults: { tool: 'codex', effort: 'medium', skills: ['implement'] },
+      defaults: { tool: 'codex', effort: 'medium', skills: ['implement'], stageSkills: {} },
       epics: [
         {
           id: 'epic-1',
@@ -641,7 +650,7 @@ describe('executeBacklog budget caps', () => {
     const backlog: Backlog = {
       version: 2,
       repo: 'repo',
-      defaults: { tool: 'codex', effort: 'medium', skills: ['implement'] },
+      defaults: { tool: 'codex', effort: 'medium', skills: ['implement'], stageSkills: {} },
       budget: { maxTokens: 100 },
       epics: [
         {
@@ -656,6 +665,7 @@ describe('executeBacklog budget caps', () => {
               tool: 'codex',
               effort: 'medium',
               dependsOn: [],
+              workflow: { mode: 'single', stages: [], approvals: { channel: 'telegram', autoAdvance: false }, syncTasksToBacklog: true },
             },
           ],
         },
@@ -690,7 +700,7 @@ describe('executeBacklog budget caps', () => {
     const backlog: Backlog = {
       version: 2,
       repo: 'repo',
-      defaults: { tool: 'codex', effort: 'medium', skills: ['implement'] },
+      defaults: { tool: 'codex', effort: 'medium', skills: ['implement'], stageSkills: {} },
       budget: { maxTokens: 1000 },
       epics: [
         {
@@ -705,6 +715,7 @@ describe('executeBacklog budget caps', () => {
               tool: 'codex',
               effort: 'medium',
               dependsOn: [],
+              workflow: { mode: 'single', stages: [], approvals: { channel: 'telegram', autoAdvance: false }, syncTasksToBacklog: true },
             },
           ],
         },

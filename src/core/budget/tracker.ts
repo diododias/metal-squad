@@ -1,5 +1,6 @@
 import type { TokenUsage } from '../adapters/types.js';
 import type { Budget } from '../backlog/schema.js';
+import type { Config } from '../../config/index.js';
 
 export interface BudgetLimits {
   maxTokens?: number;
@@ -34,6 +35,13 @@ export interface BudgetTracker {
   hasLimits(): boolean;
 }
 
+export interface BudgetTrackerPersistence {
+  config: Config;
+  saveConfig: (cfg: Config) => void;
+  loadState: (key: string) => number | null;
+  saveState: (key: string, tokens: number) => void;
+}
+
 export function resolveBudgetLimits(
   backlogBudget: Budget | undefined,
   configBudget: { alertAtPercent?: number } | undefined,
@@ -45,11 +53,38 @@ export function resolveBudgetLimits(
   };
 }
 
-export function createBudgetTracker(limits: BudgetLimits): BudgetTracker {
+function todayString(): string {
+  return new Date().toISOString().slice(0, 10);
+}
+
+export function createBudgetTracker(
+  limits: BudgetLimits,
+  persistence?: BudgetTrackerPersistence,
+): BudgetTracker {
   let tokens = 0;
   const perFeatureTokens = new Map<string, number>();
   const alerted = new Set<'tokens'>();
   const featureViolationsReported = new Set<string>();
+
+  if (persistence) {
+    const today = todayString();
+    const lastReset = persistence.config.budget.lastResetDate;
+
+    if (lastReset !== today) {
+      tokens = 0;
+      perFeatureTokens.clear();
+      alerted.clear();
+      featureViolationsReported.clear();
+      persistence.config.budget.lastResetDate = today;
+      persistence.saveConfig(persistence.config);
+      persistence.saveState('global', 0);
+    } else {
+      const persisted = persistence.loadState('global');
+      if (persisted !== null) {
+        tokens = persisted;
+      }
+    }
+  }
 
   const hasLimits = (): boolean =>
     limits.maxTokens !== undefined
@@ -79,6 +114,11 @@ export function createBudgetTracker(limits: BudgetLimits): BudgetTracker {
       tokens += usage.total;
       const featureTotal = (perFeatureTokens.get(featureId) ?? 0) + usage.total;
       perFeatureTokens.set(featureId, featureTotal);
+
+      if (persistence) {
+        persistence.saveState('global', tokens);
+        persistence.saveState(`feature:${featureId}`, featureTotal);
+      }
 
       const violations: BudgetViolation[] = [];
       const global = globalViolation();

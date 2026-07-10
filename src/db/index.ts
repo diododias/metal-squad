@@ -219,6 +219,12 @@ function migrate(d: Database.Database): void {
       created_at  TEXT NOT NULL DEFAULT (datetime('now')),
       resolved_at TEXT
     );
+
+    CREATE TABLE IF NOT EXISTS budget_state (
+      key TEXT PRIMARY KEY,
+      tokens INTEGER NOT NULL DEFAULT 0,
+      updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
   `);
 
   const runColumns = d

@@ -597,3 +597,33 @@ epics:
             channel: telegram
             autoAdvance: false
           syncTasksToBacklog: true
+  - id: e06-web-version
+    title: E06 — Web Version
+    features:
+      - id: feat-32
+        title: F32 — Web Mode
+        tool: claude
+        model: claude-sonnet-4-5
+        effort: high
+        skills:
+          - dev-flow
+        specFile: docs/features/F32-web-mode.md
+        context:
+          - docs/ROADMAP.md
+        dependsOn: []
+        tasks: []
+        retry:
+          maxAttempts: 1
+          backoffMs: 5000
+          onFail: stop
+        workflow:
+          mode: staged
+          stages:
+            - specify
+            - plan
+            - tasks
+            - implement
+          approvals:
+            channel: telegram
+            autoAdvance: false
+          syncTasksToBacklog: true

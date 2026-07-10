@@ -1,5 +1,5 @@
 import { getSecret } from '../../security/secrets.js';
-import { resolveGate, resolveStageRequest } from '../../db/repo.js';
+import { resolveGate, resolveStageRequest, resumePipeline } from '../../db/repo.js';
 import type { GateDecision } from '../../db/repo.js';
 
 interface TelegramUpdate {
@@ -93,6 +93,16 @@ export class TelegramPoller {
             if (!requestId || !response) continue;
             try { resolveStageRequest(Number(requestId), response.trim()); } catch { /* DB may be unavailable */ }
             if (callbackId) void this.answerCallback(token, callbackId);
+            continue;
+          }
+
+          if (text.startsWith('resume_pipeline:')) {
+            const pipelineId = Number(text.split(':')[1]);
+            if (pipelineId) {
+              try { resumePipeline(pipelineId); } catch { /* DB may be unavailable */ }
+            }
+            if (callbackId) void this.answerCallback(token, callbackId);
+            continue;
           }
         }
       } catch {
