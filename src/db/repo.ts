@@ -331,6 +331,77 @@ export function listRunsForTui(limit = 50, repoId?: string): RunSummary[] {
     .all(...params) as RunSummary[];
 }
 
+// F34 item 1: full run history for a feature (not deduplicated to the latest
+// run per feature/repo like listRunsForTui), so RunDetail/FeaturePreview can
+// look back at previous attempts of the same feature for stage breakdown,
+// failure context, and token cost estimation.
+export interface RunHistoryEntry {
+  runId: number;
+  repoId: string;
+  featureId: string;
+  tool: 'claude' | 'codex' | 'opencode';
+  stage: string | null;
+  status: RunStatus;
+  startedAt: string;
+  endedAt: string | null;
+  totalTokens: number | null;
+  pipelineResumeSummary: string | null;
+}
+
+export function listRunHistoryForFeature(repoId: string, featureId: string, limit = 20): RunHistoryEntry[] {
+  if (!hasDbFile()) return [];
+  return getDb('readonly')
+    .prepare(
+      `WITH latest_usage AS (
+         SELECT u.run_id AS runId, u.total
+         FROM token_usage u
+         JOIN (
+           SELECT run_id, MAX(id) AS id
+           FROM token_usage
+           GROUP BY run_id
+         ) latest_token_usage ON latest_token_usage.id = u.id
+       ),
+       pending_stage_requests AS (
+         SELECT sr.*
+         FROM stage_requests sr
+         JOIN (
+           SELECT MAX(id) AS id
+           FROM stage_requests
+           WHERE status = 'pending'
+           GROUP BY pipeline_id, feature_id
+         ) latest_pending ON latest_pending.id = sr.id
+       )
+       SELECT
+         r.id          AS runId,
+         r.repo_id     AS repoId,
+         r.feature_id  AS featureId,
+         r.tool,
+         r.stage       AS stage,
+         CASE
+           WHEN psr.id IS NOT NULL THEN 'blocked'
+           WHEN p.status IN ('paused', 'blocked') THEN 'blocked'
+           WHEN p.status IN ('aborting', 'aborted') THEN 'aborted'
+           WHEN p.status = 'failed' THEN 'failed'
+           WHEN p.status = 'running' AND r.status = 'done' THEN 'running'
+           ELSE r.status
+         END           AS status,
+         r.started_at  AS startedAt,
+         r.ended_at    AS endedAt,
+         COALESCE(r.total_tokens, lu.total) AS totalTokens,
+         p.resume_summary AS pipelineResumeSummary
+       FROM runs r
+       LEFT JOIN latest_usage lu ON lu.runId = r.id
+       LEFT JOIN pipelines p ON p.id = r.pipeline_id
+       LEFT JOIN pending_stage_requests psr
+         ON psr.pipeline_id = r.pipeline_id
+        AND psr.feature_id = r.feature_id
+       WHERE r.repo_id = ? AND r.feature_id = ?
+       ORDER BY r.started_at DESC
+       LIMIT ?`,
+    )
+    .all(repoId, featureId, limit) as RunHistoryEntry[];
+}
+
 // Union of feature ids present in pipelines.done_json across every pipeline run
 // for a repo (i.e. every `msq run` invocation, including resumes). "Done" here
 // follows the same policy the scheduler already applies when writing done_json:
@@ -652,6 +723,49 @@ export function listRunsForStats(filters: StatsFilters = {}): StatsRunRow[] {
        ORDER BY r.id DESC`,
     )
     .all(...params) as StatsRunRow[];
+}
+
+// F34 item 5c: historical average/median total_tokens among completed runs
+// with the same tool, used by FeaturePreview as a rough cost estimate before
+// starting a feature. The `runs` table does not track model/effort per run,
+// so this is intentionally scoped to `tool` only — callers must surface that
+// limitation to the user rather than presenting it as an exact match.
+export function getHistoricalTokenStatsForFeatureProfile(
+  tool: string,
+): { sampleSize: number; avgTotalTokens: number | null; medianTotalTokens: number | null } {
+  if (!hasDbFile()) return { sampleSize: 0, avgTotalTokens: null, medianTotalTokens: null };
+  const rows = getDb('readonly')
+    .prepare(
+      `WITH latest_usage AS (
+         SELECT u.run_id AS runId, u.total
+         FROM token_usage u
+         JOIN (
+           SELECT run_id, MAX(id) AS id
+           FROM token_usage
+           GROUP BY run_id
+         ) latest_token_usage ON latest_token_usage.id = u.id
+       )
+       SELECT COALESCE(r.total_tokens, lu.total) AS totalTokens
+       FROM runs r
+       LEFT JOIN latest_usage lu ON lu.runId = r.id
+       WHERE r.tool = ? AND r.status = 'done'`,
+    )
+    .all(tool) as { totalTokens: number | null }[];
+  const values = rows
+    .map((row) => row.totalTokens)
+    .filter((value): value is number => value != null)
+    .sort((a, b) => a - b);
+  if (values.length === 0) return { sampleSize: 0, avgTotalTokens: null, medianTotalTokens: null };
+  const avg = values.reduce((sum, value) => sum + value, 0) / values.length;
+  const mid = Math.floor(values.length / 2);
+  const median = values.length % 2 === 0
+    ? ((values[mid - 1] ?? 0) + (values[mid] ?? 0)) / 2
+    : (values[mid] ?? 0);
+  return {
+    sampleSize: values.length,
+    avgTotalTokens: Math.round(avg),
+    medianTotalTokens: Math.round(median),
+  };
 }
 
 export interface TaskRun {

@@ -198,3 +198,63 @@ describe('createGate', () => {
     expect(mockRun).toHaveBeenCalledWith(10, 'feat-1', 'repo1');
   });
 });
+
+// F34 item 1: listRunHistoryForFeature returns every run for a feature
+// (not deduplicated to the latest one like listRunsForTui).
+describe('listRunHistoryForFeature', () => {
+  it('returns empty array when no runs', async () => {
+    mockAll.mockReturnValue([]);
+    const { listRunHistoryForFeature } = await import('../../src/db/repo.js');
+    expect(listRunHistoryForFeature('repo1', 'feat-1')).toEqual([]);
+  });
+
+  it('passes repoId, featureId and limit to the query, ordered by started_at DESC', async () => {
+    const rows = [
+      { runId: 3, repoId: 'repo1', featureId: 'feat-1', tool: 'claude', stage: 'implement', status: 'failed', startedAt: '2026-07-08T10:00:00', endedAt: '2026-07-08T10:05:00', totalTokens: 500, pipelineResumeSummary: null },
+      { runId: 1, repoId: 'repo1', featureId: 'feat-1', tool: 'claude', stage: 'specify', status: 'done', startedAt: '2026-07-06T10:00:00', endedAt: '2026-07-06T10:05:00', totalTokens: 1200, pipelineResumeSummary: null },
+    ];
+    mockAll.mockReturnValue(rows);
+    const { listRunHistoryForFeature } = await import('../../src/db/repo.js');
+    const result = listRunHistoryForFeature('repo1', 'feat-1', 5);
+    expect(mockAll).toHaveBeenCalledWith('repo1', 'feat-1', 5);
+    expect(result).toEqual(rows);
+  });
+
+  it('defaults limit to 20', async () => {
+    mockAll.mockReturnValue([]);
+    const { listRunHistoryForFeature } = await import('../../src/db/repo.js');
+    listRunHistoryForFeature('repo1', 'feat-1');
+    expect(mockAll).toHaveBeenCalledWith('repo1', 'feat-1', 20);
+  });
+});
+
+// F34 item 5c: historical token estimate by tool.
+describe('getHistoricalTokenStatsForFeatureProfile', () => {
+  it('returns zeroed stats when there are no completed runs', async () => {
+    mockAll.mockReturnValue([]);
+    const { getHistoricalTokenStatsForFeatureProfile } = await import('../../src/db/repo.js');
+    expect(getHistoricalTokenStatsForFeatureProfile('claude')).toEqual({
+      sampleSize: 0,
+      avgTotalTokens: null,
+      medianTotalTokens: null,
+    });
+  });
+
+  it('computes average and median total tokens across completed runs for the tool', async () => {
+    mockAll.mockReturnValue([{ totalTokens: 100 }, { totalTokens: 300 }, { totalTokens: 200 }]);
+    const { getHistoricalTokenStatsForFeatureProfile } = await import('../../src/db/repo.js');
+    const result = getHistoricalTokenStatsForFeatureProfile('claude');
+    expect(result.sampleSize).toBe(3);
+    expect(result.avgTotalTokens).toBe(200);
+    expect(result.medianTotalTokens).toBe(200);
+    expect(mockAll).toHaveBeenCalledWith('claude');
+  });
+
+  it('ignores null totalTokens values', async () => {
+    mockAll.mockReturnValue([{ totalTokens: null }, { totalTokens: 100 }]);
+    const { getHistoricalTokenStatsForFeatureProfile } = await import('../../src/db/repo.js');
+    const result = getHistoricalTokenStatsForFeatureProfile('codex');
+    expect(result.sampleSize).toBe(1);
+    expect(result.avgTotalTokens).toBe(100);
+  });
+});

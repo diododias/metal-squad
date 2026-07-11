@@ -2,7 +2,7 @@ import { createServer, type IncomingMessage, type Server, type ServerResponse } 
 import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { spawn } from 'node:child_process';
+import { spawn, execFileSync } from 'node:child_process';
 import { WebSocketServer, type WebSocket } from 'ws';
 import type { MsqEvents } from '../core/events/types.js';
 import { msqEventBus } from '../core/events/index.js';
@@ -11,6 +11,7 @@ import {
   abortPipeline,
   forceResolveGate,
   listRunEvents,
+  listRunHistoryForFeature,
   listRunOutput,
   listTaskRunsForRun,
   pausePipeline,
@@ -20,11 +21,12 @@ import {
   resumePipeline,
 } from '../db/repo.js';
 import { computeRunBreakdown } from '../core/stats.js';
+import { resolveRepo } from '../core/repo.js';
 import { loadBacklog } from '../core/backlog/load.js';
 import { validateBacklogSkills } from '../core/skills/index.js';
 import { loadConfig } from '../config/index.js';
 import { buildMsqWebState, appendNotification } from './state.js';
-import type { WebSocketClientMessage, WebSocketServerMessage } from './types.js';
+import type { RunChangesPayload, WebSocketClientMessage, WebSocketServerMessage } from './types.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -39,6 +41,102 @@ interface Client {
   authenticated: boolean;
   outputSubscriptions: Set<number>;
   detailSubscriptions: Set<number>;
+  historySubscriptions: Set<string>;
+  changesSubscriptions: Set<number>;
+}
+
+// F34 item 2: git status/diff for a run's working directory. Runs against
+// the server's own cwd (the repo msq operates on today, no per-run
+// worktrees) — see docs/features/F34-web-run-detail-and-control-polish.md
+// item 2 for the accepted limitation (a run's "changes" can include
+// unrelated edits made manually to the repo during the run).
+//
+// GIT_DIR/GIT_WORK_TREE/GIT_INDEX_FILE (and friends) take priority over
+// `cwd`-based repo discovery when present in the environment — which they
+// are whenever this process is a descendant of a git hook (e.g. the msq
+// server started, however indirectly, under a pre-commit run). Without
+// stripping them, `git` here would silently operate on the ancestor
+// process's repo/index instead of `cwd`.
+const GIT_ENV_OVERRIDE = Object.fromEntries(
+  Object.entries(process.env).filter(([key]) => !key.startsWith('GIT_')),
+);
+
+function runGit(args: string[], cwd: string): string {
+  return execFileSync('git', args, {
+    cwd,
+    encoding: 'utf8',
+    stdio: ['ignore', 'pipe', 'ignore'],
+    env: GIT_ENV_OVERRIDE,
+  });
+}
+
+function computeRunChanges(runId: number, cwd: string): RunChangesPayload {
+  try {
+    runGit(['rev-parse', '--is-inside-work-tree'], cwd);
+  } catch {
+    return {
+      runId,
+      branch: null,
+      remoteUrl: null,
+      files: [],
+      notApplicableReason: "No git repository detected for this run's working directory.",
+    };
+  }
+
+  let branch: string | null = null;
+  try {
+    branch = runGit(['rev-parse', '--abbrev-ref', 'HEAD'], cwd).trim() || null;
+  } catch {
+    branch = null;
+  }
+
+  let remoteUrl: string | null = null;
+  try {
+    remoteUrl = runGit(['config', '--get', 'remote.origin.url'], cwd).trim() || null;
+  } catch {
+    remoteUrl = null;
+  }
+
+  let statusOutput = '';
+  try {
+    statusOutput = runGit(['status', '--porcelain'], cwd);
+  } catch {
+    statusOutput = '';
+  }
+
+  let numstatOutput = '';
+  try {
+    numstatOutput = runGit(['diff', '--numstat', 'HEAD'], cwd);
+  } catch {
+    try {
+      numstatOutput = runGit(['diff', '--numstat'], cwd);
+    } catch {
+      numstatOutput = '';
+    }
+  }
+
+  const statsByPath = new Map<string, { additions: number; deletions: number }>();
+  for (const line of numstatOutput.split('\n')) {
+    if (!line.trim()) continue;
+    const [added, deleted, path] = line.split('\t');
+    if (!path) continue;
+    statsByPath.set(path, {
+      additions: added === '-' ? 0 : Number(added),
+      deletions: deleted === '-' ? 0 : Number(deleted),
+    });
+  }
+
+  const files: RunChangesPayload['files'] = [];
+  for (const line of statusOutput.split('\n')) {
+    if (!line.trim()) continue;
+    const code = line.slice(0, 2);
+    const path = line.slice(3).trim();
+    const status = code.includes('D') ? 'deleted' : code.includes('A') || code.includes('?') ? 'added' : 'modified';
+    const stat = statsByPath.get(path) ?? { additions: 0, deletions: 0 };
+    files.push({ path, status, additions: stat.additions, deletions: stat.deletions });
+  }
+
+  return { runId, branch, remoteUrl, files, notApplicableReason: null };
 }
 
 const BROADCAST_EVENTS: (keyof MsqEvents)[] = [
@@ -176,6 +274,19 @@ export function createWebServer(options: {
         return;
       }
 
+      const changesMatch = /^\/api\/runs\/(\d+)\/changes$/.exec(pathname);
+      if (changesMatch?.[1]) {
+        if (!isAuthenticated(req)) {
+          res.writeHead(401, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'Unauthorized' }));
+          return;
+        }
+        const runId = Number(changesMatch[1]);
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify(computeRunChanges(runId, cwd)));
+        return;
+      }
+
       if (pathname === '/' || pathname === '/index.html') {
         serveStatic(req, res, 'index.html');
         return;
@@ -217,6 +328,8 @@ export function createWebServer(options: {
       authenticated: options.auth === 'none',
       outputSubscriptions: new Set(),
       detailSubscriptions: new Set(),
+      historySubscriptions: new Set(),
+      changesSubscriptions: new Set(),
     };
     clients.set(socket, client);
 
@@ -305,7 +418,7 @@ export function createWebServer(options: {
   ): void {
     switch (message.type) {
       case 'action:startFeature': {
-        startFeature(message.featureId, featureCwd);
+        startFeature(message.featureId, featureCwd, message.overrides);
         break;
       }
       case 'action:pausePipeline': {
@@ -367,10 +480,42 @@ export function createWebServer(options: {
         client.detailSubscriptions.delete(message.runId);
         break;
       }
+      case 'subscribe:runHistory': {
+        client.historySubscriptions.add(message.featureId);
+        sendRunHistory(client, message.featureId);
+        break;
+      }
+      case 'unsubscribe:runHistory': {
+        client.historySubscriptions.delete(message.featureId);
+        break;
+      }
+      case 'subscribe:runChanges': {
+        client.changesSubscriptions.add(message.runId);
+        sendRunChanges(client, message.runId, featureCwd);
+        break;
+      }
+      case 'unsubscribe:runChanges': {
+        client.changesSubscriptions.delete(message.runId);
+        break;
+      }
       default: {
         break;
       }
     }
+  }
+
+  function sendRunHistory(client: Client, featureId: string): void {
+    try {
+      const { repoId } = resolveRepo(cwd);
+      const runs = listRunHistoryForFeature(repoId, featureId);
+      sendTo(client, { type: 'run:history', payload: { featureId, runs } });
+    } catch {
+      // DB unavailable — skip this update
+    }
+  }
+
+  function sendRunChanges(client: Client, runId: number, featureCwd: string): void {
+    sendTo(client, { type: 'run:changes', payload: computeRunChanges(runId, featureCwd) });
   }
 
   const outputUnsubscribe = msqEventBus.subscribe('run:output', (event) => {
@@ -406,7 +551,25 @@ export function createWebServer(options: {
     }),
   );
 
-  function startFeature(featureId: string, featureCwd: string): void {
+  const HISTORY_AND_CHANGES_REFRESH_EVENTS: (keyof MsqEvents)[] = ['run:start', 'run:done', 'run:failed'];
+
+  const historyAndChangesUnsubscribers = HISTORY_AND_CHANGES_REFRESH_EVENTS.map((eventName) =>
+    msqEventBus.subscribe(eventName, (event) => {
+      const runId = 'runId' in event && typeof event.runId === 'number' ? event.runId : null;
+      const featureId = 'featureId' in event && typeof event.featureId === 'string' ? event.featureId : null;
+      for (const client of clients.values()) {
+        if (!client.authenticated || client.socket.readyState !== 1) continue;
+        if (featureId && client.historySubscriptions.has(featureId)) sendRunHistory(client, featureId);
+        if (runId !== null && client.changesSubscriptions.has(runId)) sendRunChanges(client, runId, cwd);
+      }
+    }),
+  );
+
+  function startFeature(
+    featureId: string,
+    featureCwd: string,
+    overrides?: { tool?: string; model?: string; effort?: string },
+  ): void {
     try {
       assertWritableDbPath();
       loadConfig();
@@ -424,11 +587,20 @@ export function createWebServer(options: {
       return;
     }
 
-    const child = spawn(process.execPath, [...process.execArgv, entrypoint, 'run', '--feature', featureId], {
-      detached: true,
-      stdio: 'ignore',
-      cwd: featureCwd,
-    });
+    const overrideArgs: string[] = [];
+    if (overrides?.tool) overrideArgs.push('--tool', overrides.tool);
+    if (overrides?.model) overrideArgs.push('--model', overrides.model);
+    if (overrides?.effort) overrideArgs.push('--effort', overrides.effort);
+
+    const child = spawn(
+      process.execPath,
+      [...process.execArgv, entrypoint, 'run', '--feature', featureId, ...overrideArgs],
+      {
+        detached: true,
+        stdio: 'ignore',
+        cwd: featureCwd,
+      },
+    );
     child.once('error', (error) => {
       msqEventBus.emit('ui:notice', { message: `Could not start ${featureId}: ${error.message}` });
     });
@@ -444,6 +616,7 @@ export function createWebServer(options: {
       outputUnsubscribe();
       for (const unsubscribe of eventUnsubscribers) unsubscribe();
       for (const unsubscribe of detailUnsubscribers) unsubscribe();
+      for (const unsubscribe of historyAndChangesUnsubscribers) unsubscribe();
       for (const client of clients.values()) {
         client.socket.terminate();
       }
