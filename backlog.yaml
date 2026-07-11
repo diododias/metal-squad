@@ -22,144 +22,88 @@ budget:
   maxCostUsd: 100
   perFeatureMaxTokens: 500000
 epics:
-  - id: e03-orchestration-v2
-    title: E03 — Orchestration v2
+  - id: e06-web-version
+    title: E06 — Web Version
     features:
-      - id: feat-39
-        title: F39 — Adapter Fallback em Retry + Resume no Step que Falhou
+      - id: feat-38
+        title: "F38 — Live Output: Hierarquia Visual e Cores Mutadas"
         spec: >
-          Problema: hoje, quando um adapter falha (crash, timeout, rate limit)
-          ou
-
-          estoura budget (maxTokens global ou perFeatureMaxTokens), o msq so
-          sabe
-
-          reexecutar a feature com o mesmo tool/model (runWithRetry em
-
-          src/core/runner/execute.ts:456-493 resolve getAdapter(feature.tool)
-          uma
-
-          unica vez antes do loop de tentativas). Quando o budget estoura,
-          apenas
-
-          pausa a pipeline ou cria gate manual, sem oferecer caminho de
-          continuar
-
-          com outra ferramenta. Ao reexecutar via `msq resume <target>`, o msq
-
-          reconstroi o estado a partir do snapshot persistido
-          (done/pending/active/
-
-          aborted em `pipelines`), mas nao ha forma de dizer "continue essa run
-
-          especifica, porem com outro tool/model, apenas no step que ficou
-
-          pendente". Alem disso, `updateRunUsage()` (src/db/repo.ts:99-105)
-
-          SOBRESCREVE `runs.input_tokens/output_tokens/total_tokens` a cada
-
-          chamada em vez de acumular — entao se uma tentativa falha e outra e
-
-          refeita no mesmo runId, o custo real acumulado (incluindo a tentativa
-
-          que falhou) nao fica visivel na tabela `runs`, so espalhado em linhas
-
-          avulsas de `token_usage`.
+          Problema: no painel "Live Output" do detalhe de run (dashboard web),
+          cada evento de tool call vira um bloco full-width com borda e fundo
+          solido (`renderOutputEntry` em `src/web/static/components/RunDetail.js:139-145`,
+          classe `.output-entry.tool` em `src/web/static/styles.css:598-604`
+          com `border` + `background: var(--panel)`). A chamada em
+          `RunDetail.js:515` passa `maxWidth=1000` para todas as entries, entao
+          o bloco de tool nao e limitado por largura e estica borda-a-borda do
+          container `.output-log`. Isso cria dois problemas: (1) blocos de
+          tool competem visualmente com a narrativa/"thinking" do agente —
+          entries default (`RunDetail.js:160-164`) renderizam so como texto
+          plano sem borda/fundo, entao o card de tool acaba chamando mais
+          atencao que o raciocinio do agente, invertendo a prioridade
+          esperada; (2) a paleta `var(--panel)` (`#111827`) / `var(--border)`
+          (`#374151`) tem pouco contraste com `var(--text)` (`#e5e7eb`),
+          entao o bloco de tool nao parece "secundario" o suficiente — CLIs de
+          mercado usam linha compacta, label curto e cor apagada para tool
+          calls, sem card full-width com fundo proprio.
 
 
-          Objetivo: permitir que, quando uma feature falha (esgotou
-
-          retry.maxAttempts) ou atinge limite de budget, o operador possa trocar
-
-          tool e/ou model/effort e retomar A MESMA run/pipeline, reexecutando
-
-          SOMENTE o step (stage/task) que ficou pendente, sem gerar uma run nova
-
-          do zero e sem perder o rastreio de tokens — incluindo os tokens ja
-
-          gastos pela tentativa que falhou.
+          Objetivo: redesenhar a apresentacao das entries de tool no Live
+          Output para ocupar menos espaco horizontal (nao esticar borda a
+          borda do container), usar cores mais mutadas que o texto de
+          narrativa do agente, e ficar mais proximo do padrao visual de CLIs
+          de mercado — sem alterar o que e mostrado, so como e mostrado.
+          Fora de escopo: fonte de dados do live output (WebSocket,
+          `outputLines`), fila/paginacao ou comportamento de streaming, e a
+          TUI Ink (`src/ui/components/MainPanel.tsx`), que tem um `ERR> `
+          parecido mas nao faz parte deste pedido.
 
 
           Escopo esperado:
 
-          - Estender `RetrySchema` (src/core/backlog/schema.ts:8-12) com lista
-            opcional `fallback: [{ tool, model?, effort?, maxAttempts? }]`,
-            tentada em ordem apos o tool primario esgotar maxAttempts
-          - `runWithRetry` (src/core/runner/execute.ts) passa a iterar attempt
-            specs (primario + fallback), resolvendo `getAdapter(spec.tool)` por
-            spec e construindo um `Feature` efetivo (clone com tool/model/effort
-            sobrescritos) sem mutar o objeto compartilhado pelo scheduler
-          - `retry_history` (src/db/index.ts:143-149) ganha colunas
-          `tool`/`model`
-            para auditar qual adapter rodou em cada tentativa
-          - Resolucao de gate de budget passa a aceitar tool/model como uma das
-            formas de resolucao, reusando a mesma infra do fallback de retry
-          - `msq resume <target>` (src/commands/resume.ts) ganha flags opcionais
-            `--tool`, `--model`, `--effort` aplicadas como override PONTUAL da
-            retomada (nao reescreve backlog.yaml nem o catalogo persistido)
-          - O resume com override continua usando o MESMO runId/pipelineId da
-            execucao original — nao cria run nova para trabalho ja concluido —
-            e reaproveita `determineStageStartIndex` para so reexecutar o
-            stage/task que estava `running`/`failed`, sem repetir stages `done`
-            do workflow staged (specify/plan/tasks/...)
-          - Corrigir `updateRunUsage()` (src/db/repo.ts:99-105) para ACUMULAR
-            tokens entre tentativas de um mesmo runId (hoje sobrescreve); ajustar
-            leitura em `src/core/stats.ts` e `src/core/budget/tracker.ts` para
-            refletirem o total real gasto na run, incluindo tentativas que
-            falharam antes do fallback
-          - TUI/`msq status` passam a expor qual tool/model foi usado em cada
-            tentativa (leitura de retry_history) e o total de tokens acumulado
-            da run
+          - `src/web/static/components/RunDetail.js`: ajustar
+            `renderOutputEntry` (linhas 137-165) para limitar a largura
+            efetiva das entries de tool (hoje `maxWidth=1000` na chamada de
+            `RunDetail.js:515`, sem truncamento real) e/ou trocar a estrutura
+            do elemento para nao ocupar 100% da largura do container mesmo
+            com texto curto.
+          - `src/web/static/styles.css`: em `.output-entry.tool` (linhas
+            598-604), trocar `background: var(--panel)` / `border: 1px solid
+            var(--border)` por um tratamento mais discreto (ex.: sem fundo
+            solido, `color: var(--muted)` como ja usado em `.output-entry.heartbeat`,
+            linhas 606-609, com indicador leve tipo borda esquerda fina ou
+            prefixo) — objetivo e contraste visivelmente mais baixo que o
+            texto default usado pela narrativa do agente.
+          - Preservar hierarquia entre fontes: narrativa (default,
+            `var(--text)`) mais visivel; `stderr` (`var(--danger)`) mais
+            visivel (erro deve continuar chamando atencao); `tool` mutado e
+            compacto; `heartbeat` ja mutado/italico, sem mudanca.
 
 
           Validacao:
 
-          - Uma feature com `retry.fallback` configurado, ao esgotar maxAttempts
-
-          no tool primario, tenta automaticamente o proximo tool da lista antes
-
-          de aplicar onFail
-
-          - `msq resume <target> --tool <outro> --model <outro>` retoma a mesma
-
-          run/pipeline sem criar run nova para o trabalho ja concluido
-
-          - Ao retomar apos falha, apenas o stage/task que tinha falhado e
-
-          reexecutado — stages ja done no workflow staged nao rodam de novo
-
-          - O total de tokens da run (runs.total_tokens e o que TUI/status
-
-          exibem) inclui os tokens gastos pela(s) tentativa(s) que falharam
-          antes
-
-          do fallback, nao so a tentativa final bem-sucedida
-
-          - retry_history registra tool/model usados em cada tentativa
-
-          - Existe teste cobrindo: tentativa 1 falha com codex, fallback para
-
-          claude/effort medium sucede, e o total de tokens reportado soma as
-
-          duas tentativas
+          - Entries de tool no Live Output nao esticam mais borda-a-borda do
+            container `.output-log`.
+          - Entries de tool usam cor visivelmente mais apagada que o texto
+            de narrativa do agente (contraste reduzido, comparavel a
+            `heartbeat`).
+          - Narrativa do agente mantem o contraste atual (`var(--text)`),
+            sem regressao de legibilidade; `stderr` mantem
+            `var(--danger)`.
+          - Nenhuma mudanca em `outputLines`/streaming/websocket — so
+            apresentacao.
+          - `npm run build` e `npm run typecheck` passam.
         tool: claude
         effort: medium
         skills:
           - dev-flow
+        specFile: docs/features/F38-live-output-visual-hierarchy.md
         context:
-          - docs/features/F39-adapter-fallback-resume.md
-          - docs/features/F26-resume-pipeline-from-state.md
+          - docs/features/F38-live-output-visual-hierarchy.md
+          - docs/features/F34-web-run-detail-and-control-polish.md
           - docs/ROADMAP.md
-          - src/core/backlog/schema.ts
-          - src/core/runner/execute.ts
-          - src/core/adapters/index.ts
-          - src/core/adapters/claude.ts
-          - src/core/adapters/types.ts
-          - src/core/budget/tracker.ts
-          - src/core/stats.ts
-          - src/db/index.ts
-          - src/db/repo.ts
-          - src/commands/resume.ts
+          - src/web/static/components/RunDetail.js
+          - src/web/static/styles.css
+          - src/web/lib/format.js
         dependsOn: []
         retry:
           maxAttempts: 1
@@ -177,221 +121,4 @@ epics:
             channel: telegram
             autoAdvance: false
           syncTasksToBacklog: true
-        tasks:
-          - id: T001
-            title: Rodar `rtk npm run build`, `rtk npm test`, `rtk npm run typecheck`, `rtk
-              npm run lint` na base atual (`develop`) e confirmar verde antes de
-              iniciar qualquer alteracao
-            status: todo
-            dependsOn: []
-          - id: T002
-            title: "[P] Migracao condicional `ALTER TABLE retry_history ADD COLUMN tool
-              TEXT` / `ADD COLUMN model TEXT` (nullable) em `src/db/index.ts`,
-              seguindo o idioma `PRAGMA table_info` + `ALTER TABLE` ja usado em
-              `migrate()` (ver `runs`/`token_usage`/`task_runs` no mesmo
-              arquivo)"
-            status: todo
-            dependsOn: []
-          - id: T003
-            title: Estender `createRetryRecord(runId, attempt, error?, waitMs?, tool?,
-              model?)` em `src/db/repo.ts` para persistir as novas colunas de
-              T002 no `INSERT INTO retry_history`
-            status: todo
-            dependsOn: []
-          - id: T004
-            title: Refatorar `runWithRetry` em `src/core/runner/execute.ts` (linhas
-              ~456-493) para iterar sobre uma lista interna de "candidatos" `[{
-              tool, model, effort, maxAttempts }]`, comecando com um unico
-              candidato derivado de
-              `feature.tool`/`feature.model`/`feature.effort`/`feature.retry.maxAttempts`
-              — refactor estrutural puro (D2 de research.md), preservando
-              exatamente o comportamento atual coberto por
-              `tests/runner/execute.test.ts`; contador de `attempt` permanece
-              global e crescente entre candidatos (nao reinicia por candidato)
-            status: todo
-            dependsOn: []
-          - id: T005
-            title: Atualizar a chamada a `createRetryRecord` dentro do loop de
-              `runWithRetry` para passar `tool`/`model` do candidato corrente
-              (depende de T003, T004)
-            status: todo
-            dependsOn: []
-          - id: T006
-            title: "[P] [US1] Testes em `tests/runner/execute.test.ts`: primaria esgota →
-              tenta 1º fallback → esgota → tenta 2º fallback → sucesso; todos os
-              fallbacks esgotam → aplica `onFail` (stop/continue/gate) igual ao
-              comportamento sem fallback; `retry.fallback` ausente/vazio →
-              comportamento identico ao atual (regressao zero, edge case spec.md
-              linha 63)"
-            status: todo
-            dependsOn: []
-          - id: T007
-            title: "[P] [US1] Testes em `tests/backlog/schema.test.ts`:
-              `FallbackAlternativeSchema`/`RetrySchema.fallback` — default `[]`,
-              `maxAttempts` no range 1-10, `model`/`effort` opcionais, valido
-              tanto em `BacklogV1Schema` quanto `BacklogV2Schema`"
-            status: todo
-            dependsOn: []
-          - id: T008
-            title: "[US1] Adicionar `FallbackAlternativeSchema = z.object({ tool:
-              ToolSchema, model: z.string().optional(), effort:
-              EffortSchema.optional(), maxAttempts:
-              z.number().int().min(1).max(10).default(1) })` e
-              `RetrySchema.fallback:
-              z.array(FallbackAlternativeSchema).default([])` em
-              `src/core/backlog/schema.ts`; exportar `type FallbackAlternative`"
-            status: todo
-            dependsOn: []
-          - id: T009
-            title: "[US1] Em `runWithRetry` (`src/core/runner/execute.ts`), apos o candidato
-              primario esgotar, anexar cada entrada de `feature.retry.fallback`
-              como candidato adicional — `tool` obrigatorio, `model ??
-              feature.model`, `effort ?? feature.effort`, `maxAttempts ?? 1` —
-              construindo uma `Feature` efetiva por candidato sem mutar
-              `feature` original nem `backlog.yaml`/catalogo (depende de T004,
-              T008)"
-            status: todo
-            dependsOn: []
-          - id: T010
-            title: "[US1] Garantir que `getOnFailPolicy`/`createGate` em `runWithRetry` só
-              disparam depois que **todos** os candidatos (primaria + fallbacks)
-              esgotarem, nao apos o primeiro (depende de T009)"
-            status: todo
-            dependsOn: []
-          - id: T011
-            title: "[US1] Quando o candidato vencedor (ou o ultimo, se todos falharem) usa
-              `tool` diferente de `feature.tool`, atualizar a coluna `runs.tool`
-              dessa run — nova funcao em `src/db/repo.ts` (ex.:
-              `updateRunTool(runId, tool)`), chamada a partir de
-              `src/core/runner/execute.ts` (depende de T009)"
-            status: todo
-            dependsOn: []
-          - id: T012
-            title: "[P] [US1] Testes em `tests/db/repo.test.ts` para `createRetryRecord`
-              persistindo `tool`/`model` e para `updateRunTool` atualizando
-              `runs.tool` quando o candidato vencedor difere do original"
-            status: todo
-            dependsOn: []
-          - id: T013
-            title: '[P] [US2] Testes em `tests/commands/commands.test.ts`: `msq resume
-              --tool/--model/--effort` com override valido (mensagem de override
-              exibida, `backlog.yaml`/catalogo inalterados); `--tool` fora do
-              enum `Tool` rejeitado antes de tocar DB; `--tool` valido mas
-              indisponivel no ambiente rejeitado com mensagem clara, run nao
-              criada, pipeline permanece pausada; resume sobre pipeline ja
-              `done` imprime "nada para retomar" sem chamar `executeBacklog`'
-            status: todo
-            dependsOn: []
-          - id: T014
-            title: "[P] [US2] Testes em `tests/runner/execute.test.ts`:
-              `ExecuteOptions.resumeOverride` aplicado apenas ao candidato
-              inicial da `featureId` alvo, outras features `pending` no mesmo
-              pipeline continuam usando a config persistida do backlog (FR-007)"
-            status: todo
-            dependsOn: []
-          - id: T015
-            title: "[P] [US2] Adicionar `isAvailable?(): boolean` opcional a `ToolAdapter`
-              em `src/core/adapters/types.ts`; implementar em
-              `src/core/adapters/claude.ts`, `src/core/adapters/codex.ts`,
-              `src/core/adapters/opencode.ts` (checagem de binario disponivel no
-              ambiente, ex.: reaproveitando `runCli`/spawn ja existente em
-              `src/core/adapters/spawn.ts` para uma verificacao rapida e
-              sincrona/rejeitavel)"
-            status: todo
-            dependsOn: []
-          - id: T016
-            title: "[US2] Adicionar `resumeOverride?: { featureId: string; tool?: Tool;
-              model?: string; effort?: Effort }` a `ExecuteOptions` em
-              `src/core/runner/execute.ts`; aplicar como override do candidato
-              inicial de `runWithRetry` somente quando `feature.id ===
-              resumeOverride.featureId` (depende de T004, T015)"
-            status: todo
-            dependsOn: []
-          - id: T017
-            title: "[US2] Adicionar opcoes `--tool <claude|codex|opencode>`, `--model
-              <string>`, `--effort <low|medium|high>` a `msq resume` em
-              `src/commands/resume.ts`; antes de chamar `executeBacklog`,
-              validar `--tool` (se informado) via `getAdapter(tool)` +
-              `isAvailable()` — se invalido/indisponivel, abortar com mensagem
-              clara sem tocar `pausePipeline`/`resumePipeline`/criar run
-              (FR-012, depende de T015)"
-            status: todo
-            dependsOn: []
-          - id: T018
-            title: "[US2] Em `src/commands/resume.ts`, quando
-              `snapshot.pending`+`snapshot.active`+`snapshot.aborted` estiverem
-              vazios, imprimir `Pipeline N já concluída — nada para retomar.` e
-              nao chamar `executeBacklog` (FR-013)"
-            status: todo
-            dependsOn: []
-          - id: T019
-            title: "[US2] Passar as novas flags de `src/commands/resume.ts` para
-              `executeBacklog(backlog, { ..., resumeOverride: { featureId, tool,
-              model, effort } })`, resolvendo `featureId` como a feature
-              `active`/bloqueada/em gate do snapshot; imprimir linha de override
-              ativo (`Override pontual: tool=X (persistido continua Y).`) quando
-              presente (depende de T016, T017)"
-            status: todo
-            dependsOn: []
-          - id: T020
-            title: '[P] [US3] Testes em `tests/db/repo.test.ts` para a nova query de
-              historico por tentativa (T021): retorna `tool`/`model` por linha,
-              linhas legadas com `tool`/`model` `NULL` sao distinguiveis ("nao
-              registrado") de "nao aplicavel"; soma de `token_usage.total` por
-              `run_id` reflete todas as tentativas (falhas + sucesso)'
-            status: todo
-            dependsOn: []
-          - id: T021
-            title: "[P] [US3] Testes em `tests/commands/commands.test.ts` para `msq status`
-              exibindo ferramenta/modelo por tentativa e total acumulado por
-              run"
-            status: todo
-            dependsOn: []
-          - id: T022
-            title: "[US3] Adicionar `listRetryHistory(runId: number): RetryHistoryRow[]` a
-              `src/db/repo.ts` (colunas `attempt`, `error`, `retried_at`,
-              `tool`, `model`; `tool`/`model` `null` para linhas legadas) — usa
-              as colunas de T002"
-            status: todo
-            dependsOn: []
-          - id: T023
-            title: "[US3] Estender `msq status` (`src/commands/status.ts`) para imprimir,
-              por run com tentativas, uma tabela de tentativas (`attempt`,
-              `tool`, `model`, `error`) usando T022, exibindo `nao registrado`
-              quando `tool`/`model` forem `NULL` (depende de T022)"
-            status: todo
-            dependsOn: []
-          - id: T024
-            title: "[US3] Confirmar/expor no output de `msq status` o total acumulado de uso
-              por run (`runs.total_tokens`, ja somado via
-              `recordUsage`/`token_usage` em todas as tentativas do mesmo
-              `run_id`) ao lado da tabela de tentativas de T023 (depende de
-              T023)"
-            status: todo
-            dependsOn: []
-          - id: T025
-            title: "[P] Rodar suites focadas de `quickstart.md` secao 1: `rtk npx vitest run
-              tests/backlog/load-prompt.test.ts tests/runner/execute.test.ts
-              tests/adapters/codex.test.ts tests/adapters/misc.test.ts
-              tests/db/repo.test.ts tests/commands/commands.test.ts`"
-            status: todo
-            dependsOn: []
-          - id: T026
-            title: "[P] Executar cenarios 1-3 e edge cases de
-              `specs/009-adapter-fallback-retry-resume/quickstart.md` (validacao
-              live/simulada, `.claude/rules/harness.md`) e registrar evidencias
-              (run persistida, output/summary, diff)"
-            status: todo
-            dependsOn: []
-          - id: T027
-            title: Confirmar `docs/features/F39-adapter-fallback-resume.md` continua
-              consistente com o comportamento implementado
-              (`.claude/rules/repo-context.md` — codigo e docs de feature no
-              mesmo branch)
-            status: todo
-            dependsOn: []
-          - id: T028
-            title: "Rodar baseline completa: `rtk npm run build`, `rtk npm test`, `rtk npm
-              run typecheck`, `rtk npm run lint`"
-            status: todo
-            dependsOn: []
+        tasks: []
