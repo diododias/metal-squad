@@ -43,6 +43,7 @@ export const claudeAdapter: ToolAdapter = {
     const args = [
       '--print',
       '--output-format', 'stream-json',
+      '--verbose',
       '--dangerously-skip-permissions',
       ...model,
       '--',
