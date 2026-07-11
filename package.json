@@ -20,7 +20,8 @@
     "test": "vitest run",
     "test:coverage": "vitest run --coverage",
     "test:mutation": "stryker run",
-    "prepare": "husky"
+    "prepare": "husky",
+    "clean:db": "rm -f ~/.local/share/metal-squad/app.db && rm -rf .metal-squad"
   },
   "engines": {
     "node": ">=20.17.0"
