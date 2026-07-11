@@ -16,209 +16,180 @@ defaults:
       - speckit-implement
       - dev-flow
     validate:
-      - reviewr
+      - review
 budget:
   maxTokens: 5000000
   maxCostUsd: 100
   perFeatureMaxTokens: 500000
-# Backlog reorganizado em 2026-07-10: contem apenas demandas ainda nao
-# desenvolvidas (features "Entregue" foram removidas do arquivo executavel).
-# Ordem dos epics/features abaixo reflete prioridade: core (skills system,
-# observability, developer experience backend) e web primeiro; CLI/TUI
-# despriorizado no final. Nao ha demanda web pendente hoje (F32/F34 ja
-# entregues em docs/ROADMAP.md) — proxima feature web precisa nascer de um
-# novo doc em docs/features/.
-# F35 (feat-35) muda a fonte de verdade em runtime: depois dela, msq run/
-# status/ui/web leem o catalogo de epics/features/tasks do banco, e este
-# backlog.yaml passa a servir so como formato de entrada em batch, carregado
-# via `msq backlog load` (comando ainda nao implementado).
 epics:
-  - id: e01-skills-system
-    title: E01 — Skills System (fundacao core)
+  - id: e06-web-version
+    title: E06 — Web Version
     features:
-      - id: feat-01
-        title: F01 — YAML Schema v2
-        tool: claude
-        model: claude-sonnet-4-5
-        effort: medium
-        skills:
-          - dev-flow
-        specFile: docs/features/F01-yaml-schema-v2.md
-        context:
-          - docs/ROADMAP.md
-        dependsOn: []
-        tasks: []
-        retry:
-          maxAttempts: 1
-          backoffMs: 5000
-          onFail: stop
-        workflow:
-          mode: staged
-          stages:
-            - specify
-            - plan
-            - tasks
-            - implement
-          approvals:
-            channel: telegram
-            autoAdvance: false
-          syncTasksToBacklog: true
-      - id: feat-02
-        title: F02 — Skill Registry
-        tool: claude
-        model: claude-sonnet-4-5
-        effort: medium
-        skills:
-          - dev-flow
-        specFile: docs/features/F02-skill-registry.md
-        context:
-          - docs/ROADMAP.md
-        dependsOn:
-          - feat-01
-        tasks: []
-        retry:
-          maxAttempts: 1
-          backoffMs: 5000
-          onFail: stop
-        workflow:
-          mode: staged
-          stages:
-            - specify
-            - plan
-            - tasks
-            - implement
-          approvals:
-            channel: telegram
-            autoAdvance: false
-          syncTasksToBacklog: true
-      - id: feat-03
-        title: F03 — Dynamic Prompt Builder
-        tool: claude
-        model: claude-sonnet-4-5
-        effort: medium
-        skills:
-          - dev-flow
-        specFile: docs/features/F03-dynamic-prompt-builder.md
-        context:
-          - docs/ROADMAP.md
-        dependsOn:
-          - feat-02
-        tasks: []
-        retry:
-          maxAttempts: 1
-          backoffMs: 5000
-          onFail: stop
-        workflow:
-          mode: staged
-          stages:
-            - specify
-            - plan
-            - tasks
-            - implement
-          approvals:
-            channel: telegram
-            autoAdvance: false
-          syncTasksToBacklog: true
-      - id: feat-35
-        title: F35 — Backlog Catalog Import (carga em batch para o banco)
-        tool: claude
-        model: claude-sonnet-4-5
-        effort: medium
-        skills:
-          - dev-flow
-        specFile: docs/features/F35-backlog-catalog-import.md
-        context:
-          - docs/ROADMAP.md
-        dependsOn:
-          - feat-01
-        tasks: []
-        retry:
-          maxAttempts: 1
-          backoffMs: 5000
-          onFail: stop
-        workflow:
-          mode: staged
-          stages:
-            - specify
-            - plan
-            - tasks
-            - implement
-          approvals:
-            channel: telegram
-            autoAdvance: false
-          syncTasksToBacklog: true
-      - id: feat-28
-        title: F28 — Task Context Blocks (packing + token analytics)
-        tool: claude
-        model: claude-sonnet-4-5
-        effort: medium
-        skills:
-          - dev-flow
-        specFile: docs/features/F28-task-context-blocks.md
-        context:
-          - docs/ROADMAP.md
-        dependsOn: []
-        tasks: []
-        retry:
-          maxAttempts: 1
-          backoffMs: 5000
-          onFail: stop
-        workflow:
-          mode: staged
-          stages:
-            - specify
-            - plan
-            - tasks
-            - implement
-          approvals:
-            channel: telegram
-            autoAdvance: false
-          syncTasksToBacklog: true
-  - id: e04-observability
-    title: E04 — Observability (core)
-    features:
-      - id: feat-19
-        title: F19 — Notifications v2 (multi-channel)
-        tool: claude
-        model: claude-sonnet-4-5
-        effort: medium
-        skills:
-          - dev-flow
-        specFile: docs/features/F19-notifications-v2.md
-        context:
-          - docs/ROADMAP.md
-        dependsOn: []
-        tasks: []
-        retry:
-          maxAttempts: 1
-          backoffMs: 5000
-          onFail: stop
-        workflow:
-          mode: staged
-          stages:
-            - specify
-            - plan
-            - tasks
-            - implement
-          approvals:
-            channel: telegram
-            autoAdvance: false
-          syncTasksToBacklog: true
-  - id: e05-developer-experience
-    title: E05 — Developer Experience (core, sem CLI wizard)
-    features:
-      - id: feat-20
-        title: F20 — Plugin System para Adapters
-        tool: claude
-        model: claude-sonnet-4-5
+      - id: feat-38
+        title: F38 — Web Action State Auto Refresh
+        spec: >
+          Problema: no modo web, depois de acoes como start, stop, approve, skip
+
+          e retry, a tela nao reflete o novo estado automaticamente. O usuario
+
+          precisa dar refresh manual para enxergar o que acabou de acontecer.
+
+
+          Objetivo: corrigir a reatividade do modo web para que qualquer acao de
+
+          controle atualize o estado visivel da interface logo apos a resposta
+          do
+
+          backend, sem exigir reload da pagina.
+
+
+          Escopo esperado:
+
+          - start/stop/abort/resume/pause atualizam dashboard, detalhe da run,
+            cards e botoes logo apos a acao
+          - approve/skip/retry de gates e stage requests atualizam a UI sem
+            refresh manual
+          - ao iniciar uma task/feature, ela deixa de aparecer na coluna de
+            backlog/TODO e avanca automaticamente para a proxima coluna
+            correspondente ao estado real da execucao
+          - a sincronizacao deve acontecer tanto para a aba/visao atual quanto
+            para qualquer estado compartilhado derivado do mesmo snapshot
+          - evitar depender de polling lento ou de refresh completo da pagina
+
+
+          Validacao:
+
+          - ao disparar uma acao pela web, o estado muda automaticamente em tela
+
+          - uma feature/task iniciada nao permanece visivel na coluna de backlog
+            se ja existe run em andamento para ela
+          - nenhum dos fluxos acima exige F5 para refletir sucesso, erro ou
+            transicao intermediaria
+        tool: codex
+        model: gpt-5.4
         effort: high
         skills:
           - dev-flow
-        specFile: docs/features/F20-plugin-adapters.md
         context:
           - docs/ROADMAP.md
+          - docs/features/F32-web-mode.md
+          - docs/features/F34-web-run-detail-and-control-polish.md
+          - docs/features/F36-web-feature-config-persistence.md
+          - src/web/server.ts
+          - src/web/static/app.js
+          - src/web/static/components/Gates.js
+          - src/web/static/components/RunDetail.js
+          - src/web/static/components/FeaturePreview.js
         dependsOn: []
-        tasks: []
+        tasks:
+          - id: T001
+            title: Create a shared `reconcileWebState()` helper that rebuilds
+              `buildMsqWebState()`, detects meaningful snapshot changes, and
+              centralizes `state:full` broadcasting in `src/web/server.ts`
+            status: todo
+            dependsOn: []
+          - id: T002
+            title: Create a shared subscription refresh helper for `run:detail`,
+              `run:history`, and `run:changes` so the same reconciliation cycle
+              can refresh all subscribed surfaces in `src/web/server.ts`
+            status: todo
+            dependsOn: []
+          - id: T003
+            title: "[P] Rework execution-owned pending projection so blocked runs are
+              excluded from `pendingFeatures` alongside running and done runs in
+              `src/web/state.ts`"
+            status: todo
+            dependsOn: []
+          - id: T004
+            title: "[US1] Add websocket regression coverage for `action:pausePipeline`,
+              `action:resumePipeline`, `action:abortPipeline`, and
+              `action:requestFeatureAbort` rebroadcasting refreshed `state:full`
+              payloads in `tests/web/server.test.ts`"
+            status: todo
+            dependsOn: []
+          - id: T005
+            title: "[US1] Route run-control action handlers through the shared
+              reconciliation helper in `src/web/server.ts`"
+            status: todo
+            dependsOn: []
+          - id: T006
+            title: "[US1] Refresh subscribed run-detail payloads after run-control mutations
+              in `src/web/server.ts`"
+            status: todo
+            dependsOn: []
+          - id: T007
+            title: "[US1] Reconcile selected run state and action affordances from the
+              latest `state:full` snapshot after run-control updates in
+              `src/web/static/app.js`"
+            status: todo
+            dependsOn: []
+          - id: T008
+            title: "[US2] Add websocket regression coverage for `action:resolveGate`,
+              `action:forceResolveGate`, and `action:resolveStageRequest`
+              refreshing blockers and `state:full` payloads in
+              `tests/web/server.test.ts`"
+            status: todo
+            dependsOn: []
+          - id: T009
+            title: "[US2] Route gate and stage-request resolution actions through the shared
+              reconciliation helper in `src/web/server.ts`"
+            status: todo
+            dependsOn: []
+          - id: T010
+            title: "[US2] Refresh subscribed run-history and run-changes payloads when
+              blocker resolution advances or unblocks a run in
+              `src/web/server.ts`"
+            status: todo
+            dependsOn: []
+          - id: T011
+            title: "[US2] Clear stale blocker selection and gate-derived affordances after
+              refreshed snapshots remove a resolved blocker in
+              `src/web/static/app.js`"
+            status: todo
+            dependsOn: []
+          - id: T012
+            title: "[US3] Add websocket regression coverage for detached
+              `action:startFeature` reconciliation, duplicate pending/execution
+              prevention, and latest-state ordering in
+              `tests/web/server.test.ts`"
+            status: todo
+            dependsOn: []
+          - id: T013
+            title: "[P] [US3] Add focused `buildMsqWebState()` coverage for blocked and
+              newly-started runs affecting `pendingFeatures` in
+              `tests/web/state.test.ts`"
+            status: todo
+            dependsOn: []
+          - id: T014
+            title: "[US3] Add a bounded reconciliation poll for detached runner mutations
+              that reuses the shared snapshot diffing and subscription refresh
+              pipeline in `src/web/server.ts`"
+            status: todo
+            dependsOn: []
+          - id: T015
+            title: "[US3] Keep selected run, feature, and TODO/execution navigation state
+              consistent when refreshed snapshots move an item between surfaces
+              in `src/web/static/app.js`"
+            status: todo
+            dependsOn: []
+          - id: T016
+            title: "[P] Update the observable refresh contract to match the implemented
+              same-process and detached-process synchronization behavior in
+              `specs/008-web-action-auto-refresh/contracts/web-state-refresh.md\
+              `"
+            status: todo
+            dependsOn: []
+          - id: T017
+            title: "[P] Update manual validation steps for run controls, blocker resolution,
+              shared-view sync, and failed actions in
+              `specs/008-web-action-auto-refresh/quickstart.md`"
+            status: todo
+            dependsOn: []
+          - id: T018
+            title: Run the targeted build and regression commands documented in
+              `specs/008-web-action-auto-refresh/quickstart.md`
+            status: todo
+            dependsOn: []
         retry:
           maxAttempts: 1
           backoffMs: 5000
@@ -230,265 +201,7 @@ epics:
             - plan
             - tasks
             - implement
-          approvals:
-            channel: telegram
-            autoAdvance: false
-          syncTasksToBacklog: true
-      - id: feat-22
-        title: F22 — Per-Repo Config Overrides
-        tool: claude
-        model: claude-sonnet-4-5
-        effort: high
-        skills:
-          - dev-flow
-        specFile: docs/features/F22-per-repo-config.md
-        context:
-          - docs/ROADMAP.md
-        dependsOn:
-          - feat-01
-        tasks: []
-        retry:
-          maxAttempts: 1
-          backoffMs: 5000
-          onFail: stop
-        workflow:
-          mode: staged
-          stages:
-            - specify
-            - plan
-            - tasks
-            - implement
-          approvals:
-            channel: telegram
-            autoAdvance: false
-          syncTasksToBacklog: true
-      - id: feat-23
-        title: F23 — CLAUDE.md / Agent Config Generation
-        tool: claude
-        model: claude-sonnet-4-5
-        effort: high
-        skills:
-          - dev-flow
-        specFile: docs/features/F23-agent-config-gen.md
-        context:
-          - docs/ROADMAP.md
-        dependsOn: []
-        tasks: []
-        retry:
-          maxAttempts: 1
-          backoffMs: 5000
-          onFail: stop
-        workflow:
-          mode: staged
-          stages:
-            - specify
-            - plan
-            - tasks
-            - implement
-          approvals:
-            channel: telegram
-            autoAdvance: false
-          syncTasksToBacklog: true
-  # --- A partir daqui: demandas de CLI/TUI, despriorizadas por pedido explicito ---
-  - id: e02-modern-tui
-    title: E02 — Modern TUI (despriorizado)
-    features:
-      - id: feat-05
-        title: F05 — Layout Multi-Painel
-        tool: claude
-        model: claude-sonnet-4-5
-        effort: high
-        skills:
-          - dev-flow
-        specFile: docs/features/F05-layout-multi-panel.md
-        context:
-          - docs/ROADMAP.md
-        dependsOn: []
-        tasks: []
-        retry:
-          maxAttempts: 1
-          backoffMs: 5000
-          onFail: stop
-        workflow:
-          mode: staged
-          stages:
-            - specify
-            - plan
-            - tasks
-            - implement
-          approvals:
-            channel: telegram
-            autoAdvance: false
-          syncTasksToBacklog: true
-      - id: feat-06
-        title: F06 — Log Streaming em Tempo Real
-        tool: claude
-        model: claude-sonnet-4-5
-        effort: high
-        skills:
-          - dev-flow
-        specFile: docs/features/F06-log-streaming.md
-        context:
-          - docs/ROADMAP.md
-        dependsOn:
-          - feat-05
-        tasks: []
-        retry:
-          maxAttempts: 1
-          backoffMs: 5000
-          onFail: stop
-        workflow:
-          mode: staged
-          stages:
-            - specify
-            - plan
-            - tasks
-            - implement
-          approvals:
-            channel: telegram
-            autoAdvance: false
-          syncTasksToBacklog: true
-      - id: feat-07
-        title: F07 — Status Bar
-        tool: claude
-        model: claude-sonnet-4-5
-        effort: low
-        skills:
-          - dev-flow
-        specFile: docs/features/F07-status-bar.md
-        context:
-          - docs/ROADMAP.md
-        dependsOn:
-          - feat-05
-        tasks: []
-        retry:
-          maxAttempts: 1
-          backoffMs: 5000
-          onFail: stop
-        workflow:
-          mode: staged
-          stages:
-            - specify
-            - plan
-            - tasks
-            - implement
-          approvals:
-            channel: telegram
-            autoAdvance: false
-          syncTasksToBacklog: true
-      - id: feat-08
-        title: F08 — Navegacao por Sessoes/Runs
-        tool: claude
-        model: claude-sonnet-4-6
-        effort: high
-        skills:
-          - dev-flow
-        specFile: docs/features/F08-session-navigation.md
-        context:
-          - docs/ROADMAP.md
-        dependsOn:
-          - feat-05
-        tasks: []
-        retry:
-          maxAttempts: 1
-          backoffMs: 5000
-          onFail: stop
-        workflow:
-          mode: staged
-          stages:
-            - specify
-            - plan
-            - tasks
-            - implement
-          approvals:
-            channel: telegram
-            autoAdvance: false
-          syncTasksToBacklog: true
-      - id: feat-24
-        title: F24 — Task & Stage Progress na TUI
-        tool: claude
-        model: claude-sonnet-4-5
-        effort: medium
-        skills:
-          - dev-flow
-        specFile: docs/features/F24-task-stage-progress.md
-        context:
-          - docs/ROADMAP.md
-        dependsOn:
-          - feat-05
-        tasks: []
-        retry:
-          maxAttempts: 1
-          backoffMs: 5000
-          onFail: stop
-        workflow:
-          mode: staged
-          stages:
-            - specify
-            - plan
-            - tasks
-            - implement
-          approvals:
-            channel: telegram
-            autoAdvance: false
-          syncTasksToBacklog: true
-  - id: e03-orchestration-v2
-    title: E03 — Orchestration v2 (despriorizado — depende de TUI)
-    features:
-      - id: feat-13
-        title: F13 — Execution Graph Visualization
-        tool: claude
-        model: claude-sonnet-4-5
-        effort: medium
-        skills:
-          - dev-flow
-        specFile: docs/features/F13-execution-graph.md
-        context:
-          - docs/ROADMAP.md
-        dependsOn:
-          - feat-05
-        tasks: []
-        retry:
-          maxAttempts: 1
-          backoffMs: 5000
-          onFail: stop
-        workflow:
-          mode: staged
-          stages:
-            - specify
-            - plan
-            - tasks
-            - implement
-          approvals:
-            channel: telegram
-            autoAdvance: false
-          syncTasksToBacklog: true
-  - id: e05-developer-experience-cli
-    title: E05 — Developer Experience (CLI, despriorizado)
-    features:
-      - id: feat-21
-        title: F21 — Interactive Setup Wizard
-        tool: claude
-        model: claude-sonnet-4-5
-        effort: medium
-        skills:
-          - dev-flow
-        specFile: docs/features/F21-setup-wizard.md
-        context:
-          - docs/ROADMAP.md
-        dependsOn: []
-        tasks: []
-        retry:
-          maxAttempts: 1
-          backoffMs: 5000
-          onFail: stop
-        workflow:
-          mode: staged
-          stages:
-            - specify
-            - plan
-            - tasks
-            - implement
+            - validate
           approvals:
             channel: telegram
             autoAdvance: false

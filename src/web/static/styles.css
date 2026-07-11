@@ -620,30 +620,6 @@ button.danger { border-color: var(--danger); color: var(--danger); }
 }
 
 /* Feature preview */
-.override-fields {
-  display: flex;
-  gap: 12px;
-  flex-wrap: wrap;
-  margin-bottom: 6px;
-}
-.override-fields label {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  font-size: 0.8rem;
-  color: var(--muted);
-}
-.override-fields select,
-.override-fields input {
-  background: var(--bg);
-  color: var(--text);
-  border: 1px solid var(--border);
-  border-radius: 4px;
-  padding: 3px 6px;
-  font-family: inherit;
-}
-.token-estimate { margin-top: 4px; }
-
 .link-button {
   background: none;
   border: none;

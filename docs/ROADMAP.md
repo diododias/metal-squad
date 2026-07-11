@@ -154,8 +154,8 @@ busca/filtro no kanban, indicador de conexao claro e uma tela de preview de
 feature com paridade de layout, tentativas anteriores, dependencias e
 estimativa de custo. F36 torna o form de config da feature (tool/model/effort/
 maxTokens/workflow/retry/skills) e das tasks (status/skills/title/dependsOn)
-editavel e persistente no catalogo do banco, em vez de so um override pontual
-de execucao.
+editavel e persistente no catalogo do banco. F37 remove o override pontual
+de execucao, deixando o "Save Config" como unica forma de customizacao.
 
 ---
 

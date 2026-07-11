@@ -31,6 +31,35 @@ function getRunGroup(status) {
   return 'canceled';
 }
 
+function normalizeLegacyOpencodePayload(payload) {
+  if (!payload || payload.tool !== 'opencode' || typeof payload.line !== 'string') return payload;
+  const line = payload.line.trim();
+  if (!line.startsWith('{"type":')) return payload;
+
+  const rawTypeMatch = line.match(/"type":"([^"]+)"/);
+  const rawToolMatch = line.match(/"tool":"([^"]+)"/);
+  const rawTextMatch = line.match(/"text":"([^"]+)"/);
+  const rawReasoningMatch = line.match(/"reasoning":"([^"]+)"/);
+  const rawType = rawTypeMatch ? rawTypeMatch[1] : '';
+  const rawTool = rawToolMatch ? rawToolMatch[1] : '';
+  const rawText = rawTextMatch ? rawTextMatch[1] : '';
+  const rawReasoning = rawReasoningMatch ? rawReasoningMatch[1] : '';
+
+  if (rawType === 'tool_use' && rawTool) {
+    return { ...payload, source: 'tool', line: `tool ${rawTool}` };
+  }
+  if (rawType === 'thinking' && rawReasoning) {
+    return { ...payload, source: 'agent', line: `[thinking] ${rawReasoning}` };
+  }
+  if (rawType === 'text' && rawText) {
+    return { ...payload, source: 'agent', line: rawText };
+  }
+  if (rawType === 'step_start' || rawType === 'step_finish') return null;
+  if (rawType === 'tool_use') return null;
+  if (rawType === 'text') return null;
+  return payload;
+}
+
 // F34 item 4: connectionState is a richer signal than the old boolean —
 // distinguishes "never connected yet" from "was live, now retrying" from
 // "gave up" (auth failure / intentional close), each with a since-timestamp
@@ -173,10 +202,24 @@ function useLocalOutput() {
   const [linesByRun, setLinesByRun] = useState({});
 
   const append = useCallback((runId, line) => {
-    setLinesByRun((current) => ({
-      ...current,
-      [runId]: [...(current[runId] || []), line].slice(-500),
-    }));
+    const normalizedLine = normalizeLegacyOpencodePayload(line);
+    if (!normalizedLine) return;
+    setLinesByRun((current) => {
+      const existing = current[runId] || [];
+      // Dedup by row id when present (initial subscription + DB poll can
+      // overlap in the brief window before lastIdByRun is set, and the
+      // kanban mass-subscription + run-detail subscription can both deliver
+      // the same row).
+      if (normalizedLine?.id != null) {
+        for (let i = existing.length - 1; i >= 0 && i >= existing.length - 16; i -= 1) {
+          if (existing[i]?.id === normalizedLine.id) return current;
+        }
+      }
+      return {
+        ...current,
+        [runId]: [...existing, normalizedLine].slice(-500),
+      };
+    });
   }, []);
 
   const clear = useCallback((runId) => {
@@ -442,22 +485,22 @@ function App() {
     [state?.runs],
   );
 
-  const navigateToRun = (runId) => {
+  const navigateToRun = useCallback((runId) => {
     setSelectedRunId(runId);
     setSelectedFeatureId(null);
     setView('run');
     setDetailTab(0);
     updateUrlParams({ run: runId, feature: null, view: null });
-  };
+  }, []);
 
-  const navigateToPreview = (featureId) => {
+  const navigateToPreview = useCallback((featureId) => {
     setSelectedFeatureId(featureId);
     setSelectedRunId(null);
     setView('preview');
     updateUrlParams({ run: null, feature: featureId, view: null });
-  };
+  }, []);
 
-  const backToOverview = () => {
+  const backToOverview = useCallback(() => {
     setView('overview');
     setSelectedRunId(null);
     setSelectedFeatureId(null);
@@ -465,7 +508,21 @@ function App() {
     setPaletteOpen(false);
     setHelpOpen(false);
     updateUrlParams({ run: null, feature: null, view: null });
-  };
+  }, []);
+
+  useEffect(() => {
+    if (selectedGateId != null && !(state?.gates || []).some((gate) => gate.id === selectedGateId)) {
+      setSelectedGateId(null);
+    }
+
+    if (view !== 'preview' || !selectedFeatureId) return;
+
+    const movedRun = (state?.runs || []).find((run) => run.featureId === selectedFeatureId);
+    const stillPending = (state?.pendingFeatures || []).some((feature) => feature.id === selectedFeatureId);
+    if (movedRun && !stillPending) {
+      navigateToRun(movedRun.runId);
+    }
+  }, [navigateToRun, selectedFeatureId, selectedGateId, state?.gates, state?.pendingFeatures, state?.runs, view]);
 
   const handleSelectRun = (id, column) => {
     setSelectedColumn(column);
@@ -690,12 +747,10 @@ function App() {
           settings: state?.backlogSettings || { stageSkills: {} },
           runHistory: runHistories[selectedFeature.id] || [],
           doneFeatureIds,
-          tokenEstimatesByTool: state?.tokenEstimatesByTool || null,
-          onStart: (overrides) => {
+          onStart: () => {
             send({
               type: 'action:startFeature',
               featureId: selectedFeature.id,
-              ...(overrides && Object.keys(overrides).length > 0 ? { overrides } : {}),
             });
             backToOverview();
           },

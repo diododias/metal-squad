@@ -26,12 +26,6 @@ export interface ThemeSnapshot {
   roles: Record<ThemeRoleName, string>;
 }
 
-export interface TokenEstimate {
-  sampleSize: number;
-  avgTotalTokens: number | null;
-  medianTotalTokens: number | null;
-}
-
 export interface MsqWebState {
   repoLabel: string;
   runs: RunSummary[];
@@ -53,7 +47,6 @@ export interface MsqWebState {
   };
   notifications: UiNotification[];
   theme: ThemeSnapshot;
-  tokenEstimatesByTool: Record<'claude' | 'codex' | 'opencode', TokenEstimate>;
 }
 
 export interface RunChangedFile {
@@ -102,7 +95,6 @@ export type WebSocketClientMessage =
   | {
       type: 'action:startFeature';
       featureId: string;
-      overrides?: { tool?: string; model?: string; effort?: string };
     }
   | { type: 'action:updateFeatureConfig'; featureId: string; patch: FeatureConfigPatch }
   | { type: 'action:updateTaskConfig'; featureId: string; taskId: string; patch: TaskConfigPatch }

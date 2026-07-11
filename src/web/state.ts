@@ -5,14 +5,12 @@ import {
   listPendingStageRequests,
   listRunningTaskRuns,
   listRunsForStats,
-  getHistoricalTokenStatsForFeatureProfile,
   type GateRow,
   type StageRequestRow,
   type RunSummary,
   type RunningTaskSummary,
   type StatsRunRow,
 } from '../db/repo.js';
-import { ToolSchema } from '../core/backlog/schema.js';
 import { resolveRepo } from '../core/repo.js';
 import { getFeatureCatalog, getBacklogSettings, getPendingFeatures, type FeatureCatalogEntry } from '../ui/catalog.js';
 import { getRunGroup, sortRunsByGroup } from '../ui/dashboardGroups.js';
@@ -80,7 +78,11 @@ function collectPendingFeatures(runs: RunSummary[]): FeatureCatalogEntry[] {
   try {
     const catalog = getFeatureCatalog();
     const doneFeatureIds = new Set(runs.filter((run) => run.status === 'done').map((run) => run.featureId));
-    const activeFeatureIds = new Set(runs.filter((run) => run.status === 'running' || run.status === 'done').map((run) => run.featureId));
+    const activeFeatureIds = new Set(
+      runs
+        .filter((run) => run.status === 'running' || run.status === 'blocked' || run.status === 'done')
+        .map((run) => run.featureId),
+    );
     return getPendingFeatures(catalog, doneFeatureIds, activeFeatureIds);
   } catch {
     return [];
@@ -104,23 +106,6 @@ function collectDashboardRows(): StatsRunRow[] {
   } catch {
     return [];
   }
-}
-
-// F34 item 5c: precompute the historical token estimate for every tool the
-// schema supports (only 3 values) so FeaturePreview can show a rough cost
-// estimate without a dedicated round trip, and can re-derive it live as the
-// user changes the one-off tool override.
-function collectTokenEstimatesByTool(): MsqWebState['tokenEstimatesByTool'] {
-  const tools = ToolSchema.options;
-  return Object.fromEntries(
-    tools.map((tool) => {
-      try {
-        return [tool, getHistoricalTokenStatsForFeatureProfile(tool)];
-      } catch {
-        return [tool, { sampleSize: 0, avgTotalTokens: null, medianTotalTokens: null }];
-      }
-    }),
-  ) as MsqWebState['tokenEstimatesByTool'];
 }
 
 const FALLBACK_ROLE_COLOR = '#e5e7eb';
@@ -186,7 +171,6 @@ export function buildMsqWebState(): MsqWebState {
     },
     notifications: [],
     theme: buildThemeSnapshot(),
-    tokenEstimatesByTool: collectTokenEstimatesByTool(),
   };
 }
 
