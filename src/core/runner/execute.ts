@@ -77,6 +77,12 @@ export async function executeBacklog(
   cleanupStaleRuns(config.staleRunThresholdMinutes);
   const activeRunIds = new Set<number>();
   const activeControllers = new Map<string, AbortController>();
+  const featureMaxTokens = new Map<string, number>();
+  for (const epic of backlog.epics) {
+    for (const feature of epic.features) {
+      if (feature.maxTokens !== undefined) featureMaxTokens.set(feature.id, feature.maxTokens);
+    }
+  }
   const budget = createBudgetTracker(resolveBudgetLimits(
     backlog.version === 2 ? backlog.budget : undefined,
     config.budget,
@@ -85,7 +91,7 @@ export async function executeBacklog(
     saveConfig,
     loadState: loadBudgetState,
     saveState: saveBudgetState,
-  });
+  }, featureMaxTokens);
   let budgetPauseTriggered = false;
 
   const repoStageSkills = backlog.version === 2 ? backlog.defaults.stageSkills : {};

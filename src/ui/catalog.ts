@@ -30,6 +30,9 @@ export interface FeatureCatalogEntry {
   retry?: Retry;
   specFile?: string;
   context?: string[];
+  /** F36: per-feature override for `budget.perFeatureMaxTokens` — undefined
+   * means the backlog-level default still applies. */
+  maxTokens?: number;
 }
 
 /** F31 section 5b: backlog-level settings shown alongside per-feature config
@@ -92,6 +95,7 @@ function loadCatalogAndSettings(cwd: string): void {
             retry: feature.retry,
             specFile: feature.specFile,
             context: feature.context,
+            maxTokens: feature.maxTokens,
           } satisfies FeatureCatalogEntry,
         ]),
       ),

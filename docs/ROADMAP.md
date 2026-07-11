@@ -44,7 +44,7 @@ O que ainda falta:
 | Fase 3 — Orquestracao robusta | 5 | 5 | 0 |
 | Fase 4 — Observability & DX | 7 | 5 | 2 |
 | Fase 5 — Extensibilidade | 4 | 0 | 4 |
-| Fase 6 — Web & Remote Control | 2 | 2 | 0 |
+| Fase 6 — Web & Remote Control | 3 | 3 | 0 |
 | Backlog operacional | 3 | 2 | 1 |
 
 ---
@@ -144,6 +144,7 @@ contexto por sessao/step.
 |---------|---------|------------|--------|
 | [F32 — Web Mode](features/F32-web-mode.md) | High | Alta | Entregue |
 | [F34 — Web Run Detail & Control Polish](features/F34-web-run-detail-and-control-polish.md) | High | Alta | Entregue |
+| [F36 — Web Feature/Task Config Persistence](features/F36-web-feature-config-persistence.md) | Medium | Alta | Entregue |
 
 **Entrega**: servidor HTTP/WebSocket com autenticação por token, dashboard kanban,
 gates, detalhe de run, command palette e daemon em background. F34 adiciona
@@ -151,7 +152,10 @@ historico completo de runs por feature, aba de mudancas de codigo no detalhe de
 run, resolucao de gate/stage-request inline e telemetria ao vivo no kanban,
 busca/filtro no kanban, indicador de conexao claro e uma tela de preview de
 feature com paridade de layout, tentativas anteriores, dependencias e
-estimativa de custo.
+estimativa de custo. F36 torna o form de config da feature (tool/model/effort/
+maxTokens/workflow/retry/skills) e das tasks (status/skills/title/dependsOn)
+editavel e persistente no catalogo do banco, em vez de so um override pontual
+de execucao.
 
 ---
 

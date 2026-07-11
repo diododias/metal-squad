@@ -71,6 +71,32 @@ export interface RunChangesPayload {
   notApplicableReason: string | null;
 }
 
+/** Explicit narrow patch shape for `action:updateFeatureConfig` — not
+ * `Partial<Feature>`, so the wire contract can't smuggle in `id`/`tasks`
+ * reshaping from an untrusted client. */
+export interface FeatureConfigPatch {
+  tool?: string;
+  model?: string;
+  effort?: string;
+  maxTokens?: number;
+  skills?: string[];
+  workflow?: {
+    mode?: string;
+    stages?: string[];
+    syncTasksToBacklog?: boolean;
+    approvals?: { autoAdvance?: boolean };
+  };
+  retry?: { maxAttempts?: number; backoffMs?: number; onFail?: string };
+}
+
+/** Explicit narrow patch shape for `action:updateTaskConfig`. */
+export interface TaskConfigPatch {
+  title?: string;
+  status?: string;
+  skills?: string[];
+  dependsOn?: string[];
+}
+
 export type WebSocketClientMessage =
   | { type: 'auth'; token: string }
   | {
@@ -78,6 +104,8 @@ export type WebSocketClientMessage =
       featureId: string;
       overrides?: { tool?: string; model?: string; effort?: string };
     }
+  | { type: 'action:updateFeatureConfig'; featureId: string; patch: FeatureConfigPatch }
+  | { type: 'action:updateTaskConfig'; featureId: string; taskId: string; patch: TaskConfigPatch }
   | { type: 'action:pausePipeline'; pipelineId: number }
   | { type: 'action:resumePipeline'; pipelineId: number }
   | { type: 'action:abortPipeline'; pipelineId: number }

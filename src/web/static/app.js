@@ -697,6 +697,12 @@ function App() {
             });
             backToOverview();
           },
+          onSaveConfig: (patch) => {
+            send({ type: 'action:updateFeatureConfig', featureId: selectedFeature.id, patch });
+          },
+          onSaveTaskConfig: (taskId, patch) => {
+            send({ type: 'action:updateTaskConfig', featureId: selectedFeature.id, taskId, patch });
+          },
           onClose: backToOverview,
           onOpenRun: (runId) => {
             navigateToRun(runId);

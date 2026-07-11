@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { TabBar, DetailSection } from './RunDetail.js';
 import { STATUS_ICON, formatTokens } from '../lib/format.js';
 
@@ -16,6 +16,13 @@ const DEFAULT_RETRY = {
   onFail: 'stop',
 };
 
+const DEFAULT_WORKFLOW = {
+  mode: 'staged',
+  stages: ['specify', 'plan', 'tasks', 'implement', 'validate'],
+  approvals: { channel: 'telegram', autoAdvance: false },
+  syncTasksToBacklog: true,
+};
+
 const PREVIEW_SECTION_ORDER = ['spec', 'config', 'tasks', 'previous', 'dependencies'];
 const PREVIEW_SECTION_LABEL = {
   spec: 'Feature Spec',
@@ -27,6 +34,9 @@ const PREVIEW_SECTION_LABEL = {
 
 const TOOL_OPTIONS = ['claude', 'codex', 'opencode'];
 const EFFORT_OPTIONS = ['low', 'medium', 'high'];
+const WORKFLOW_MODE_OPTIONS = ['single', 'staged'];
+const ON_FAIL_OPTIONS = ['stop', 'continue', 'gate'];
+const TASK_STATUS_OPTIONS = ['todo', 'running', 'done', 'failed', 'blocked'];
 
 function configGroup(title, ...children) {
   return React.createElement(
@@ -41,68 +51,321 @@ function configRow(label, value, muted = false) {
   return React.createElement('div', { className: muted ? 'muted' : '' }, `${label}: ${value}`);
 }
 
-function FeatureConfigSection({ feature, settings }) {
-  const retry = feature.retry;
-  const retryExplicit = Boolean(retry);
-  const resolvedRetry = { ...DEFAULT_RETRY, ...retry };
-  const workflow = feature.workflow ?? {
-    mode: 'staged',
-    stages: ['specify', 'plan', 'tasks', 'implement', 'validate'],
-    approvals: { channel: 'telegram', autoAdvance: false },
-    syncTasksToBacklog: true,
+/** Add-on-enter, remove-on-click chip editor for array fields (skills,
+ * workflow.stages, dependsOn) — shared between the feature config form and
+ * the per-task edit rows. */
+function ChipListEditor({ items, onChange, placeholder, listId, suggestions }) {
+  const [draft, setDraft] = useState('');
+
+  const commitDraft = () => {
+    const value = draft.trim();
+    setDraft('');
+    if (!value || items.includes(value)) return;
+    onChange([...items, value]);
   };
-  const skills = feature.skills ?? [];
+
+  return React.createElement(
+    'div',
+    { className: 'chip-list-editor' },
+    React.createElement(
+      'div',
+      { className: 'chip-list' },
+      items.map((item) =>
+        React.createElement(
+          'span',
+          { key: item, className: 'chip' },
+          item,
+          React.createElement(
+            'button',
+            {
+              type: 'button',
+              className: 'chip-remove',
+              'aria-label': `remove ${item}`,
+              onClick: () => onChange(items.filter((existing) => existing !== item)),
+            },
+            '×',
+          ),
+        ),
+      ),
+    ),
+    React.createElement('input', {
+      type: 'text',
+      value: draft,
+      placeholder: placeholder ?? 'add and press enter',
+      list: listId,
+      onChange: (e) => setDraft(e.target.value),
+      onKeyDown: (e) => {
+        if (e.key === 'Enter') {
+          e.preventDefault();
+          commitDraft();
+        }
+      },
+      onBlur: commitDraft,
+    }),
+    listId && suggestions && suggestions.length > 0
+      ? React.createElement(
+          'datalist',
+          { id: listId },
+          suggestions.map((s) => React.createElement('option', { key: s, value: s })),
+        )
+      : null,
+  );
+}
+
+function buildFeatureFormState(feature) {
+  const workflow = feature.workflow ?? DEFAULT_WORKFLOW;
+  const resolvedRetry = { ...DEFAULT_RETRY, ...feature.retry };
+  return {
+    tool: feature.tool,
+    model: feature.model ?? '',
+    effort: feature.effort,
+    maxTokens: feature.maxTokens !== undefined ? String(feature.maxTokens) : '',
+    skills: feature.skills ?? [],
+    workflowMode: workflow.mode,
+    workflowStages: workflow.stages,
+    syncTasksToBacklog: workflow.syncTasksToBacklog,
+    autoAdvance: workflow.approvals?.autoAdvance ?? false,
+    retryMaxAttempts: String(resolvedRetry.maxAttempts),
+    retryBackoffMs: String(resolvedRetry.backoffMs),
+    retryOnFail: resolvedRetry.onFail,
+  };
+}
+
+function buildFeatureConfigPatch(form, feature) {
+  const workflow = feature.workflow ?? DEFAULT_WORKFLOW;
+  const resolvedRetry = { ...DEFAULT_RETRY, ...feature.retry };
+  const patch = {};
+
+  if (form.tool !== feature.tool) patch.tool = form.tool;
+  if (form.model.trim() && form.model.trim() !== (feature.model ?? '')) patch.model = form.model.trim();
+  if (form.effort !== feature.effort) patch.effort = form.effort;
+
+  const maxTokensCurrent = feature.maxTokens !== undefined ? String(feature.maxTokens) : '';
+  if (form.maxTokens.trim() !== maxTokensCurrent) {
+    const parsed = Number(form.maxTokens.trim());
+    if (form.maxTokens.trim() && Number.isFinite(parsed) && parsed > 0) patch.maxTokens = parsed;
+  }
+
+  if (JSON.stringify(form.skills) !== JSON.stringify(feature.skills ?? [])) patch.skills = form.skills;
+
+  const workflowPatch = {};
+  if (form.workflowMode !== workflow.mode) workflowPatch.mode = form.workflowMode;
+  if (JSON.stringify(form.workflowStages) !== JSON.stringify(workflow.stages)) workflowPatch.stages = form.workflowStages;
+  if (form.syncTasksToBacklog !== workflow.syncTasksToBacklog) workflowPatch.syncTasksToBacklog = form.syncTasksToBacklog;
+  if (form.autoAdvance !== (workflow.approvals?.autoAdvance ?? false)) {
+    workflowPatch.approvals = { autoAdvance: form.autoAdvance };
+  }
+  if (Object.keys(workflowPatch).length > 0) patch.workflow = workflowPatch;
+
+  const retryPatch = {};
+  if (Number(form.retryMaxAttempts) !== resolvedRetry.maxAttempts) retryPatch.maxAttempts = Number(form.retryMaxAttempts);
+  if (Number(form.retryBackoffMs) !== resolvedRetry.backoffMs) retryPatch.backoffMs = Number(form.retryBackoffMs);
+  if (form.retryOnFail !== resolvedRetry.onFail) retryPatch.onFail = form.retryOnFail;
+  if (Object.keys(retryPatch).length > 0) patch.retry = retryPatch;
+
+  return patch;
+}
+
+function FeatureConfigForm({ feature, settings, onSaveConfig }) {
+  const [form, setForm] = useState(() => buildFeatureFormState(feature));
+
+  // F36: once a save round-trips through state:full, `feature` reflects the
+  // persisted values — resync the form so it doesn't drift back to a stale
+  // pre-save snapshot.
+  useEffect(() => {
+    setForm(buildFeatureFormState(feature));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [feature.id, JSON.stringify(feature)]);
+
+  const set = (key) => (value) => setForm((current) => ({ ...current, [key]: value }));
   const stageSkillEntries = Object.entries(settings.stageSkills ?? {});
+
+  const handleSave = () => {
+    const patch = buildFeatureConfigPatch(form, feature);
+    if (Object.keys(patch).length === 0) return;
+    onSaveConfig(patch);
+  };
 
   return React.createElement(
     React.Fragment,
     null,
-    configGroup('Execução',
-      configRow('tool', feature.tool),
-      configRow('model', feature.model ?? `${feature.tool} (default)`, !feature.model),
-      configRow('effort', feature.effort),
+    configGroup(
+      'Execução',
+      React.createElement(
+        'div',
+        { className: 'config-form-row' },
+        React.createElement(
+          'label',
+          null,
+          'tool ',
+          React.createElement(
+            'select',
+            { value: form.tool, onChange: (e) => set('tool')(e.target.value) },
+            TOOL_OPTIONS.map((tool) => React.createElement('option', { key: tool, value: tool }, tool)),
+          ),
+        ),
+        React.createElement(
+          'label',
+          null,
+          'model ',
+          React.createElement('input', {
+            type: 'text',
+            value: form.model,
+            placeholder: `${form.tool} (default)`,
+            onChange: (e) => set('model')(e.target.value),
+          }),
+        ),
+        React.createElement(
+          'label',
+          null,
+          'effort ',
+          React.createElement(
+            'select',
+            { value: form.effort, onChange: (e) => set('effort')(e.target.value) },
+            EFFORT_OPTIONS.map((effort) => React.createElement('option', { key: effort, value: effort }, effort)),
+          ),
+        ),
+      ),
     ),
-    configGroup('Workflow',
-      configRow('mode', workflow.mode),
-      configRow('stages', workflow.stages.join(' → ')),
-      configRow('syncTasksToBacklog', String(workflow.syncTasksToBacklog)),
+    configGroup(
+      'Budget',
+      React.createElement(
+        'label',
+        null,
+        'maxTokens (esta feature) ',
+        React.createElement('input', {
+          type: 'number',
+          min: 1,
+          value: form.maxTokens,
+          placeholder: settings.budget?.perFeatureMaxTokens
+            ? `default: ${settings.budget.perFeatureMaxTokens}`
+            : 'sem limite global',
+          onChange: (e) => set('maxTokens')(e.target.value),
+        }),
+      ),
+      settings.budget?.perFeatureMaxTokens !== undefined &&
+        configRow('perFeatureMaxTokens (backlog default)', String(settings.budget.perFeatureMaxTokens), true),
     ),
-    configGroup('Aprovações',
-      configRow('channel', workflow.approvals.channel),
-      configRow('autoAdvance', String(workflow.approvals.autoAdvance)),
+    configGroup(
+      'Workflow',
+      React.createElement(
+        'div',
+        { className: 'config-form-row' },
+        React.createElement(
+          'label',
+          null,
+          'mode ',
+          React.createElement(
+            'select',
+            { value: form.workflowMode, onChange: (e) => set('workflowMode')(e.target.value) },
+            WORKFLOW_MODE_OPTIONS.map((mode) => React.createElement('option', { key: mode, value: mode }, mode)),
+          ),
+        ),
+        React.createElement(
+          'label',
+          { className: 'checkbox-label' },
+          React.createElement('input', {
+            type: 'checkbox',
+            checked: form.syncTasksToBacklog,
+            onChange: (e) => set('syncTasksToBacklog')(e.target.checked),
+          }),
+          ' syncTasksToBacklog',
+        ),
+      ),
+      React.createElement('div', { className: 'muted' }, 'stages'),
+      React.createElement(ChipListEditor, {
+        items: form.workflowStages,
+        onChange: set('workflowStages'),
+        placeholder: 'add stage and press enter',
+      }),
     ),
-    configGroup('Skills',
-      skills.length > 0
-        ? skills.map((skill) => React.createElement('div', { key: skill, className: 'skill-item' }, `- ${skill}`))
-        : React.createElement('div', { className: 'muted' }, 'Nenhuma skill declarada na feature.'),
+    configGroup(
+      'Aprovações',
+      configRow('channel', feature.workflow?.approvals?.channel ?? 'telegram', true),
+      React.createElement(
+        'label',
+        { className: 'checkbox-label' },
+        React.createElement('input', {
+          type: 'checkbox',
+          checked: form.autoAdvance,
+          onChange: (e) => set('autoAdvance')(e.target.checked),
+        }),
+        ' autoAdvance',
+      ),
+    ),
+    configGroup(
+      'Skills',
+      React.createElement(ChipListEditor, {
+        items: form.skills,
+        onChange: set('skills'),
+        placeholder: 'add skill and press enter',
+      }),
       stageSkillEntries.length > 0 &&
-        React.createElement(React.Fragment, null,
+        React.createElement(
+          React.Fragment,
+          null,
           React.createElement('div', { className: 'muted' }, 'stageSkills (defaults):'),
           stageSkillEntries.map(([stage, stageSkills]) =>
             React.createElement('div', { key: stage, className: 'muted' }, `  ${stage}: ${stageSkills.join(', ')}`),
           ),
         ),
     ),
-    configGroup('Retry',
-      configRow('maxAttempts', String(resolvedRetry.maxAttempts), !retryExplicit),
-      configRow('backoffMs', String(resolvedRetry.backoffMs), !retryExplicit),
-      configRow('onFail', resolvedRetry.onFail, !retryExplicit),
-    ),
-    settings.budget &&
-      configGroup('Budget (backlog)',
-        settings.budget.maxTokens !== undefined && configRow('maxTokens', String(settings.budget.maxTokens)),
-        settings.budget.perFeatureMaxTokens !== undefined && configRow('perFeatureMaxTokens', String(settings.budget.perFeatureMaxTokens)),
+    configGroup(
+      'Retry',
+      React.createElement(
+        'div',
+        { className: 'config-form-row' },
+        React.createElement(
+          'label',
+          null,
+          'maxAttempts ',
+          React.createElement('input', {
+            type: 'number',
+            min: 1,
+            max: 10,
+            value: form.retryMaxAttempts,
+            onChange: (e) => set('retryMaxAttempts')(e.target.value),
+          }),
+        ),
+        React.createElement(
+          'label',
+          null,
+          'backoffMs ',
+          React.createElement('input', {
+            type: 'number',
+            min: 0,
+            value: form.retryBackoffMs,
+            onChange: (e) => set('retryBackoffMs')(e.target.value),
+          }),
+        ),
+        React.createElement(
+          'label',
+          null,
+          'onFail ',
+          React.createElement(
+            'select',
+            { value: form.retryOnFail, onChange: (e) => set('retryOnFail')(e.target.value) },
+            ON_FAIL_OPTIONS.map((onFail) => React.createElement('option', { key: onFail, value: onFail }, onFail)),
+          ),
+        ),
       ),
-    configGroup('Arquivos',
+    ),
+    configGroup(
+      'Arquivos',
       configRow('specFile', feature.specFile ?? 'não declarado', !feature.specFile),
       configRow('context', feature.context && feature.context.length > 0 ? feature.context.join(', ') : 'nenhum', !feature.context?.length),
+    ),
+    React.createElement(
+      'div',
+      { className: 'config-actions' },
+      React.createElement('button', { className: 'primary', onClick: handleSave }, 'save config'),
     ),
   );
 }
 
 function OverrideSection({ overrides, onChange, tokenEstimate }) {
   return configGroup(
-    'Override pontual (não grava no backlog.yaml)',
+    'Override pontual (só para esta execução — use "save config" acima para persistir)',
     React.createElement(
       'div',
       { className: 'override-fields' },
@@ -149,6 +412,94 @@ function OverrideSection({ overrides, onChange, tokenEstimate }) {
   );
 }
 
+function buildTaskFormState(task) {
+  return {
+    title: task.title,
+    status: task.status,
+    skills: task.skills ?? [],
+    dependsOn: task.dependsOn ?? [],
+  };
+}
+
+function buildTaskConfigPatch(form, task) {
+  const patch = {};
+  if (form.title.trim() && form.title.trim() !== task.title) patch.title = form.title.trim();
+  if (form.status !== task.status) patch.status = form.status;
+  if (JSON.stringify(form.skills) !== JSON.stringify(task.skills ?? [])) patch.skills = form.skills;
+  if (JSON.stringify(form.dependsOn) !== JSON.stringify(task.dependsOn ?? [])) patch.dependsOn = form.dependsOn;
+  return patch;
+}
+
+function TaskEditRow({ task, otherTaskIds, onSaveTaskConfig }) {
+  const [form, setForm] = useState(() => buildTaskFormState(task));
+
+  useEffect(() => {
+    setForm(buildTaskFormState(task));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [task.id, JSON.stringify(task)]);
+
+  const set = (key) => (value) => setForm((current) => ({ ...current, [key]: value }));
+
+  const handleSave = () => {
+    const patch = buildTaskConfigPatch(form, task);
+    if (Object.keys(patch).length === 0) return;
+    onSaveTaskConfig(task.id, patch);
+  };
+
+  return React.createElement(
+    'div',
+    { className: 'task-edit-row' },
+    React.createElement(
+      'div',
+      { className: 'task-edit-header' },
+      React.createElement('span', { className: 'muted' }, `${BACKLOG_TASK_ICON[task.status] ?? '○'} ${task.id}`),
+    ),
+    React.createElement(
+      'div',
+      { className: 'config-form-row' },
+      React.createElement(
+        'label',
+        null,
+        'title ',
+        React.createElement('input', {
+          type: 'text',
+          value: form.title,
+          onChange: (e) => set('title')(e.target.value),
+        }),
+      ),
+      React.createElement(
+        'label',
+        null,
+        'status ',
+        React.createElement(
+          'select',
+          { value: form.status, onChange: (e) => set('status')(e.target.value) },
+          TASK_STATUS_OPTIONS.map((status) => React.createElement('option', { key: status, value: status }, status)),
+        ),
+      ),
+    ),
+    React.createElement('div', { className: 'muted' }, 'skills'),
+    React.createElement(ChipListEditor, {
+      items: form.skills,
+      onChange: set('skills'),
+      placeholder: 'add skill and press enter',
+    }),
+    React.createElement('div', { className: 'muted' }, 'dependsOn'),
+    React.createElement(ChipListEditor, {
+      items: form.dependsOn,
+      onChange: set('dependsOn'),
+      placeholder: 'add task id and press enter',
+      listId: `task-depends-on-${task.id}`,
+      suggestions: otherTaskIds,
+    }),
+    React.createElement(
+      'div',
+      { className: 'config-actions' },
+      React.createElement('button', { className: 'primary', onClick: handleSave }, 'save task'),
+    ),
+  );
+}
+
 export function FeaturePreview({
   feature,
   settings,
@@ -156,6 +507,8 @@ export function FeaturePreview({
   doneFeatureIds,
   tokenEstimatesByTool,
   onStart,
+  onSaveConfig,
+  onSaveTaskConfig,
   onClose,
   onOpenRun,
 }) {
@@ -209,7 +562,7 @@ export function FeaturePreview({
         return React.createElement(
           DetailSection,
           { title: PREVIEW_SECTION_LABEL.config },
-          React.createElement(FeatureConfigSection, { feature, settings }),
+          React.createElement(FeatureConfigForm, { feature, settings, onSaveConfig }),
           React.createElement(OverrideSection, { overrides, onChange: handleOverrideChange, tokenEstimate }),
         );
 
@@ -219,11 +572,12 @@ export function FeaturePreview({
           { title: PREVIEW_SECTION_LABEL.tasks },
           declaredTasks.length > 0
             ? declaredTasks.map((task) =>
-                React.createElement(
-                  'div',
-                  { key: task.id, className: 'muted' },
-                  `${BACKLOG_TASK_ICON[task.status] ?? '○'} ${task.id} — ${task.title}`,
-                ),
+                React.createElement(TaskEditRow, {
+                  key: task.id,
+                  task,
+                  otherTaskIds: declaredTasks.map((t) => t.id).filter((id) => id !== task.id),
+                  onSaveTaskConfig,
+                }),
               )
             : React.createElement('div', { className: 'muted' }, `No task breakdown declared for ${feature.id} in the backlog.`),
         );
@@ -332,7 +686,7 @@ export function FeaturePreview({
       React.createElement(
         'footer',
         { className: 'run-detail-footer' },
-        'Use the buttons above to start (with optional overrides) or close · Esc goes back without starting',
+        'Use the buttons above to start (with optional overrides), save config/task edits, or close · Esc goes back without starting',
       ),
     ),
   );

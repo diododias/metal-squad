@@ -14,9 +14,9 @@ export function registerRun(program: Command): void {
     .option('-f, --feature <id>', 'run a single feature only')
     .option('-c, --concurrency <n>', 'global parallel runs')
     .option('--auto-advance-stages', 'advance staged steps without manual Telegram approval')
-    .option('--tool <tool>', 'one-off tool override for --feature (not persisted to backlog.yaml)')
-    .option('--model <model>', 'one-off model override for --feature (not persisted to backlog.yaml)')
-    .option('--effort <effort>', 'one-off effort override for --feature (not persisted to backlog.yaml)')
+    .option('--tool <tool>', 'one-off tool override for --feature (this run only; use the web UI to persist)')
+    .option('--model <model>', 'one-off model override for --feature (this run only; use the web UI to persist)')
+    .option('--effort <effort>', 'one-off effort override for --feature (this run only; use the web UI to persist)')
     .action(async (opts: {
       feature?: string;
       concurrency?: string;
@@ -34,7 +34,9 @@ export function registerRun(program: Command): void {
 
         // F34 5d: one-off tool/model/effort override for a single-feature run,
         // requested by the web FeaturePreview start action. Mutates the
-        // in-memory backlog only — backlog.yaml on disk is never touched.
+        // in-memory backlog only — the DB catalog row is never touched. For
+        // durable edits use the web UI's "save config" action (F36), which
+        // persists via updateCatalogFeature.
         if (opts.feature && (opts.tool || opts.model || opts.effort)) {
           const feature = backlog.epics
             .flatMap((epic) => epic.features)
