@@ -310,6 +310,11 @@ describe('executeBacklog failure persistence', () => {
     expect(mockCreateRetryRecord).toHaveBeenNthCalledWith(2, 7, 2, 'falha 2', expect.any(Number), 'codex', undefined);
     expect(mockCreateRetryRecord).toHaveBeenCalledTimes(2);
     expect(mockFinishRun).toHaveBeenCalledWith(7, 'failed', 'falha 3');
+    // The failed feature must land in the `aborted` (needs-rerun) snapshot bucket
+    // instead of disappearing from pending/active/done/aborted entirely — otherwise
+    // `msq resume`/the TUI have no record that this feature still needs to run.
+    expect(JSON.parse(pipelineRow.abortedJson)).toEqual(['feat-11']);
+    expect(JSON.parse(pipelineRow.doneJson)).toEqual([]);
 
     vi.useRealTimers();
   });

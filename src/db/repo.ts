@@ -1254,7 +1254,7 @@ export function listResumablePipelines(): PipelineRow[] {
          updated_at AS updatedAt,
          ended_at AS endedAt
        FROM pipelines
-       WHERE status IN ('paused', 'aborted')
+       WHERE status IN ('paused', 'aborted', 'failed', 'blocked')
           OR json_array_length(pending_json) > 0
           OR json_array_length(aborted_json) > 0
        ORDER BY id DESC`,
