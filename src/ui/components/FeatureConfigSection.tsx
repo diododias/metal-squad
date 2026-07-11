@@ -66,7 +66,7 @@ export function FeatureConfigSection({ feature, settings, width }: Props): React
     >
       <Text {...theme.role('text')} bold>Feature Config</Text>
       <Box marginTop={1} flexDirection="column">
-        <Text {...theme.role('muted')} bold>Execução</Text>
+        <Text {...theme.role('muted')} bold>Execution</Text>
         {row(theme, 'tool', feature.tool)}
         {row(theme, 'model', feature.model ?? `${feature.tool} (default)`, !feature.model)}
         {row(theme, 'effort', feature.effort)}
@@ -78,7 +78,7 @@ export function FeatureConfigSection({ feature, settings, width }: Props): React
         {row(theme, 'syncTasksToBacklog', String(workflow.syncTasksToBacklog))}
       </Box>
       <Box marginTop={1} flexDirection="column">
-        <Text {...theme.role('muted')} bold>Aprovações</Text>
+        <Text {...theme.role('muted')} bold>Approvals</Text>
         {row(theme, 'channel', workflow.approvals.channel)}
         {row(theme, 'autoAdvance', String(workflow.approvals.autoAdvance))}
       </Box>
@@ -89,7 +89,7 @@ export function FeatureConfigSection({ feature, settings, width }: Props): React
             <Text key={skill} {...theme.role('success')}>- {skill}</Text>
           ))
         ) : (
-          <Text {...theme.role('muted')}>Nenhuma skill declarada na feature.</Text>
+          <Text {...theme.role('muted')}>No skills declared in feature.</Text>
         )}
         {stageSkillEntries.length > 0 && (
           <>
@@ -103,9 +103,9 @@ export function FeatureConfigSection({ feature, settings, width }: Props): React
         )}
       </Box>
       <Box marginTop={1} flexDirection="column">
-        <Text {...theme.role('muted')} bold>Dependências</Text>
+        <Text {...theme.role('muted')} bold>Dependencies</Text>
         <Text {...theme.role('muted')}>
-          {dependsOn.length > 0 ? dependsOn.join(', ') : 'nenhuma'}
+          {dependsOn.length > 0 ? dependsOn.join(', ') : 'none'}
         </Text>
       </Box>
       <Box marginTop={1} flexDirection="column">
@@ -123,9 +123,9 @@ export function FeatureConfigSection({ feature, settings, width }: Props): React
         </Box>
       )}
       <Box marginTop={1} flexDirection="column">
-        <Text {...theme.role('muted')} bold>Arquivos</Text>
-        {row(theme, 'specFile', feature.specFile ?? 'não declarado', !feature.specFile)}
-        {row(theme, 'context', feature.context && feature.context.length > 0 ? feature.context.join(', ') : 'nenhum', !feature.context?.length)}
+        <Text {...theme.role('muted')} bold>Files</Text>
+        {row(theme, 'specFile', feature.specFile ?? 'not declared', !feature.specFile)}
+        {row(theme, 'context', feature.context && feature.context.length > 0 ? feature.context.join(', ') : 'none', !feature.context?.length)}
       </Box>
     </Box>
   );

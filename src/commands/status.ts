@@ -52,7 +52,7 @@ export function registerStatus(program: Command): void {
 
       const visiblePipelines = listPipelineOverviews(Number(opts.limit));
       if (visiblePipelines.length > 0) {
-        console.log('Pipelines ativas/pendentes:');
+        console.log('Active/pending pipelines:');
         console.table(
           visiblePipelines.map((pipeline) => ({
             pipeline_id: pipeline.id,
@@ -73,7 +73,7 @@ export function registerStatus(program: Command): void {
 
       const resumable = listResumablePipelines();
       if (resumable.length === 0) return;
-      console.log('Pipelines retomáveis:');
+      console.log('Resumable pipelines:');
       console.table(
         resumable.map((pipeline) => {
           const snapshot = getPipelineSnapshot(pipeline);
