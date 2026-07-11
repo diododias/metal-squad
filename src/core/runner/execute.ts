@@ -507,11 +507,16 @@ async function executeStagedFeature(
   const stages = workflow.stages;
   const persistedRequests = listStageRequestsForFeature(pipelineId, feature.id);
   const stageInputs = loadPersistedStageInputs(persistedRequests);
+  const currentStage = getPipeline(pipelineId)?.currentStage ?? null;
+  // A gate-blocked stage leaves `currentStage` set and re-enters this
+  // function within the same process once the scheduler resumes it — treat
+  // that the same as an explicit `msq resume` so it continues from the
+  // stage that was in flight instead of restarting from stage 0.
   const startIndex = determineStageStartIndex(
     stages,
-    getPipeline(pipelineId)?.currentStage ?? null,
+    currentStage,
     persistedRequests,
-    Boolean(opts.resumePipelineId),
+    Boolean(opts.resumePipelineId) || currentStage !== null,
   );
 
   for (let index = startIndex; index < stages.length; index += 1) {
