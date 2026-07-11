@@ -127,6 +127,7 @@ export type WebSocketServerMessage =
   | { type: 'run:detail'; payload: { runId: number; taskRuns: TaskRun[]; breakdown: RunBreakdown | null } }
   | { type: 'run:history'; payload: { featureId: string; runs: RunHistoryEntry[] } }
   | { type: 'run:changes'; payload: RunChangesPayload }
+  | { type: 'error'; payload: { message: string } }
   | { type: keyof MsqEvents; payload: unknown };
 
 export interface WebServerOptions {

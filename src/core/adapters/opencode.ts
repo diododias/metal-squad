@@ -13,7 +13,14 @@ interface OpenCodeUsage {
   output_tokens?: number;
 }
 
+interface OpenCodeError {
+  name?: string;
+  message?: string;
+  data?: { message?: string };
+}
+
 interface OpenCodeResponse {
+  type?: string;
   response?: string;
   usage?: OpenCodeUsage;
   tokens?: OpenCodeUsage;
@@ -24,6 +31,7 @@ interface OpenCodeResponse {
   arguments?: unknown;
   result?: string;
   message?: string;
+  error?: OpenCodeError;
 }
 
 const _EFFORT_HINT: Record<Effort, string> = {
@@ -42,9 +50,10 @@ export const opencodeAdapter: ToolAdapter = {
   async runFeature(feature: Feature, prompt: string, opts: RunFeatureOptions): Promise<RunResult> {
     const args = [
       'run',
-      prompt,
       '--format', 'json',
       ...(feature.model ? ['--model', feature.model] : []),
+      '--',
+      prompt,
     ];
 
     let code: number;
@@ -78,9 +87,24 @@ export const opencodeAdapter: ToolAdapter = {
       }
       throw error;
     }
-    if (code !== 0) return { ok: false, summary: stderr.slice(-500) || `exit ${String(code)}` };
+    if (code !== 0) {
+      const errorSummary = stderr.slice(-500) || `exit ${String(code)}`;
+      console.error(`[opencode adapter] exit ${String(code)}: ${errorSummary}`);
+      return { ok: false, summary: errorSummary };
+    }
 
     const json = safeJson<OpenCodeResponse>(stdout);
+
+    if (json?.type === 'error' || json?.error) {
+      const errorMessage = json.error?.data?.message
+        ?? json.error?.message
+        ?? json.message
+        ?? 'Unknown opencode error';
+      const errorName = json.error?.name ?? 'UnknownError';
+      console.error(`[opencode adapter] ${errorName}: ${errorMessage}`);
+      return { ok: false, summary: `${errorName}: ${errorMessage}` };
+    }
+
     const usage = this.parseUsage?.(stdout) ?? undefined;
     if (usage) emitUsage(opts.runId, feature, usage);
     return {

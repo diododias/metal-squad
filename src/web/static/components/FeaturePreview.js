@@ -520,6 +520,14 @@ export function FeaturePreview({
   });
   const [confirmStart, setConfirmStart] = useState(false);
 
+  useEffect(() => {
+    setOverrides({
+      tool: feature.tool,
+      model: feature.model ?? '',
+      effort: feature.effort,
+    });
+  }, [feature.id, feature.tool, feature.model, feature.effort]);
+
   const specLines = feature.description ? feature.description.split('\n') : [];
   const declaredTasks = feature.tasks ?? [];
   const dependsOn = feature.dependsOn ?? [];

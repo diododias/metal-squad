@@ -256,6 +256,8 @@ function App() {
       setRunHistories((current) => ({ ...current, [message.payload.featureId]: message.payload.runs }));
     } else if (message.type === 'run:changes') {
       setRunChangesByRun((current) => ({ ...current, [message.payload.runId]: message.payload }));
+    } else if (message.type === 'error') {
+      console.error('[ws] server error:', message.payload.message);
     } else if (message.type === 'tokens:update') {
       // F34 item 3: live token telemetry on kanban cards without waiting for
       // the next full state broadcast.

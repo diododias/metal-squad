@@ -182,6 +182,15 @@ export function createWebServer(options: {
   let latestState = buildMsqWebState();
   const cwd = options.cwd ?? process.cwd();
 
+  process.on('uncaughtException', (error) => {
+    console.error('[web] uncaughtException:', error.message);
+    console.error(error.stack);
+  });
+
+  process.on('unhandledRejection', (reason) => {
+    console.error('[web] unhandledRejection:', reason);
+  });
+
   function broadcast(message: WebSocketServerMessage): void {
     const data = JSON.stringify(message);
     for (const client of clients.values()) {
@@ -203,6 +212,10 @@ export function createWebServer(options: {
 
   const eventUnsubscribers = BROADCAST_EVENTS.map((event) =>
     msqEventBus.subscribe(event, (payload) => {
+      if (event === 'ui:notice' || event === 'ui:info') {
+        const message = typeof payload === 'object' && 'message' in payload ? payload.message : String(payload);
+        console.log(`[event:${event}]`, message);
+      }
       broadcast({ type: event, payload });
       if (event === 'ui:info' || event === 'ui:notice') {
         const message =
@@ -382,7 +395,16 @@ export function createWebServer(options: {
         return;
       }
 
-      handleClientMessage(message, client, cwd);
+      try {
+        console.log(`[ws] received message type=${message.type}`);
+        handleClientMessage(message, client, cwd);
+      } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        const errorStack = error instanceof Error ? error.stack : undefined;
+        console.error(`[ws] handleClientMessage error for ${message.type}: ${errorMessage}`);
+        if (errorStack) console.error(errorStack);
+        sendTo(client, { type: 'error', payload: { message: errorMessage } });
+      }
     });
 
     socket.on('close', () => {
@@ -587,12 +609,16 @@ export function createWebServer(options: {
     overrides?: { tool?: string; model?: string; effort?: string },
   ): void {
     try {
+      console.log(`[startFeature] featureId=${featureId}, overrides=`, overrides);
       assertWritableDbPath();
       loadConfig();
       const backlog = loadBacklogFromCatalog(resolveRepo(featureCwd).repoId);
       validateBacklogSkills(backlog, featureCwd);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
+      const stack = error instanceof Error ? error.stack : undefined;
+      console.error(`[startFeature] error: ${message}`);
+      if (stack) console.error(stack);
       msqEventBus.emit('ui:notice', { message: `Could not start ${featureId}: ${message}` });
       return;
     }
@@ -640,11 +666,15 @@ export function createWebServer(options: {
 
   function updateFeatureConfig(featureId: string, patch: FeatureConfigPatch, featureCwd: string): void {
     try {
+      console.log(`[updateFeatureConfig] featureId=${featureId}, patch=`, patch);
       assertWritableDbPath();
       const { repoId } = resolveRepo(featureCwd);
       updateCatalogFeature(repoId, featureId, toFeaturePatch(patch));
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
+      const stack = error instanceof Error ? error.stack : undefined;
+      console.error(`[updateFeatureConfig] error: ${message}`);
+      if (stack) console.error(stack);
       msqEventBus.emit('ui:notice', { message: `Could not save config for ${featureId}: ${message}` });
       return;
     }
@@ -655,11 +685,15 @@ export function createWebServer(options: {
 
   function updateTaskConfig(featureId: string, taskId: string, patch: TaskConfigPatch, featureCwd: string): void {
     try {
+      console.log(`[updateTaskConfig] featureId=${featureId}, taskId=${taskId}, patch=`, patch);
       assertWritableDbPath();
       resolveRepo(featureCwd);
       updateCatalogTask(featureId, taskId, patch as Partial<Task>);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
+      const stack = error instanceof Error ? error.stack : undefined;
+      console.error(`[updateTaskConfig] error: ${message}`);
+      if (stack) console.error(stack);
       msqEventBus.emit('ui:notice', { message: `Could not save task ${taskId}: ${message}` });
       return;
     }
