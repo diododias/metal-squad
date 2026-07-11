@@ -101,9 +101,9 @@ describe('StatsBar', () => {
     );
     expect(lastFrame()).toContain('3 done');
     expect(lastFrame()).toContain('5 todo');
-    expect(lastFrame()).toContain('2 execução');
-    expect(lastFrame()).toContain('1 falha');
-    expect(lastFrame()).toContain('4 aprovações');
+    expect(lastFrame()).toContain('2 execution');
+    expect(lastFrame()).toContain('1 failure');
+    expect(lastFrame()).toContain('4 approvals');
     expect(lastFrame()).toContain('tokens (7d) 1.5k');
   });
 
@@ -152,7 +152,7 @@ describe('StatsBar', () => {
     );
     const frame = lastFrame();
     expect(frame).toContain('3 done');
-    expect(frame).toContain('4 aprovações');
+    expect(frame).toContain('4 approvals');
     expect(frame).not.toContain('tokens (7d)');
   });
 });

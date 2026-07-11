@@ -130,10 +130,10 @@ function stageStatusLabel(stage: WorkflowStageSummary): string {
 }
 
 const COLUMN_EMPTY_LABEL: Record<DashboardGroupId, string> = {
-  execution: 'nenhuma em execução',
-  todo: 'backlog vazio',
-  done: 'nenhuma concluída',
-  canceled: 'sem falhas',
+  execution: 'none running',
+  todo: 'backlog empty',
+  done: 'none completed',
+  canceled: 'no failures',
 };
 
 function MainPanelComponent({

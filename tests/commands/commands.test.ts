@@ -275,8 +275,8 @@ describe('commands', () => {
     expect(log).toHaveBeenCalledWith(
       '[msq] 2 orphan run(s) marked as failed (30 min threshold).',
     );
-    expect(log).toHaveBeenCalledWith('Pipelines ativas/pendentes:');
-    expect(log).toHaveBeenCalledWith('Pipelines retomáveis:');
+    expect(log).toHaveBeenCalledWith('Active/pending pipelines:');
+    expect(log).toHaveBeenCalledWith('Resumable pipelines:');
   });
 
   it('ui dynamically imports and renders the app', async () => {

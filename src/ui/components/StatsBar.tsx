@@ -32,11 +32,11 @@ function StatsBarComponent({ done, todo, execution, falha, gatesPending, tokenSt
       <Text {...theme.role('muted')}> | </Text>
       <Text {...theme.role('text')}>{todo} todo</Text>
       <Text {...theme.role('muted')}> | </Text>
-      <Text {...theme.statusTone('running')}>{execution} execução</Text>
+      <Text {...theme.statusTone('running')}>{execution} execution</Text>
       <Text {...theme.role('muted')}> | </Text>
-      <Text {...theme.statusTone('failed')}>{falha} falha</Text>
+      <Text {...theme.statusTone('failed')}>{falha} failure</Text>
       <Text {...theme.role('muted')}> | </Text>
-      <Text {...theme.role('warning')}>{gatesPending} aprovações</Text>
+      <Text {...theme.role('warning')}>{gatesPending} approvals</Text>
       {!compact && (
         <>
           <Text {...theme.role('muted')}> | tokens (7d) {tokensLabel}</Text>
