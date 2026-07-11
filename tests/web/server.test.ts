@@ -7,10 +7,12 @@ import WebSocket from 'ws';
 const mocks = vi.hoisted(() => ({
   resolveRepo: vi.fn(),
   listRunsForTui: vi.fn(),
+  listRunHistoryForFeature: vi.fn(),
   openGates: vi.fn(),
   listPendingStageRequests: vi.fn(),
   listRunningTaskRuns: vi.fn(),
   listRunsForStats: vi.fn(),
+  getHistoricalTokenStatsForFeatureProfile: vi.fn(),
   resolveGate: vi.fn(),
   listRunOutput: vi.fn(),
   listTaskRunsForRun: vi.fn(),
@@ -33,10 +35,12 @@ vi.mock('../../src/core/repo.js', () => ({
 
 vi.mock('../../src/db/repo.js', () => ({
   listRunsForTui: mocks.listRunsForTui,
+  listRunHistoryForFeature: mocks.listRunHistoryForFeature,
   openGates: mocks.openGates,
   listPendingStageRequests: mocks.listPendingStageRequests,
   listRunningTaskRuns: mocks.listRunningTaskRuns,
   listRunsForStats: mocks.listRunsForStats,
+  getHistoricalTokenStatsForFeatureProfile: mocks.getHistoricalTokenStatsForFeatureProfile,
   listRunOutput: mocks.listRunOutput,
   listTaskRunsForRun: mocks.listTaskRunsForRun,
   listRunEvents: mocks.listRunEvents,
@@ -126,6 +130,12 @@ describe('web server', () => {
     mocks.listRunOutput.mockReturnValue([]);
     mocks.listTaskRunsForRun.mockReturnValue([]);
     mocks.listRunEvents.mockReturnValue([]);
+    mocks.listRunHistoryForFeature.mockReturnValue([]);
+    mocks.getHistoricalTokenStatsForFeatureProfile.mockReturnValue({
+      sampleSize: 0,
+      avgTotalTokens: null,
+      medianTotalTokens: null,
+    });
     mocks.computeRunBreakdown.mockReturnValue({
       wallMs: 1000,
       gateWaitMs: 0,
@@ -349,5 +359,101 @@ describe('web server', () => {
     expect(extraMessage).toBe(false);
 
     socket.close();
+  });
+
+  // F34 item 1/2: run history subscription
+  it('sends run:history immediately on subscribe:runHistory', async () => {
+    const { createWebServer } = await import('../../src/web/server.js');
+    mocks.listRunHistoryForFeature.mockReturnValue([
+      { runId: 1, repoId: 'repo-1', featureId: 'feat-1', tool: 'claude', stage: 'implement', status: 'failed', startedAt: '2026-07-06T10:00:00', endedAt: '2026-07-06T10:05:00', totalTokens: 500, pipelineResumeSummary: null },
+    ]);
+
+    server = createWebServer({ host: '127.0.0.1', port: 0, auth: 'token', token: 'secret' });
+    await new Promise<void>((resolve) => server!.server.listen(0, '127.0.0.1', resolve));
+    const address = server!.server.address() as { port: number };
+    const wsUrl = `ws://127.0.0.1:${address.port}/ws`;
+
+    const socket = new WebSocket(wsUrl);
+    await waitForOpen(socket);
+    socket.send(JSON.stringify({ type: 'auth', token: 'secret' }));
+    await waitForSocketMessage(socket); // state:full
+
+    socket.send(JSON.stringify({ type: 'subscribe:runHistory', featureId: 'feat-1' }));
+    const message = await waitForMessageType(socket, 'run:history');
+    const payload = (message as { payload: { featureId: string; runs: unknown[] } }).payload;
+    expect(payload.featureId).toBe('feat-1');
+    expect(payload.runs).toHaveLength(1);
+    expect(mocks.listRunHistoryForFeature).toHaveBeenCalledWith('repo-1', 'feat-1');
+
+    socket.close();
+  });
+
+  // F34 item 2: run changes over WebSocket and HTTP, with git-unavailable fallback.
+  // These pass `cwd` explicitly instead of relying on the ambient
+  // process.cwd() set by beforeEach's process.chdir() — that global mutates
+  // process-wide state, which races against other test files under
+  // vitest's threaded pool and can point computeRunChanges' `git` calls at
+  // the real project repo instead of the empty tmp dir.
+  it('reports no git repository for a run:changes subscription outside a git repo', async () => {
+    const { createWebServer } = await import('../../src/web/server.js');
+
+    server = createWebServer({ host: '127.0.0.1', port: 0, auth: 'token', token: 'secret', cwd });
+    await new Promise<void>((resolve) => server!.server.listen(0, '127.0.0.1', resolve));
+    const address = server!.server.address() as { port: number };
+    const wsUrl = `ws://127.0.0.1:${address.port}/ws`;
+
+    const socket = new WebSocket(wsUrl);
+    await waitForOpen(socket);
+    socket.send(JSON.stringify({ type: 'auth', token: 'secret' }));
+    await waitForSocketMessage(socket); // state:full
+
+    socket.send(JSON.stringify({ type: 'subscribe:runChanges', runId: 42 }));
+    const message = await waitForMessageType(socket, 'run:changes');
+    const payload = (message as { payload: { runId: number; files: unknown[]; notApplicableReason: string | null } }).payload;
+    expect(payload.runId).toBe(42);
+    expect(payload.files).toEqual([]);
+    expect(payload.notApplicableReason).toBe("No git repository detected for this run's working directory.");
+
+    socket.close();
+  });
+
+  it('serves /api/runs/:runId/changes over HTTP with the same git fallback', async () => {
+    const { createWebServer } = await import('../../src/web/server.js');
+    server = createWebServer({ host: '127.0.0.1', port: 0, auth: 'token', token: 'secret', cwd });
+    await new Promise<void>((resolve) => server!.server.listen(0, '127.0.0.1', resolve));
+    const address = server!.server.address() as { port: number };
+    const base = `http://127.0.0.1:${address.port}`;
+
+    const res = await fetch(`${base}/api/runs/42/changes`, { headers: { Authorization: 'Bearer secret' } });
+    expect(res.status).toBe(200);
+    const json = (await res.json()) as { runId: number; notApplicableReason: string | null };
+    expect(json.runId).toBe(42);
+    expect(json.notApplicableReason).toBe("No git repository detected for this run's working directory.");
+  });
+
+  it('rejects /api/runs/:runId/changes without a token', async () => {
+    const { createWebServer } = await import('../../src/web/server.js');
+    server = createWebServer({ host: '127.0.0.1', port: 0, auth: 'token', token: 'secret' });
+    await new Promise<void>((resolve) => server!.server.listen(0, '127.0.0.1', resolve));
+    const address = server!.server.address() as { port: number };
+    const base = `http://127.0.0.1:${address.port}`;
+
+    const res = await fetch(`${base}/api/runs/42/changes`);
+    expect(res.status).toBe(401);
+  });
+
+  // F34 item 6: theme snapshot in full state
+  it('includes a theme snapshot with a default fallback in full state', async () => {
+    const { createWebServer } = await import('../../src/web/server.js');
+    server = createWebServer({ host: '127.0.0.1', port: 0, auth: 'token', token: 'secret' });
+    await new Promise<void>((resolve) => server!.server.listen(0, '127.0.0.1', resolve));
+    const address = server!.server.address() as { port: number };
+    const base = `http://127.0.0.1:${address.port}`;
+
+    const res = await fetch(`${base}/api/state`, { headers: { Authorization: 'Bearer secret' } });
+    const json = (await res.json()) as { theme: { name: string; roles: Record<string, string> } };
+    expect(json.theme.name).toBe('default');
+    expect(json.theme.roles.text).toBeTruthy();
+    expect(json.theme.roles.error).toBeTruthy();
   });
 });

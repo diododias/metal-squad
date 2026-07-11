@@ -1,8 +1,25 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import { formatTokens } from '../lib/format.js';
 
-export function Header({ state, connected }) {
+function connectionLabel(connectionState, elapsedSeconds) {
+  if (connectionState === 'live') return 'live';
+  if (connectionState === 'reconnecting') return `reconnecting (${elapsedSeconds}s)`;
+  if (connectionState === 'disconnected') return `disconnected (${elapsedSeconds}s)`;
+  return 'never connected';
+}
+
+export function Header({ state, connectionState, connectionSince }) {
   const stats = state?.stats || {};
+  const [, forceTick] = useState(0);
+
+  useEffect(() => {
+    if (connectionState === 'live') return undefined;
+    const id = setInterval(() => forceTick((n) => n + 1), 1000);
+    return () => clearInterval(id);
+  }, [connectionState]);
+
+  const elapsedSeconds = connectionSince ? Math.max(0, Math.round((Date.now() - connectionSince) / 1000)) : 0;
+
   return React.createElement(
     'header',
     { className: 'header' },
@@ -20,7 +37,7 @@ export function Header({ state, connected }) {
         'tokens: ',
         React.createElement('strong', null, formatTokens(stats.tokenStats?.totalTokens)),
       ),
-      React.createElement('span', null, connected ? 'connected' : 'offline'),
+      React.createElement('span', { className: `connection-state ${connectionState || 'never-connected'}` }, connectionLabel(connectionState, elapsedSeconds)),
     ),
   );
 }

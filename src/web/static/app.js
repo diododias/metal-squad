@@ -8,7 +8,7 @@ import { CommandPalette } from './components/CommandPalette.js';
 import { HelpOverlay } from './components/HelpOverlay.js';
 import { Toasts } from './components/Toasts.js';
 import { StatusBar } from './components/StatusBar.js';
-import { RunDetail } from './components/RunDetail.js';
+import { RunDetail, DETAIL_SECTION_ORDER } from './components/RunDetail.js';
 import { FeaturePreview } from './components/FeaturePreview.js';
 
 const GROUP_ORDER = ['todo', 'execution', 'done', 'canceled'];
@@ -31,13 +31,29 @@ function getRunGroup(status) {
   return 'canceled';
 }
 
+// F34 item 4: connectionState is a richer signal than the old boolean —
+// distinguishes "never connected yet" from "was live, now retrying" from
+// "gave up" (auth failure / intentional close), each with a since-timestamp
+// so Header can show elapsed time.
 function useWebSocket(token, onMessage) {
   const wsRef = useRef(null);
+  // The socket reaches OPEN before the server confirms auth (state:full is
+  // the actual auth ack) — sending a subscribe:* message in that window is
+  // silently dropped, or on auth='token' setups can get the socket closed
+  // by the server ("Not authenticated"). Deep-linking straight to a
+  // ?run=/?feature= URL hits this every time, since the page's first
+  // subscribe effects fire before the handshake completes. Queue sends
+  // until authenticatedRef flips true, then flush.
+  const authenticatedRef = useRef(false);
+  const pendingRef = useRef([]);
   const [connected, setConnected] = useState(false);
+  const [connectionState, setConnectionState] = useState('never-connected');
+  const [connectionSince, setConnectionSince] = useState(null);
   const [error, setError] = useState(null);
   const onMessageRef = useRef(onMessage);
   const shouldReconnectRef = useRef(true);
   const connectedTimeoutRef = useRef(null);
+  const hasEverConnectedRef = useRef(false);
 
   useEffect(() => {
     onMessageRef.current = onMessage;
@@ -52,6 +68,16 @@ function useWebSocket(token, onMessage) {
       if (closed || !shouldReconnectRef.current) return;
       const ws = new WebSocket(WS_PATH);
       wsRef.current = ws;
+      authenticatedRef.current = false;
+      pendingRef.current = [];
+
+      function flushPending() {
+        const queue = pendingRef.current;
+        pendingRef.current = [];
+        for (const message of queue) {
+          if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(message));
+        }
+      }
 
       ws.addEventListener('open', () => {
         console.log('[msq web] ws open');
@@ -64,7 +90,12 @@ function useWebSocket(token, onMessage) {
           if (message.type === 'state:full') {
             clearTimeout(connectedTimeoutRef.current);
             connectedTimeoutRef.current = setTimeout(() => setConnected(true), 500);
+            hasEverConnectedRef.current = true;
+            authenticatedRef.current = true;
+            setConnectionState('live');
+            setConnectionSince(Date.now());
             setError(null);
+            flushPending();
           }
           onMessageRef.current(message);
         } catch {
@@ -76,15 +107,24 @@ function useWebSocket(token, onMessage) {
         console.log('[msq web] ws close', event.code, event.reason);
         clearTimeout(connectedTimeoutRef.current);
         setConnected(false);
+        authenticatedRef.current = false;
+        pendingRef.current = [];
         clearInterval(heartbeatTimer);
         heartbeatTimer = null;
         if (event.code === 1008) {
           shouldReconnectRef.current = false;
           setError(`WebSocket closed: ${event.reason || 'authentication failed'}`);
+          setConnectionState('disconnected');
+          setConnectionSince(Date.now());
           return;
         }
         if (!closed && event.code !== 1000 && shouldReconnectRef.current) {
+          setConnectionState(hasEverConnectedRef.current ? 'reconnecting' : 'never-connected');
+          setConnectionSince(Date.now());
           reconnectTimer = setTimeout(connect, 2000);
+        } else {
+          setConnectionState('disconnected');
+          setConnectionSince(Date.now());
         }
       });
 
@@ -116,14 +156,17 @@ function useWebSocket(token, onMessage) {
 
   const send = useMemo(
     () => (message) => {
-      if (wsRef.current?.readyState === WebSocket.OPEN) {
-        wsRef.current.send(JSON.stringify(message));
+      const ws = wsRef.current;
+      if (ws?.readyState === WebSocket.OPEN && authenticatedRef.current) {
+        ws.send(JSON.stringify(message));
+      } else if (ws && ws.readyState !== WebSocket.CLOSED && ws.readyState !== WebSocket.CLOSING) {
+        pendingRef.current.push(message);
       }
     },
     [],
   );
 
-  return { connected, error, send };
+  return { connected, connectionState, connectionSince, error, send };
 }
 
 function useLocalOutput() {
@@ -170,12 +213,31 @@ function App() {
   const [outputPaused, setOutputPaused] = useState(false);
   const [logsVisible, setLogsVisible] = useState(true);
   const [runDetails, setRunDetails] = useState({});
+  const [runHistories, setRunHistories] = useState({});
+  const [runChangesByRun, setRunChangesByRun] = useState({});
   const { linesByRun, append, clear } = useLocalOutput();
 
   const token = useMemo(() => {
     const params = new URLSearchParams(window.location.search);
     return params.get('token') || prompt('Enter msq web token:') || '';
   }, []);
+
+  // F34 item 6: apply the server-resolved theme (same BUILTIN_THEMES the TUI
+  // uses, F10) as CSS custom properties instead of the previous hardcoded
+  // single dark palette.
+  useEffect(() => {
+    const roles = state?.theme?.roles;
+    if (!roles) return;
+    const root = document.documentElement.style;
+    root.setProperty('--text', roles.text);
+    root.setProperty('--accent', roles.primary);
+    root.setProperty('--accent-dim', roles.accent);
+    root.setProperty('--success', roles.success);
+    root.setProperty('--warning', roles.warning);
+    root.setProperty('--danger', roles.error);
+    root.setProperty('--muted', roles.muted);
+    root.setProperty('--info', roles.focus);
+  }, [state?.theme]);
 
   const onMessage = useCallback((message) => {
     if (message.type === 'state:full') {
@@ -190,10 +252,28 @@ function App() {
           breakdown: message.payload.breakdown,
         },
       }));
+    } else if (message.type === 'run:history') {
+      setRunHistories((current) => ({ ...current, [message.payload.featureId]: message.payload.runs }));
+    } else if (message.type === 'run:changes') {
+      setRunChangesByRun((current) => ({ ...current, [message.payload.runId]: message.payload }));
+    } else if (message.type === 'tokens:update') {
+      // F34 item 3: live token telemetry on kanban cards without waiting for
+      // the next full state broadcast.
+      setState((current) => {
+        if (!current?.runs) return current;
+        const { runId, total } = message.payload;
+        let changed = false;
+        const runs = current.runs.map((run) => {
+          if (run.runId !== runId) return run;
+          changed = true;
+          return { ...run, totalTokens: total };
+        });
+        return changed ? { ...current, runs } : current;
+      });
     }
   }, [append, clear]);
 
-  const { connected, send } = useWebSocket(token, onMessage);
+  const { connected, connectionState, connectionSince, send } = useWebSocket(token, onMessage);
 
   // Subscribe/unsubscribe run detail and output when selected run changes
   useEffect(() => {
@@ -201,13 +281,34 @@ function App() {
       clear(selectedRunId);
       send({ type: 'subscribe:output', runId: selectedRunId });
       send({ type: 'subscribe:runDetail', runId: selectedRunId });
+      send({ type: 'subscribe:runChanges', runId: selectedRunId });
       return () => {
         send({ type: 'unsubscribe:output', runId: selectedRunId });
         send({ type: 'unsubscribe:runDetail', runId: selectedRunId });
+        send({ type: 'unsubscribe:runChanges', runId: selectedRunId });
       };
     }
     return undefined;
   }, [view, selectedRunId, send]);
+
+  // F34 item 3: kanban cards in the execution column show live output/tokens
+  // even while the run detail overlay is closed, so keep every running/
+  // blocked run subscribed to output regardless of which screen is active.
+  // The currently open run detail manages its own subscription above, so it
+  // is excluded here to avoid the two effects racing to unsubscribe it.
+  const kanbanOutputRunIdsKey = useMemo(() => (state?.runs || [])
+    .filter((run) => (run.status === 'running' || run.status === 'blocked') && run.runId !== selectedRunId)
+    .map((run) => run.runId)
+    .sort((a, b) => a - b)
+    .join(','), [state?.runs, selectedRunId]);
+
+  useEffect(() => {
+    const ids = kanbanOutputRunIdsKey ? kanbanOutputRunIdsKey.split(',').map(Number) : [];
+    for (const runId of ids) send({ type: 'subscribe:output', runId });
+    return () => {
+      for (const runId of ids) send({ type: 'unsubscribe:output', runId });
+    };
+  }, [kanbanOutputRunIdsKey, send]);
 
   // Parse URL params on initial load and browser back/forward
   useEffect(() => {
@@ -283,6 +384,60 @@ function App() {
   const selectedGate = useMemo(
     () => (state?.gates || []).find((gate) => gate.id === selectedGateId) || null,
     [state?.gates, selectedGateId],
+  );
+
+  // F34 item 1/2: subscribe to full run history for the selected run's
+  // feature so RunDetail can surface previous attempts (workflow/tasks
+  // fallback, failed-attempt banner in FeaturePreview).
+  useEffect(() => {
+    const featureId = selectedRun?.featureId || (view === 'preview' ? selectedFeatureId : null);
+    if ((view === 'run' || view === 'preview') && featureId) {
+      send({ type: 'subscribe:runHistory', featureId });
+      return () => send({ type: 'unsubscribe:runHistory', featureId });
+    }
+    return undefined;
+  }, [view, selectedRun?.featureId, selectedFeatureId, send]);
+
+  const previousRunId = useMemo(() => {
+    if (!selectedRun) return null;
+    const history = runHistories[selectedRun.featureId] || [];
+    const other = history.find(
+      (entry) => entry.runId !== selectedRun.runId
+        && (entry.status === 'done' || entry.status === 'failed' || entry.status === 'aborted'),
+    );
+    return other ? other.runId : null;
+  }, [selectedRun, runHistories]);
+
+  // Prefetch task-run breakdown of the most recent completed previous
+  // attempt so the Workflow/Tasks tabs can fall back to it when the current
+  // run has no stage data of its own yet.
+  useEffect(() => {
+    if (view === 'run' && typeof previousRunId === 'number') {
+      send({ type: 'subscribe:runDetail', runId: previousRunId });
+      return () => send({ type: 'unsubscribe:runDetail', runId: previousRunId });
+    }
+    return undefined;
+  }, [view, previousRunId, send]);
+
+  const previousAttemptTaskRuns = useMemo(() => {
+    if (typeof previousRunId !== 'number') return [];
+    return runDetails[previousRunId]?.taskRuns || [];
+  }, [previousRunId, runDetails]);
+
+  const previousAttemptInfo = useMemo(() => {
+    if (typeof previousRunId !== 'number' || !selectedRun) return null;
+    const entry = (runHistories[selectedRun.featureId] || []).find((run) => run.runId === previousRunId);
+    return entry ? { runId: entry.runId, status: entry.status } : null;
+  }, [previousRunId, runHistories, selectedRun]);
+
+  const runChangesForSelected = useMemo(() => {
+    if (!selectedRun) return null;
+    return runChangesByRun[selectedRun.runId] || null;
+  }, [selectedRun, runChangesByRun]);
+
+  const doneFeatureIds = useMemo(
+    () => new Set((state?.runs || []).filter((run) => run.status === 'done').map((run) => run.featureId)),
+    [state?.runs],
   );
 
   const navigateToRun = (runId) => {
@@ -399,13 +554,14 @@ function App() {
       }
 
       if (view === 'run' && selectedRun) {
-        if (e.key >= '1' && e.key <= '7') {
+        if (e.key >= '1' && e.key <= String(DETAIL_SECTION_ORDER.length)) {
           setDetailTab(Number(e.key) - 1);
           return;
         }
         if (e.key === 'Tab') {
           e.preventDefault();
-          setDetailTab((t) => (e.shiftKey ? (t - 1 + 7) % 7 : (t + 1) % 7));
+          const total = DETAIL_SECTION_ORDER.length;
+          setDetailTab((t) => (e.shiftKey ? (t - 1 + total) % total : (t + 1) % total));
           return;
         }
         if (e.key === 'i') {
@@ -424,13 +580,6 @@ function App() {
         }
       }
 
-      if (view === 'preview' && selectedFeature) {
-        if (e.key === 'Enter') {
-          send({ type: 'action:startFeature', featureId: selectedFeature.id });
-          backToOverview();
-          return;
-        }
-      }
 
       if (view !== 'run' && view !== 'preview') {
         if (e.key === 'ArrowLeft') {
@@ -455,7 +604,7 @@ function App() {
   return React.createElement(
     'div',
     { className: 'app' },
-    React.createElement(Header, { state, connected }),
+    React.createElement(Header, { state, connected, connectionState, connectionSince }),
     view === 'dashboard'
       ? React.createElement(Dashboard, {
           rows: dashboardRows,
@@ -472,6 +621,7 @@ function App() {
             selectedColumn,
             onSelectRun: handleSelectRun,
             onSelectColumn: handleSelectColumn,
+            linesByRun,
           }),
           React.createElement(Gates, {
             gates: state?.gates || [],
@@ -503,6 +653,9 @@ function App() {
           backlogSettings: state?.backlogSettings || { stageSkills: {} },
           taskRuns: runDetail.taskRuns,
           breakdown: runDetail.breakdown,
+          previousAttemptTaskRuns,
+          previousAttemptInfo,
+          runChanges: runChangesForSelected,
           outputLines: outputForSelected,
           outputPaused,
           logsVisible,
@@ -516,17 +669,38 @@ function App() {
           onResume: () => selectedRun.pipelineId && send({ type: 'action:resumePipeline', pipelineId: selectedRun.pipelineId }),
           onAbort: () => selectedRun.pipelineId && send({ type: 'action:abortPipeline', pipelineId: selectedRun.pipelineId }),
           onClose: backToOverview,
+          onResolveGate: (decision) => {
+            if (selectedRun.gateId != null) send({ type: 'action:resolveGate', gateId: selectedRun.gateId, decision });
+          },
+          onForceGate: () => {
+            if (selectedRun.gateId != null) send({ type: 'action:forceResolveGate', gateId: selectedRun.gateId });
+          },
+          onResolveStageRequest: (response) => {
+            if (selectedRun.pendingStageRequestId != null) {
+              send({ type: 'action:resolveStageRequest', requestId: selectedRun.pendingStageRequestId, response });
+            }
+          },
         })
       : null,
     view === 'preview' && selectedFeature
       ? React.createElement(FeaturePreview, {
           feature: selectedFeature,
           settings: state?.backlogSettings || { stageSkills: {} },
-          onStart: () => {
-            send({ type: 'action:startFeature', featureId: selectedFeature.id });
+          runHistory: runHistories[selectedFeature.id] || [],
+          doneFeatureIds,
+          tokenEstimatesByTool: state?.tokenEstimatesByTool || null,
+          onStart: (overrides) => {
+            send({
+              type: 'action:startFeature',
+              featureId: selectedFeature.id,
+              ...(overrides && Object.keys(overrides).length > 0 ? { overrides } : {}),
+            });
             backToOverview();
           },
           onClose: backToOverview,
+          onOpenRun: (runId) => {
+            navigateToRun(runId);
+          },
         })
       : null,
     React.createElement(StatusBar, {
@@ -557,7 +731,6 @@ function App() {
         { key: 'i', label: 'Toggle detail density' },
         { key: 'ctrl+s', label: 'Pause/resume output' },
         { key: 'ctrl+l', label: 'Toggle logs' },
-        { key: 'enter', label: 'Start feature from preview' },
       ],
     }),
     React.createElement(Toasts, { toasts: state?.notifications?.slice(0, 4) || [] }),
