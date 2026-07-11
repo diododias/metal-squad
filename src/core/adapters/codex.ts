@@ -47,6 +47,15 @@ export const codexAdapter: ToolAdapter = {
     return ['-c', `model_reasoning_effort="${EFFORT[effort]}"`];
   },
 
+  isAvailable(): boolean {
+    try {
+      execFileSync('codex', ['--version'], { stdio: 'ignore' });
+      return true;
+    } catch {
+      return false;
+    }
+  },
+
   async runFeature(feature: Feature, prompt: string, opts: RunFeatureOptions): Promise<RunResult> {
     const args = [
       'exec',

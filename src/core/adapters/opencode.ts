@@ -1,3 +1,4 @@
+import { execFileSync } from 'node:child_process';
 import type { ToolAdapter, RunResult, RunFeatureOptions, TokenUsage } from './types.js';
 import type { Effort, Feature } from '../backlog/schema.js';
 import { CliAbortError, runCli } from './spawn.js';
@@ -60,6 +61,15 @@ export const opencodeAdapter: ToolAdapter = {
 
   effortFlag(_effort: Effort): string[] {
     return [];
+  },
+
+  isAvailable(): boolean {
+    try {
+      execFileSync('opencode', ['--version'], { stdio: 'ignore' });
+      return true;
+    } catch {
+      return false;
+    }
   },
 
   async runFeature(feature: Feature, prompt: string, opts: RunFeatureOptions): Promise<RunResult> {

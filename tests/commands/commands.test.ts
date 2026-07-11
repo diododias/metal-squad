@@ -13,6 +13,8 @@ const mockLoadConfig = vi.fn();
 const mockCreateSkillRegistry = vi.fn();
 const mockFormatSkillList = vi.fn();
 const mockListRuns = vi.fn();
+const mockListRetryHistory = vi.fn();
+const mockGetRunAccumulatedTokens = vi.fn();
 const mockListPipelineOverviews = vi.fn();
 const mockListResumablePipelines = vi.fn();
 const mockFindResumablePipeline = vi.fn();
@@ -20,6 +22,7 @@ const mockGetPipelineSnapshot = vi.fn();
 const mockCleanupStaleRuns = vi.fn();
 const mockRender = vi.fn();
 const mockAssertWritableDbPath = vi.fn();
+const mockGetAdapter = vi.fn();
 
 vi.mock('../../src/core/repo.js', () => ({
   resolveRepo: mockResolveRepo,
@@ -30,6 +33,8 @@ vi.mock('../../src/db/repo.js', () => ({
   findResumablePipeline: mockFindResumablePipeline,
   getPipelineSnapshot: mockGetPipelineSnapshot,
   listRuns: mockListRuns,
+  listRetryHistory: mockListRetryHistory,
+  getRunAccumulatedTokens: mockGetRunAccumulatedTokens,
   listPipelineOverviews: mockListPipelineOverviews,
   listResumablePipelines: mockListResumablePipelines,
   cleanupStaleRuns: mockCleanupStaleRuns,
@@ -80,6 +85,10 @@ vi.mock('../../src/core/notify/telegram-poller.js', () => ({
   stopTelegramPoller: vi.fn(),
 }));
 
+vi.mock('../../src/core/adapters/index.js', () => ({
+  getAdapter: mockGetAdapter,
+}));
+
 describe('commands', () => {
   const previousCwd = process.cwd();
   let cwd = '';
@@ -101,8 +110,11 @@ describe('commands', () => {
     mockAssertWritableDbPath.mockReturnValue(undefined);
     mockListResumablePipelines.mockReturnValue([]);
     mockListPipelineOverviews.mockReturnValue([]);
+    mockListRetryHistory.mockReturnValue([]);
+    mockGetRunAccumulatedTokens.mockReturnValue(0);
     mockFindResumablePipeline.mockReturnValue(null);
     mockGetPipelineSnapshot.mockReturnValue({ plan: [], done: [], pending: [], active: [], aborted: [] });
+    mockGetAdapter.mockReturnValue({ isAvailable: () => true });
   });
 
   afterEach(() => {
@@ -269,6 +281,11 @@ describe('commands', () => {
       active: [],
       aborted: [],
     });
+    mockListRetryHistory.mockReturnValueOnce([
+      { attempt: 1, error: 'falha 1', retriedAt: '2026-07-06T10:00:00', tool: null, model: null },
+      { attempt: 2, error: 'falha 2', retriedAt: '2026-07-06T10:01:00', tool: 'codex', model: 'gpt-5' },
+    ]);
+    mockGetRunAccumulatedTokens.mockReturnValueOnce(180);
     await program.parseAsync(['node', 'msq', 'status', '--repair-stale', '--stale-minutes', '30', '--limit', '10']);
 
     expect(mockCleanupStaleRuns).toHaveBeenCalledWith(30);
@@ -278,6 +295,11 @@ describe('commands', () => {
     );
     expect(log).toHaveBeenCalledWith('Active/pending pipelines:');
     expect(log).toHaveBeenCalledWith('Resumable pipelines:');
+    expect(log).toHaveBeenCalledWith('Attempt history (run 1, total tokens: 180):');
+    expect(table).toHaveBeenCalledWith([
+      { attempt: 1, tool: 'nao registrado', model: 'nao registrado', error: 'falha 1', retried_at: '2026-07-06T10:00:00' },
+      { attempt: 2, tool: 'codex', model: 'gpt-5', error: 'falha 2', retried_at: '2026-07-06T10:01:00' },
+    ]);
   });
 
   it('ui dynamically imports and renders the app', async () => {
@@ -331,5 +353,90 @@ describe('commands', () => {
     await expect(
       program.parseAsync(['node', 'msq', 'resume', 'missing']),
     ).rejects.toThrow('Nenhuma pipeline retomável encontrada para "missing".');
+  });
+
+  it('resume applies --tool/--model/--effort as a pointwise override without touching backlog.yaml/catalog', async () => {
+    const backlog = { version: 2, repo: 'demo', defaults: { tool: 'codex', effort: 'medium', skills: ['implement'] }, epics: [] };
+    mockLoadBacklog.mockReturnValue(backlog);
+    mockFindResumablePipeline.mockReturnValue({
+      id: 9,
+      repoId: 'repo-1',
+      cwd: '/tmp/resume-repo',
+      autoAdvance: 0,
+    });
+    mockGetPipelineSnapshot.mockReturnValue({
+      plan: ['feat-11', 'feat-12'],
+      done: ['feat-11'],
+      pending: [],
+      active: ['feat-12'],
+      aborted: [],
+    });
+
+    const { registerResume } = await import('../../src/commands/resume.js');
+    const program = new Command();
+    registerResume(program);
+
+    await program.parseAsync(['node', 'msq', 'resume', '9', '--tool', 'opencode', '--model', 'gpt-4o', '--effort', 'high']);
+
+    expect(mockGetAdapter).toHaveBeenCalledWith('opencode');
+    expect(mockExecuteBacklog).toHaveBeenCalledWith(backlog, {
+      cwd: '/tmp/resume-repo',
+      concurrency: 3,
+      resumePipelineId: 9,
+      autoAdvanceStages: false,
+      resumeOverride: { featureId: 'feat-12', tool: 'opencode', model: 'gpt-4o', effort: 'high' },
+    });
+    expect(log).toHaveBeenCalledWith(expect.stringContaining('Override pontual'));
+  });
+
+  it('rejects --tool outside the enum before touching the DB', async () => {
+    const { registerResume } = await import('../../src/commands/resume.js');
+    const program = new Command();
+    program.exitOverride();
+    registerResume(program);
+
+    await expect(
+      program.parseAsync(['node', 'msq', 'resume', '9', '--tool', 'not-a-tool']),
+    ).rejects.toThrow();
+    expect(mockFindResumablePipeline).not.toHaveBeenCalled();
+  });
+
+  it('rejects a valid --tool that is unavailable in the environment, without creating a run or resuming the pipeline', async () => {
+    mockFindResumablePipeline.mockReturnValue({
+      id: 9,
+      repoId: 'repo-1',
+      cwd: '/tmp/resume-repo',
+      autoAdvance: 0,
+    });
+    mockGetAdapter.mockReturnValue({ isAvailable: () => false });
+
+    const { registerResume } = await import('../../src/commands/resume.js');
+    const program = new Command();
+    registerResume(program);
+
+    await expect(
+      program.parseAsync(['node', 'msq', 'resume', '9', '--tool', 'codex']),
+    ).rejects.toThrow('Ferramenta "codex" indisponível no ambiente atual — resume abortado, nenhuma run criada.');
+    expect(mockGetPipelineSnapshot).not.toHaveBeenCalled();
+    expect(mockExecuteBacklog).not.toHaveBeenCalled();
+  });
+
+  it('resume over an already-done pipeline prints "nada para retomar" and does not call executeBacklog', async () => {
+    mockFindResumablePipeline.mockReturnValue({
+      id: 9,
+      repoId: 'repo-1',
+      cwd: '/tmp/resume-repo',
+      autoAdvance: 0,
+    });
+    mockGetPipelineSnapshot.mockReturnValue({ plan: ['feat-11'], done: ['feat-11'], pending: [], active: [], aborted: [] });
+
+    const { registerResume } = await import('../../src/commands/resume.js');
+    const program = new Command();
+    registerResume(program);
+
+    await program.parseAsync(['node', 'msq', 'resume', '9']);
+
+    expect(log).toHaveBeenCalledWith('Pipeline 9 já concluída — nada para retomar.');
+    expect(mockExecuteBacklog).not.toHaveBeenCalled();
   });
 });

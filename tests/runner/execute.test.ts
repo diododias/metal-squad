@@ -9,6 +9,7 @@ const mockCreatePipeline = vi.fn();
 const mockCreateStageRequest = vi.fn();
 const mockCreateGate = vi.fn();
 const mockCreateRetryRecord = vi.fn();
+const mockUpdateRunTool = vi.fn();
 const mockFinishRun = vi.fn();
 const mockFinishPipeline = vi.fn();
 const mockGetPipeline = vi.fn();
@@ -41,6 +42,7 @@ vi.mock('../../src/db/repo.js', () => ({
   createStageRequest: mockCreateStageRequest,
   createGate: mockCreateGate,
   createRetryRecord: mockCreateRetryRecord,
+  updateRunTool: mockUpdateRunTool,
   finishRun: mockFinishRun,
   finishPipeline: mockFinishPipeline,
   getPipeline: mockGetPipeline,
@@ -97,6 +99,7 @@ beforeEach(() => {
   mockCreateStageRequest.mockReset();
   mockCreateGate.mockReset();
   mockCreateRetryRecord.mockReset();
+  mockUpdateRunTool.mockReset();
   mockFinishRun.mockReset();
   mockFinishPipeline.mockReset();
   mockGetPipeline.mockReset();
@@ -303,12 +306,121 @@ describe('executeBacklog failure persistence', () => {
 
     await rejection;
     expect(mockRunFeature).toHaveBeenCalledTimes(3);
-    expect(mockCreateRetryRecord).toHaveBeenNthCalledWith(1, 7, 1, 'falha 1', expect.any(Number));
-    expect(mockCreateRetryRecord).toHaveBeenNthCalledWith(2, 7, 2, 'falha 2', expect.any(Number));
+    expect(mockCreateRetryRecord).toHaveBeenNthCalledWith(1, 7, 1, 'falha 1', expect.any(Number), 'codex', undefined);
+    expect(mockCreateRetryRecord).toHaveBeenNthCalledWith(2, 7, 2, 'falha 2', expect.any(Number), 'codex', undefined);
     expect(mockCreateRetryRecord).toHaveBeenCalledTimes(2);
     expect(mockFinishRun).toHaveBeenCalledWith(7, 'failed', 'falha 3');
 
     vi.useRealTimers();
+  });
+
+  it('exhausts primary then tries fallbacks in order before succeeding, updating runs.tool to the winner', async () => {
+    const backlog: Backlog = {
+      version: 2,
+      repo: 'repo',
+      defaults: { tool: 'claude', effort: 'medium', skills: ['implement'], stageSkills: {} },
+      epics: [
+        {
+          id: 'epic-1',
+          title: 'Epic',
+          features: [
+            {
+              id: 'feat-fallback',
+              title: 'Fallback Feature',
+              spec: 'spec',
+              tasks: [],
+              tool: 'claude',
+              effort: 'medium',
+              dependsOn: [],
+              workflow: { mode: 'single', stages: [], approvals: { channel: 'telegram', autoAdvance: false }, syncTasksToBacklog: true },
+              retry: {
+                maxAttempts: 2,
+                backoffMs: 0,
+                onFail: 'stop',
+                fallback: [
+                  { tool: 'codex', maxAttempts: 1 },
+                  { tool: 'opencode', model: 'gpt-4o', maxAttempts: 1 },
+                ],
+              },
+            },
+          ],
+        },
+      ],
+    };
+
+    mockRunFeature
+      .mockResolvedValueOnce({ ok: false, summary: 'claude falha 1' })
+      .mockResolvedValueOnce({ ok: false, summary: 'claude falha 2' })
+      .mockResolvedValueOnce({ ok: false, summary: 'codex falha' })
+      .mockResolvedValueOnce({ ok: true, summary: 'opencode ok' });
+
+    const { executeBacklog } = await import('../../src/core/runner/execute.js');
+
+    await expect(
+      executeBacklog(backlog, { cwd: '/repo', concurrency: 1 }),
+    ).resolves.toBeUndefined();
+
+    expect(mockRunFeature).toHaveBeenCalledTimes(4);
+    expect(mockRunFeature.mock.calls[0]![0].tool).toBe('claude');
+    expect(mockRunFeature.mock.calls[1]![0].tool).toBe('claude');
+    expect(mockRunFeature.mock.calls[2]![0].tool).toBe('codex');
+    expect(mockRunFeature.mock.calls[3]![0].tool).toBe('opencode');
+    expect(mockRunFeature.mock.calls[3]![0].model).toBe('gpt-4o');
+
+    expect(mockCreateRetryRecord).toHaveBeenCalledTimes(3);
+    expect(mockCreateRetryRecord).toHaveBeenNthCalledWith(1, 7, 1, 'claude falha 1', expect.any(Number), 'claude', undefined);
+    expect(mockCreateRetryRecord).toHaveBeenNthCalledWith(2, 7, 2, 'claude falha 2', expect.any(Number), 'claude', undefined);
+    expect(mockCreateRetryRecord).toHaveBeenNthCalledWith(3, 7, 3, 'codex falha', expect.any(Number), 'codex', undefined);
+
+    expect(mockUpdateRunTool).toHaveBeenCalledWith(7, 'opencode');
+    expect(mockFinishRun).toHaveBeenCalledWith(7, 'done', 'opencode ok');
+  });
+
+  it('applies onFail only after every candidate (primary + all fallbacks) is exhausted', async () => {
+    const backlog: Backlog = {
+      version: 2,
+      repo: 'repo',
+      defaults: { tool: 'claude', effort: 'medium', skills: ['implement'], stageSkills: {} },
+      epics: [
+        {
+          id: 'epic-1',
+          title: 'Epic',
+          features: [
+            {
+              id: 'feat-fallback-exhausted',
+              title: 'Fallback Feature',
+              spec: 'spec',
+              tasks: [],
+              tool: 'claude',
+              effort: 'medium',
+              dependsOn: [],
+              workflow: { mode: 'single', stages: [], approvals: { channel: 'telegram', autoAdvance: false }, syncTasksToBacklog: true },
+              retry: {
+                maxAttempts: 1,
+                backoffMs: 0,
+                onFail: 'stop',
+                fallback: [{ tool: 'codex', maxAttempts: 1 }],
+              },
+            },
+          ],
+        },
+      ],
+    };
+
+    mockRunFeature
+      .mockResolvedValueOnce({ ok: false, summary: 'claude falha' })
+      .mockResolvedValueOnce({ ok: false, summary: 'codex falha' });
+
+    const { executeBacklog } = await import('../../src/core/runner/execute.js');
+
+    await expect(
+      executeBacklog(backlog, { cwd: '/repo', concurrency: 1 }),
+    ).rejects.toThrow('Feature feat-fallback-exhausted falhou: codex falha');
+
+    expect(mockRunFeature).toHaveBeenCalledTimes(2);
+    expect(mockCreateGate).not.toHaveBeenCalled();
+    expect(mockUpdateRunTool).toHaveBeenCalledWith(7, 'codex');
+    expect(mockFinishRun).toHaveBeenCalledWith(7, 'failed', 'codex falha');
   });
 
   it('continues the pipeline when onFail is continue', async () => {
@@ -367,7 +479,7 @@ describe('executeBacklog failure persistence', () => {
     expect(mockFinishRun).toHaveBeenNthCalledWith(2, 8, 'done', 'ok');
   });
 
-  it('creates a gate and blocks the run when onFail is gate', async () => {
+  it('creates a gate, pauses the pipeline, and resumes the same feature once the gate is approved', async () => {
     const backlog: Backlog = {
       version: 2,
       repo: 'repo',
@@ -397,15 +509,18 @@ describe('executeBacklog failure persistence', () => {
       ],
     };
 
-    mockRunFeature.mockResolvedValue({ ok: false, summary: 'aguardando decisão humana' });
+    mockCreateRun.mockReturnValueOnce(7).mockReturnValueOnce(8);
+    mockRunFeature
+      .mockResolvedValueOnce({ ok: false, summary: 'aguardando decisão humana' })
+      .mockResolvedValueOnce({ ok: true, summary: 'ok apos aprovacao' });
 
     const { executeBacklog } = await import('../../src/core/runner/execute.js');
 
-    await expect(
-      executeBacklog(backlog, { cwd: '/repo', concurrency: 1 }),
-    ).resolves.toBeUndefined();
+    const pipelinePromise = executeBacklog(backlog, { cwd: '/repo', concurrency: 1 });
 
-    expect(mockCreateGate).toHaveBeenCalledWith(7, 'feat-11', 'repo-1');
+    await vi.waitFor(() => {
+      expect(mockCreateGate).toHaveBeenCalledWith(7, 'feat-11', 'repo-1');
+    });
     expect(mockFinishRun).toHaveBeenCalledWith(7, 'blocked', 'aguardando decisão humana');
     expect(mockEventEmit).toHaveBeenCalledWith('run:failed', {
       runId: 7,
@@ -413,6 +528,22 @@ describe('executeBacklog failure persistence', () => {
       tool: 'codex',
       error: 'aguardando decisão humana',
     });
+    expect(mockRunFeature).toHaveBeenCalledTimes(1);
+
+    // Nothing resolves the pipeline while the gate is unresolved: the
+    // process stays paused waiting for a human decision instead of
+    // finishing as if the feature had completed.
+    expect(mockFinishPipeline).not.toHaveBeenCalled();
+
+    // Simulate an operator approving the gate (forceResolveGate ->
+    // resumePipeline), which the control poller picks up.
+    pipelineRow = { ...pipelineRow, status: 'running' };
+
+    await pipelinePromise;
+
+    expect(mockRunFeature).toHaveBeenCalledTimes(2);
+    expect(mockFinishRun).toHaveBeenCalledWith(8, 'done', 'ok apos aprovacao');
+    expect(mockFinishPipeline).toHaveBeenCalledWith(9, 'done');
   });
 
   it('runs staged workflows in separate adapter sessions and asks for approval between stages', async () => {
@@ -627,6 +758,75 @@ describe('executeBacklog failure persistence', () => {
       pipelineId: 9,
       stage: 'implement',
     });
+  });
+
+  it('applies resumeOverride only to the initial candidate of the target featureId, leaving other pending features on persisted config', async () => {
+    const backlog: Backlog = {
+      version: 2,
+      repo: 'repo',
+      defaults: { tool: 'codex', effort: 'medium', skills: ['implement'], stageSkills: {} },
+      epics: [
+        {
+          id: 'epic-1',
+          title: 'Epic',
+          features: [
+            {
+              id: 'feat-a',
+              title: 'Feature A',
+              spec: 'spec',
+              tasks: [],
+              tool: 'codex',
+              effort: 'medium',
+              dependsOn: [],
+              workflow: { mode: 'single', stages: [], approvals: { channel: 'telegram', autoAdvance: false }, syncTasksToBacklog: true },
+            },
+            {
+              id: 'feat-b',
+              title: 'Feature B',
+              spec: 'spec',
+              tasks: [],
+              tool: 'codex',
+              effort: 'medium',
+              dependsOn: [],
+              workflow: { mode: 'single', stages: [], approvals: { channel: 'telegram', autoAdvance: false }, syncTasksToBacklog: true },
+            },
+          ],
+        },
+      ],
+    };
+
+    pipelineRow = {
+      ...pipelineRow,
+      featureId: 'feat-a',
+      currentStage: null,
+      planJson: JSON.stringify(['feat-a', 'feat-b']),
+      doneJson: JSON.stringify([]),
+      pendingJson: JSON.stringify(['feat-a', 'feat-b']),
+      activeJson: JSON.stringify([]),
+      abortedJson: JSON.stringify([]),
+    };
+
+    mockCreateRun.mockReturnValueOnce(7).mockReturnValueOnce(8);
+    mockRunFeature
+      .mockResolvedValueOnce({ ok: true, summary: 'a ok' })
+      .mockResolvedValueOnce({ ok: true, summary: 'b ok' });
+
+    const { executeBacklog } = await import('../../src/core/runner/execute.js');
+
+    await expect(
+      executeBacklog(backlog, {
+        cwd: '/repo',
+        concurrency: 1,
+        resumePipelineId: 9,
+        resumeOverride: { featureId: 'feat-a', tool: 'opencode' },
+      }),
+    ).resolves.toBeUndefined();
+
+    expect(mockRunFeature).toHaveBeenCalledTimes(2);
+    expect(mockRunFeature.mock.calls[0]![0].id).toBe('feat-a');
+    expect(mockRunFeature.mock.calls[0]![0].tool).toBe('opencode');
+    expect(mockRunFeature.mock.calls[1]![0].id).toBe('feat-b');
+    expect(mockRunFeature.mock.calls[1]![0].tool).toBe('codex');
   });
 
   it('returns jitter within the expected exponential interval', async () => {

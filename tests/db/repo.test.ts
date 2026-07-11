@@ -258,3 +258,65 @@ describe('getHistoricalTokenStatsForFeatureProfile', () => {
     expect(result.avgTotalTokens).toBe(100);
   });
 });
+
+// F39 T012: createRetryRecord persisting tool/model, updateRunTool
+describe('createRetryRecord', () => {
+  it('inserts tool and model alongside run_id/attempt/error', async () => {
+    mockRun.mockReturnValue({ lastInsertRowid: 1 });
+    const { createRetryRecord } = await import('../../src/db/repo.js');
+    createRetryRecord(7, 1, 'falha 1', 5000, 'codex', 'gpt-4o');
+    expect(mockRun).toHaveBeenCalledWith(7, 1, 'falha 1', 'codex', 'gpt-4o');
+  });
+
+  it('inserts null tool/model when not provided (legacy call shape)', async () => {
+    mockRun.mockReturnValue({ lastInsertRowid: 1 });
+    const { createRetryRecord } = await import('../../src/db/repo.js');
+    createRetryRecord(7, 1, 'falha 1', 5000);
+    expect(mockRun).toHaveBeenCalledWith(7, 1, 'falha 1', null, null);
+  });
+});
+
+describe('updateRunTool', () => {
+  it('updates the tool column for the given run', async () => {
+    const { updateRunTool } = await import('../../src/db/repo.js');
+    updateRunTool(7, 'codex');
+    expect(mockRun).toHaveBeenCalledWith('codex', 7);
+  });
+});
+
+describe('listRetryHistory', () => {
+  it('returns empty array when no attempts recorded', async () => {
+    mockAll.mockReturnValue([]);
+    const { listRetryHistory } = await import('../../src/db/repo.js');
+    expect(listRetryHistory(7)).toEqual([]);
+  });
+
+  it('returns attempt/tool/model rows ordered by attempt, distinguishing legacy null rows', async () => {
+    const rows = [
+      { attempt: 1, error: 'falha 1', retriedAt: '2026-07-06T10:00:00', tool: null, model: null },
+      { attempt: 2, error: 'falha 2', retriedAt: '2026-07-06T10:01:00', tool: 'codex', model: 'gpt-4o' },
+    ];
+    mockAll.mockReturnValue(rows);
+    const { listRetryHistory } = await import('../../src/db/repo.js');
+    const result = listRetryHistory(7);
+    expect(mockAll).toHaveBeenCalledWith(7);
+    expect(result).toEqual(rows);
+    expect(result[0]!.tool).toBeNull();
+    expect(result[1]!.tool).toBe('codex');
+  });
+});
+
+describe('getRunAccumulatedTokens', () => {
+  it('sums token_usage across all attempts of the same run_id', async () => {
+    mockGet.mockReturnValue({ total: 300 });
+    const { getRunAccumulatedTokens } = await import('../../src/db/repo.js');
+    expect(getRunAccumulatedTokens(7)).toBe(300);
+    expect(mockGet).toHaveBeenCalledWith(7);
+  });
+
+  it('returns 0 when no attempts were recorded for the run', async () => {
+    mockGet.mockReturnValue({ total: 0 });
+    const { getRunAccumulatedTokens } = await import('../../src/db/repo.js');
+    expect(getRunAccumulatedTokens(99)).toBe(0);
+  });
+});

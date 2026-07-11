@@ -352,6 +352,17 @@ function migrate(d: Database.Database): void {
   ensurePipelineColumn('requested_abort_feature_id', `ALTER TABLE pipelines ADD COLUMN requested_abort_feature_id TEXT`);
   ensurePipelineColumn('resume_count', `ALTER TABLE pipelines ADD COLUMN resume_count INTEGER NOT NULL DEFAULT 0`);
   ensurePipelineColumn('resume_summary', `ALTER TABLE pipelines ADD COLUMN resume_summary TEXT`);
+
+  const retryHistoryColumns = d
+    .prepare(`PRAGMA table_info(retry_history)`)
+    .all() as { name?: string }[];
+  const ensureRetryHistoryColumn = (name: string, sql: string): void => {
+    if (!retryHistoryColumns.some((column) => column.name === name)) {
+      d.exec(sql);
+    }
+  };
+  ensureRetryHistoryColumn('tool', `ALTER TABLE retry_history ADD COLUMN tool TEXT`);
+  ensureRetryHistoryColumn('model', `ALTER TABLE retry_history ADD COLUMN model TEXT`);
 }
 
 function toDbAccessError(error: unknown, dbPath: string): Error {

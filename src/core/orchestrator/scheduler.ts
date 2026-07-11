@@ -115,6 +115,15 @@ export function schedule(
               rejectResult(new Error(`Feature ${feature.id} falhou: ${resultValue.summary}`));
               return;
             }
+            if (policy === 'gate') {
+              // A gate needs a human decision before this feature can be
+              // retried, so it stays neither done nor dropped: put it back in
+              // remaining and pause, mirroring a budget-violation pause.
+              // resume() re-dispatches it once the gate is resolved.
+              remaining.unshift(feature);
+              setState('paused');
+              return;
+            }
             done.add(feature.id);
             pump();
             return;
