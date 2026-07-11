@@ -82,6 +82,20 @@ describe('budget tracker', () => {
     expect(other.violations).toHaveLength(1);
   });
 
+  it('a lower per-feature maxTokens override wins over the global perFeatureMaxTokens', () => {
+    const tracker = createBudgetTracker(
+      { perFeatureMaxTokens: 1000, alertAtPercent: 80 },
+      undefined,
+      new Map([['feat-1', 200]]),
+    );
+    const overridden = tracker.record('feat-1', usage(250));
+    expect(overridden.violations).toHaveLength(1);
+    expect(overridden.violations[0]).toMatchObject({ scope: 'feature', featureId: 'feat-1', limit: 200 });
+
+    const notOverridden = tracker.record('feat-2', usage(250));
+    expect(notOverridden.violations).toEqual([]);
+  });
+
   it('reports hasLimits correctly', () => {
     expect(createBudgetTracker({ alertAtPercent: 80 }).hasLimits()).toBe(false);
     expect(createBudgetTracker({ maxTokens: 1, alertAtPercent: 80 }).hasLimits()).toBe(true);

@@ -147,4 +147,134 @@ describe('backlogCatalog upsert/diff/load', () => {
     const { loadBacklogFromCatalog } = await import('../../src/core/backlog/load.js');
     expect(() => loadBacklogFromCatalog('repo-1')).toThrow('msq backlog load');
   });
+
+  describe('updateCatalogFeature', () => {
+    it('persists a patch to data_json and denormalized columns', async () => {
+      const { db, upsertBacklogCatalog, updateCatalogFeature } = await setup();
+      upsertBacklogCatalog(makeBacklog(), 'repo-1');
+
+      const updated = updateCatalogFeature('repo-1', 'feat-1', { effort: 'high', maxTokens: 5000 });
+      expect(updated.effort).toBe('high');
+      expect(updated.maxTokens).toBe(5000);
+
+      const row = db
+        .prepare(`SELECT data_json FROM backlog_features WHERE feature_id = 'feat-1'`)
+        .get() as { data_json: string };
+      const stored = JSON.parse(row.data_json) as { effort: string; maxTokens: number };
+      expect(stored.effort).toBe('high');
+      expect(stored.maxTokens).toBe(5000);
+    });
+
+    it('round-trips maxTokens through loadBacklogFromCatalog', async () => {
+      const { upsertBacklogCatalog, updateCatalogFeature } = await setup();
+      const { loadBacklogFromCatalog } = await import('../../src/core/backlog/load.js');
+      upsertBacklogCatalog(makeBacklog(), 'repo-1');
+
+      updateCatalogFeature('repo-1', 'feat-1', { maxTokens: 12345 });
+      const reloaded = loadBacklogFromCatalog('repo-1');
+      expect(reloaded.epics[0]?.features[0]?.maxTokens).toBe(12345);
+    });
+
+    it('deep-merges workflow so patching only stages preserves approvals', async () => {
+      const { upsertBacklogCatalog, updateCatalogFeature } = await setup();
+      upsertBacklogCatalog(makeBacklog(), 'repo-1');
+
+      const updated = updateCatalogFeature('repo-1', 'feat-1', {
+        workflow: { stages: ['plan', 'implement'] },
+      });
+      expect(updated.workflow.stages).toEqual(['plan', 'implement']);
+      expect(updated.workflow.approvals).toEqual({ channel: 'telegram', autoAdvance: false });
+      expect(updated.workflow.syncTasksToBacklog).toBe(true);
+    });
+
+    it('deep-merges workflow.approvals so patching only autoAdvance preserves channel', async () => {
+      const { upsertBacklogCatalog, updateCatalogFeature } = await setup();
+      upsertBacklogCatalog(makeBacklog(), 'repo-1');
+
+      const updated = updateCatalogFeature('repo-1', 'feat-1', {
+        workflow: { approvals: { autoAdvance: true } },
+      });
+      expect(updated.workflow.approvals).toEqual({ channel: 'telegram', autoAdvance: true });
+      expect(updated.workflow.stages).toEqual(['specify', 'plan', 'tasks', 'implement', 'validate']);
+    });
+
+    it('throws on an invalid patch and writes nothing', async () => {
+      const { db, upsertBacklogCatalog, updateCatalogFeature } = await setup();
+      upsertBacklogCatalog(makeBacklog(), 'repo-1');
+      const before = db
+        .prepare(`SELECT data_json, updated_at FROM backlog_features WHERE feature_id = 'feat-1'`)
+        .get() as { data_json: string; updated_at: string };
+
+      expect(() => updateCatalogFeature('repo-1', 'feat-1', { maxTokens: -1 })).toThrow();
+
+      const after = db
+        .prepare(`SELECT data_json, updated_at FROM backlog_features WHERE feature_id = 'feat-1'`)
+        .get() as { data_json: string; updated_at: string };
+      expect(after).toEqual(before);
+    });
+
+    it('throws BacklogCatalogNotFoundError for an unknown feature', async () => {
+      const { upsertBacklogCatalog, updateCatalogFeature } = await setup();
+      upsertBacklogCatalog(makeBacklog(), 'repo-1');
+      expect(() => updateCatalogFeature('repo-1', 'nope', { effort: 'high' })).toThrow(/not found/);
+    });
+
+    it('throws BacklogCatalogNotFoundError for an archived feature', async () => {
+      const { upsertBacklogCatalog, updateCatalogFeature } = await setup();
+      upsertBacklogCatalog(makeBacklog(), 'repo-1');
+      upsertBacklogCatalog(makeBacklog({ epics: [{ id: 'epic-1', title: 'Epic One', features: [] }] }), 'repo-1');
+      expect(() => updateCatalogFeature('repo-1', 'feat-1', { effort: 'high' })).toThrow(/not found/);
+    });
+  });
+
+  describe('updateCatalogTask', () => {
+    it('persists a patch to data_json and keeps title/status columns in sync', async () => {
+      const { db, upsertBacklogCatalog, updateCatalogTask } = await setup();
+      upsertBacklogCatalog(makeBacklog(), 'repo-1');
+
+      const updated = updateCatalogTask('feat-1', 'task-1', { status: 'done', title: 'Renamed Task' });
+      expect(updated.status).toBe('done');
+      expect(updated.title).toBe('Renamed Task');
+
+      const row = db
+        .prepare(`SELECT title, status, data_json FROM backlog_tasks WHERE task_id = 'task-1'`)
+        .get() as { title: string; status: string; data_json: string };
+      expect(row.title).toBe('Renamed Task');
+      expect(row.status).toBe('done');
+      expect((JSON.parse(row.data_json) as { status: string }).status).toBe('done');
+    });
+
+    it('throws on an invalid patch and writes nothing', async () => {
+      const { db, upsertBacklogCatalog, updateCatalogTask } = await setup();
+      upsertBacklogCatalog(makeBacklog(), 'repo-1');
+      const before = db
+        .prepare(`SELECT data_json, updated_at FROM backlog_tasks WHERE task_id = 'task-1'`)
+        .get() as { data_json: string; updated_at: string };
+
+      expect(() => updateCatalogTask('feat-1', 'task-1', { status: 'not-a-status' as never })).toThrow();
+
+      const after = db
+        .prepare(`SELECT data_json, updated_at FROM backlog_tasks WHERE task_id = 'task-1'`)
+        .get() as { data_json: string; updated_at: string };
+      expect(after).toEqual(before);
+    });
+
+    it('throws BacklogCatalogNotFoundError for an unknown task', async () => {
+      const { upsertBacklogCatalog, updateCatalogTask } = await setup();
+      upsertBacklogCatalog(makeBacklog(), 'repo-1');
+      expect(() => updateCatalogTask('feat-1', 'nope', { status: 'done' })).toThrow(/not found/);
+    });
+
+    it('keeps the owning feature\'s embedded tasks[] in sync, so loadBacklogFromCatalog sees the patch', async () => {
+      const { upsertBacklogCatalog, updateCatalogTask } = await setup();
+      const { loadBacklogFromCatalog } = await import('../../src/core/backlog/load.js');
+      upsertBacklogCatalog(makeBacklog(), 'repo-1');
+
+      updateCatalogTask('feat-1', 'task-1', { status: 'done', title: 'Renamed Task' });
+
+      const reloaded = loadBacklogFromCatalog('repo-1');
+      const task = reloaded.epics[0]?.features[0]?.tasks[0];
+      expect(task).toMatchObject({ id: 'task-1', title: 'Renamed Task', status: 'done' });
+    });
+  });
 });

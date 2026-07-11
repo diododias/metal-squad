@@ -2,7 +2,31 @@ import { existsSync } from 'node:fs';
 import type Database from 'better-sqlite3';
 import { getDb } from './index.js';
 import { resolveDbPath } from '../config/index.js';
-import type { BacklogV2, Epic, Feature, Task } from '../core/backlog/schema.js';
+import {
+  FeatureSchema,
+  TaskSchema,
+  type BacklogV2,
+  type Epic,
+  type Feature,
+  type Retry,
+  type Task,
+  type Workflow,
+} from '../core/backlog/schema.js';
+
+export class BacklogCatalogNotFoundError extends Error {
+  public constructor(message: string) {
+    super(message);
+    this.name = 'BacklogCatalogNotFoundError';
+  }
+}
+
+/** Same as `Partial<Feature>`, except `workflow`/`retry` accept a partial
+ * shape too — callers should be able to patch just `workflow.stages`
+ * without also supplying `mode`/`approvals`/`syncTasksToBacklog`. */
+export type FeaturePatch = Omit<Partial<Feature>, 'workflow' | 'retry'> & {
+  workflow?: Partial<Omit<Workflow, 'approvals'>> & { approvals?: Partial<Workflow['approvals']> };
+  retry?: Partial<Retry>;
+};
 
 /**
  * Readonly access that tolerates a never-initialized DB (e.g. the very first
@@ -283,4 +307,127 @@ export function upsertBacklogCatalog(backlog: BacklogV2, repoId: string): Backlo
 
   run();
   return diff;
+}
+
+function mergeFeaturePatch(current: Feature, patch: FeaturePatch): unknown {
+  return {
+    ...current,
+    ...patch,
+    workflow: patch.workflow
+      ? {
+          ...current.workflow,
+          ...patch.workflow,
+          approvals: patch.workflow.approvals
+            ? { ...current.workflow.approvals, ...patch.workflow.approvals }
+            : current.workflow.approvals,
+        }
+      : current.workflow,
+    retry: patch.retry ? { ...(current.retry ?? {}), ...patch.retry } : current.retry,
+  };
+}
+
+/**
+ * Patches a single feature's `data_json` in place, re-validating through
+ * `FeatureSchema` so an invalid patch throws instead of writing a corrupt
+ * row. `workflow`/`retry` are deep-merged so a partial patch (e.g. just
+ * `workflow.stages`) doesn't wipe sibling fields like `workflow.approvals`.
+ */
+export function updateCatalogFeature(repoId: string, featureId: string, patch: FeaturePatch): Feature {
+  const db = getDb('readwrite');
+
+  const getRow = db.prepare(
+    `SELECT data_json FROM backlog_features WHERE feature_id = ? AND repo_id = ? AND archived_at IS NULL`,
+  );
+  const updateRow = db.prepare(
+    `UPDATE backlog_features SET data_json = ?, title = ?, depends_on = ?, spec_file = ?, updated_at = datetime('now')
+     WHERE feature_id = ? AND repo_id = ?`,
+  );
+
+  const run = db.transaction((): Feature => {
+    const row = getRow.get(featureId, repoId) as { data_json: string } | undefined;
+    if (!row) {
+      throw new BacklogCatalogNotFoundError(
+        `Feature "${featureId}" not found (or archived) for repo "${repoId}".`,
+      );
+    }
+    const current = FeatureSchema.parse(JSON.parse(row.data_json));
+    const merged = FeatureSchema.parse(mergeFeaturePatch(current, patch));
+
+    updateRow.run(
+      JSON.stringify(merged),
+      merged.title,
+      JSON.stringify(merged.dependsOn),
+      merged.specFile ?? null,
+      featureId,
+      repoId,
+    );
+
+    return merged;
+  });
+
+  return run();
+}
+
+/**
+ * Patches a single task's `data_json` in place, re-validating through
+ * `TaskSchema`. Keeps the denormalized `title`/`status` columns in sync with
+ * `data_json`, matching `upsertBacklogCatalog`'s write shape.
+ */
+export function updateCatalogTask(featureId: string, taskId: string, patch: Partial<Task>): Task {
+  const db = getDb('readwrite');
+
+  const getTaskRow = db.prepare(
+    `SELECT data_json FROM backlog_tasks WHERE task_id = ? AND feature_id = ? AND archived_at IS NULL`,
+  );
+  const updateTaskRow = db.prepare(
+    `UPDATE backlog_tasks SET data_json = ?, title = ?, status = ?, updated_at = datetime('now')
+     WHERE task_id = ? AND feature_id = ?`,
+  );
+  // `loadBacklogFromCatalog` reads a feature's tasks from its own embedded
+  // `data_json.tasks` snapshot, not from this table (see F35) — the
+  // standalone backlog_tasks row must stay in lockstep with it, or task
+  // edits here would be invisible at runtime.
+  const getFeatureRow = db.prepare(
+    `SELECT data_json FROM backlog_features WHERE feature_id = ? AND archived_at IS NULL`,
+  );
+  const updateFeatureRow = db.prepare(
+    `UPDATE backlog_features SET data_json = ?, updated_at = datetime('now') WHERE feature_id = ?`,
+  );
+
+  const run = db.transaction((): Task => {
+    const taskRow = getTaskRow.get(taskId, featureId) as { data_json: string } | undefined;
+    if (!taskRow) {
+      throw new BacklogCatalogNotFoundError(
+        `Task "${taskId}" not found (or archived) for feature "${featureId}".`,
+      );
+    }
+    const featureRow = getFeatureRow.get(featureId) as { data_json: string } | undefined;
+    if (!featureRow) {
+      throw new BacklogCatalogNotFoundError(
+        `Feature "${featureId}" not found (or archived) for task "${taskId}".`,
+      );
+    }
+
+    const current = TaskSchema.parse(JSON.parse(taskRow.data_json));
+    const merged = TaskSchema.parse({ ...current, ...patch });
+
+    const feature = FeatureSchema.parse(JSON.parse(featureRow.data_json));
+    const taskIndex = feature.tasks.findIndex((task) => task.id === taskId);
+    if (taskIndex === -1) {
+      throw new BacklogCatalogNotFoundError(
+        `Task "${taskId}" not found in feature "${featureId}"'s task list.`,
+      );
+    }
+    const updatedFeature = FeatureSchema.parse({
+      ...feature,
+      tasks: feature.tasks.map((task, index) => (index === taskIndex ? merged : task)),
+    });
+
+    updateTaskRow.run(JSON.stringify(merged), merged.title, merged.status, taskId, featureId);
+    updateFeatureRow.run(JSON.stringify(updatedFeature), featureId);
+
+    return merged;
+  });
+
+  return run();
 }

@@ -25,8 +25,16 @@ import { resolveRepo } from '../core/repo.js';
 import { loadBacklogFromCatalog } from '../core/backlog/load.js';
 import { validateBacklogSkills } from '../core/skills/index.js';
 import { loadConfig } from '../config/index.js';
+import { updateCatalogFeature, updateCatalogTask, type FeaturePatch } from '../db/backlogCatalog.js';
+import type { Feature, Task } from '../core/backlog/schema.js';
 import { buildMsqWebState, appendNotification } from './state.js';
-import type { RunChangesPayload, WebSocketClientMessage, WebSocketServerMessage } from './types.js';
+import type {
+  FeatureConfigPatch,
+  RunChangesPayload,
+  TaskConfigPatch,
+  WebSocketClientMessage,
+  WebSocketServerMessage,
+} from './types.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -421,6 +429,14 @@ export function createWebServer(options: {
         startFeature(message.featureId, featureCwd, message.overrides);
         break;
       }
+      case 'action:updateFeatureConfig': {
+        updateFeatureConfig(message.featureId, message.patch, featureCwd);
+        break;
+      }
+      case 'action:updateTaskConfig': {
+        updateTaskConfig(message.featureId, message.taskId, message.patch, featureCwd);
+        break;
+      }
       case 'action:pausePipeline': {
         pausePipeline(message.pipelineId);
         break;
@@ -606,6 +622,50 @@ export function createWebServer(options: {
     });
     child.unref();
     msqEventBus.emit('ui:info', { message: `Starting ${featureId}...` });
+  }
+
+  function toFeaturePatch(patch: FeatureConfigPatch): FeaturePatch {
+    return {
+      ...(patch.tool !== undefined ? { tool: patch.tool as Feature['tool'] } : {}),
+      ...(patch.model !== undefined ? { model: patch.model } : {}),
+      ...(patch.effort !== undefined ? { effort: patch.effort as Feature['effort'] } : {}),
+      ...(patch.maxTokens !== undefined ? { maxTokens: patch.maxTokens } : {}),
+      ...(patch.skills !== undefined ? { skills: patch.skills } : {}),
+      ...(patch.workflow !== undefined
+        ? { workflow: patch.workflow as FeaturePatch['workflow'] }
+        : {}),
+      ...(patch.retry !== undefined ? { retry: patch.retry as FeaturePatch['retry'] } : {}),
+    };
+  }
+
+  function updateFeatureConfig(featureId: string, patch: FeatureConfigPatch, featureCwd: string): void {
+    try {
+      assertWritableDbPath();
+      const { repoId } = resolveRepo(featureCwd);
+      updateCatalogFeature(repoId, featureId, toFeaturePatch(patch));
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      msqEventBus.emit('ui:notice', { message: `Could not save config for ${featureId}: ${message}` });
+      return;
+    }
+    refreshState();
+    broadcast({ type: 'state:full', payload: latestState });
+    msqEventBus.emit('ui:info', { message: `Saved config for ${featureId}.` });
+  }
+
+  function updateTaskConfig(featureId: string, taskId: string, patch: TaskConfigPatch, featureCwd: string): void {
+    try {
+      assertWritableDbPath();
+      resolveRepo(featureCwd);
+      updateCatalogTask(featureId, taskId, patch as Partial<Task>);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      msqEventBus.emit('ui:notice', { message: `Could not save task ${taskId}: ${message}` });
+      return;
+    }
+    refreshState();
+    broadcast({ type: 'state:full', payload: latestState });
+    msqEventBus.emit('ui:info', { message: `Saved task ${taskId}.` });
   }
 
   return {
