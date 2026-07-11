@@ -1,9 +1,10 @@
 import type { Command } from 'commander';
-import { loadBacklog } from '../core/backlog/load.js';
+import { loadBacklogFromCatalog } from '../core/backlog/load.js';
 import { EffortSchema, ToolSchema } from '../core/backlog/schema.js';
 import { executeBacklog } from '../core/runner/execute.js';
 import { loadConfig } from '../config/index.js';
 import { validateBacklogSkills } from '../core/skills/index.js';
+import { resolveRepo } from '../core/repo.js';
 import { assertWritableDbPath, DbAccessError } from '../db/index.js';
 
 export function registerRun(program: Command): void {
@@ -28,7 +29,7 @@ export function registerRun(program: Command): void {
         assertWritableDbPath();
 
         const cwd = process.cwd();
-        const backlog = loadBacklog(undefined, cwd);
+        const backlog = loadBacklogFromCatalog(resolveRepo(cwd).repoId);
         validateBacklogSkills(backlog, cwd);
 
         // F34 5d: one-off tool/model/effort override for a single-feature run,

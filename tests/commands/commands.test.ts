@@ -40,6 +40,7 @@ vi.mock('../../src/core/backlog/load.js', async () => {
   return {
     ...actual,
     loadBacklog: mockLoadBacklog,
+    loadBacklogFromCatalog: mockLoadBacklog,
   };
 });
 
@@ -148,7 +149,7 @@ describe('commands', () => {
     await program.parseAsync(['node', 'msq', 'run', '--feature', 'feat-1', '--concurrency', '9']);
 
     expect(mockAssertWritableDbPath).toHaveBeenCalled();
-    expect(mockLoadBacklog).toHaveBeenCalledWith(undefined, currentCwd);
+    expect(mockLoadBacklog).toHaveBeenCalledWith('repo-1');
     expect(mockValidateBacklogSkills).toHaveBeenCalledWith(backlog, currentCwd);
     expect(mockExecuteBacklog).toHaveBeenCalledWith(backlog, {
       cwd: currentCwd,
@@ -294,6 +295,7 @@ describe('commands', () => {
     mockLoadBacklog.mockReturnValue(backlog);
     mockFindResumablePipeline.mockReturnValue({
       id: 9,
+      repoId: 'repo-1',
       cwd: '/tmp/resume-repo',
       autoAdvance: 0,
     });
@@ -311,6 +313,7 @@ describe('commands', () => {
 
     await program.parseAsync(['node', 'msq', 'resume', '9']);
 
+    expect(mockLoadBacklog).toHaveBeenCalledWith('repo-1');
     expect(mockExecuteBacklog).toHaveBeenCalledWith(backlog, {
       cwd: '/tmp/resume-repo',
       concurrency: 3,

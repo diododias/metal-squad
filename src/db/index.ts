@@ -225,6 +225,50 @@ function migrate(d: Database.Database): void {
       tokens INTEGER NOT NULL DEFAULT 0,
       updated_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
+
+    CREATE TABLE IF NOT EXISTS backlog_catalog_meta (
+      repo_id       TEXT PRIMARY KEY REFERENCES repos(repo_id),
+      repo          TEXT NOT NULL,
+      version       INTEGER NOT NULL,
+      defaults_json TEXT NOT NULL,
+      budget_json   TEXT,
+      updated_at    TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+
+    CREATE TABLE IF NOT EXISTS backlog_epics (
+      epic_id     TEXT PRIMARY KEY,
+      repo_id     TEXT NOT NULL REFERENCES repos(repo_id),
+      title       TEXT NOT NULL,
+      position    INTEGER NOT NULL,
+      data_json   TEXT NOT NULL,
+      archived_at TEXT,
+      updated_at  TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+
+    CREATE TABLE IF NOT EXISTS backlog_features (
+      feature_id  TEXT PRIMARY KEY,
+      epic_id     TEXT NOT NULL REFERENCES backlog_epics(epic_id),
+      repo_id     TEXT NOT NULL REFERENCES repos(repo_id),
+      title       TEXT NOT NULL,
+      depends_on  TEXT NOT NULL DEFAULT '[]',
+      spec_file   TEXT,
+      position    INTEGER NOT NULL,
+      data_json   TEXT NOT NULL,
+      archived_at TEXT,
+      updated_at  TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+
+    CREATE TABLE IF NOT EXISTS backlog_tasks (
+      task_id     TEXT NOT NULL,
+      feature_id  TEXT NOT NULL REFERENCES backlog_features(feature_id),
+      title       TEXT NOT NULL,
+      status      TEXT NOT NULL DEFAULT 'todo',
+      position    INTEGER NOT NULL,
+      data_json   TEXT NOT NULL,
+      archived_at TEXT,
+      updated_at  TEXT NOT NULL DEFAULT (datetime('now')),
+      PRIMARY KEY (task_id, feature_id)
+    );
   `);
 
   const runColumns = d

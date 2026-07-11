@@ -1,5 +1,6 @@
 import { Command } from 'commander';
 import { registerInit } from './commands/init.js';
+import { registerBacklog } from './commands/backlog.js';
 import { registerRun } from './commands/run.js';
 import { registerDecompose } from './commands/decompose.js';
 import { registerResume } from './commands/resume.js';
@@ -22,6 +23,7 @@ export async function run(argv: string[]): Promise<void> {
     .version('0.0.1');
 
   registerInit(program);
+  registerBacklog(program);
   registerRun(program);
   registerDecompose(program);
   registerResume(program);
