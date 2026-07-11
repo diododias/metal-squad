@@ -5,10 +5,17 @@ export const EffortSchema = z.enum(['low', 'medium', 'high']);
 export const WorkflowModeSchema = z.enum(['single', 'staged']);
 export const WorkflowApprovalChannelSchema = z.enum(['telegram']);
 export const OnFailSchema = z.enum(['stop', 'continue', 'gate']);
+export const FallbackAlternativeSchema = z.object({
+  tool: ToolSchema,
+  model: z.string().optional(),
+  effort: EffortSchema.optional(),
+  maxAttempts: z.number().int().min(1).max(10).default(1),
+});
 export const RetrySchema = z.object({
   maxAttempts: z.number().int().min(1).max(10).default(1),
   backoffMs: z.number().int().min(0).default(5000),
   onFail: OnFailSchema.default('stop'),
+  fallback: z.array(FallbackAlternativeSchema).default([]),
 });
 
 export const BudgetSchema = z.object({
@@ -89,6 +96,7 @@ export type Effort = z.infer<typeof EffortSchema>;
 export type OnFail = z.infer<typeof OnFailSchema>;
 export type Budget = z.infer<typeof BudgetSchema>;
 export type Retry = z.infer<typeof RetrySchema>;
+export type FallbackAlternative = z.infer<typeof FallbackAlternativeSchema>;
 export type Defaults = z.infer<typeof DefaultsSchema>;
 export type Task = z.infer<typeof TaskSchema>;
 export type WorkflowApprovals = z.infer<typeof WorkflowApprovalsSchema>;

@@ -38,6 +38,15 @@ export const claudeAdapter: ToolAdapter = {
     return ['--model', EFFORT_MODEL[effort]];
   },
 
+  isAvailable(): boolean {
+    try {
+      execFileSync('claude', ['--version'], { stdio: 'ignore' });
+      return true;
+    } catch {
+      return false;
+    }
+  },
+
   async runFeature(feature: Feature, prompt: string, opts: RunFeatureOptions): Promise<RunResult> {
     const model = feature.model ? ['--model', feature.model] : this.effortFlag(feature.effort);
     const args = [

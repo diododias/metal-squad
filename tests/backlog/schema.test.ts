@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { BacklogSchema, BacklogV1Schema, BacklogV2Schema } from '../../src/core/backlog/schema.js';
+import { BacklogSchema, BacklogV1Schema, BacklogV2Schema, FallbackAlternativeSchema, RetrySchema } from '../../src/core/backlog/schema.js';
 
 const V1_YAML_OBJ = {
   version: 1,
@@ -155,7 +155,86 @@ describe('BacklogV2Schema', () => {
         maxAttempts: 3,
         backoffMs: 1500,
         onFail: 'continue',
+        fallback: [],
       });
+    }
+  });
+});
+
+describe('FallbackAlternativeSchema / RetrySchema.fallback', () => {
+  it('defaults fallback to an empty array when omitted', () => {
+    const result = RetrySchema.safeParse({});
+    expect(result.success).toBe(true);
+    if (result.success) expect(result.data.fallback).toEqual([]);
+  });
+
+  it('parses a fallback alternative with only tool set, defaulting maxAttempts to 1', () => {
+    const result = FallbackAlternativeSchema.safeParse({ tool: 'codex' });
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data).toEqual({ tool: 'codex', maxAttempts: 1 });
+    }
+  });
+
+  it('parses a fallback alternative with model/effort/maxAttempts overrides', () => {
+    const result = FallbackAlternativeSchema.safeParse({
+      tool: 'opencode',
+      model: 'gpt-4o',
+      effort: 'high',
+      maxAttempts: 2,
+    });
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data).toEqual({ tool: 'opencode', model: 'gpt-4o', effort: 'high', maxAttempts: 2 });
+    }
+  });
+
+  it('rejects maxAttempts outside the 1-10 range', () => {
+    expect(FallbackAlternativeSchema.safeParse({ tool: 'codex', maxAttempts: 0 }).success).toBe(false);
+    expect(FallbackAlternativeSchema.safeParse({ tool: 'codex', maxAttempts: 11 }).success).toBe(false);
+  });
+
+  it('rejects a fallback alternative without a tool', () => {
+    expect(FallbackAlternativeSchema.safeParse({ model: 'gpt-4o' }).success).toBe(false);
+  });
+
+  it('parses retry.fallback as an ordered list of alternatives, valid in both v1 and v2 backlogs', () => {
+    const retryWithFallback = {
+      maxAttempts: 2,
+      backoffMs: 5000,
+      onFail: 'gate',
+      fallback: [
+        { tool: 'codex', maxAttempts: 2 },
+        { tool: 'opencode', model: 'gpt-4o', maxAttempts: 1 },
+      ],
+    };
+
+    const v1Result = BacklogV1Schema.safeParse({
+      ...V1_YAML_OBJ,
+      epics: [
+        {
+          ...V1_YAML_OBJ.epics[0],
+          features: [{ ...V1_YAML_OBJ.epics[0].features[0], retry: retryWithFallback }],
+        },
+      ],
+    });
+    expect(v1Result.success).toBe(true);
+    if (v1Result.success) {
+      expect(v1Result.data.epics[0]?.features[0]?.retry?.fallback).toEqual(retryWithFallback.fallback);
+    }
+
+    const v2Result = BacklogV2Schema.safeParse({
+      ...V2_YAML_OBJ,
+      epics: [
+        {
+          ...V2_YAML_OBJ.epics[0],
+          features: [{ ...V2_YAML_OBJ.epics[0].features[0], retry: retryWithFallback }],
+        },
+      ],
+    });
+    expect(v2Result.success).toBe(true);
+    if (v2Result.success) {
+      expect(v2Result.data.epics[0]?.features[0]?.retry?.fallback).toEqual(retryWithFallback.fallback);
     }
   });
 });

@@ -6,6 +6,7 @@ let pragmaRunsColumns: Array<{ name: string }> = [];
 let pragmaTokenUsageColumns: Array<{ name: string }> = [];
 let pragmaTaskRunColumns: Array<{ name: string }> = [];
 let pragmaPipelinesColumns: Array<{ name: string }> = [];
+let pragmaRetryHistoryColumns: Array<{ name: string }> = [];
 const mockExecCalls: string[] = [];
 
 const mockExec = vi.fn((sql: string) => { mockExecCalls.push(sql); });
@@ -28,6 +29,9 @@ const mockPrepare = vi.fn((sql: string) => {
   }
   if (sql.includes('PRAGMA table_info(pipelines)')) {
     return { all: makeMockAll(pragmaPipelinesColumns), run: vi.fn(), get: vi.fn() };
+  }
+  if (sql.includes('PRAGMA table_info(retry_history)')) {
+    return { all: makeMockAll(pragmaRetryHistoryColumns), run: vi.fn(), get: vi.fn() };
   }
   return { all: vi.fn(() => []), run: vi.fn(), get: vi.fn() };
 });
@@ -63,6 +67,7 @@ function resetAll() {
     { name: 'context_window_percent' },
   ];
   pragmaPipelinesColumns = [];
+  pragmaRetryHistoryColumns = [{ name: 'tool' }, { name: 'model' }];
   mockExecCalls.length = 0;
   mockDatabase.mockReset();
   mockDatabase.mockReturnValue(mockDb);
@@ -314,6 +319,47 @@ describe('getDb migration — column checks', () => {
 
     const alterCalls = mockExecCalls.filter((s) => s.trim().startsWith('ALTER'));
     expect(alterCalls.some((s) => s.includes('ADD COLUMN resume_count'))).toBe(true);
+  });
+
+  it('alters retry_history when tool/model columns are missing', async () => {
+    pragmaRunsColumns = [
+      { name: 'summary' }, { name: 'input_tokens' }, { name: 'output_tokens' },
+      { name: 'cached_input_tokens' }, { name: 'total_tokens' }, { name: 'pipeline_id' }, { name: 'stage' },
+    ];
+    pragmaTokenUsageColumns = [{ name: 'cached_input' }];
+    pragmaPipelinesColumns = [
+      { name: 'cwd' }, { name: 'plan_json' }, { name: 'done_json' }, { name: 'pending_json' },
+      { name: 'active_json' }, { name: 'aborted_json' }, { name: 'requested_abort_feature_id' },
+      { name: 'resume_count' }, { name: 'resume_summary' },
+    ];
+    pragmaRetryHistoryColumns = [];
+
+    const { getDb } = await import('../../src/db/index.js');
+    getDb('readwrite');
+
+    const alterCalls = mockExecCalls.filter((s) => s.trim().startsWith('ALTER'));
+    expect(alterCalls.some((s) => s.includes('ALTER TABLE retry_history ADD COLUMN tool'))).toBe(true);
+    expect(alterCalls.some((s) => s.includes('ALTER TABLE retry_history ADD COLUMN model'))).toBe(true);
+  });
+
+  it('does not alter retry_history when tool/model already exist', async () => {
+    pragmaRunsColumns = [
+      { name: 'summary' }, { name: 'input_tokens' }, { name: 'output_tokens' },
+      { name: 'cached_input_tokens' }, { name: 'total_tokens' }, { name: 'pipeline_id' }, { name: 'stage' },
+    ];
+    pragmaTokenUsageColumns = [{ name: 'cached_input' }];
+    pragmaPipelinesColumns = [
+      { name: 'cwd' }, { name: 'plan_json' }, { name: 'done_json' }, { name: 'pending_json' },
+      { name: 'active_json' }, { name: 'aborted_json' }, { name: 'requested_abort_feature_id' },
+      { name: 'resume_count' }, { name: 'resume_summary' },
+    ];
+    pragmaRetryHistoryColumns = [{ name: 'tool' }, { name: 'model' }];
+
+    const { getDb } = await import('../../src/db/index.js');
+    getDb('readwrite');
+
+    const alterCalls = mockExecCalls.filter((s) => s.trim().startsWith('ALTER'));
+    expect(alterCalls.some((s) => s.includes('retry_history'))).toBe(false);
   });
 });
 

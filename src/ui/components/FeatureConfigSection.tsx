@@ -10,6 +10,7 @@ const DEFAULT_RETRY: Required<Retry> = {
   maxAttempts: 1,
   backoffMs: 5000,
   onFail: 'stop',
+  fallback: [],
 };
 
 // Matches WorkflowSchema's own defaults (schema.ts) — used defensively when a

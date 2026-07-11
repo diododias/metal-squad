@@ -1,6 +1,6 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { resolve, dirname, join } from 'node:path';
-import type { Backlog, Feature, OnFail } from '../backlog/schema.js';
+import type { Backlog, Effort, Feature, OnFail, Tool } from '../backlog/schema.js';
 import type { RunResult } from '../adapters/types.js';
 import { topoOrder, selectFeaturePlan } from '../orchestrator/graph.js';
 import { schedule } from '../orchestrator/scheduler.js';
@@ -26,6 +26,7 @@ import {
   cleanupStaleRuns,
   updatePipelineSnapshot,
   updatePipelineStage,
+  updateRunTool,
   type PipelineStatus,
   type StageRequestRow,
 } from '../../db/repo.js';
@@ -52,12 +53,20 @@ import {
 import { loadBudgetState, saveBudgetState } from '../../db/repo.js';
 import { saveConfig } from '../../config/index.js';
 
+export interface ResumeOverride {
+  featureId: string;
+  tool?: Tool;
+  model?: string;
+  effort?: Effort;
+}
+
 export interface ExecuteOptions {
   cwd: string;
   concurrency: number;
   featureId?: string;
   autoAdvanceStages?: boolean;
   resumePipelineId?: number;
+  resumeOverride?: ResumeOverride;
 }
 
 export async function executeBacklog(
@@ -189,6 +198,7 @@ export async function executeBacklog(
         runId,
         repoId,
         signal: abortSignal,
+        resumeOverride: opts.resumeOverride?.featureId === feature.id ? opts.resumeOverride : undefined,
       });
       if (res.usage) {
         recordUsage(runId, res.usage);
@@ -451,6 +461,30 @@ interface RetryRunOptions {
   runId: number;
   repoId: string;
   signal?: AbortSignal;
+  resumeOverride?: ResumeOverride;
+}
+
+interface RetryCandidate {
+  tool: Tool;
+  model?: string;
+  effort: Effort;
+  maxAttempts: number;
+}
+
+function buildRetryCandidates(feature: Feature, resumeOverride?: ResumeOverride): RetryCandidate[] {
+  const primary: RetryCandidate = {
+    tool: resumeOverride?.tool ?? feature.tool,
+    model: resumeOverride?.model ?? feature.model,
+    effort: resumeOverride?.effort ?? feature.effort,
+    maxAttempts: feature.retry?.maxAttempts ?? 1,
+  };
+  const fallbacks = (feature.retry?.fallback ?? []).map((alt) => ({
+    tool: alt.tool,
+    model: alt.model ?? feature.model,
+    effort: alt.effort ?? feature.effort,
+    maxAttempts: alt.maxAttempts,
+  }));
+  return [primary, ...fallbacks];
 }
 
 async function runWithRetry(
@@ -458,31 +492,53 @@ async function runWithRetry(
   prompt: string,
   opts: RetryRunOptions,
 ): Promise<RunResult> {
-  const adapter = getAdapter(feature.tool);
-  const maxAttempts = feature.retry?.maxAttempts ?? 1;
   const backoffMs = feature.retry?.backoffMs ?? 5000;
+  const candidates = buildRetryCandidates(feature, opts.resumeOverride);
   let lastResult: RunResult | null = null;
+  let lastCandidateTool: Tool | null = null;
+  let attempt = 0;
 
-  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
-    const res = await adapter.runFeature(feature, prompt, {
-      cwd: opts.cwd,
-      runId: opts.runId,
-      signal: opts.signal,
-    });
+  for (const [candidateIndex, candidate] of candidates.entries()) {
+    const adapter = getAdapter(candidate.tool);
+    const candidateFeature: Feature = {
+      ...feature,
+      tool: candidate.tool,
+      model: candidate.model,
+      effort: candidate.effort,
+    };
 
-    if (res.ok || res.control?.type === 'needs_input') return res;
+    for (let localAttempt = 1; localAttempt <= candidate.maxAttempts; localAttempt += 1) {
+      attempt += 1;
+      const res = await adapter.runFeature(candidateFeature, prompt, {
+        cwd: opts.cwd,
+        runId: opts.runId,
+        signal: opts.signal,
+      });
 
-    lastResult = res;
+      if (res.ok || res.control?.type === 'needs_input') {
+        if (candidate.tool !== feature.tool) updateRunTool(opts.runId, candidate.tool);
+        return res;
+      }
 
-    if (attempt < maxAttempts) {
-      const waitMs = backoffWithJitter(backoffMs, attempt);
-      createRetryRecord(opts.runId, attempt, res.summary, waitMs);
-      await sleep(waitMs);
+      lastResult = res;
+      lastCandidateTool = candidate.tool;
+
+      const isLastAttemptOfCandidate = localAttempt === candidate.maxAttempts;
+      const isLastCandidate = candidateIndex === candidates.length - 1;
+      if (!(isLastAttemptOfCandidate && isLastCandidate)) {
+        const waitMs = backoffWithJitter(backoffMs, attempt);
+        createRetryRecord(opts.runId, attempt, res.summary, waitMs, candidate.tool, candidate.model);
+        await sleep(waitMs);
+      }
     }
   }
 
   if (!lastResult) {
     throw new Error(`Feature ${feature.id} did not produce a run result.`);
+  }
+
+  if (lastCandidateTool && lastCandidateTool !== feature.tool) {
+    updateRunTool(opts.runId, lastCandidateTool);
   }
 
   if (getOnFailPolicy(feature) === 'gate') {

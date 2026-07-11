@@ -753,12 +753,21 @@ describe('web server', () => {
     const { execFileSync } = await import('node:child_process');
     const { writeFileSync } = await import('node:fs');
 
-    execFileSync('git', ['init'], { cwd, stdio: 'ignore' });
-    execFileSync('git', ['config', 'user.email', 'test@example.com'], { cwd, stdio: 'ignore' });
-    execFileSync('git', ['config', 'user.name', 'Test User'], { cwd, stdio: 'ignore' });
+    // Strip GIT_* env vars (GIT_DIR/GIT_WORK_TREE/GIT_INDEX_FILE/...) so this
+    // fixture repo isn't hijacked by an ancestor git process — e.g. when this
+    // suite runs under the repo's own pre-commit hook, git sets these to
+    // point at the *outer* repo, and without stripping them, every git call
+    // below would silently operate on it instead of `cwd`. See src/web/server.ts
+    // GIT_ENV_OVERRIDE for the same workaround in production code.
+    const gitEnv = Object.fromEntries(
+      Object.entries(process.env).filter(([key]) => !key.startsWith('GIT_')),
+    );
+    execFileSync('git', ['init'], { cwd, stdio: 'ignore', env: gitEnv });
+    execFileSync('git', ['config', 'user.email', 'test@example.com'], { cwd, stdio: 'ignore', env: gitEnv });
+    execFileSync('git', ['config', 'user.name', 'Test User'], { cwd, stdio: 'ignore', env: gitEnv });
     writeFileSync(join(cwd, 'tracked.txt'), 'base\n');
-    execFileSync('git', ['add', 'tracked.txt'], { cwd, stdio: 'ignore' });
-    execFileSync('git', ['commit', '-m', 'init'], { cwd, stdio: 'ignore' });
+    execFileSync('git', ['add', 'tracked.txt'], { cwd, stdio: 'ignore', env: gitEnv });
+    execFileSync('git', ['commit', '-m', 'init'], { cwd, stdio: 'ignore', env: gitEnv });
 
     let currentRun = {
       runId: 42,

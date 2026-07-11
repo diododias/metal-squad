@@ -100,18 +100,24 @@ msq resume <run-id|feature-id|repo-id> --effort medium
 
 ### 4. Contabilizacao correta de tokens entre tentativas/tools
 
-Corrigir o gap de `updateRunUsage()` (`src/db/repo.ts:99-105`), que hoje
-**sobrescreve** `runs.input_tokens/output_tokens/total_tokens` a cada chamada em
-vez de acumular:
+`updateRunUsage()` (`src/db/repo.ts`) continua sobrescrevendo
+`runs.input_tokens/output_tokens/total_tokens` a cada chamada (snapshot da
+ultima tentativa) — isso nao foi alterado, pra nao arriscar quebrar outros
+consumidores de `runs.total_tokens` (budget/TUI) que esperam o valor da
+tentativa mais recente. Em vez disso, o total acumulado real e exposto via
+uma nova leitura:
 
-- `runs.total_tokens` (e colunas irmãs) passam a refletir a soma de todas as
-  tentativas daquele `runId`, incluindo a(s) tentativa(s) que falharam antes do
-  fallback de tool ser acionado.
-- `token_usage` continua como audit trail granular por tentativa (ja funciona
-  hoje), mas os agregados usados por budget/relatorios/TUI (`runs`, `stats.ts`)
-  devem refletir o total real gasto na run, nao apenas a ultima tentativa.
-- `task_runs` (tokens por task) segue o mesmo principio quando o fallback ocorre
-  dentro de um step de granularidade task.
+- `getRunAccumulatedTokens(runId)` (`src/db/repo.ts`) roda
+  `SELECT SUM(total) FROM token_usage WHERE run_id = ?` — `token_usage` ja e
+  append-only por tentativa, entao a soma cobre a(s) tentativa(s) que
+  falharam antes do fallback ser acionado sem precisar de coluna nova.
+- `msq status` (`src/commands/status.ts`) usa essa soma na tabela de
+  "Attempt history" por run, ao lado de `retry_history` (`tool`/`model` por
+  tentativa via `listRetryHistory`); a tabela principal de runs continua
+  mostrando `runs.total_tokens` (ultima tentativa) sem mudanca de
+  comportamento.
+- `task_runs`/`stats.ts`/`budget/tracker.ts` nao foram tocados nesta feature —
+  ficam fora do escopo, pois nenhum FR exigiu revisao desses agregados.
 
 ## Escopo tecnico
 
@@ -121,9 +127,9 @@ vez de acumular:
   (primario + fallback) em vez de um unico adapter fixo; constroi `Feature`
   efetivo por tentativa sem mutar o objeto compartilhado.
 - `src/db/index.ts` / `src/db/repo.ts`: `retry_history` ganha colunas `tool`/
-  `model`; `updateRunUsage()` passa a acumular em vez de sobrescrever; funcoes de
-  leitura de stats (`src/core/stats.ts`) e budget (`src/core/budget/tracker.ts`)
-  revisadas para consumir o total acumulado corretamente.
+  `model`; nova `getRunAccumulatedTokens(runId)` soma `token_usage` por
+  `run_id` para expor o total real gasto (incluindo tentativas falhas) sem
+  alterar `updateRunUsage()`/`runs.total_tokens`.
 - `src/commands/resume.ts`: novas flags `--tool`, `--model`, `--effort` aplicadas
   como override pontual da retomada, sem persistir no `backlog.yaml`.
 - `src/core/orchestrator/scheduler.ts` / `execute.ts` (staged workflow): garantir
@@ -135,18 +141,20 @@ vez de acumular:
 
 ## Criterios de aceite
 
-- [ ] Uma feature com `retry.fallback` configurado, ao esgotar `maxAttempts` no
+- [x] Uma feature com `retry.fallback` configurado, ao esgotar `maxAttempts` no
       tool primario, tenta automaticamente o proximo tool da lista antes de
       aplicar `onFail`.
-- [ ] `msq resume <target> --tool <outro> --model <outro>` retoma a mesma
+- [x] `msq resume <target> --tool <outro> --model <outro>` retoma a mesma
       run/pipeline, sem criar uma run nova para o trabalho ja concluido.
-- [ ] Ao retomar apos falha, apenas o stage/task que tinha falhado e
+- [x] Ao retomar apos falha, apenas o stage/task que tinha falhado e
       reexecutado — stages ja `done` no workflow staged nao rodam de novo.
-- [ ] O total de tokens da run (`runs.total_tokens` e o que a TUI/`msq status`
-      exibem) inclui os tokens gastos pela(s) tentativa(s) que falharam antes do
-      fallback, nao apenas a tentativa final bem-sucedida.
-- [ ] `retry_history` registra `tool`/`model` usados em cada tentativa,
+- [x] O total de tokens exibido em `msq status` (tabela "Attempt history" por
+      run, via `getRunAccumulatedTokens`) inclui os tokens gastos pela(s)
+      tentativa(s) que falharam antes do fallback, nao apenas a tentativa
+      final bem-sucedida — `runs.total_tokens` em si continua refletindo
+      apenas a ultima tentativa.
+- [x] `retry_history` registra `tool`/`model` usados em cada tentativa,
       permitindo auditar exatamente quando e para onde houve fallback.
-- [ ] Existe teste cobrindo: tentativa 1 falha com `codex`, fallback para
+- [x] Existe teste cobrindo: tentativa 1 falha com `codex`, fallback para
       `claude`/effort medium sucede, e o total de tokens reportado soma as duas
       tentativas.

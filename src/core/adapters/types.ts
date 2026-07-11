@@ -36,4 +36,6 @@ export interface ToolAdapter {
   runFeature(feature: Feature, prompt: string, opts: RunFeatureOptions): Promise<RunResult>;
   /** Extrai uso de tokens do transcript, se disponível. */
   parseUsage?(transcript: string): TokenUsage | null;
+  /** Verifica de forma rápida e síncrona se o binário desta ferramenta está disponível no ambiente atual. */
+  isAvailable?(): boolean;
 }

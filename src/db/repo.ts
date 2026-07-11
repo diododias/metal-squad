@@ -610,17 +610,52 @@ export function createRetryRecord(
   attempt: number,
   error?: string,
   waitMs?: number,
+  tool?: Tool,
+  model?: string,
 ): void {
   getDb('readwrite')
     .prepare(
-      `INSERT INTO retry_history (run_id, attempt, error)
-       VALUES (?, ?, ?)`,
+      `INSERT INTO retry_history (run_id, attempt, error, tool, model)
+       VALUES (?, ?, ?, ?, ?)`,
     )
-    .run(runId, attempt, error ?? null);
+    .run(runId, attempt, error ?? null, tool ?? null, model ?? null);
   recordRunEvent(runId, 'retry', {
     attempt,
     ...(waitMs !== undefined ? { waitMs } : {}),
   });
+}
+
+export function updateRunTool(runId: number, tool: Tool): void {
+  getDb('readwrite')
+    .prepare(`UPDATE runs SET tool = ? WHERE id = ?`)
+    .run(tool, runId);
+}
+
+export interface RetryHistoryRow {
+  attempt: number;
+  error: string | null;
+  retriedAt: string;
+  tool: string | null;
+  model: string | null;
+}
+
+export function listRetryHistory(runId: number): RetryHistoryRow[] {
+  const rows = getDb('readonly')
+    .prepare(
+      `SELECT attempt, error, retried_at AS retriedAt, tool, model
+       FROM retry_history
+       WHERE run_id = ?
+       ORDER BY attempt ASC`,
+    )
+    .all(runId) as RetryHistoryRow[];
+  return rows;
+}
+
+export function getRunAccumulatedTokens(runId: number): number {
+  const row = getDb('readonly')
+    .prepare(`SELECT COALESCE(SUM(total), 0) AS total FROM token_usage WHERE run_id = ?`)
+    .get(runId) as { total: number };
+  return row.total;
 }
 
 export interface RunEventRow {
