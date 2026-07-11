@@ -22,7 +22,7 @@ import {
 } from '../db/repo.js';
 import { computeRunBreakdown } from '../core/stats.js';
 import { resolveRepo } from '../core/repo.js';
-import { loadBacklog } from '../core/backlog/load.js';
+import { loadBacklogFromCatalog } from '../core/backlog/load.js';
 import { validateBacklogSkills } from '../core/skills/index.js';
 import { loadConfig } from '../config/index.js';
 import { buildMsqWebState, appendNotification } from './state.js';
@@ -573,7 +573,7 @@ export function createWebServer(options: {
     try {
       assertWritableDbPath();
       loadConfig();
-      const backlog = loadBacklog(undefined, featureCwd);
+      const backlog = loadBacklogFromCatalog(resolveRepo(featureCwd).repoId);
       validateBacklogSkills(backlog, featureCwd);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);

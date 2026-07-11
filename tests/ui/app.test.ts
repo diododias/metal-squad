@@ -142,6 +142,7 @@ vi.mock('../../src/config/index.js', () => ({
 
 vi.mock('../../src/core/backlog/load.js', () => ({
   loadBacklog: mockLoadBacklog,
+  loadBacklogFromCatalog: mockLoadBacklog,
 }));
 
 vi.mock('../../src/core/skills/index.js', () => ({

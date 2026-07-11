@@ -3,7 +3,7 @@ import { Box } from 'ink';
 import { spawn } from 'node:child_process';
 import { basename } from 'node:path';
 import { loadConfig } from '../config/index.js';
-import { loadBacklog } from '../core/backlog/load.js';
+import { loadBacklogFromCatalog } from '../core/backlog/load.js';
 import { msqEventBus } from '../core/events/index.js';
 import { resolveRepo } from '../core/repo.js';
 import { validateBacklogSkills } from '../core/skills/index.js';
@@ -101,7 +101,7 @@ function formatStartError(featureId: string, error: unknown): string {
 function validateFeatureStart(cwd: string): void {
   assertWritableDbPath();
   loadConfig();
-  const backlog = loadBacklog(undefined, cwd);
+  const backlog = loadBacklogFromCatalog(resolveRepo(cwd).repoId);
   validateBacklogSkills(backlog, cwd);
 }
 

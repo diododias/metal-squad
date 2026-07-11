@@ -114,17 +114,17 @@ load + upsert (`architecture.md`).
 
 ## Criterios de aceite
 
-- [ ] `msq backlog load` cria/atualiza `backlog_epics`, `backlog_features`,
+- [x] `msq backlog load` cria/atualiza `backlog_epics`, `backlog_features`,
       `backlog_tasks` a partir do `backlog.yaml` validado
-- [ ] Comando e idempotente: rodar 2x com o mesmo YAML nao gera diff
-- [ ] Comando nunca escreve/apaga em tabelas de estado de execucao
+- [x] Comando e idempotente: rodar 2x com o mesmo YAML nao gera diff
+- [x] Comando nunca escreve/apaga em tabelas de estado de execucao
       (`runs`, `gates`, `token_usage`, `pipelines`, etc.)
-- [ ] `--dry-run` mostra features adicionadas/removidas/alteradas sem gravar
-- [ ] `msq run`, `msq status`, `msq ui` e o modo web passam a resolver o
+- [x] `--dry-run` mostra features adicionadas/removidas/alteradas sem gravar
+- [x] `msq run`, `msq status`, `msq ui` e o modo web passam a resolver o
       catalogo de epics/features/tasks a partir do banco, nao mais lendo
       `backlog.yaml` diretamente em runtime
-- [ ] `msq run --feature X` para uma feature ausente do catalogo carregado
+- [x] `msq run --feature X` para uma feature ausente do catalogo carregado
       falha com mensagem acionavel pedindo `msq backlog load`
-- [ ] Testes cobrindo: carga inicial, recarga idempotente, feature removida
+- [x] Testes cobrindo: carga inicial, recarga idempotente, feature removida
       do YAML (marcada, nao deletada), YAML invalido (erro claro), e runtime
       lendo do banco em vez do YAML

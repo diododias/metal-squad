@@ -1,5 +1,5 @@
 import type { Command } from 'commander';
-import { loadBacklog } from '../core/backlog/load.js';
+import { loadBacklogFromCatalog } from '../core/backlog/load.js';
 import type { BacklogV2, Feature } from '../core/backlog/schema.js';
 import { buildPrompt } from '../core/backlog/prompt.js';
 import {
@@ -23,7 +23,8 @@ export function registerDecompose(program: Command): void {
       try {
         assertWritableDbPath();
         const cwd = process.cwd();
-        const backlog = loadBacklog(undefined, cwd);
+        const { repoId, path } = resolveRepo(cwd);
+        const backlog = loadBacklogFromCatalog(repoId);
         const feature = findFeature(backlog, featureId);
         if (!feature) {
           throw new Error(`Feature not found in backlog: ${featureId}`);
@@ -36,7 +37,6 @@ export function registerDecompose(program: Command): void {
           maxContextChars: config.promptContextCharLimit,
         });
 
-        const { repoId, path } = resolveRepo(cwd);
         registerRepo(repoId, path);
         const runId = createRun(repoId, feature.id, feature.tool, { stage: 'decompose' });
 
@@ -56,6 +56,7 @@ export function registerDecompose(program: Command): void {
         if (opts.apply) {
           const count = applyDecomposedTasks(feature.id, output.tasks, cwd);
           console.log(`\nbacklog.yaml updated: ${String(count)} tasks applied to ${feature.id}.`);
+          console.log('Rode "msq backlog load" para publicar essas mudancas no catalogo.');
         } else {
           console.log('\nRun again with --apply to update backlog.yaml.');
         }

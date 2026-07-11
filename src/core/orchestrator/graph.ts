@@ -37,7 +37,7 @@ export function selectFeaturePlan(backlog: Backlog, featureId: string): Feature[
       if (parent) {
         throw new Error(`Feature ${parent} depends on missing feature ${id}`);
       }
-      throw new Error(`Feature not found in backlog: ${id}`);
+      throw new Error(`Feature not found in backlog: ${id}. Rode "msq backlog load" para atualizar o catalogo.`);
     }
 
     if (selected.has(id)) return;

@@ -3,10 +3,14 @@ import { resolve, dirname, isAbsolute } from 'node:path';
 import { parse } from 'yaml';
 import {
   BacklogSchema,
+  BacklogV2Schema,
   type BacklogV1,
   type BacklogV2,
   type Defaults,
+  type Epic,
+  type Feature,
 } from './schema.js';
+import { getCatalogMeta, listCatalogEpics, listCatalogFeatures } from '../../db/backlogCatalog.js';
 
 export const BACKLOG_FILE = 'backlog.yaml';
 
@@ -130,4 +134,44 @@ export function loadBacklog(path = BACKLOG_FILE, cwd = process.cwd()): BacklogV2
 
   validateFiles(v2, root);
   return v2;
+}
+
+/**
+ * Reconstructs a fully-validated Backlog from the DB catalog tables
+ * (populated by `msq backlog load`), instead of reading backlog.yaml.
+ * This is the runtime source of truth after F35 — see docs/features/F35-backlog-catalog-import.md.
+ */
+export function loadBacklogFromCatalog(repoId: string): BacklogV2 {
+  const meta = getCatalogMeta(repoId);
+  const epicRows = listCatalogEpics(repoId);
+
+  if (!meta || epicRows.length === 0) {
+    throw new Error(
+      `Catalogo vazio para este repo — rode "msq backlog load" primeiro.`,
+    );
+  }
+
+  const featureRows = listCatalogFeatures(repoId);
+  const featuresByEpic = new Map<string, Feature[]>();
+  for (const row of featureRows) {
+    const feature = JSON.parse(row.data_json) as Feature;
+    const bucket = featuresByEpic.get(row.epic_id) ?? [];
+    bucket.push(feature);
+    featuresByEpic.set(row.epic_id, bucket);
+  }
+
+  const epics: Epic[] = epicRows.map((row) => {
+    const epic = JSON.parse(row.data_json) as Epic;
+    return { ...epic, features: featuresByEpic.get(row.epic_id) ?? [] };
+  });
+
+  const raw = {
+    version: 2 as const,
+    repo: meta.repo,
+    defaults: JSON.parse(meta.defaults_json) as Defaults,
+    ...(meta.budget_json ? { budget: JSON.parse(meta.budget_json) as unknown } : {}),
+    epics,
+  };
+
+  return BacklogV2Schema.parse(raw);
 }

@@ -1,5 +1,5 @@
 import type { Command } from 'commander';
-import { loadBacklog } from '../core/backlog/load.js';
+import { loadBacklogFromCatalog } from '../core/backlog/load.js';
 import { executeBacklog } from '../core/runner/execute.js';
 import { validateBacklogSkills } from '../core/skills/index.js';
 import { loadConfig } from '../config/index.js';
@@ -26,7 +26,7 @@ export function registerResume(program: Command): void {
           + `reexecuta=[${[...snapshot.active, ...snapshot.aborted, ...snapshot.pending].join(', ') || '-'}].`,
       );
 
-      const backlog = loadBacklog(undefined, pipeline.cwd);
+      const backlog = loadBacklogFromCatalog(pipeline.repoId);
       validateBacklogSkills(backlog, pipeline.cwd);
       const concurrency = opts.concurrency
         ? Number(opts.concurrency)

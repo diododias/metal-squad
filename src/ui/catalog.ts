@@ -1,6 +1,7 @@
-import { existsSync, readFileSync, statSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { BACKLOG_FILE, loadBacklog } from '../core/backlog/load.js';
+import { loadBacklogFromCatalog } from '../core/backlog/load.js';
+import { resolveRepo } from '../core/repo.js';
 import type { Budget, Retry, Task, Workflow } from '../core/backlog/schema.js';
 
 const DESCRIPTION_CHAR_LIMIT = 4000;
@@ -62,26 +63,17 @@ function readFeatureDescription(
   }
 }
 
-let cachedPath = '';
-let cachedMtimeMs = 0;
 let cachedCatalog: Record<string, FeatureCatalogEntry> = {};
 let cachedSettings: BacklogSettings = DEFAULT_BACKLOG_SETTINGS;
 
+/** Catalog now lives in the DB (populated by `msq backlog load`) rather than
+ * backlog.yaml — see docs/features/F35-backlog-catalog-import.md. Queried
+ * fresh on every call (cheap local SQLite read, same pattern as the rest of
+ * the TUI's DB-backed state). */
 function loadCatalogAndSettings(cwd: string): void {
-  const backlogPath = resolve(cwd, BACKLOG_FILE);
-  if (!existsSync(backlogPath)) {
-    cachedPath = backlogPath;
-    cachedMtimeMs = 0;
-    cachedCatalog = {};
-    cachedSettings = DEFAULT_BACKLOG_SETTINGS;
-    return;
-  }
-
-  const mtimeMs = statSync(backlogPath).mtimeMs;
-  if (cachedPath === backlogPath && cachedMtimeMs === mtimeMs) return;
-
   try {
-    const backlog = loadBacklog(BACKLOG_FILE, cwd);
+    const { repoId } = resolveRepo(cwd);
+    const backlog = loadBacklogFromCatalog(repoId);
     cachedCatalog = Object.fromEntries(
       backlog.epics.flatMap((epic) =>
         epic.features.map((feature) => [
@@ -112,9 +104,6 @@ function loadCatalogAndSettings(cwd: string): void {
     cachedCatalog = {};
     cachedSettings = DEFAULT_BACKLOG_SETTINGS;
   }
-
-  cachedPath = backlogPath;
-  cachedMtimeMs = mtimeMs;
 }
 
 export function getFeatureCatalog(cwd = process.cwd()): Record<string, FeatureCatalogEntry> {
