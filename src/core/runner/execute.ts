@@ -389,13 +389,20 @@ export async function executeBacklog(
         return;
       }
       const shouldCountAsDone = result.ok || getOnFailPolicy(feature) === 'continue';
+      // A genuine failure (stop/gate policy, not aborted) must land in `aborted` —
+      // the "needs rerun" bucket — instead of nowhere. Otherwise it vanishes from
+      // pending/active/done/aborted entirely and `msq resume`/the TUI have no
+      // record that this feature still needs to run (see F39 resume flow).
+      const needsRerun = !shouldCountAsDone;
       updatePipelineSnapshot(pipelineId, {
         active: withoutActive,
         done: shouldCountAsDone
           ? [...snapshot.done.filter((item) => item !== feature.id), feature.id]
           : snapshot.done,
         pending: snapshot.pending.filter((item) => item !== feature.id),
-        aborted: snapshot.aborted.filter((item) => item !== feature.id),
+        aborted: needsRerun
+          ? [...snapshot.aborted.filter((item) => item !== feature.id), feature.id]
+          : snapshot.aborted.filter((item) => item !== feature.id),
       }, {
         clearAbortRequest: true,
       });
