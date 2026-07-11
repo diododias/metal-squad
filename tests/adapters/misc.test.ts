@@ -109,7 +109,7 @@ describe('claude adapter', () => {
     });
     expect(mockRunCli).toHaveBeenCalledWith(
       'claude',
-      ['--print', '--output-format', 'stream-json', '--dangerously-skip-permissions', '--model', 'custom', '--', 'PROMPT'],
+      ['--print', '--output-format', 'stream-json', '--verbose', '--dangerously-skip-permissions', '--model', 'custom', '--', 'PROMPT'],
       expect.objectContaining({
         cwd: '/repo',
         heartbeatMs: 30_000,
