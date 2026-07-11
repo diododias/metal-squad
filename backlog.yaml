@@ -30,32 +30,33 @@ epics:
         spec: >
           Problema: no painel "Live Output" do detalhe de run (dashboard web),
           cada evento de tool call vira um bloco full-width com borda e fundo
-          solido (`renderOutputEntry` em `src/web/static/components/RunDetail.js:139-145`,
-          classe `.output-entry.tool` em `src/web/static/styles.css:598-604`
-          com `border` + `background: var(--panel)`). A chamada em
+          solido (`renderOutputEntry` em
+          `src/web/static/components/RunDetail.js:139-145`, classe
+          `.output-entry.tool` em `src/web/static/styles.css:598-604` com
+          `border` + `background: var(--panel)`). A chamada em
           `RunDetail.js:515` passa `maxWidth=1000` para todas as entries, entao
           o bloco de tool nao e limitado por largura e estica borda-a-borda do
-          container `.output-log`. Isso cria dois problemas: (1) blocos de
-          tool competem visualmente com a narrativa/"thinking" do agente —
-          entries default (`RunDetail.js:160-164`) renderizam so como texto
-          plano sem borda/fundo, entao o card de tool acaba chamando mais
-          atencao que o raciocinio do agente, invertendo a prioridade
-          esperada; (2) a paleta `var(--panel)` (`#111827`) / `var(--border)`
-          (`#374151`) tem pouco contraste com `var(--text)` (`#e5e7eb`),
-          entao o bloco de tool nao parece "secundario" o suficiente — CLIs de
-          mercado usam linha compacta, label curto e cor apagada para tool
-          calls, sem card full-width com fundo proprio.
+          container `.output-log`. Isso cria dois problemas: (1) blocos de tool
+          competem visualmente com a narrativa/"thinking" do agente — entries
+          default (`RunDetail.js:160-164`) renderizam so como texto plano sem
+          borda/fundo, entao o card de tool acaba chamando mais atencao que o
+          raciocinio do agente, invertendo a prioridade esperada; (2) a paleta
+          `var(--panel)` (`#111827`) / `var(--border)` (`#374151`) tem pouco
+          contraste com `var(--text)` (`#e5e7eb`), entao o bloco de tool nao
+          parece "secundario" o suficiente — CLIs de mercado usam linha
+          compacta, label curto e cor apagada para tool calls, sem card
+          full-width com fundo proprio.
 
 
-          Objetivo: redesenhar a apresentacao das entries de tool no Live
-          Output para ocupar menos espaco horizontal (nao esticar borda a
-          borda do container), usar cores mais mutadas que o texto de
-          narrativa do agente, e ficar mais proximo do padrao visual de CLIs
-          de mercado — sem alterar o que e mostrado, so como e mostrado.
-          Fora de escopo: fonte de dados do live output (WebSocket,
-          `outputLines`), fila/paginacao ou comportamento de streaming, e a
-          TUI Ink (`src/ui/components/MainPanel.tsx`), que tem um `ERR> `
-          parecido mas nao faz parte deste pedido.
+          Objetivo: redesenhar a apresentacao das entries de tool no Live Output
+          para ocupar menos espaco horizontal (nao esticar borda a borda do
+          container), usar cores mais mutadas que o texto de narrativa do
+          agente, e ficar mais proximo do padrao visual de CLIs de mercado — sem
+          alterar o que e mostrado, so como e mostrado. Fora de escopo: fonte de
+          dados do live output (WebSocket, `outputLines`), fila/paginacao ou
+          comportamento de streaming, e a TUI Ink
+          (`src/ui/components/MainPanel.tsx`), que tem um `ERR> ` parecido mas
+          nao faz parte deste pedido.
 
 
           Escopo esperado:
@@ -121,4 +122,104 @@ epics:
             channel: telegram
             autoAdvance: false
           syncTasksToBacklog: true
-        tasks: []
+        tasks:
+          - id: T001
+            title: 'Build atual do `msq` para servir de baseline visual "antes": rodar `rtk
+              npm run build` e abrir `rtk node dist/index.js ui`, localizar uma
+              run real (ou fixture local) com entries `tool`, `heartbeat` e
+              `stderr` intercaladas, e anotar/capturar screenshot do estado
+              atual do painel Live Output em
+              `src/web/static/components/RunDetail.js` para comparacao
+              pos-mudanca (ver `quickstart.md`)'
+            status: todo
+            dependsOn: []
+          - id: T002
+            title: '[US1] Remover o tratamento de "card" da regra `.output-entry.tool` em
+              `src/web/static/styles.css:598-604` (remover `border`,
+              `border-radius`, `padding`, `background: var(--panel)`,
+              `margin-bottom: 6px` divergente) e substituir por um layout
+              compacto que nao herde `white-space: pre-wrap` de largura total —
+              usar `display: inline-block` (ou `width: fit-content`) para que a
+              entry nunca estique borda-a-borda, independente do tamanho do
+              texto (FR-001, edge cases de texto muito longo e muito curto)'
+            status: todo
+            dependsOn: []
+          - id: T003
+            title: "[US1] Aplicar cor mutada `color: var(--muted)` na regra
+              `.output-entry.tool` atualizada em `src/web/static/styles.css`,
+              alinhada ao contraste ja usado por `.output-entry.heartbeat`
+              (`src/web/static/styles.css:606-609`), sem alterar as regras
+              `.output-entry.heartbeat` (FR-002, FR-005, SC-003)"
+            status: todo
+            dependsOn: []
+          - id: T004
+            title: "[US1] Confirmar em `renderOutputEntry`
+              (`src/web/static/components/RunDetail.js:139-144`) que
+              `truncateText(entry.line, maxWidth)` continua sendo usado para a
+              entry `tool`, garantindo que textos longos (ex.: comando de shell
+              extenso) permanecam truncados de forma compacta e nao voltem a
+              ocupar a largura total do container mesmo com o novo `display`
+              (edge case de texto longo, FR-001)"
+            status: todo
+            dependsOn: []
+          - id: T005
+            title: "[US1] Validar manualmente contra `quickstart.md` passos 2-3 e 5 (SC-001,
+              SC-002): abrir o mesmo detalhe de run usado no baseline (T001),
+              comparar visualmente narrativa vs. tool, testar texto de tool
+              muito longo e muito curto, e repetir em largura de janela
+              estreita"
+            status: todo
+            dependsOn: []
+          - id: T006
+            title: "[US2] Adicionar um prefixo textual curto (ex.: `TOOL>`, seguindo o mesmo
+              padrao ja usado por `ERR>` em
+              `src/web/static/components/RunDetail.js:157`) na renderizacao da
+              entry `tool` em `renderOutputEntry`
+              (`src/web/static/components/RunDetail.js:139-144`), ajustando
+              `truncateText(entry.line, maxWidth)` para
+              `truncateText(entry.line, maxWidth - N)` (mesmo padrao usado na
+              entry `stderr` em `RunDetail.js:157`) para o prefixo nao estourar
+              o `maxWidth` (FR-006, User Story 2)"
+            status: todo
+            dependsOn: []
+          - id: T007
+            title: "[US2] Validar manualmente contra `quickstart.md` passo 4: com narrativa,
+              tool, heartbeat e stderr juntos no painel, confirmar que os quatro
+              tipos permanecem distinguiveis entre si e que a entry `tool` e
+              reconhecivel pelo prefixo mesmo apagada (depende de T002-T003,
+              T006)"
+            status: todo
+            dependsOn: []
+          - id: T008
+            title: "[US3] Confirmar que a regra `.output-entry.stderr` em
+              `src/web/static/styles.css:611-613` (`color: var(--danger)`) e o
+              prefixo `ERR>` em `renderOutputEntry`
+              (`src/web/static/components/RunDetail.js:153-158`) permanecem
+              inalterados apos T002-T003 e T006 — nenhuma edicao deve tocar
+              essas linhas; se houver colisao acidental de estilo herdado de
+              `.output-entry` (`src/web/static/styles.css:594-596`), corrigir
+              para preservar o contraste de alerta (FR-004)"
+            status: todo
+            dependsOn: []
+          - id: T009
+            title: "[US3] Validar manualmente contra `quickstart.md` passo 3/SC-004:
+              comparar a entry `stderr` antes (baseline T001) e depois das
+              mudancas, confirmando que o nivel de destaque visual de alerta e
+              identico (depende de T002-T003, T006, T008)"
+            status: todo
+            dependsOn: []
+          - id: T010
+            title: Rodar a suite de validacao completa de `quickstart.md` (passos 1-6) de
+              ponta a ponta, incluindo o passo 6 (confirmar que streaming,
+              auto-scroll/pause com Ctrl+S e conteudo textual das linhas
+              permanecem inalterados — FR-007) e a checagem "Fora de escopo" de
+              que a TUI (`src/ui/`) nao foi tocada (FR-008)
+            status: todo
+            dependsOn: []
+          - id: T011
+            title: "[P] Rodar `rtk npm run lint` e `rtk npm run typecheck` para confirmar
+              que as edicoes em `src/web/static/components/RunDetail.js` nao
+              introduziram problemas (arquivo JS servido sem build, mas cobrido
+              por lint/typecheck do repo conforme `.claude/rules/testing.md`)"
+            status: todo
+            dependsOn: []

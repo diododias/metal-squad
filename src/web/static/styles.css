@@ -596,11 +596,8 @@ button.danger { border-color: var(--danger); color: var(--danger); }
 }
 
 .output-entry.tool {
-  border: 1px solid var(--border);
-  border-radius: 4px;
-  padding: 4px 6px;
-  margin-bottom: 6px;
-  background: var(--panel);
+  display: inline-block;
+  color: var(--muted);
 }
 
 .output-entry.heartbeat {

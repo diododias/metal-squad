@@ -140,7 +140,7 @@ function renderOutputEntry(entry, maxWidth, fallbackIndex) {
     return React.createElement(
       'div',
       { key, className: 'output-entry tool' },
-      truncateText(entry.line, maxWidth),
+      `TOOL> ${truncateText(entry.line, maxWidth - 6)}`,
     );
   }
   if (entry.source === 'heartbeat') {
