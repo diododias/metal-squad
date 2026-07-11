@@ -22,174 +22,137 @@ budget:
   maxCostUsd: 100
   perFeatureMaxTokens: 500000
 epics:
-  - id: e06-web-version
-    title: E06 — Web Version
+  - id: e03-orchestration-v2
+    title: E03 — Orchestration v2
     features:
-      - id: feat-38
-        title: F38 — Web Action State Auto Refresh
+      - id: feat-39
+        title: F39 — Adapter Fallback em Retry + Resume no Step que Falhou
         spec: >
-          Problema: no modo web, depois de acoes como start, stop, approve, skip
+          Problema: hoje, quando um adapter falha (crash, timeout, rate limit) ou
 
-          e retry, a tela nao reflete o novo estado automaticamente. O usuario
+          estoura budget (maxTokens global ou perFeatureMaxTokens), o msq so sabe
 
-          precisa dar refresh manual para enxergar o que acabou de acontecer.
+          reexecutar a feature com o mesmo tool/model (runWithRetry em
+
+          src/core/runner/execute.ts:456-493 resolve getAdapter(feature.tool) uma
+
+          unica vez antes do loop de tentativas). Quando o budget estoura, apenas
+
+          pausa a pipeline ou cria gate manual, sem oferecer caminho de continuar
+
+          com outra ferramenta. Ao reexecutar via `msq resume <target>`, o msq
+
+          reconstroi o estado a partir do snapshot persistido (done/pending/active/
+
+          aborted em `pipelines`), mas nao ha forma de dizer "continue essa run
+
+          especifica, porem com outro tool/model, apenas no step que ficou
+
+          pendente". Alem disso, `updateRunUsage()` (src/db/repo.ts:99-105)
+
+          SOBRESCREVE `runs.input_tokens/output_tokens/total_tokens` a cada
+
+          chamada em vez de acumular — entao se uma tentativa falha e outra e
+
+          refeita no mesmo runId, o custo real acumulado (incluindo a tentativa
+
+          que falhou) nao fica visivel na tabela `runs`, so espalhado em linhas
+
+          avulsas de `token_usage`.
 
 
-          Objetivo: corrigir a reatividade do modo web para que qualquer acao de
+          Objetivo: permitir que, quando uma feature falha (esgotou
 
-          controle atualize o estado visivel da interface logo apos a resposta
-          do
+          retry.maxAttempts) ou atinge limite de budget, o operador possa trocar
 
-          backend, sem exigir reload da pagina.
+          tool e/ou model/effort e retomar A MESMA run/pipeline, reexecutando
+
+          SOMENTE o step (stage/task) que ficou pendente, sem gerar uma run nova
+
+          do zero e sem perder o rastreio de tokens — incluindo os tokens ja
+
+          gastos pela tentativa que falhou.
 
 
           Escopo esperado:
 
-          - start/stop/abort/resume/pause atualizam dashboard, detalhe da run,
-            cards e botoes logo apos a acao
-          - approve/skip/retry de gates e stage requests atualizam a UI sem
-            refresh manual
-          - ao iniciar uma task/feature, ela deixa de aparecer na coluna de
-            backlog/TODO e avanca automaticamente para a proxima coluna
-            correspondente ao estado real da execucao
-          - a sincronizacao deve acontecer tanto para a aba/visao atual quanto
-            para qualquer estado compartilhado derivado do mesmo snapshot
-          - evitar depender de polling lento ou de refresh completo da pagina
+          - Estender `RetrySchema` (src/core/backlog/schema.ts:8-12) com lista
+            opcional `fallback: [{ tool, model?, effort?, maxAttempts? }]`,
+            tentada em ordem apos o tool primario esgotar maxAttempts
+          - `runWithRetry` (src/core/runner/execute.ts) passa a iterar attempt
+            specs (primario + fallback), resolvendo `getAdapter(spec.tool)` por
+            spec e construindo um `Feature` efetivo (clone com tool/model/effort
+            sobrescritos) sem mutar o objeto compartilhado pelo scheduler
+          - `retry_history` (src/db/index.ts:143-149) ganha colunas `tool`/`model`
+            para auditar qual adapter rodou em cada tentativa
+          - Resolucao de gate de budget passa a aceitar tool/model como uma das
+            formas de resolucao, reusando a mesma infra do fallback de retry
+          - `msq resume <target>` (src/commands/resume.ts) ganha flags opcionais
+            `--tool`, `--model`, `--effort` aplicadas como override PONTUAL da
+            retomada (nao reescreve backlog.yaml nem o catalogo persistido)
+          - O resume com override continua usando o MESMO runId/pipelineId da
+            execucao original — nao cria run nova para trabalho ja concluido —
+            e reaproveita `determineStageStartIndex` para so reexecutar o
+            stage/task que estava `running`/`failed`, sem repetir stages `done`
+            do workflow staged (specify/plan/tasks/...)
+          - Corrigir `updateRunUsage()` (src/db/repo.ts:99-105) para ACUMULAR
+            tokens entre tentativas de um mesmo runId (hoje sobrescreve); ajustar
+            leitura em `src/core/stats.ts` e `src/core/budget/tracker.ts` para
+            refletirem o total real gasto na run, incluindo tentativas que
+            falharam antes do fallback
+          - TUI/`msq status` passam a expor qual tool/model foi usado em cada
+            tentativa (leitura de retry_history) e o total de tokens acumulado
+            da run
 
 
           Validacao:
 
-          - ao disparar uma acao pela web, o estado muda automaticamente em tela
+          - Uma feature com `retry.fallback` configurado, ao esgotar maxAttempts
 
-          - uma feature/task iniciada nao permanece visivel na coluna de backlog
-            se ja existe run em andamento para ela
-          - nenhum dos fluxos acima exige F5 para refletir sucesso, erro ou
-            transicao intermediaria
-        tool: codex
-        model: gpt-5.4
-        effort: high
+          no tool primario, tenta automaticamente o proximo tool da lista antes
+
+          de aplicar onFail
+
+          - `msq resume <target> --tool <outro> --model <outro>` retoma a mesma
+
+          run/pipeline sem criar run nova para o trabalho ja concluido
+
+          - Ao retomar apos falha, apenas o stage/task que tinha falhado e
+
+          reexecutado — stages ja done no workflow staged nao rodam de novo
+
+          - O total de tokens da run (runs.total_tokens e o que TUI/status
+
+          exibem) inclui os tokens gastos pela(s) tentativa(s) que falharam antes
+
+          do fallback, nao so a tentativa final bem-sucedida
+
+          - retry_history registra tool/model usados em cada tentativa
+
+          - Existe teste cobrindo: tentativa 1 falha com codex, fallback para
+
+          claude/effort medium sucede, e o total de tokens reportado soma as
+
+          duas tentativas
+        tool: claude
+        effort: medium
         skills:
           - dev-flow
         context:
+          - docs/features/F39-adapter-fallback-resume.md
+          - docs/features/F26-resume-pipeline-from-state.md
           - docs/ROADMAP.md
-          - docs/features/F32-web-mode.md
-          - docs/features/F34-web-run-detail-and-control-polish.md
-          - docs/features/F36-web-feature-config-persistence.md
-          - src/web/server.ts
-          - src/web/static/app.js
-          - src/web/static/components/Gates.js
-          - src/web/static/components/RunDetail.js
-          - src/web/static/components/FeaturePreview.js
+          - src/core/backlog/schema.ts
+          - src/core/runner/execute.ts
+          - src/core/adapters/index.ts
+          - src/core/adapters/claude.ts
+          - src/core/adapters/types.ts
+          - src/core/budget/tracker.ts
+          - src/core/stats.ts
+          - src/db/index.ts
+          - src/db/repo.ts
+          - src/commands/resume.ts
         dependsOn: []
-        tasks:
-          - id: T001
-            title: Create a shared `reconcileWebState()` helper that rebuilds
-              `buildMsqWebState()`, detects meaningful snapshot changes, and
-              centralizes `state:full` broadcasting in `src/web/server.ts`
-            status: todo
-            dependsOn: []
-          - id: T002
-            title: Create a shared subscription refresh helper for `run:detail`,
-              `run:history`, and `run:changes` so the same reconciliation cycle
-              can refresh all subscribed surfaces in `src/web/server.ts`
-            status: todo
-            dependsOn: []
-          - id: T003
-            title: "[P] Rework execution-owned pending projection so blocked runs are
-              excluded from `pendingFeatures` alongside running and done runs in
-              `src/web/state.ts`"
-            status: todo
-            dependsOn: []
-          - id: T004
-            title: "[US1] Add websocket regression coverage for `action:pausePipeline`,
-              `action:resumePipeline`, `action:abortPipeline`, and
-              `action:requestFeatureAbort` rebroadcasting refreshed `state:full`
-              payloads in `tests/web/server.test.ts`"
-            status: todo
-            dependsOn: []
-          - id: T005
-            title: "[US1] Route run-control action handlers through the shared
-              reconciliation helper in `src/web/server.ts`"
-            status: todo
-            dependsOn: []
-          - id: T006
-            title: "[US1] Refresh subscribed run-detail payloads after run-control mutations
-              in `src/web/server.ts`"
-            status: todo
-            dependsOn: []
-          - id: T007
-            title: "[US1] Reconcile selected run state and action affordances from the
-              latest `state:full` snapshot after run-control updates in
-              `src/web/static/app.js`"
-            status: todo
-            dependsOn: []
-          - id: T008
-            title: "[US2] Add websocket regression coverage for `action:resolveGate`,
-              `action:forceResolveGate`, and `action:resolveStageRequest`
-              refreshing blockers and `state:full` payloads in
-              `tests/web/server.test.ts`"
-            status: todo
-            dependsOn: []
-          - id: T009
-            title: "[US2] Route gate and stage-request resolution actions through the shared
-              reconciliation helper in `src/web/server.ts`"
-            status: todo
-            dependsOn: []
-          - id: T010
-            title: "[US2] Refresh subscribed run-history and run-changes payloads when
-              blocker resolution advances or unblocks a run in
-              `src/web/server.ts`"
-            status: todo
-            dependsOn: []
-          - id: T011
-            title: "[US2] Clear stale blocker selection and gate-derived affordances after
-              refreshed snapshots remove a resolved blocker in
-              `src/web/static/app.js`"
-            status: todo
-            dependsOn: []
-          - id: T012
-            title: "[US3] Add websocket regression coverage for detached
-              `action:startFeature` reconciliation, duplicate pending/execution
-              prevention, and latest-state ordering in
-              `tests/web/server.test.ts`"
-            status: todo
-            dependsOn: []
-          - id: T013
-            title: "[P] [US3] Add focused `buildMsqWebState()` coverage for blocked and
-              newly-started runs affecting `pendingFeatures` in
-              `tests/web/state.test.ts`"
-            status: todo
-            dependsOn: []
-          - id: T014
-            title: "[US3] Add a bounded reconciliation poll for detached runner mutations
-              that reuses the shared snapshot diffing and subscription refresh
-              pipeline in `src/web/server.ts`"
-            status: todo
-            dependsOn: []
-          - id: T015
-            title: "[US3] Keep selected run, feature, and TODO/execution navigation state
-              consistent when refreshed snapshots move an item between surfaces
-              in `src/web/static/app.js`"
-            status: todo
-            dependsOn: []
-          - id: T016
-            title: "[P] Update the observable refresh contract to match the implemented
-              same-process and detached-process synchronization behavior in
-              `specs/008-web-action-auto-refresh/contracts/web-state-refresh.md\
-              `"
-            status: todo
-            dependsOn: []
-          - id: T017
-            title: "[P] Update manual validation steps for run controls, blocker resolution,
-              shared-view sync, and failed actions in
-              `specs/008-web-action-auto-refresh/quickstart.md`"
-            status: todo
-            dependsOn: []
-          - id: T018
-            title: Run the targeted build and regression commands documented in
-              `specs/008-web-action-auto-refresh/quickstart.md`
-            status: todo
-            dependsOn: []
         retry:
           maxAttempts: 1
           backoffMs: 5000
