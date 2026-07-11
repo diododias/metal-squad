@@ -31,6 +31,7 @@ O que ainda falta:
 - Sem streaming de output em tempo real → F06
 - Sem arquivos associados a features/tasks → F01
 - Telemetria ainda precisa evoluir no empacotamento/blocos de execucao → F28
+- Catalogo de epics/features/tasks so existe no `backlog.yaml`, runtime nao le do banco → F35
 
 ---
 
@@ -38,7 +39,7 @@ O que ainda falta:
 
 | Fase | Total | Entregues | Pendentes |
 |------|-------|-----------|-----------|
-| Fase 1 — Fundacao | 4 | 1 | 3 |
+| Fase 1 — Fundacao | 5 | 1 | 4 |
 | Fase 2 — TUI moderna | 7 | 2 | 5 |
 | Fase 3 — Orquestracao robusta | 5 | 5 | 0 |
 | Fase 4 — Observability & DX | 7 | 5 | 2 |
@@ -57,6 +58,7 @@ O que ainda falta:
 | [F01 — YAML Schema v2](features/F01-yaml-schema-v2.md) | Medium | Critica | Pendente |
 | [F02 — Skill Registry](features/F02-skill-registry.md) | Medium | Critica | Pendente |
 | [F03 — Dynamic Prompt Builder](features/F03-dynamic-prompt-builder.md) | Medium | Critica | Pendente |
+| [F35 — Backlog Catalog Import (banco como fonte de verdade em runtime)](features/F35-backlog-catalog-import.md) | Medium | Alta | Pendente |
 | [F15 — Event System](features/F15-event-system.md) | Medium | Critica | Entregue |
 
 **Entrega**: msq funciona com skills parametrizadas, arquivos associados, e emite eventos internos.
@@ -186,7 +188,8 @@ F01 (schema v2)
  ├→ F02 (skill registry)
  │   ├→ F03 (dynamic prompt)
  │   └→ F04 (task sizer) ✅
- └→ F22 (per-repo config)
+ ├→ F22 (per-repo config)
+ └→ F35 (backlog catalog import — banco como fonte de verdade)
 
 F15 (event system) ✅
  ├→ F06 (log streaming)
