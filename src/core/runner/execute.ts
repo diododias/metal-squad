@@ -36,6 +36,7 @@ import { buildPrompt } from '../backlog/prompt.js';
 import { createSkillRegistry } from '../skills/index.js';
 import { syncFeatureTasksToBacklog } from '../backlog/sync.js';
 import type { Skill } from '../skills/types.js';
+import { collectEffectiveStageSkills } from '../workflow/stageSkills.js';
 import {
   createBudgetTracker,
   formatBudgetViolation,
@@ -50,14 +51,6 @@ import {
 } from '../events/index.js';
 import { loadBudgetState, saveBudgetState } from '../../db/repo.js';
 import { saveConfig } from '../../config/index.js';
-
-const SYSTEM_STAGE_SKILLS: Record<string, string[]> = {
-  specify: ['speckit-specify'],
-  plan: ['speckit-plan'],
-  tasks: ['speckit-tasks'],
-  implement: ['speckit-implement', 'dev-flow'],
-  validate: ['reviewr'],
-};
 
 export interface ExecuteOptions {
   cwd: string;
@@ -95,11 +88,7 @@ export async function executeBacklog(
   let budgetPauseTriggered = false;
 
   const repoStageSkills = backlog.version === 2 ? backlog.defaults.stageSkills : {};
-  const effectiveStageSkills: Record<string, string[]> = {
-    ...SYSTEM_STAGE_SKILLS,
-    ...config.stageSkills,
-    ...repoStageSkills,
-  };
+  const effectiveStageSkills = collectEffectiveStageSkills(repoStageSkills, config.stageSkills);
 
   const resolvedPlan = opts.featureId
     ? selectFeaturePlan(backlog, opts.featureId)

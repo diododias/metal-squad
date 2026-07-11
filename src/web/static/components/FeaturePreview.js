@@ -363,55 +363,6 @@ function FeatureConfigForm({ feature, settings, onSaveConfig }) {
   );
 }
 
-function OverrideSection({ overrides, onChange, tokenEstimate }) {
-  return configGroup(
-    'Override pontual (só para esta execução — use "save config" acima para persistir)',
-    React.createElement(
-      'div',
-      { className: 'override-fields' },
-      React.createElement(
-        'label',
-        null,
-        'tool ',
-        React.createElement(
-          'select',
-          { value: overrides.tool, onChange: (e) => onChange('tool', e.target.value) },
-          TOOL_OPTIONS.map((tool) => React.createElement('option', { key: tool, value: tool }, tool)),
-        ),
-      ),
-      React.createElement(
-        'label',
-        null,
-        'model ',
-        React.createElement('input', {
-          type: 'text',
-          value: overrides.model,
-          placeholder: `${overrides.tool} (default)`,
-          onChange: (e) => onChange('model', e.target.value),
-        }),
-      ),
-      React.createElement(
-        'label',
-        null,
-        'effort ',
-        React.createElement(
-          'select',
-          { value: overrides.effort, onChange: (e) => onChange('effort', e.target.value) },
-          EFFORT_OPTIONS.map((effort) => React.createElement('option', { key: effort, value: effort }, effort)),
-        ),
-      ),
-    ),
-    tokenEstimate &&
-      React.createElement(
-        'div',
-        { className: 'muted token-estimate' },
-        tokenEstimate.sampleSize > 0
-          ? `~${formatTokens(tokenEstimate.avgTotalTokens)} avg tokens (median ${formatTokens(tokenEstimate.medianTotalTokens)}, n=${tokenEstimate.sampleSize} completed ${overrides.tool} runs) — model/effort not tracked per run, treat as a rough estimate.`
-          : `No completed ${overrides.tool} runs yet to estimate cost from.`,
-      ),
-  );
-}
-
 function buildTaskFormState(task) {
   return {
     title: task.title,
@@ -505,7 +456,6 @@ export function FeaturePreview({
   settings,
   runHistory,
   doneFeatureIds,
-  tokenEstimatesByTool,
   onStart,
   onSaveConfig,
   onSaveTaskConfig,
@@ -513,20 +463,7 @@ export function FeaturePreview({
   onOpenRun,
 }) {
   const [activeTab, setActiveTab] = useState(0);
-  const [overrides, setOverrides] = useState({
-    tool: feature.tool,
-    model: feature.model ?? '',
-    effort: feature.effort,
-  });
   const [confirmStart, setConfirmStart] = useState(false);
-
-  useEffect(() => {
-    setOverrides({
-      tool: feature.tool,
-      model: feature.model ?? '',
-      effort: feature.effort,
-    });
-  }, [feature.id, feature.tool, feature.model, feature.effort]);
 
   const specLines = feature.description ? feature.description.split('\n') : [];
   const declaredTasks = feature.tasks ?? [];
@@ -534,23 +471,13 @@ export function FeaturePreview({
   const history = runHistory ?? [];
   const previousFailed = history.find((run) => run.status === 'failed' || run.status === 'aborted');
   const unsatisfiedDeps = dependsOn.filter((dep) => !doneFeatureIds?.has(dep));
-  const tokenEstimate = tokenEstimatesByTool?.[overrides.tool] ?? null;
-
-  const handleOverrideChange = (key, value) => {
-    setOverrides((current) => ({ ...current, [key]: value }));
-    setConfirmStart(false);
-  };
 
   const handleStartClick = () => {
     if (unsatisfiedDeps.length > 0 && !confirmStart) {
       setConfirmStart(true);
       return;
     }
-    const cleanOverrides = {};
-    if (overrides.tool && overrides.tool !== feature.tool) cleanOverrides.tool = overrides.tool;
-    if (overrides.model && overrides.model !== (feature.model ?? '')) cleanOverrides.model = overrides.model;
-    if (overrides.effort && overrides.effort !== feature.effort) cleanOverrides.effort = overrides.effort;
-    onStart(cleanOverrides);
+    onStart();
   };
 
   function renderSection(sectionId) {
@@ -571,7 +498,6 @@ export function FeaturePreview({
           DetailSection,
           { title: PREVIEW_SECTION_LABEL.config },
           React.createElement(FeatureConfigForm, { feature, settings, onSaveConfig }),
-          React.createElement(OverrideSection, { overrides, onChange: handleOverrideChange, tokenEstimate }),
         );
 
       case 'tasks':
@@ -694,7 +620,7 @@ export function FeaturePreview({
       React.createElement(
         'footer',
         { className: 'run-detail-footer' },
-        'Use the buttons above to start (with optional overrides), save config/task edits, or close · Esc goes back without starting',
+        'Use the buttons above to start a feature, save config/task edits, or close · Esc goes back without starting',
       ),
     ),
   );

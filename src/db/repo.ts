@@ -166,6 +166,19 @@ export function listRunOutput(runId: number, limit = 120): RunOutputRow[] {
     .all(runId, limit) as RunOutputRow[];
 }
 
+export function listRunOutputAfterId(runId: number, afterId: number, limit = 200): RunOutputRow[] {
+  if (!hasDbFile()) return [];
+  return getDb('readonly')
+    .prepare(
+      `SELECT id, run_id AS runId, feature_id AS featureId, tool, stream, source, line, created_at AS createdAt
+       FROM run_output
+       WHERE run_id = ? AND id > ?
+       ORDER BY id ASC
+       LIMIT ?`,
+    )
+    .all(runId, afterId, limit) as RunOutputRow[];
+}
+
 export interface RunRow {
   id: number;
   repo_id: string;

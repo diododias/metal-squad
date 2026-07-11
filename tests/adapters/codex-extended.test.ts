@@ -396,6 +396,42 @@ describe('createCodexProgress — onStdoutLine', () => {
     expect(outputCall).toBeDefined();
     expect(outputCall![1].line).toContain('read_file');
   });
+
+  it('emits run:output with the actual message for item.completed error payloads', async () => {
+    const errorEvent = JSON.stringify({
+      type: 'item.completed',
+      item: { type: 'error', message: 'usage limit reached' },
+    });
+    mockRunCli.mockImplementation(async (_bin, _args, opts) => {
+      opts.onStdoutLine?.(errorEvent);
+      return { code: 0, stdout: '', stderr: '' };
+    });
+
+    const { codexAdapter } = await import('../../src/core/adapters/codex.js');
+    await codexAdapter.runFeature(feature, 'prompt', { cwd: '/repo', runId: 27 });
+
+    const outputCall = mockEventEmit.mock.calls.find(c => c[0] === 'run:output' && c[1].source === 'tool');
+    expect(outputCall).toBeDefined();
+    expect(outputCall![1].line).toBe('error usage limit reached');
+  });
+
+  it('emits top-level codex errors as output lines', async () => {
+    const errorEvent = JSON.stringify({
+      type: 'error',
+      message: 'try again later',
+    });
+    mockRunCli.mockImplementation(async (_bin, _args, opts) => {
+      opts.onStdoutLine?.(errorEvent);
+      return { code: 0, stdout: '', stderr: '' };
+    });
+
+    const { codexAdapter } = await import('../../src/core/adapters/codex.js');
+    await codexAdapter.runFeature(feature, 'prompt', { cwd: '/repo', runId: 28 });
+
+    const outputCall = mockEventEmit.mock.calls.find(c => c[0] === 'run:output' && c[1].source === 'tool');
+    expect(outputCall).toBeDefined();
+    expect(outputCall![1].line).toBe('error try again later');
+  });
 });
 
 describe('createCodexProgress — onStderrLine', () => {
@@ -508,6 +544,24 @@ describe('createCodexProgress — heartbeatSuffix', () => {
     const suffix = capturedSuffix?.();
     expect(suffix).toContain('stderr="warning from codex"');
   });
+
+  it('prefers error snippet over generic tool snippet when an error event is seen', async () => {
+    let capturedSuffix: (() => string | undefined) | undefined;
+    mockRunCli.mockImplementation(async (_bin, _args, opts) => {
+      capturedSuffix = opts.heartbeatSuffix;
+      opts.onStdoutLine?.(JSON.stringify({
+        type: 'error',
+        message: 'usage limit reached',
+      }));
+      return { code: 0, stdout: '', stderr: '' };
+    });
+
+    const { codexAdapter } = await import('../../src/core/adapters/codex.js');
+    await codexAdapter.runFeature(feature, 'prompt', { cwd: '/repo', runId: 45 });
+
+    const suffix = capturedSuffix?.();
+    expect(suffix).toContain('erro="error usage limit reached"');
+  });
 });
 
 describe('detectTouchedFiles / summarizePartialOutput via timeout', () => {
@@ -546,6 +600,25 @@ describe('detectTouchedFiles / summarizePartialOutput via timeout', () => {
     const result = await codexAdapter.runFeature(feature, 'prompt', { cwd: '/repo', runId: 52 });
 
     expect(result.summary).toContain('stdout final: raw stdout content');
+  });
+
+  it('shows stdout error message before stderr in timeout summaries', async () => {
+    mockRunCli.mockRejectedValue(
+      new MockCliTimeoutError(
+        'codex',
+        600_000,
+        600_001,
+        JSON.stringify({ type: 'error', message: 'usage limit reached' }),
+        'Reading additional input from stdin...',
+      ),
+    );
+    mockExecFileSync.mockReturnValue('');
+
+    const { codexAdapter } = await import('../../src/core/adapters/codex.js');
+    const result = await codexAdapter.runFeature(feature, 'prompt', { cwd: '/repo', runId: 52 });
+
+    expect(result.summary).toContain('erro final: error usage limit reached');
+    expect(result.summary).not.toContain('stderr final: Reading additional input from stdin...');
   });
 
   it('shows "sem saída útil capturada" when everything empty in timeout', async () => {
@@ -687,5 +760,25 @@ describe('summarizeCodexToolEvent via onStdoutLine', () => {
     const toolCall = mockEventEmit.mock.calls.find(c => c[0] === 'run:output' && c[1].source === 'tool');
     expect(toolCall?.[1].line).toContain('read');
     expect(toolCall?.[1].line).toContain('file contents here');
+  });
+});
+
+describe('codexAdapter non-zero exit summaries', () => {
+  it('prefers stdout codex error messages over misleading stderr tails', async () => {
+    mockRunCli.mockResolvedValue({
+      code: 1,
+      stdout: [
+        JSON.stringify({ type: 'thread.started', thread_id: 'thread_1' }),
+        JSON.stringify({ type: 'turn.started' }),
+        JSON.stringify({ type: 'error', message: 'usage limit reached' }),
+      ].join('\n'),
+      stderr: 'Reading additional input from stdin...\n',
+    });
+
+    const { codexAdapter } = await import('../../src/core/adapters/codex.js');
+    const result = await codexAdapter.runFeature(feature, 'prompt', { cwd: '/repo', runId: 70 });
+
+    expect(result.ok).toBe(false);
+    expect(result.summary).toBe('error usage limit reached');
   });
 });

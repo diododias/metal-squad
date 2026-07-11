@@ -134,31 +134,32 @@ export function DetailSection({ title, children }) {
   );
 }
 
-function renderOutputEntry(entry, maxWidth) {
+function renderOutputEntry(entry, maxWidth, fallbackIndex) {
+  const key = entry.id != null ? `row-${entry.id}` : `idx-${fallbackIndex ?? 0}`;
   if (entry.source === 'tool') {
     return React.createElement(
       'div',
-      { key: entry.id, className: 'output-entry tool' },
+      { key, className: 'output-entry tool' },
       truncateText(entry.line, maxWidth),
     );
   }
   if (entry.source === 'heartbeat') {
     return React.createElement(
       'div',
-      { key: entry.id, className: 'output-entry heartbeat' },
+      { key, className: 'output-entry heartbeat' },
       formatHeartbeatLine(entry.line, maxWidth),
     );
   }
   if (entry.source === 'stderr') {
     return React.createElement(
       'div',
-      { key: entry.id, className: 'output-entry stderr' },
+      { key, className: 'output-entry stderr' },
       `ERR> ${truncateText(entry.line, maxWidth - 5)}`,
     );
   }
   return React.createElement(
     'div',
-    { key: entry.id, className: `output-entry ${entry.source || 'stdout'}` },
+    { key, className: `output-entry ${entry.source || 'stdout'}` },
     truncateText(entry.line, maxWidth),
   );
 }
@@ -511,7 +512,7 @@ function renderSectionContent(sectionId, ctx) {
                 'div',
                 { className: 'output-log' },
                 outputToRender.length > 0
-                  ? outputToRender.map((entry) => renderOutputEntry(entry, 1000))
+                  ? outputToRender.map((entry, index) => renderOutputEntry(entry, 1000, index))
                   : React.createElement(
                       'div',
                       { className: 'muted' },

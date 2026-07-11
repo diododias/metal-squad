@@ -7,13 +7,12 @@
 
 ## Problema
 
-A web UI ja renderiza um formulario de "override" por feature (tool/model/
-effort) no `FeaturePreview.js`, rotulado explicitamente como "nao grava no
-backlog.yaml" — mas ele so encaminha os valores como flags de CLI para o
-processo filho `msq run` disparado. Nada e persistido no banco. Editar
-`workflow.stages`, `retry`, `skills` ou o budget por feature ainda exige
-editar `backlog.yaml` manualmente e rodar `msq backlog load` de novo, e o
-detalhamento de tasks (`FeaturePreview`'s tab "Tasks") e somente leitura.
+A web UI permite editar e persistir a configuracao de cada feature (tool/model/
+effort/workflow/retry/skills/maxTokens) diretamente no formulario do
+`FeaturePreview.js`, gravando no catalogo do banco via `updateCatalogFeature`.
+Editar `workflow.stages`, `retry`, `skills` ou o budget por feature antes
+exigia editar `backlog.yaml` manualmente e rodar `msq backlog load` de novo, e o
+detalhamento de tasks (`FeaturePreview`'s tab "Tasks") era somente leitura.
 
 ## Solucao
 
@@ -73,24 +72,20 @@ existente: `assertWritableDbPath()` -> `resolveRepo(cwd)` ->
 de `startFeature`). Sucesso chama `refreshState()` e faz `broadcast` de
 `state:full` para todos os clientes conectados, mais um toast `ui:info`.
 
-A flag `--tool/--model/--effort` do CLI (`src/commands/run.ts`) continua
-valida como override pontual de uma unica execucao — o texto de ajuda foi
-atualizado para nao dizer mais que "nao persiste no backlog.yaml" (o backlog
-YAML nem e mais a fonte de verdade em runtime desde F35); agora aponta para
-o "save config" da web como o jeito de persistir.
+Apos a F37, as flags `--tool/--model/--effort` do CLI (`src/commands/run.ts`)
+foram removidas. A unica forma de customizar parametros de feature e via
+"Save Config" na web UI, que persiste no catalogo do banco.
 
 ### Frontend (`src/web/static/components/FeaturePreview.js`, `app.js`)
 
-- O bloco de override pontual (tool/model/effort) continua existindo,
-  re-rotulado para "override so para esta execucao — use 'save config' acima
-  para persistir" — agora coexiste com a persistencia real em vez de ser a
-  unica opcao.
+- O bloco de override pontual (tool/model/effort) foi removido pela F37.
+  A unica forma de customizar parametros e via "Save Config" acima.
 - `FeatureConfigSection` (somente leitura) virou `FeatureConfigForm`
   (editavel): tool, model, effort, `workflow.mode`, `workflow.stages`,
   `workflow.syncTasksToBacklog`, `approvals.autoAdvance`,
   `retry.maxAttempts/backoffMs/onFail`, `skills`, `maxTokens`. Um botao
   "save config" no rodape do form diffa so os campos alterados (mesma
-  disciplina do `handleStartClick` de override) e chama `onSaveConfig(patch)`
+   disciplina do diff de patch) e chama `onSaveConfig(patch)`
   — nao fecha o preview; o proximo `state:full` broadcastado atualiza
   `state.featureCatalog[id]` e o form resincroniza com os valores
   persistidos.

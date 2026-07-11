@@ -184,8 +184,9 @@ describe('backlog skill validation', () => {
       'plan',
       'review',
       'shipit',
-      'specify',
-      'tasks',
+      'speckit-plan',
+      'speckit-specify',
+      'speckit-tasks',
     ]);
   });
 

@@ -13,6 +13,7 @@ import {
   listRunEvents,
   listRunHistoryForFeature,
   listRunOutput,
+  listRunOutputAfterId,
   listTaskRunsForRun,
   pausePipeline,
   requestFeatureAbort,
@@ -48,9 +49,13 @@ interface Client {
   socket: HeartbeatWebSocket;
   authenticated: boolean;
   outputSubscriptions: Set<number>;
+  outputLastIdByRun: Map<number, number>;
   detailSubscriptions: Set<number>;
   historySubscriptions: Set<string>;
   changesSubscriptions: Set<number>;
+  detailPayloadSignatures: Map<number, string>;
+  historyPayloadSignatures: Map<string, string>;
+  changesPayloadSignatures: Map<number, string>;
 }
 
 // F34 item 2: git status/diff for a run's working directory. Runs against
@@ -179,8 +184,9 @@ export function createWebServer(options: {
   cwd?: string;
 }): RunningWebServer {
   const clients = new Map<HeartbeatWebSocket, Client>();
-  let latestState = buildMsqWebState();
   const cwd = options.cwd ?? process.cwd();
+  let latestState = buildMsqWebState();
+  let latestStateSignature = JSON.stringify(latestState);
 
   process.on('uncaughtException', (error) => {
     console.error('[web] uncaughtException:', error.message);
@@ -206,14 +212,95 @@ export function createWebServer(options: {
     }
   }
 
+  function buildCurrentState(): typeof latestState {
+    const nextState = buildMsqWebState();
+    return latestState.notifications.length > 0
+      ? { ...nextState, notifications: latestState.notifications }
+      : nextState;
+  }
+
   function refreshState(): void {
-    latestState = buildMsqWebState();
+    latestState = buildCurrentState();
+    latestStateSignature = JSON.stringify(latestState);
+  }
+
+  function buildRunDetailPayload(runId: number): { runId: number; taskRuns: ReturnType<typeof listTaskRunsForRun>; breakdown: ReturnType<typeof computeRunBreakdown> | null } | null {
+    try {
+      const taskRuns = listTaskRunsForRun(runId);
+      const runEvents = listRunEvents(runId);
+      const startedAt = runEvents.find((event) => event.event === 'start')?.createdAt ?? null;
+      const endedAt = runEvents.find((event) => event.event === 'done' || event.event === 'failed')?.createdAt ?? null;
+      const breakdown = startedAt ? computeRunBreakdown(runEvents, startedAt, endedAt) : null;
+      return { runId, taskRuns, breakdown };
+    } catch {
+      return null;
+    }
+  }
+
+  function sendRunDetail(client: Client, runId: number, force = false): void {
+    const payload = buildRunDetailPayload(runId);
+    if (!payload) return;
+    const signature = JSON.stringify(payload);
+    if (!force && client.detailPayloadSignatures.get(runId) === signature) return;
+    client.detailPayloadSignatures.set(runId, signature);
+    sendTo(client, { type: 'run:detail', payload });
+  }
+
+  function sendRunHistory(client: Client, featureId: string, force = false): void {
+    try {
+      const { repoId } = resolveRepo(cwd);
+      const payload = { featureId, runs: listRunHistoryForFeature(repoId, featureId) };
+      const signature = JSON.stringify(payload);
+      if (!force && client.historyPayloadSignatures.get(featureId) === signature) return;
+      client.historyPayloadSignatures.set(featureId, signature);
+      sendTo(client, { type: 'run:history', payload });
+    } catch {
+      // DB unavailable — skip this update
+    }
+  }
+
+  function sendRunChanges(client: Client, runId: number, featureCwd: string, force = false): void {
+    const payload = computeRunChanges(runId, featureCwd);
+    const signature = JSON.stringify(payload);
+    if (!force && client.changesPayloadSignatures.get(runId) === signature) return;
+    client.changesPayloadSignatures.set(runId, signature);
+    sendTo(client, { type: 'run:changes', payload });
+  }
+
+  function refreshSubscribedViews(featureCwd: string): void {
+    for (const client of clients.values()) {
+      if (!client.authenticated || client.socket.readyState !== 1 /* OPEN */) continue;
+      for (const runId of client.detailSubscriptions) sendRunDetail(client, runId);
+      for (const featureId of client.historySubscriptions) sendRunHistory(client, featureId);
+      for (const runId of client.changesSubscriptions) sendRunChanges(client, runId, featureCwd);
+    }
+  }
+
+  function reconcileWebState(
+    featureCwd: string,
+    options: { forceBroadcast?: boolean; refreshSubscriptions?: boolean } = {},
+  ): boolean {
+    const nextState = buildCurrentState();
+    const nextSignature = JSON.stringify(nextState);
+    const changed = options.forceBroadcast === true || nextSignature !== latestStateSignature;
+    latestState = nextState;
+    latestStateSignature = nextSignature;
+    if (changed) {
+      broadcast({ type: 'state:full', payload: latestState });
+    }
+    if (options.refreshSubscriptions !== false) {
+      refreshSubscribedViews(featureCwd);
+    }
+    return changed;
   }
 
   const eventUnsubscribers = BROADCAST_EVENTS.map((event) =>
     msqEventBus.subscribe(event, (payload) => {
       if (event === 'ui:notice' || event === 'ui:info') {
-        const message = typeof payload === 'object' && 'message' in payload ? payload.message : String(payload);
+        const payloadObj = payload as Record<string, unknown> | null;
+        const message = payloadObj && typeof payloadObj === 'object' && 'message' in payloadObj && typeof payloadObj.message === 'string'
+          ? payloadObj.message
+          : JSON.stringify(payload);
         console.log(`[event:${event}]`, message);
       }
       broadcast({ type: event, payload });
@@ -228,6 +315,12 @@ export function createWebServer(options: {
           message,
           createdAt: new Date().toISOString(),
         });
+        latestStateSignature = JSON.stringify(latestState);
+        broadcast({ type: 'state:full', payload: latestState });
+        return;
+      }
+      if (event !== 'run:output' && event !== 'budget:alert') {
+        reconcileWebState(cwd);
       }
     }),
   );
@@ -348,9 +441,13 @@ export function createWebServer(options: {
       socket,
       authenticated: options.auth === 'none',
       outputSubscriptions: new Set(),
+      outputLastIdByRun: new Map(),
       detailSubscriptions: new Set(),
       historySubscriptions: new Set(),
       changesSubscriptions: new Set(),
+      detailPayloadSignatures: new Map(),
+      historyPayloadSignatures: new Map(),
+      changesPayloadSignatures: new Map(),
     };
     clients.set(socket, client);
 
@@ -383,7 +480,8 @@ export function createWebServer(options: {
         }
         if (message.token === options.token) {
           client.authenticated = true;
-          sendTo(client, { type: 'state:full', payload: buildMsqWebState() });
+          refreshState();
+          sendTo(client, { type: 'state:full', payload: latestState });
         } else {
           socket.close(1008, 'Invalid token');
         }
@@ -414,11 +512,10 @@ export function createWebServer(options: {
 
     // If auth is disabled, send full state immediately
     if (options.auth === 'none') {
-      sendTo(client, { type: 'state:full', payload: buildMsqWebState() });
-    }
-
-    // Allow a window for auth before closing unauthenticated sockets
-    if (options.auth === 'token') {
+      refreshState();
+      sendTo(client, { type: 'state:full', payload: latestState });
+    } else {
+      // Allow a window for auth before closing unauthenticated sockets
       const timer = setTimeout(() => {
         if (!client.authenticated && socket.readyState === 1 /* OPEN */) {
           socket.close(1008, 'Authentication required');
@@ -428,19 +525,6 @@ export function createWebServer(options: {
     }
   });
 
-  function sendRunDetail(client: Client, runId: number): void {
-    try {
-      const taskRuns = listTaskRunsForRun(runId);
-      const runEvents = listRunEvents(runId);
-      const startedAt = runEvents.find((event) => event.event === 'start')?.createdAt ?? null;
-      const endedAt = runEvents.find((event) => event.event === 'done' || event.event === 'failed')?.createdAt ?? null;
-      const breakdown = startedAt ? computeRunBreakdown(runEvents, startedAt, endedAt) : null;
-      sendTo(client, { type: 'run:detail', payload: { runId, taskRuns, breakdown } });
-    } catch {
-      // DB unavailable — skip this update
-    }
-  }
-
   function handleClientMessage(
     message: Exclude<WebSocketClientMessage, { type: 'auth' }>,
     client: Client,
@@ -448,7 +532,8 @@ export function createWebServer(options: {
   ): void {
     switch (message.type) {
       case 'action:startFeature': {
-        startFeature(message.featureId, featureCwd, message.overrides);
+        startFeature(message.featureId, featureCwd);
+        reconcileWebState(featureCwd);
         break;
       }
       case 'action:updateFeatureConfig': {
@@ -461,39 +546,50 @@ export function createWebServer(options: {
       }
       case 'action:pausePipeline': {
         pausePipeline(message.pipelineId);
+        reconcileWebState(featureCwd);
         break;
       }
       case 'action:resumePipeline': {
         resumePipeline(message.pipelineId);
+        reconcileWebState(featureCwd);
         break;
       }
       case 'action:abortPipeline': {
         abortPipeline(message.pipelineId);
+        reconcileWebState(featureCwd);
         break;
       }
       case 'action:requestFeatureAbort': {
         requestFeatureAbort(message.pipelineId, message.featureId);
+        reconcileWebState(featureCwd);
         break;
       }
       case 'action:resolveGate': {
         resolveGate(message.gateId, message.decision);
+        reconcileWebState(featureCwd);
         break;
       }
       case 'action:forceResolveGate': {
         forceResolveGate(message.gateId);
+        reconcileWebState(featureCwd);
         break;
       }
       case 'action:resolveStageRequest': {
         resolveStageRequest(message.requestId, message.response);
+        reconcileWebState(featureCwd);
         break;
       }
       case 'subscribe:output': {
         client.outputSubscriptions.add(message.runId);
         const rows = listRunOutput(message.runId, 120);
+        const lastRow = rows.length > 0 ? rows[rows.length - 1] : undefined;
+        const lastId = lastRow ? lastRow.id : 0;
+        client.outputLastIdByRun.set(message.runId, lastId);
         for (const row of rows) {
           sendTo(client, {
             type: 'run:output',
             payload: {
+              id: row.id,
               runId: row.runId,
               featureId: row.featureId,
               tool: row.tool,
@@ -507,6 +603,7 @@ export function createWebServer(options: {
       }
       case 'unsubscribe:output': {
         client.outputSubscriptions.delete(message.runId);
+        client.outputLastIdByRun.delete(message.runId);
         break;
       }
       case 'subscribe:runDetail': {
@@ -516,44 +613,33 @@ export function createWebServer(options: {
       }
       case 'unsubscribe:runDetail': {
         client.detailSubscriptions.delete(message.runId);
+        client.detailPayloadSignatures.delete(message.runId);
         break;
       }
       case 'subscribe:runHistory': {
         client.historySubscriptions.add(message.featureId);
-        sendRunHistory(client, message.featureId);
+        sendRunHistory(client, message.featureId, true);
         break;
       }
       case 'unsubscribe:runHistory': {
         client.historySubscriptions.delete(message.featureId);
+        client.historyPayloadSignatures.delete(message.featureId);
         break;
       }
       case 'subscribe:runChanges': {
         client.changesSubscriptions.add(message.runId);
-        sendRunChanges(client, message.runId, featureCwd);
+        sendRunChanges(client, message.runId, featureCwd, true);
         break;
       }
       case 'unsubscribe:runChanges': {
         client.changesSubscriptions.delete(message.runId);
+        client.changesPayloadSignatures.delete(message.runId);
         break;
       }
       default: {
         break;
       }
     }
-  }
-
-  function sendRunHistory(client: Client, featureId: string): void {
-    try {
-      const { repoId } = resolveRepo(cwd);
-      const runs = listRunHistoryForFeature(repoId, featureId);
-      sendTo(client, { type: 'run:history', payload: { featureId, runs } });
-    } catch {
-      // DB unavailable — skip this update
-    }
-  }
-
-  function sendRunChanges(client: Client, runId: number, featureCwd: string): void {
-    sendTo(client, { type: 'run:changes', payload: computeRunChanges(runId, featureCwd) });
   }
 
   const outputUnsubscribe = msqEventBus.subscribe('run:output', (event) => {
@@ -569,47 +655,12 @@ export function createWebServer(options: {
     }
   });
 
-  const DETAIL_REFRESH_EVENTS: (keyof MsqEvents)[] = [
-    'task:started',
-    'task:updated',
-    'run:done',
-    'run:failed',
-    'tokens:update',
-  ];
-
-  const detailUnsubscribers = DETAIL_REFRESH_EVENTS.map((eventName) =>
-    msqEventBus.subscribe(eventName, (event) => {
-      const runId = 'runId' in event && typeof event.runId === 'number' ? event.runId : null;
-      if (runId === null) return;
-      for (const client of clients.values()) {
-        if (client.authenticated && client.detailSubscriptions.has(runId) && client.socket.readyState === 1) {
-          sendRunDetail(client, runId);
-        }
-      }
-    }),
-  );
-
-  const HISTORY_AND_CHANGES_REFRESH_EVENTS: (keyof MsqEvents)[] = ['run:start', 'run:done', 'run:failed'];
-
-  const historyAndChangesUnsubscribers = HISTORY_AND_CHANGES_REFRESH_EVENTS.map((eventName) =>
-    msqEventBus.subscribe(eventName, (event) => {
-      const runId = 'runId' in event && typeof event.runId === 'number' ? event.runId : null;
-      const featureId = 'featureId' in event && typeof event.featureId === 'string' ? event.featureId : null;
-      for (const client of clients.values()) {
-        if (!client.authenticated || client.socket.readyState !== 1) continue;
-        if (featureId && client.historySubscriptions.has(featureId)) sendRunHistory(client, featureId);
-        if (runId !== null && client.changesSubscriptions.has(runId)) sendRunChanges(client, runId, cwd);
-      }
-    }),
-  );
-
   function startFeature(
     featureId: string,
     featureCwd: string,
-    overrides?: { tool?: string; model?: string; effort?: string },
   ): void {
     try {
-      console.log(`[startFeature] featureId=${featureId}, overrides=`, overrides);
+      console.log(`[startFeature] featureId=${featureId}`);
       assertWritableDbPath();
       loadConfig();
       const backlog = loadBacklogFromCatalog(resolveRepo(featureCwd).repoId);
@@ -629,14 +680,9 @@ export function createWebServer(options: {
       return;
     }
 
-    const overrideArgs: string[] = [];
-    if (overrides?.tool) overrideArgs.push('--tool', overrides.tool);
-    if (overrides?.model) overrideArgs.push('--model', overrides.model);
-    if (overrides?.effort) overrideArgs.push('--effort', overrides.effort);
-
     const child = spawn(
       process.execPath,
-      [...process.execArgv, entrypoint, 'run', '--feature', featureId, ...overrideArgs],
+      [...process.execArgv, entrypoint, 'run', '--feature', featureId],
       {
         detached: true,
         stdio: 'ignore',
@@ -678,8 +724,7 @@ export function createWebServer(options: {
       msqEventBus.emit('ui:notice', { message: `Could not save config for ${featureId}: ${message}` });
       return;
     }
-    refreshState();
-    broadcast({ type: 'state:full', payload: latestState });
+    reconcileWebState(featureCwd);
     msqEventBus.emit('ui:info', { message: `Saved config for ${featureId}.` });
   }
 
@@ -697,20 +742,65 @@ export function createWebServer(options: {
       msqEventBus.emit('ui:notice', { message: `Could not save task ${taskId}: ${message}` });
       return;
     }
-    refreshState();
-    broadcast({ type: 'state:full', payload: latestState });
+    reconcileWebState(featureCwd);
     msqEventBus.emit('ui:info', { message: `Saved task ${taskId}.` });
   }
+
+  // Poll the DB for new output rows written by separated feature-runner
+  // processes (started as detached `msq run --feature` children). Those
+  // processes share the SQLite database, but NOT the in-process `msqEventBus`
+  // — so the `outputUnsubscribe` subscriber above only fires for adapters
+  // that run in this same process. The poll picks up output written by
+  // other processes every 1s and forwards new rows to subscribed clients.
+  const outputPollInterval = setInterval(() => {
+    for (const client of clients.values()) {
+      if (!client.authenticated || client.socket.readyState !== 1) continue;
+      if (client.outputSubscriptions.size === 0) continue;
+      for (const runId of client.outputSubscriptions) {
+        const afterId = client.outputLastIdByRun.get(runId) ?? 0;
+        const rows = listRunOutputAfterId(runId, afterId);
+        if (rows.length === 0) continue;
+        const lastRow = rows[rows.length - 1];
+        if (!lastRow) continue;
+        const newLastId = lastRow.id;
+        client.outputLastIdByRun.set(runId, newLastId);
+        for (const row of rows) {
+          client.socket.send(JSON.stringify({
+            type: 'run:output',
+            payload: {
+              id: row.id,
+              runId: row.runId,
+              featureId: row.featureId,
+              tool: row.tool,
+              line: row.line,
+              stream: row.stream,
+              source: row.source,
+            },
+          }));
+        }
+      }
+    }
+  }, 1000);
+  outputPollInterval.unref();
+
+  const reconcilePollInterval = setInterval(() => {
+    const hasAuthenticatedClients = Array.from(clients.values()).some(
+      (client) => client.authenticated && client.socket.readyState === 1 /* OPEN */,
+    );
+    if (!hasAuthenticatedClients) return;
+    reconcileWebState(cwd);
+  }, 1000);
+  reconcilePollInterval.unref();
 
   return {
     server: httpServer,
     wss,
     url: `http://${options.host}:${String(options.port)}`,
     close: async (): Promise<void> => {
+      clearInterval(outputPollInterval);
+      clearInterval(reconcilePollInterval);
       outputUnsubscribe();
       for (const unsubscribe of eventUnsubscribers) unsubscribe();
-      for (const unsubscribe of detailUnsubscribers) unsubscribe();
-      for (const unsubscribe of historyAndChangesUnsubscribers) unsubscribe();
       for (const client of clients.values()) {
         client.socket.terminate();
       }

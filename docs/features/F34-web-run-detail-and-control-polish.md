@@ -11,7 +11,7 @@ A F32 entregou um modo web funcional, mas uma revisao direta da interface (kanba
 
 ## Objetivo
 
-Fechar essas lacunas de UX no modo web sem introduzir nenhuma dependencia nova de infraestrutura (sem worktrees por run, sem novos adapters): reaproveitar dados que ja existem no pipeline (task runs por stage, eventos do event bus, catalogo de features, historico de runs no SQLite, git do proprio repo) e expor uma consulta de historico completo por feature que hoje nao existe (`listRunsForTui` deduplica para o run mais recente por feature/repo). O resultado deve ser: abas de detalhe de run que mostram dados reais ou uma mensagem explicita de "nao aplicavel nesta etapa"; resolucao de gate/stage-request inline na tela de detalhe de uma run bloqueada; cards do kanban com telemetria ao vivo; uma nova aba "Changes" com diff/arquivos alterados; busca e filtro no kanban; um indicador de conexao com estados claros; e uma tela de preview de feature que mostra tentativas anteriores, status de dependencias, estimativa de custo e permite override pontual de tool/model/effort — com uma apresentacao mais consistente com a tela de run em andamento.
+Fechar essas lacunas de UX no modo web sem introduzir nenhuma dependencia nova de infraestrutura (sem worktrees por run, sem novos adapters): reaproveitar dados que ja existem no pipeline (task runs por stage, eventos do event bus, catalogo de features, historico de runs no SQLite, git do proprio repo) e expor uma consulta de historico completo por feature que hoje nao existe (`listRunsForTui` deduplica para o run mais recente por feature/repo). O resultado deve ser: abas de detalhe de run que mostram dados reais ou uma mensagem explicita de "nao aplicavel nesta etapa"; resolucao de gate/stage-request inline na tela de detalhe de uma run bloqueada; cards do kanban com telemetria ao vivo; uma nova aba "Changes" com diff/arquivos alterados; busca e filtro no kanban; um indicador de conexao com estados claros; e uma tela de preview de feature que mostra tentativas anteriores, status de dependencias e estimativa de custo — com uma apresentacao mais consistente com a tela de run em andamento.
 
 ## Escopo entregue
 
@@ -46,7 +46,7 @@ Fechar essas lacunas de UX no modo web sem introduzir nenhuma dependencia nova d
 - **5a. Tentativa anterior falha/cancelada**: `FeaturePreview.js` consome `run:history` (item 1) filtrado por `featureId`; se existir uma entrada com status `failed`/`aborted`, exibe um bloco `"Previous attempt failed at <stage> — view run #<id>"` com um link que abre o `RunDetail` daquele run historico em modo somente-leitura (sem `subscribe:output` ativo, so leitura de `run:history`/eventos ja persistidos).
 - **5b. Chip de status de dependencia**: usa `feature.dependsOn` (ja existente no catalogo de features); para cada dependencia, verifica se ha uma run `done` para aquele `featureId`. Renderiza chip `✓ Fxx done` ou `✗ Fxx not done`. Quando alguma dependencia nao esta satisfeita, o botao "start feature" mostra um aviso de confirmacao (`"Fxx is not done yet — start anyway?"`) em vez de bloquear silenciosamente (o backend ja permite iniciar fora de ordem; a UI so passa a avisar).
 - **5c. Estimativa de tokens/custo**: nova consulta agregada `getHistoricalTokenStatsForFeatureProfile(tool)` em `src/db/repo.ts`, que busca media/mediana de `total_tokens` entre runs concluidas (`done`) com o mesmo `tool`. **Limitacao registrada**: a tabela `runs` nao armazena `model`/`effort` por run hoje (apenas `tool`); por isso a estimativa e exibida como "media historica de execucoes com esta tool" com aviso de que model/effort podem ter mudado, nao uma media exata por combinacao — normalizar isso exigiria persistir `model`/`effort` por run, o que fica fora de escopo aqui.
-- **5d. Override pontual de tool/model/effort**: `FeaturePreview.js` ganha campos editaveis (selects) para tool/model/effort, pre-preenchidos com os valores do backlog; `action:startFeature` no protocolo WS ganha campos opcionais `{ tool?, model?, effort? }` repassados ao spawn de `msq run --feature <id>` como flags de override (sem gravar no `backlog.yaml`).
+- **5d. (Removido pela F37)** Override pontual de tool/model/effort foi removido; a unica forma de customizar parametros de feature e via "Save Config" (F36).
 - **5e. Paridade de layout com tab bar**: `FeaturePreview.js` hoje usa um layout `preview-grid` de 2 colunas (Feature Spec | Feature Config) mais uma secao Tasks full-width, diferente do tab bar do `RunDetail.js`. Passa a usar o mesmo componente de tab bar (abas: Feature Spec / Feature Config / Tasks / Previous Attempts / Dependencies), reduzindo a divergencia visual entre "feature ainda nao iniciada" e "run em andamento" da mesma feature.
 
 ### 6. Web consome o modelo semantico de tema (F10), sem bloquear nele
@@ -90,11 +90,10 @@ export type WebSocketClientMessage =
   | { type: 'unsubscribe:runHistory'; featureId: string }
   | { type: 'subscribe:runChanges'; runId: number }
   | { type: 'unsubscribe:runChanges'; runId: number }
-  | {
-      type: 'action:startFeature';
-      featureId: string;
-      overrides?: { tool?: string; model?: string; effort?: string };
-    };
+   | {
+       type: 'action:startFeature';
+       featureId: string;
+     };
 
 export type WebSocketServerMessage =
   | /* ...existing... */
@@ -121,10 +120,10 @@ export interface ThemeSnapshot {
 - `src/db/repo.ts` — nova `listRunHistoryForFeature`, `getHistoricalTokenStatsForFeatureProfile`; `listRunsForTui` inalterada.
 - `src/web/server.ts` — novas mensagens WS (`subscribe:runHistory`, `subscribe:runChanges`), novo endpoint `GET /api/runs/:runId/changes` (ou equivalente via WS), leitura de git via `child_process` no working tree do repo, endpoint/estado de tema.
 - `src/web/state.ts` — inclusao opcional de snapshot de tema em `MsqWebState` (ou endpoint separado).
-- `src/web/types.ts` — novos tipos `RunHistoryEntry`, `run:history`, `run:changes`, `ThemeSnapshot`, override em `action:startFeature`.
+- `src/web/types.ts` — novos tipos `RunHistoryEntry`, `run:history`, `run:changes`, `ThemeSnapshot`.
 - `src/web/static/app.js` — `connectionState` enumerado, subscribe automatico de output/tokens para cards em execucao, filtro/busca de kanban.
 - `src/web/static/components/RunDetail.js` — nova aba "Changes", fallback explicito em Workflow/Tasks, acoes de gate/stage-request inline no header.
-- `src/web/static/components/FeaturePreview.js` — tab bar compartilhado, bloco de tentativa anterior, chip de dependencia, estimativa de tokens, campos de override.
+- `src/web/static/components/FeaturePreview.js` — tab bar compartilhado, bloco de tentativa anterior, chip de dependencia, estimativa de tokens.
 - `src/web/static/components/Kanban.js`, `KanbanCard.js` — barra de filtro/busca, telemetria ao vivo nos cards.
 - `src/web/static/components/Header.js` — indicador de conexao com estados.
 - `src/web/static/styles.css` — custom properties derivadas do tema resolvido em vez de hardcode.
@@ -144,6 +143,6 @@ export interface ThemeSnapshot {
 - [x] Tela de preview de feature TODO mostra tentativa anterior falha/cancelada com link para o run, quando existir.
 - [x] Tela de preview mostra chip de status para cada dependencia declarada (`dependsOn`) e avisa (sem bloquear) ao iniciar com dependencia nao satisfeita.
 - [x] Tela de preview mostra estimativa de tokens historica (media/mediana por tool) com aviso de limitacao quando model/effort nao puderem ser cruzados com precisao.
-- [x] Tela de preview permite override pontual de tool/model/effort ao iniciar, sem alterar `backlog.yaml`.
+- [x] (Removido pela F37) Tela de preview permitia override pontual de tool/model/effort ao iniciar.
 - [x] Tela de preview usa o mesmo componente de tab bar do detalhe de run em vez do `preview-grid` atual de 2 colunas.
 - [x] Web le o tema ativo de `~/.config/metal-squad/config.json` (mesmo campo `theme` da F10) e aplica os papeis semanticos correspondentes no CSS, com fallback seguro para `default`.

@@ -8,6 +8,10 @@ import { parseControlSignal } from './control.js';
 
 interface CodexEvent {
   type?: string;
+  message?: string;
+  error?: {
+    message?: string;
+  };
   usage?: {
     input_tokens?: number;
     cached_input_tokens?: number;
@@ -17,6 +21,7 @@ interface CodexEvent {
   item?: {
     type?: string;
     text?: string;
+    message?: string;
     name?: string;
     tool_name?: string;
     arguments?: unknown;
@@ -102,9 +107,12 @@ export const codexAdapter: ToolAdapter = {
         };
       }
       throw error;
-    }
+  }
 
-    if (code !== 0) return { ok: false, summary: stderr.slice(-500) || `exit ${String(code)}` };
+    if (code !== 0) {
+      const stdoutError = lastCodexError(stdout);
+      return { ok: false, summary: stdoutError || stderr.slice(-500) || `exit ${String(code)}` };
+    }
 
     const finalMsg = lastAgentMessage(stdout);
     const usage = this.parseUsage?.(stdout) ?? undefined;
@@ -143,6 +151,16 @@ function lastAgentMessage(transcript: string): string {
   return msg;
 }
 
+function lastCodexError(transcript: string): string {
+  let msg = '';
+  for (const line of transcript.split('\n')) {
+    const evt = safeJson<CodexEvent>(line);
+    const error = summarizeCodexErrorEvent(evt);
+    if (error) msg = error;
+  }
+  return msg;
+}
+
 function summarizePartialOutput(stdout: string, stderr: string, touchedFiles: string[]): string {
   const touchedSummary = formatTouchedFiles(touchedFiles);
   const finalMsg = lastAgentMessage(stdout);
@@ -150,6 +168,11 @@ function summarizePartialOutput(stdout: string, stderr: string, touchedFiles: st
     return touchedSummary
       ? `última mensagem do agente: ${finalMsg.slice(0, 160)}. ${touchedSummary}`
       : `última mensagem do agente: ${finalMsg.slice(0, 160)}`;
+  }
+
+  const stdoutError = lastCodexError(stdout);
+  if (stdoutError) {
+    return touchedSummary ? `erro final: ${stdoutError}. ${touchedSummary}` : `erro final: ${stdoutError}`;
   }
 
   const stderrTail = stderr.trim().slice(-160);
@@ -224,6 +247,7 @@ function createCodexProgress(): {
   let eventCount = 0;
   let lastEventType = '';
   let lastAgentSnippet = '';
+  let lastErrorSnippet = '';
   let lastToolSnippet = '';
   let lastStderrSnippet = '';
 
@@ -249,6 +273,17 @@ function createCodexProgress(): {
           output: {
             line: text,
             source: 'agent',
+          },
+        };
+      }
+
+      const errorLine = summarizeCodexErrorEvent(evt);
+      if (errorLine) {
+        lastErrorSnippet = errorLine;
+        return {
+          output: {
+            line: errorLine,
+            source: 'tool',
           },
         };
       }
@@ -282,6 +317,7 @@ function createCodexProgress(): {
       if (eventCount > 0) parts.push(`eventos=${String(eventCount)}`);
       if (lastEventType) parts.push(`último=${lastEventType}`);
       if (lastAgentSnippet) parts.push(`agente="${lastAgentSnippet}"`);
+      else if (lastErrorSnippet) parts.push(`erro="${lastErrorSnippet}"`);
       else if (lastToolSnippet) parts.push(`tool="${lastToolSnippet}"`);
       else if (lastStderrSnippet) parts.push(`stderr="${lastStderrSnippet}"`);
       return parts.length > 0 ? `[${parts.join(' | ')}]` : undefined;
@@ -330,6 +366,22 @@ function serializeToolPayload(payload: unknown): string {
   } catch {
     return normalizeSnippet(String(payload)); // eslint-disable-line @typescript-eslint/no-base-to-string
   }
+}
+
+function summarizeCodexErrorEvent(evt: CodexEvent | null): string | null {
+  if (!evt?.type) return null;
+
+  if (evt.type === 'error' || evt.type === 'turn.failed') {
+    const message = normalizeSnippet(evt.error?.message ?? evt.message);
+    return message ? `error ${message}` : 'error';
+  }
+
+  if (evt.type === 'item.completed' && evt.item?.type === 'error') {
+    const message = normalizeSnippet(evt.item.message ?? evt.item.text);
+    return message ? `error ${message}` : 'error';
+  }
+
+  return null;
 }
 
 function emitRunOutput(

@@ -30,8 +30,8 @@ export interface FeatureCatalogEntry {
   retry?: Retry;
   specFile?: string;
   context?: string[];
-  /** F36: per-feature override for `budget.perFeatureMaxTokens` — undefined
-   * means the backlog-level default still applies. */
+  /** F36: per-feature config for `budget.perFeatureMaxTokens` — undefined
+    * means the backlog-level default still applies. */
   maxTokens?: number;
 }
 
