@@ -1,4 +1,4 @@
-import { loadConfig } from '../../config/index.js';
+import { resolveConfigSnapshot } from '../../config/index.js';
 import { msqEventBus } from '../../core/events/index.js';
 import type { Command } from '../types/commands.js';
 
@@ -27,9 +27,11 @@ interface CommandDefinitionOptions {
 }
 
 function showConfigSummary(): void {
-  const config = loadConfig();
+  const snapshot = resolveConfigSnapshot(process.cwd());
+  const config = snapshot.runtime;
   const concurrency = typeof config.concurrency === 'number' ? String(config.concurrency) : 'default';
-  msqEventBus.emit('ui:info', { message: `Config loaded: concurrency ${concurrency}` });
+  const repoSource = snapshot.sources.repoConfigPath ? `, repo ${snapshot.sources.repoConfigPath}` : '';
+  msqEventBus.emit('ui:info', { message: `Config loaded: concurrency ${concurrency} (${snapshot.sources.globalConfigPath}${repoSource})` });
 }
 
 export function buildCommandDefinitions(options: CommandDefinitionOptions): Command[] {

@@ -5,6 +5,8 @@ import type { Skill } from '../skills/types.js';
 
 export interface PromptBuildOptions {
   maxContextChars?: number;
+  activeStage?: string | null;
+  stepGuidanceSkills?: Skill[];
 }
 
 function renderTemplate(template: string, vars: Record<string, string | null | undefined>): string {
@@ -102,6 +104,41 @@ function buildTasksSection(feature: Feature, cwd: string): string | null {
   return parts.length > 0 ? parts.join('\n\n') : null;
 }
 
+function renderSkillPrompt(
+  skill: Skill,
+  feature: Feature,
+  specContent: string | null,
+  contextContent: string | null,
+  tasksContent: string | null,
+): string {
+  const inputs = skill.metadata.inputs;
+  const vars: Record<string, string | null | undefined> = {
+    featureId: feature.id,
+    featureTitle: feature.title,
+    summary: !inputs || inputs.includes('summary')
+      ? (feature.spec ? `Feature summary:\n${feature.spec}` : null)
+      : null,
+    spec: null,
+    context: null,
+    tasks: null,
+  };
+  if (!inputs || inputs.includes('specFile')) vars.spec = specContent;
+  if (!inputs || inputs.includes('context')) vars.context = contextContent;
+  if (!inputs || inputs.includes('tasks')) vars.tasks = tasksContent;
+  return normalizePrompt(renderTemplate(skill.promptTemplate, vars));
+}
+
+function dedupeStepGuidanceSkills(baseSkills: Skill[], extraSkills: Skill[]): Skill[] {
+  const seen = new Set(baseSkills.map((skill) => skill.name));
+  const deduped: Skill[] = [];
+  for (const skill of extraSkills) {
+    if (seen.has(skill.name)) continue;
+    seen.add(skill.name);
+    deduped.push(skill);
+  }
+  return deduped;
+}
+
 const FALLBACK_IMPLEMENT: Skill = {
   name: 'implement',
   source: 'builtin',
@@ -129,24 +166,16 @@ export function buildPrompt(
   const contextContent = truncateSection(buildContextSection(feature, cwd) ?? '', opts.maxContextChars);
   const tasksContent = truncateSection(buildTasksSection(feature, cwd) ?? '', opts.maxContextChars);
   const effectiveSkills = skills.length > 0 ? skills : [FALLBACK_IMPLEMENT];
+  const skillPrompts = effectiveSkills.map((skill) => renderSkillPrompt(skill, feature, specContent, contextContent, tasksContent));
+  // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- tests still exercise buildPrompt with partial feature objects
+  const stepGuidance = opts.activeStage ? feature.workflow?.stepGuidance?.[opts.activeStage] : undefined;
+  const stepGuidanceSkills = dedupeStepGuidanceSkills(
+    effectiveSkills,
+    opts.stepGuidanceSkills ?? [],
+  ).map((skill) => renderSkillPrompt(skill, feature, specContent, contextContent, tasksContent));
+  const directPrompt = stepGuidance?.prompt?.trim() ? normalizePrompt(stepGuidance.prompt) : null;
 
-  const skillPrompts = effectiveSkills.map((s) => {
-    const inputs = s.metadata.inputs;
-    const vars: Record<string, string | null | undefined> = {
-      featureId: feature.id,
-      featureTitle: feature.title,
-      summary: !inputs || inputs.includes('summary')
-        ? (feature.spec ? `Feature summary:\n${feature.spec}` : null)
-        : null,
-      spec: null,
-      context: null,
-      tasks: null,
-    };
-    if (!inputs || inputs.includes('specFile')) vars.spec = specContent;
-    if (!inputs || inputs.includes('context')) vars.context = contextContent;
-    if (!inputs || inputs.includes('tasks')) vars.tasks = tasksContent;
-    return normalizePrompt(renderTemplate(s.promptTemplate, vars));
-  });
-
-  return skillPrompts.join('\n\n---\n\n');
+  return [...skillPrompts, ...stepGuidanceSkills, directPrompt]
+    .filter((section): section is string => Boolean(section))
+    .join('\n\n---\n\n');
 }

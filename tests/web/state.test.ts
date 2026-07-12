@@ -9,7 +9,7 @@ const mocks = vi.hoisted(() => ({
   listRunsForStats: vi.fn(),
   getFeatureCatalog: vi.fn(),
   getBacklogSettings: vi.fn(),
-  loadConfig: vi.fn(),
+  resolveRuntimeConfig: vi.fn(),
 }));
 
 vi.mock('../../src/core/repo.js', () => ({
@@ -32,7 +32,7 @@ vi.mock('../../src/ui/catalog.js', () => ({
 }));
 
 vi.mock('../../src/config/index.js', () => ({
-  loadConfig: mocks.loadConfig,
+  resolveRuntimeConfig: mocks.resolveRuntimeConfig,
 }));
 
 describe('buildMsqWebState pendingFeatures projection', () => {
@@ -55,7 +55,18 @@ describe('buildMsqWebState pendingFeatures projection', () => {
       },
     });
     mocks.getBacklogSettings.mockReturnValue({ stageSkills: {} });
-    mocks.loadConfig.mockReturnValue({});
+    mocks.resolveRuntimeConfig.mockReturnValue({
+      theme: undefined,
+      concurrency: 3,
+      staleRunThresholdMinutes: 120,
+      toolTimeoutMs: 600_000,
+      promptContextCharLimit: 20_000,
+      stageSkills: {},
+      notifications: { channels: [], events: [] },
+      workflow: { autoAdvanceStages: false, pollIntervalMs: 2_000 },
+      budget: { alertAtPercent: 80 },
+      web: { host: '127.0.0.1', port: 8743, auth: 'token' },
+    });
   });
 
   it('removes newly started running features from pendingFeatures', async () => {

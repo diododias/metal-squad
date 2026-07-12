@@ -198,4 +198,66 @@ describe('config', () => {
 
     expect(loadConfig().theme).toBe('solarized');
   });
+
+  it('loads repo runtime overrides and env interpolation from .msq/config.yaml', async () => {
+    home = mkdtempSync(join(tmpdir(), 'msq-config-'));
+    process.env.HOME = home;
+    process.env.SLACK_WEBHOOK_URL = 'https://example.test/hook';
+
+    await import('node:fs').then(({ mkdirSync, writeFileSync }) => {
+      mkdirSync(join(home, 'repo', '.msq'), { recursive: true });
+      writeFileSync(join(home, 'repo', '.msq', 'config.yaml'), [
+        'runtime:',
+        '  concurrency: 5',
+        '  notifications:',
+        '    channels:',
+        '      - type: slack',
+        '        webhookUrl: ${SLACK_WEBHOOK_URL}',
+        'defaults:',
+        '  tool: codex',
+        '  model: gpt-5.4',
+        '  effort: high',
+        '  stageSkills:',
+        '    plan:',
+        '      - speckit-plan',
+      ].join('\n'));
+    });
+
+    const { loadRepoConfig, resolveRuntimeConfig } = await import('../../src/config/index.js');
+    const repoConfig = loadRepoConfig(join(home, 'repo'));
+    const runtime = resolveRuntimeConfig(join(home, 'repo'));
+
+    expect(repoConfig.defaults).toEqual({
+      tool: 'codex',
+      model: 'gpt-5.4',
+      effort: 'high',
+      stageSkills: { plan: ['speckit-plan'] },
+    });
+    expect(runtime.concurrency).toBe(5);
+    expect(runtime.notifications.channels).toEqual([
+      { type: 'slack', webhookUrl: 'https://example.test/hook' },
+    ]);
+  });
+
+  it('fails clearly when repo config references a missing environment variable', async () => {
+    home = mkdtempSync(join(tmpdir(), 'msq-config-'));
+    process.env.HOME = home;
+
+    await import('node:fs').then(({ mkdirSync, writeFileSync }) => {
+      mkdirSync(join(home, 'repo', '.msq'), { recursive: true });
+      writeFileSync(join(home, 'repo', '.msq', 'config.yaml'), [
+        'runtime:',
+        '  notifications:',
+        '    channels:',
+        '      - type: slack',
+        '        webhookUrl: ${MISSING_SECRET}',
+      ].join('\n'));
+    });
+
+    const { loadRepoConfig } = await import('../../src/config/index.js');
+
+    expect(() => loadRepoConfig(join(home, 'repo'))).toThrow('.msq/config.yaml');
+    expect(() => loadRepoConfig(join(home, 'repo'))).toThrow('MISSING_SECRET');
+    expect(() => loadRepoConfig(join(home, 'repo'))).toThrow('runtime.notifications.channels.0.webhookUrl');
+  });
 });

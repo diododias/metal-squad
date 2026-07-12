@@ -9,7 +9,7 @@ import {
 } from '../core/backlog/decompose.js';
 import { getAdapter } from '../core/adapters/index.js';
 import { createSkillRegistry } from '../core/skills/index.js';
-import { loadConfig } from '../config/index.js';
+import { resolveRuntimeConfig } from '../config/index.js';
 import { resolveRepo } from '../core/repo.js';
 import { assertWritableDbPath, DbAccessError } from '../db/index.js';
 import { createRun, finishRun, recordUsage, registerRepo } from '../db/repo.js';
@@ -30,7 +30,7 @@ export function registerDecompose(program: Command): void {
           throw new Error(`Feature not found in backlog: ${featureId}`);
         }
 
-        const config = loadConfig();
+        const config = resolveRuntimeConfig(cwd);
         const registry = createSkillRegistry();
         const skills = registry.resolve(['decompose'], cwd);
         const prompt = buildPrompt(feature, skills, cwd, {

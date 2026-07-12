@@ -1,17 +1,17 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const mockGetSecret = vi.fn();
-const mockLoadConfig = vi.fn();
+const mockResolveRuntimeConfig = vi.fn();
 const mockFetch = vi.fn();
 
 vi.mock('../../src/security/secrets.js', () => ({ getSecret: mockGetSecret }));
-vi.mock('../../src/config/index.js', () => ({ loadConfig: mockLoadConfig }));
+vi.mock('../../src/config/index.js', () => ({ resolveRuntimeConfig: mockResolveRuntimeConfig }));
 vi.stubGlobal('fetch', mockFetch);
 
 beforeEach(() => {
   vi.resetModules();
   mockGetSecret.mockReset();
-  mockLoadConfig.mockReset();
+  mockResolveRuntimeConfig.mockReset();
   mockFetch.mockReset();
   mockFetch.mockResolvedValue({ ok: true });
 });
@@ -172,7 +172,7 @@ describe('TelegramChannel', () => {
 describe('notify (deprecated)', () => {
   it('does nothing when token is falsy', async () => {
     mockGetSecret.mockResolvedValue(undefined);
-    mockLoadConfig.mockReturnValue({ telegramChatId: 'chat1' });
+    mockResolveRuntimeConfig.mockReturnValue({ telegramChatId: 'chat1' });
     const { notify } = await import('../../src/core/notify/telegram.js');
 
     await notify('hello');
@@ -182,7 +182,7 @@ describe('notify (deprecated)', () => {
 
   it('does nothing when chatId is falsy', async () => {
     mockGetSecret.mockResolvedValue('TOKEN');
-    mockLoadConfig.mockReturnValue({ telegramChatId: undefined });
+    mockResolveRuntimeConfig.mockReturnValue({ telegramChatId: undefined });
     const { notify } = await import('../../src/core/notify/telegram.js');
 
     await notify('hello');
@@ -192,7 +192,7 @@ describe('notify (deprecated)', () => {
 
   it('posts message when both token and chatId are present', async () => {
     mockGetSecret.mockResolvedValue('TOKEN');
-    mockLoadConfig.mockReturnValue({ telegramChatId: 'chat99' });
+    mockResolveRuntimeConfig.mockReturnValue({ telegramChatId: 'chat99' });
     const { notify } = await import('../../src/core/notify/telegram.js');
 
     await notify('deprecation test');

@@ -9,7 +9,8 @@ const mockRegisterRepo = vi.fn();
 const mockLoadBacklog = vi.fn();
 const mockExecuteBacklog = vi.fn();
 const mockValidateBacklogSkills = vi.fn();
-const mockLoadConfig = vi.fn();
+const mockResolveRuntimeConfig = vi.fn();
+const mockResolveConfigSnapshot = vi.fn();
 const mockCreateSkillRegistry = vi.fn();
 const mockFormatSkillList = vi.fn();
 const mockListRuns = vi.fn();
@@ -60,7 +61,16 @@ vi.mock('../../src/core/skills/index.js', () => ({
 }));
 
 vi.mock('../../src/config/index.js', () => ({
-  loadConfig: mockLoadConfig,
+  resolveRuntimeConfig: mockResolveRuntimeConfig,
+  resolveConfigSnapshot: mockResolveConfigSnapshot,
+  mergeExecutionDefaults: (base: Record<string, unknown>, overlay: Record<string, unknown>) => ({
+    ...base,
+    ...overlay,
+    stageSkills: {
+      ...((base.stageSkills as Record<string, string[]>) ?? {}),
+      ...((overlay.stageSkills as Record<string, string[]>) ?? {}),
+    },
+  }),
 }));
 
 vi.mock('../../src/db/index.js', () => ({
@@ -100,10 +110,33 @@ describe('commands', () => {
     cwd = mkdtempSync(join(tmpdir(), 'msq-command-'));
     process.chdir(cwd);
     mockResolveRepo.mockReturnValue({ repoId: 'repo-1', path: cwd });
-    mockLoadConfig.mockReturnValue({
+    mockResolveRuntimeConfig.mockReturnValue({
       concurrency: 3,
       staleRunThresholdMinutes: 120,
+      toolTimeoutMs: 600_000,
+      promptContextCharLimit: 20_000,
+      theme: undefined,
+      stageSkills: {},
+      notifications: { channels: [], events: [] },
       workflow: { autoAdvanceStages: false, pollIntervalMs: 2_000 },
+      budget: { alertAtPercent: 80 },
+      web: { host: '127.0.0.1', port: 8743, auth: 'token' },
+    });
+    mockResolveConfigSnapshot.mockReturnValue({
+      runtime: {
+        concurrency: 3,
+        staleRunThresholdMinutes: 120,
+        toolTimeoutMs: 600_000,
+        promptContextCharLimit: 20_000,
+        theme: undefined,
+        stageSkills: {},
+        notifications: { channels: [], events: [] },
+        workflow: { autoAdvanceStages: false, pollIntervalMs: 2_000 },
+        budget: { alertAtPercent: 80 },
+        web: { host: '127.0.0.1', port: 8743, auth: 'token' },
+      },
+      repoDefaults: {},
+      sources: { globalConfigPath: '/tmp/global.json' },
     });
     mockCreateSkillRegistry.mockReturnValue({ discover: vi.fn(() => ['implement']) });
     mockFormatSkillList.mockReturnValue('implement');
@@ -438,5 +471,46 @@ describe('commands', () => {
 
     expect(log).toHaveBeenCalledWith('Pipeline 9 já concluída — nada para retomar.');
     expect(mockExecuteBacklog).not.toHaveBeenCalled();
+  });
+
+  it('config show prints resolved defaults for one feature as JSON', async () => {
+    await import('node:fs').then(({ writeFileSync }) => writeFileSync(join(cwd, 'backlog.yaml'), 'version: 2\nrepo: demo\n'));
+    mockLoadBacklog.mockReturnValue({
+      version: 2,
+      repo: 'demo',
+      defaults: { tool: 'codex', effort: 'medium', skills: ['implement'], stageSkills: { plan: ['speckit-plan'] } },
+      epics: [{
+        id: 'e1',
+        title: 'Epic',
+        features: [{
+          id: 'feat-1',
+          title: 'Feature 1',
+          tool: 'codex',
+          effort: 'high',
+          skills: ['implement'],
+          dependsOn: [],
+          tasks: [],
+          workflow: {
+            mode: 'staged',
+            stages: ['implement'],
+            approvals: { channel: 'telegram', autoAdvance: false },
+            syncTasksToBacklog: true,
+            sessionPolicy: { mode: 'isolated', alwaysIsolatedStages: [] },
+            stepGuidance: {},
+          },
+        }],
+      }],
+    });
+
+    const { registerConfig } = await import('../../src/commands/config.js');
+    const program = new Command();
+    registerConfig(program);
+
+    await program.parseAsync(['node', 'msq', 'config', 'show', '--feature', 'feat-1', '--json']);
+
+    const printed = log.mock.calls.at(-1)?.[0] as string;
+    const payload = JSON.parse(printed) as { feature: { id: string; effective: { effort: string } } };
+    expect(payload.feature.id).toBe('feat-1');
+    expect(payload.feature.effective.effort).toBe('high');
   });
 });

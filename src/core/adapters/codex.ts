@@ -1,7 +1,7 @@
 import type { SessionHandle, ToolAdapter, RunResult, RunFeatureOptions, TokenUsage } from './types.js';
 import type { Effort, Feature } from '../backlog/schema.js';
 import { execFileSync } from 'node:child_process';
-import { loadConfig } from '../../config/index.js';
+import { resolveRuntimeConfig } from '../../config/index.js';
 import { CliAbortError, CliTimeoutError, runCli } from './spawn.js';
 import { msqEventBus } from '../events/index.js';
 import { parseControlSignal } from './control.js';
@@ -81,7 +81,7 @@ export const codexAdapter: ToolAdapter = {
           prompt,
         ];
 
-    const timeoutMs = Math.max(loadConfig().toolTimeoutMs, 1_800_000);
+    const timeoutMs = Math.max(resolveRuntimeConfig(process.cwd()).toolTimeoutMs, 1_800_000);
     let code: number;
     let stdout: string;
     let stderr: string;

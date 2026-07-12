@@ -1,7 +1,7 @@
 import type { Command } from 'commander';
 import { loadBacklogFromCatalog } from '../core/backlog/load.js';
 import { executeBacklog } from '../core/runner/execute.js';
-import { loadConfig } from '../config/index.js';
+import { resolveRuntimeConfig } from '../config/index.js';
 import { validateBacklogSkills } from '../core/skills/index.js';
 import { resolveRepo } from '../core/repo.js';
 import { assertWritableDbPath, DbAccessError } from '../db/index.js';
@@ -27,7 +27,7 @@ export function registerRun(program: Command): void {
 
         const concurrency = opts.concurrency
           ? Number(opts.concurrency)
-          : loadConfig().concurrency;
+          : resolveRuntimeConfig(cwd).concurrency;
         await executeBacklog(backlog, {
           cwd,
           concurrency,

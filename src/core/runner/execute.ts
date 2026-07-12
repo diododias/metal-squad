@@ -48,7 +48,7 @@ import {
 import { getCatalogFeature } from '../../db/backlogCatalog.js';
 import { dispatch } from '../notify/manager.js';
 import { startTelegramPoller, stopTelegramPoller } from '../notify/telegram-poller.js';
-import { loadConfig } from '../../config/index.js';
+import { resolveRuntimeConfig } from '../../config/index.js';
 import { buildPrompt } from '../backlog/prompt.js';
 import { createSkillRegistry } from '../skills/index.js';
 import { syncFeatureTasksToBacklog } from '../backlog/sync.js';
@@ -90,7 +90,7 @@ export async function executeBacklog(
   backlog: Backlog,
   opts: ExecuteOptions,
 ): Promise<void> {
-  const config = loadConfig();
+  const config = resolveRuntimeConfig(opts.cwd);
   const { repoId, path } = resolveRepo(opts.cwd);
   registerRepo(repoId, path);
   cleanupStaleRuns(config.staleRunThresholdMinutes);
@@ -714,7 +714,7 @@ async function executeStagedFeature(
   feature: Feature,
   pipelineId: number,
   registry: ReturnType<typeof createSkillRegistry>,
-  config: ReturnType<typeof loadConfig>,
+  config: ReturnType<typeof resolveRuntimeConfig>,
   opts: ExecuteOptions,
   executeStageRun: StageExecutor,
   stageSkills: Record<string, string[]>,
@@ -761,7 +761,16 @@ async function executeStagedFeature(
     const stage = stages[index] ?? 'implement';
     updatePipelineStage(pipelineId, stage);
     const stageSkillList = resolveStageSkill(feature, stage, registry, opts.cwd, stageSkills);
-    const prompt = buildStagePrompt(feature, stage, stageSkillList, opts.cwd, config.promptContextCharLimit, stageInputs.get(stage) ?? []);
+    const stepGuidanceSkills = resolveStepGuidanceSkills(feature, stage, registry, opts.cwd);
+    const prompt = buildStagePrompt(
+      feature,
+      stage,
+      stageSkillList,
+      stepGuidanceSkills,
+      opts.cwd,
+      config.promptContextCharLimit,
+      stageInputs.get(stage) ?? [],
+    );
     const { runId, res } = await executeStageRun(feature, prompt, stage, abortSignal, nextStageSession);
     if (pendingTransitionDecisionId !== null) {
       updateStageTransitionDecisionNextSessionId(
@@ -905,11 +914,16 @@ function buildStagePrompt(
   feature: Feature,
   stage: string,
   skills: Skill[],
+  stepGuidanceSkills: Skill[],
   cwd: string,
   maxContextChars: number,
   adminInputs: string[],
 ): string {
-  const basePrompt = buildPrompt(feature, skills, cwd, { maxContextChars });
+  const basePrompt = buildPrompt(feature, skills, cwd, {
+    maxContextChars,
+    activeStage: stage,
+    stepGuidanceSkills,
+  });
   const stageNotes = [
     `Current workflow stage: ${stage}.`,
     'Run only this stage in this session.',
@@ -933,6 +947,18 @@ function buildStagePrompt(
 
   const appendedSections = [stageNotes.join('\n'), ...stageContext].filter((section) => section.trim().length > 0);
   return `${basePrompt}\n\n---\n\n${appendedSections.join('\n\n')}`.trim();
+}
+
+function resolveStepGuidanceSkills(
+  feature: Feature,
+  stage: string,
+  registry: ReturnType<typeof createSkillRegistry>,
+  cwd: string,
+): Skill[] {
+  // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- staged tests still construct partial workflow objects
+  const names = feature.workflow.stepGuidance?.[stage]?.skills ?? [];
+  if (names.length === 0) return [];
+  return registry.resolve([...new Set(names)], cwd);
 }
 
 function buildSpecifyStageDescription(

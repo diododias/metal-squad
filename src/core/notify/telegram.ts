@@ -1,5 +1,5 @@
 import { getSecret } from '../../security/secrets.js';
-import { loadConfig } from '../../config/index.js';
+import { resolveRuntimeConfig } from '../../config/index.js';
 import type { NotificationChannel } from './types.js';
 
 const TELEGRAM_MESSAGE_LIMIT = 4096;
@@ -51,7 +51,7 @@ export class TelegramChannel implements NotificationChannel {
 /** @deprecated Use TelegramChannel via the notification manager instead. */
 export async function notify(message: string): Promise<void> {
   const token = await getSecret('telegram-bot-token');
-  const chatId = loadConfig().telegramChatId;
+  const chatId = resolveRuntimeConfig(process.cwd()).telegramChatId;
   if (!token || !chatId) return;
 
   await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {

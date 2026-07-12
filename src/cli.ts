@@ -7,6 +7,7 @@ import { registerResume } from './commands/resume.js';
 import { registerSkills } from './commands/skills.js';
 import { registerStatus } from './commands/status.js';
 import { registerStats } from './commands/stats.js';
+import { registerConfig } from './commands/config.js';
 import { registerUi } from './commands/ui.js';
 import { registerWeb } from './commands/web.js';
 import { registerDaemon } from './commands/daemon.js';
@@ -30,6 +31,7 @@ export async function run(argv: string[]): Promise<void> {
   registerSkills(program);
   registerStatus(program);
   registerStats(program);
+  registerConfig(program);
   registerUi(program);
   registerWeb(program);
   registerDaemon(program);

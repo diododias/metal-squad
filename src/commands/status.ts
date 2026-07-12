@@ -8,7 +8,7 @@ import {
   listRetryHistory,
   listRuns,
 } from '../db/repo.js';
-import { loadConfig } from '../config/index.js';
+import { resolveRuntimeConfig } from '../config/index.js';
 
 export function registerStatus(program: Command): void {
   program
@@ -23,7 +23,7 @@ export function registerStatus(program: Command): void {
     .action(async (opts: { limit: string; repairStale?: boolean; staleMinutes?: string }) => { // eslint-disable-line @typescript-eslint/require-await
       const staleRunThresholdMinutes = opts.staleMinutes
         ? Number(opts.staleMinutes)
-        : loadConfig().staleRunThresholdMinutes;
+        : resolveRuntimeConfig(process.cwd()).staleRunThresholdMinutes;
       const repaired = opts.repairStale
         ? cleanupStaleRuns(staleRunThresholdMinutes)
         : 0;

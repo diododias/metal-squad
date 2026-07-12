@@ -36,7 +36,7 @@ class MockCliAbortError extends Error {
 }
 
 vi.mock('../../src/config/index.js', () => ({
-  loadConfig: () => ({ toolTimeoutMs: 600_000 }),
+  resolveRuntimeConfig: () => ({ toolTimeoutMs: 600_000 }),
 }));
 
 vi.mock('../../src/core/adapters/spawn.js', () => ({

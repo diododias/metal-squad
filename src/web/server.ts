@@ -25,7 +25,7 @@ import { computeRunBreakdown } from '../core/stats.js';
 import { resolveRepo } from '../core/repo.js';
 import { loadBacklogFromCatalog } from '../core/backlog/load.js';
 import { validateBacklogSkills } from '../core/skills/index.js';
-import { loadConfig } from '../config/index.js';
+import { resolveRuntimeConfig } from '../config/index.js';
 import { updateCatalogFeature, updateCatalogTask, type FeaturePatch } from '../db/backlogCatalog.js';
 import type { Feature, Task } from '../core/backlog/schema.js';
 import { buildMsqWebState, appendNotification } from './state.js';
@@ -664,8 +664,8 @@ export function createWebServer(options: {
     try {
       console.log(`[startFeature] featureId=${featureId}`);
       assertWritableDbPath();
-      loadConfig();
-      const backlog = loadBacklogFromCatalog(resolveRepo(featureCwd).repoId);
+      resolveRuntimeConfig(featureCwd);
+      const backlog = loadBacklogFromCatalog(resolveRepo(featureCwd).repoId, featureCwd);
       validateBacklogSkills(backlog, featureCwd);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);

@@ -102,7 +102,7 @@ vi.mock('../../src/core/skills/index.js', () => ({
 }));
 
 vi.mock('../../src/config/index.js', () => ({
-  loadConfig: () => ({
+  resolveRuntimeConfig: () => ({
     staleRunThresholdMinutes: 120,
     promptContextCharLimit: 20_000,
     workflow: { autoAdvanceStages: false, pollIntervalMs: 1 },
@@ -651,6 +651,11 @@ describe('executeBacklog failure persistence', () => {
                 approvals: { channel: 'telegram', autoAdvance: false },
                 syncTasksToBacklog: false,
                 sessionPolicy: { mode: 'isolated', alwaysIsolatedStages: [] },
+                stepGuidance: {
+                  plan: {
+                    prompt: 'Focus only on planning output.',
+                  },
+                },
               },
             },
           ],
@@ -699,6 +704,7 @@ describe('executeBacklog failure persistence', () => {
     );
     expect(mockRunFeature.mock.calls[0]?.[1]).toContain('Feature: Feature');
     expect(mockRunFeature.mock.calls[0]?.[1]).toContain('Summary:\nspec');
+    expect(mockRunFeature.mock.calls[1]?.[1]).toContain('Focus only on planning output.');
     expect(mockFinishPipeline).toHaveBeenCalledWith(9, 'done');
   });
 

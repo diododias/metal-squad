@@ -1,5 +1,6 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
+import { mergeExecutionDefaults, resolveConfigSnapshot, type ResolvedConfigSources, type ResolvedExecutionDefaults } from '../config/index.js';
 import { loadBacklogFromCatalog } from '../core/backlog/load.js';
 import { resolveRepo } from '../core/repo.js';
 import type { Budget, Retry, Task, Workflow } from '../core/backlog/schema.js';
@@ -43,6 +44,8 @@ export interface FeatureCatalogEntry {
 export interface BacklogSettings {
   budget?: Budget;
   stageSkills: Record<string, string[]>;
+  configSources?: ResolvedConfigSources;
+  resolvedDefaults?: ResolvedExecutionDefaults;
 }
 
 const DEFAULT_BACKLOG_SETTINGS: BacklogSettings = { stageSkills: {} };
@@ -78,8 +81,16 @@ let cachedSettings: BacklogSettings = DEFAULT_BACKLOG_SETTINGS;
  * the TUI's DB-backed state). */
 function loadCatalogAndSettings(cwd: string): void {
   try {
+    const snapshot = resolveConfigSnapshot(cwd);
     const { repoId } = resolveRepo(cwd);
-    const backlog = loadBacklogFromCatalog(repoId);
+    const backlog = loadBacklogFromCatalog(repoId, cwd);
+    const resolvedDefaults = mergeExecutionDefaults({
+      tool: snapshot.repoDefaults.tool ?? 'claude',
+      model: snapshot.repoDefaults.model,
+      effort: snapshot.repoDefaults.effort ?? 'medium',
+      skills: snapshot.repoDefaults.skills ?? [],
+      stageSkills: snapshot.repoDefaults.stageSkills ?? {},
+    }, backlog.defaults);
     cachedCatalog = Object.fromEntries(
       backlog.epics.flatMap((epic) =>
         epic.features.map((feature) => [
@@ -107,6 +118,8 @@ function loadCatalogAndSettings(cwd: string): void {
     cachedSettings = {
       budget: backlog.budget,
       stageSkills: 'defaults' in backlog ? backlog.defaults.stageSkills : {},
+      configSources: snapshot.sources,
+      resolvedDefaults,
     };
   } catch {
     cachedCatalog = {};

@@ -1,7 +1,7 @@
 # F46 — Prompt/Skill Customizado por Step
 
 **Tipo**: Feature
-**Status**: Pendente — triagem
+**Status**: Implementado
 **Prioridade sugerida**: Media
 **Relaciona**: F02 (Skill Registry), F03 (Dynamic Prompt Builder)
 
@@ -24,9 +24,30 @@ de "esta skill/prompt extra guia especificamente este step desta feature".
 - `src/core/backlog/` (prompt builder, F03) — injecao do prompt customizado
   na montagem final
 
-## Proximo passo
+## Contrato entregue
 
-Ler `docs/features/F02-skill-registry.md` e `F03-dynamic-prompt-builder.md`
-para confirmar se "prompt customizado por step" e melhor modelado como uma
-skill de precedence mais alta (reaproveitando F02) ou como um campo novo no
-schema do backlog — evitar path paralelo de resolucao de prompt.
+`workflow.stepGuidance` agora aceita chaves por stage, reaproveitando o mesmo
+registro de skills do backlog:
+
+```yaml
+workflow:
+  mode: staged
+  stages: [specify, plan, tasks, implement, validate]
+  stepGuidance:
+    implement:
+      skills:
+        - repo-implement-guardrails
+      prompt: |
+        Touch only the files needed for this stage.
+```
+
+## Garantias
+
+- skills nomeadas em `workflow.stepGuidance.<stage>.skills` usam a precedence
+  canonica `repo > global > external > builtin`
+- stage sem `stepGuidance` mantem o prompt byte-equivalent ao comportamento
+  anterior
+- prompt final concatena, nesta ordem: base skills, step-guidance skills
+  deduplicadas e prompt direto do stage
+- prompt direto vazio ou so com whitespace e ignorado
+- validacao do backlog falha antes da execucao se uma skill nomeada nao existir

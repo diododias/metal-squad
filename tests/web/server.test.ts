@@ -32,7 +32,7 @@ const mocks = vi.hoisted(() => ({
   updateCatalogTask: vi.fn(),
   loadBacklogFromCatalog: vi.fn(),
   validateBacklogSkills: vi.fn(),
-  loadConfig: vi.fn(),
+  resolveRuntimeConfig: vi.fn(),
   spawn: vi.fn(),
 }));
 
@@ -58,7 +58,7 @@ vi.mock('../../src/core/skills/index.js', () => ({
 }));
 
 vi.mock('../../src/config/index.js', () => ({
-  loadConfig: mocks.loadConfig,
+  resolveRuntimeConfig: mocks.resolveRuntimeConfig,
 }));
 
 vi.mock('node:child_process', async () => {
@@ -206,7 +206,18 @@ describe('web server', () => {
     mocks.getBacklogSettings.mockReturnValue({ stageSkills: {} });
     mocks.loadBacklogFromCatalog.mockReturnValue({ epics: [] });
     mocks.validateBacklogSkills.mockReturnValue(undefined);
-    mocks.loadConfig.mockReturnValue({});
+    mocks.resolveRuntimeConfig.mockReturnValue({
+      concurrency: 3,
+      staleRunThresholdMinutes: 120,
+      toolTimeoutMs: 600_000,
+      promptContextCharLimit: 20_000,
+      theme: undefined,
+      stageSkills: {},
+      notifications: { channels: [], events: [] },
+      workflow: { autoAdvanceStages: false, pollIntervalMs: 2_000 },
+      budget: { alertAtPercent: 80 },
+      web: { host: '127.0.0.1', port: 8743, auth: 'token' },
+    });
     mocks.spawn.mockReturnValue({
       once: vi.fn(),
       unref: vi.fn(),

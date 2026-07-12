@@ -146,6 +146,35 @@ describe('collectBacklogSkillNames', () => {
     expect(names).toContain('review');
   });
 
+  it('includes workflow.stepGuidance skill references in backlog validation collection', () => {
+    const backlog = makeBacklog({
+      epics: [{
+        id: 'epic-1',
+        title: 'Epic',
+        features: [{
+          id: 'feat-1',
+          title: 'Feature',
+          tool: 'claude',
+          effort: 'medium',
+          dependsOn: [],
+          workflow: {
+            stages: ['implement'],
+            stepGuidance: {
+              implement: {
+                skills: ['repo-implement-guardrails', 'dev-flow'],
+              },
+            },
+          },
+          tasks: [],
+        }],
+      }],
+    });
+
+    const names = collectBacklogSkillNames(backlog);
+    expect(names).toContain('repo-implement-guardrails');
+    expect(names.filter((name) => name === 'dev-flow')).toHaveLength(1);
+  });
+
   it('handles features with no skills', () => {
     const backlog = makeBacklog({
       epics: [{
@@ -212,5 +241,43 @@ describe('validateBacklogSkills via doMock', () => {
     });
 
     expect(() => validateBacklogSkills(backlog, '/cwd')).not.toThrow();
+  });
+
+  it('throws when a workflow.stepGuidance skill is missing from registry', async () => {
+    vi.doMock('../../src/core/skills/registry.js', () => ({
+      createSkillRegistry: vi.fn(() => ({
+        discover: vi.fn(() => []),
+        resolve: vi.fn(() => []),
+        validate: vi.fn(() => ({ valid: false, missing: ['repo-implement-guardrails'] })),
+      })),
+    }));
+
+    const { validateBacklogSkills } = await import('../../src/core/skills/backlog.js');
+    const backlog = makeBacklog({
+      epics: [{
+        id: 'epic-1',
+        title: 'Epic',
+        features: [{
+          id: 'feat-1',
+          title: 'Feature',
+          tool: 'claude',
+          effort: 'medium',
+          dependsOn: [],
+          workflow: {
+            stages: ['implement'],
+            stepGuidance: {
+              implement: {
+                skills: ['repo-implement-guardrails'],
+              },
+            },
+          },
+          tasks: [],
+        }],
+      }],
+    });
+
+    expect(() => validateBacklogSkills(backlog, '/cwd')).toThrow(
+      /Missing skills referenced in backlog: repo-implement-guardrails/,
+    );
   });
 });

@@ -22,6 +22,7 @@ const _DEFAULT_WORKFLOW: Workflow = {
   approvals: { channel: 'telegram', autoAdvance: false },
   syncTasksToBacklog: true,
   sessionPolicy: { mode: 'isolated', alwaysIsolatedStages: [] },
+  stepGuidance: {},
 };
 
 interface Props {
@@ -145,6 +146,14 @@ export function FeatureConfigSection({ feature, settings, width }: Props): React
           {settings.budget.maxTokens !== undefined && row(theme, 'maxTokens', String(settings.budget.maxTokens))}
           {settings.budget.perFeatureMaxTokens !== undefined
             && row(theme, 'perFeatureMaxTokens', String(settings.budget.perFeatureMaxTokens))}
+        </Box>
+      )}
+      {settings.configSources && (
+        <Box marginTop={1} flexDirection="column">
+          <Text {...theme.role('muted')} bold>Config sources</Text>
+          {row(theme, 'global', settings.configSources.globalConfigPath)}
+          {row(theme, 'repo', settings.configSources.repoConfigPath ?? 'not found', !settings.configSources.repoConfigPath)}
+          {row(theme, 'resolved defaults', settings.resolvedDefaults ? `${settings.resolvedDefaults.tool}/${settings.resolvedDefaults.effort}` : 'not available', !settings.resolvedDefaults)}
         </Box>
       )}
       <Box marginTop={1} flexDirection="column">

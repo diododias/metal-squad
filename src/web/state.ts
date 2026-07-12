@@ -14,7 +14,7 @@ import {
 import { resolveRepo } from '../core/repo.js';
 import { getFeatureCatalog, getBacklogSettings, getPendingFeatures, type FeatureCatalogEntry } from '../ui/catalog.js';
 import { getRunGroup, sortRunsByGroup } from '../ui/dashboardGroups.js';
-import { loadConfig } from '../config/index.js';
+import { resolveRuntimeConfig } from '../config/index.js';
 import { resolveThemePreference } from '../ui/theme/resolve.js';
 import type { ThemeRoleName } from '../ui/theme/types.js';
 import type { MsqWebState, ThemeSnapshot, TokenStats, UiNotification } from './types.js';
@@ -112,7 +112,7 @@ const FALLBACK_ROLE_COLOR = '#e5e7eb';
 
 function buildThemeSnapshot(): ThemeSnapshot {
   try {
-    const config = loadConfig();
+    const config = resolveRuntimeConfig(process.cwd());
     const resolution = resolveThemePreference(config.theme);
     const textColor = resolution.profile.roles.text.color ?? FALLBACK_ROLE_COLOR;
     const roles = Object.fromEntries(

@@ -137,7 +137,7 @@ vi.mock('../../src/ui/catalog.js', () => ({
 }));
 
 vi.mock('../../src/config/index.js', () => ({
-  loadConfig: mockLoadConfig,
+  resolveRuntimeConfig: mockLoadConfig,
 }));
 
 vi.mock('../../src/core/backlog/load.js', () => ({

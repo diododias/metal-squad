@@ -85,7 +85,7 @@ describe('backlogCatalog upsert/diff/load', () => {
     expect(reloaded.epics).toHaveLength(1);
     expect(reloaded.epics[0]?.features[0]).toMatchObject({ id: 'feat-1', title: 'Feature One' });
     expect(reloaded.epics[0]?.features[0]?.tasks).toEqual([
-      { id: 'task-1', title: 'Task One', status: 'todo', dependsOn: [] },
+      { id: 'task-1', title: 'Task One', status: 'todo', dependsOn: [], skills: [] },
     ]);
   });
 

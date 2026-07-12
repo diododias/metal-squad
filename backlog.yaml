@@ -402,6 +402,186 @@ epics:
             channel: telegram
             autoAdvance: true
           syncTasksToBacklog: true
+        tasks:
+          - id: T001
+            title: Align the feature contract narrative and implementation notes in
+              `specs/016-per-repo-config/contracts/config-resolution-contract.md`
+              and `specs/016-per-repo-config/quickstart.md`
+            status: todo
+            dependsOn: []
+          - id: T002
+            title: "[P] Add baseline config fixture coverage for repo-local config loading
+              entry points in `tests/config/index.test.ts`"
+            status: todo
+            dependsOn: []
+          - id: T003
+            title: "[P] Add baseline backlog/default precedence fixtures for repo-level
+              defaults in `tests/backlog/load-extended.test.ts`"
+            status: todo
+            dependsOn: []
+          - id: T004
+            title: Extend config schemas and exported types for repo-scoped runtime/default
+              sections in `src/config/index.ts` and `src/core/backlog/schema.ts`
+            status: todo
+            dependsOn: []
+          - id: T005
+            title: "[P] Add repo-root config path discovery, YAML parsing, and
+              source-specific error reporting in `src/config/index.ts`"
+            status: todo
+            dependsOn: []
+          - id: T006
+            title: "[P] Implement recursive `${ENV_VAR}` interpolation with field-path-aware
+              failures in `src/config/index.ts`"
+            status: todo
+            dependsOn: []
+          - id: T007
+            title: Build a shared effective-config resolver that merges global config, repo
+              config, and optional backlog context in `src/config/index.ts` and
+              `src/core/backlog/load.ts`
+            status: todo
+            dependsOn: []
+          - id: T008
+            title: Thread repo-level execution defaults through backlog hydration and
+              normalization in `src/core/backlog/load.ts` and
+              `src/ui/catalog.ts`
+            status: todo
+            dependsOn: []
+          - id: T009
+            title: Add foundational regression coverage for schema validation, repo-config
+              parsing, env interpolation, and backlog merge primitives in
+              `tests/config/index.test.ts`,
+              `tests/backlog/load-extended.test.ts`, and
+              `tests/backlog/schema.test.ts`
+            status: todo
+            dependsOn: []
+          - id: T010
+            title: "[P] [US1] Add config resolution regression coverage for repo overrides
+              and missing-file fallback in `tests/config/index.test.ts`"
+            status: todo
+            dependsOn: []
+          - id: T011
+            title: "[P] [US1] Add backlog/runtime propagation coverage for repo defaults
+              reaching feature catalog and backlog settings in
+              `tests/backlog/load-extended.test.ts` and
+              `tests/ui/catalog.test.ts`"
+            status: todo
+            dependsOn: []
+          - id: T012
+            title: "[US1] Apply repo runtime overrides on top of global config in
+              `src/config/index.ts`"
+            status: todo
+            dependsOn: []
+          - id: T013
+            title: "[US1] Merge repo execution defaults into backlog-derived settings in
+              `src/core/backlog/load.ts` and `src/ui/catalog.ts`"
+            status: todo
+            dependsOn: []
+          - id: T014
+            title: "[US1] Update runtime consumers to read the shared resolved config
+              instead of raw global config in `src/commands/run.ts`,
+              `src/commands/resume.ts`, `src/commands/status.ts`, and
+              `src/core/notify/manager.ts`"
+            status: todo
+            dependsOn: []
+          - id: T015
+            title: "[US1] Preserve backward-compatible behavior for repos without
+              `.msq/config.yaml` in `src/config/index.ts` and
+              `tests/config/index.test.ts`"
+            status: todo
+            dependsOn: []
+          - id: T016
+            title: "[P] [US2] Add precedence regression coverage for backlog-over-repo and
+              feature-over-backlog resolution in
+              `tests/backlog/load-extended.test.ts` and
+              `tests/runner/execute.test.ts`"
+            status: todo
+            dependsOn: []
+          - id: T017
+            title: "[P] [US2] Add projection coverage for resolved backlog/feature settings
+              in `tests/ui/catalog.test.ts` and `tests/web/state.test.ts`"
+            status: todo
+            dependsOn: []
+          - id: T018
+            title: "[US2] Extend the shared resolver to produce backlog-level and
+              feature-level resolved views in `src/config/index.ts` and
+              `src/core/backlog/load.ts`"
+            status: todo
+            dependsOn: []
+          - id: T019
+            title: "[US2] Reuse resolved defaults when building feature catalog and backlog
+              settings views in `src/ui/catalog.ts` and `src/web/state.ts`"
+            status: todo
+            dependsOn: []
+          - id: T020
+            title: "[US2] Apply feature-level effective config precedence in execution paths
+              that consume backlog/catalog data in `src/core/runner/execute.ts`,
+              `src/commands/run.ts`, and `src/commands/decompose.ts`"
+            status: todo
+            dependsOn: []
+          - id: T021
+            title: "[US2] Keep stage-skills and workflow-related deep merges deterministic
+              across repo/backlog/feature layers in
+              `src/core/workflow/stageSkills.ts`, `src/core/backlog/load.ts`,
+              and `tests/backlog/load-extended.test.ts`"
+            status: todo
+            dependsOn: []
+          - id: T022
+            title: "[P] [US3] Add CLI coverage for `msq config show` human and JSON output
+              plus unknown-feature failures in
+              `tests/commands/commands.test.ts`"
+            status: todo
+            dependsOn: []
+          - id: T023
+            title: "[P] [US3] Add env interpolation and repo-config error coverage for
+              web/TUI inspection consumers in `tests/config/index.test.ts`,
+              `tests/web/state.test.ts`, and `tests/web/server.test.ts`"
+            status: todo
+            dependsOn: []
+          - id: T024
+            title: "[US3] Add the `config show` CLI command and resolved-config formatter in
+              `src/commands/config.ts` and `tests/commands/commands.test.ts`"
+            status: todo
+            dependsOn: []
+          - id: T025
+            title: "[US3] Register the new config command in the CLI bootstrap path in
+              `src/commands/index.ts` or the command-registration module used by
+              `tests/cli.test.ts`"
+            status: todo
+            dependsOn: []
+          - id: T026
+            title: "[US3] Expose resolved config sources and effective values to TUI/web
+              consumers through the shared resolver in
+              `src/ui/commands/definitions.ts`, `src/web/state.ts`, and
+              `src/web/server.ts`"
+            status: todo
+            dependsOn: []
+          - id: T027
+            title: "[US3] Surface repo-config validation and missing-env failures with
+              `.msq/config.yaml` source context in `src/config/index.ts` and
+              `tests/config/index.test.ts`"
+            status: todo
+            dependsOn: []
+          - id: T028
+            title: "[P] Document repo-config authoring, precedence, and env placeholder
+              behavior in `docs/features/F22-per-repo-config.md`"
+            status: todo
+            dependsOn: []
+          - id: T029
+            title: "[P] Run the focused validation flow from
+              `specs/016-per-repo-config/quickstart.md` with `rtk npx vitest run
+              tests/config/index.test.ts tests/backlog/schema.test.ts
+              tests/backlog/load-extended.test.ts tests/ui/catalog.test.ts
+              tests/runner/execute.test.ts tests/web/state.test.ts
+              tests/web/server.test.ts tests/commands/commands.test.ts
+              tests/cli.test.ts`"
+            status: todo
+            dependsOn: []
+          - id: T030
+            title: Run the repo baseline validation for this feature with `rtk npm run
+              build`, `rtk npm test`, `rtk npm run typecheck`, and `rtk npm run
+              lint`
+            status: todo
+            dependsOn: []
   - id: e17-modo-automatico
     title: E — Modo Automatico
     features:
@@ -662,3 +842,158 @@ epics:
             channel: telegram
             autoAdvance: true
           syncTasksToBacklog: true
+        tasks:
+          - id: T001
+            title: Capture the stage-guidance contract for implementation reference in
+              `specs/015-step-custom-guidance/contracts/backlog-step-guidance.md`
+              and
+              `specs/015-step-custom-guidance/contracts/step-prompt-assembly.md`
+            status: todo
+            dependsOn: []
+          - id: T002
+            title: "[P] Add baseline fixture coverage for staged workflow prompt assembly
+              inputs in `tests/backlog/load-prompt.test.ts` and
+              `tests/runner/execute.test.ts`"
+            status: todo
+            dependsOn: []
+          - id: T003
+            title: "[P] Add schema fixture coverage for `workflow.stepGuidance` defaults and
+              valid stage-key parsing in `tests/backlog/schema.test.ts`"
+            status: todo
+            dependsOn: []
+          - id: T004
+            title: Extend workflow and feature schemas to accept `workflow.stepGuidance`
+              entries in `src/core/backlog/schema.ts`
+            status: todo
+            dependsOn: []
+          - id: T005
+            title: "[P] Thread `workflow.stepGuidance` through YAML and catalog hydration in
+              `src/core/backlog/load.ts` and `src/db/backlogCatalog.ts`"
+            status: todo
+            dependsOn: []
+          - id: T006
+            title: "[P] Extend backlog skill collection to include step-guidance skill
+              references in `src/core/skills/backlog.ts`"
+            status: todo
+            dependsOn: []
+          - id: T007
+            title: Add prompt-builder support for `activeStage`-scoped guidance inputs in
+              `src/core/backlog/prompt.ts`
+            status: todo
+            dependsOn: []
+          - id: T008
+            title: Add foundational regression coverage for schema hydration, catalog
+              parity, and skill collection in `tests/backlog/schema.test.ts`,
+              `tests/backlog/load-extended.test.ts`, and
+              `tests/core/skills-backlog.test.ts`
+            status: todo
+            dependsOn: []
+          - id: T009
+            title: "[P] [US1] Add prompt regression coverage for single-stage named guidance
+              and direct prompt injection in
+              `tests/backlog/load-prompt.test.ts`"
+            status: todo
+            dependsOn: []
+          - id: T010
+            title: "[P] [US1] Add prompt ordering and whitespace-ignore coverage for stage
+              guidance in `tests/backlog/prompt-extended.test.ts`"
+            status: todo
+            dependsOn: []
+          - id: T011
+            title: "[US1] Implement stage-key lookup and additive guidance extraction in
+              `src/core/backlog/prompt.ts`"
+            status: todo
+            dependsOn: []
+          - id: T012
+            title: "[US1] Render step-guidance skill prompts and direct prompt blocks in
+              deterministic order in `src/core/backlog/prompt.ts`"
+            status: todo
+            dependsOn: []
+          - id: T013
+            title: "[US1] Pass the active workflow stage into prompt assembly from staged
+              execution in `src/core/runner/execute.ts`"
+            status: todo
+            dependsOn: []
+          - id: T014
+            title: "[US1] Preserve unchanged prompt output for stages without custom
+              guidance in `src/core/backlog/prompt.ts` and
+              `tests/backlog/load-prompt.test.ts`"
+            status: todo
+            dependsOn: []
+          - id: T015
+            title: "[P] [US2] Add backlog validation coverage for resolved and missing
+              step-guidance skill references in
+              `tests/core/skills-backlog.test.ts`"
+            status: todo
+            dependsOn: []
+          - id: T016
+            title: "[P] [US2] Add precedence regression coverage for step-guidance skill
+              resolution in `tests/core/skills-registry-mock.test.ts` and
+              `tests/backlog/load-extended.test.ts`"
+            status: todo
+            dependsOn: []
+          - id: T017
+            title: "[US2] Reuse canonical skill-resolution and validation paths for
+              `workflow.stepGuidance.*.skills` in `src/core/skills/backlog.ts`
+              and `src/core/skills/registry.ts`"
+            status: todo
+            dependsOn: []
+          - id: T018
+            title: "[US2] Reject missing named step-guidance skills during backlog
+              validation in `src/core/backlog/load.ts` and
+              `tests/core/skills-backlog.test.ts`"
+            status: todo
+            dependsOn: []
+          - id: T019
+            title: "[US2] Deduplicate inherited and step-guidance skills by skill name
+              before rendering in `src/core/backlog/prompt.ts`"
+            status: todo
+            dependsOn: []
+          - id: T020
+            title: "[P] [US3] Add catalog-backed parity coverage for inherited plus
+              step-specific guidance in `tests/backlog/load-extended.test.ts`"
+            status: todo
+            dependsOn: []
+          - id: T021
+            title: "[P] [US3] Add runner retry/resume regression coverage for active-stage
+              guidance persistence in `tests/runner/execute.test.ts`"
+            status: todo
+            dependsOn: []
+          - id: T022
+            title: "[US3] Preserve inherited feature/stage guidance while appending step
+              guidance in `src/core/backlog/prompt.ts`"
+            status: todo
+            dependsOn: []
+          - id: T023
+            title: "[US3] Ensure catalog serialization and rehydration keep
+              `workflow.stepGuidance` unchanged in `src/db/backlogCatalog.ts`
+              and `src/core/backlog/load.ts`"
+            status: todo
+            dependsOn: []
+          - id: T024
+            title: "[US3] Rebuild the same customized prompt for repeated staged executions
+              in `src/core/runner/execute.ts`"
+            status: todo
+            dependsOn: []
+          - id: T025
+            title: "[P] Document `workflow.stepGuidance` authoring and prompt-order
+              guarantees in `docs/features/F46-custom-prompt-per-step.md`"
+            status: todo
+            dependsOn: []
+          - id: T026
+            title: Run the focused validation flow from
+              `specs/015-step-custom-guidance/quickstart.md` with `rtk npx
+              vitest run tests/backlog/schema.test.ts
+              tests/backlog/load-prompt.test.ts
+              tests/backlog/load-extended.test.ts
+              tests/backlog/prompt-extended.test.ts
+              tests/core/skills-backlog.test.ts
+              tests/core/skills-registry-mock.test.ts
+              tests/runner/execute.test.ts`
+            status: todo
+            dependsOn: []
+          - id: T027
+            title: Run the repo baseline validation for this feature with `rtk npm run
+              build`, `rtk npm test`, and `rtk npm run typecheck`
+            status: todo
+            dependsOn: []

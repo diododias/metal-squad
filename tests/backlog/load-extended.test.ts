@@ -4,12 +4,17 @@ const mockReadFileSync = vi.fn();
 const mockExistsSync = vi.fn();
 const mockParse = vi.fn();
 const mockBacklogSchemaParse = vi.fn();
+const mockLoadRepoConfig = vi.fn(() => ({ defaults: {} }));
 
 vi.mock('node:fs', () => ({
   readFileSync: mockReadFileSync,
   existsSync: mockExistsSync,
 }));
 vi.mock('yaml', () => ({ parse: mockParse }));
+vi.mock('../../src/config/index.js', () => ({
+  loadRepoConfig: mockLoadRepoConfig,
+  mergeStageSkills: (base: Record<string, string[]> = {}, overlay: Record<string, string[]> = {}) => ({ ...base, ...overlay }),
+}));
 vi.mock('../../src/core/backlog/schema.js', () => ({
   BacklogSchema: { parse: mockBacklogSchemaParse },
 }));
@@ -66,7 +71,8 @@ describe('loadBacklog — version 2 default propagation', () => {
       }],
     });
     mockBacklogSchemaParse.mockReturnValue(parsedResult);
-    mockReadFileSync.mockReturnValue('yaml content');
+  mockReadFileSync.mockReturnValue('yaml content');
+  mockLoadRepoConfig.mockReset().mockReturnValue({ defaults: {} });
 
     const { loadBacklog } = await import('../../src/core/backlog/load.js');
     const result = loadBacklog('/abs/backlog.yaml', '/abs');
@@ -326,5 +332,60 @@ describe('loadBacklog — version 2 default propagation', () => {
     const { loadBacklog } = await import('../../src/core/backlog/load.js');
     const result = loadBacklog('/abs/backlog.yaml', '/abs');
     expect(result.epics[0]?.features).toHaveLength(0);
+  });
+
+  it('preserves workflow.stepGuidance through version 2 parsing and hydration', async () => {
+    const rawV2 = makeRawV2({
+      epics: [{
+        id: 'e1',
+        title: 'E',
+        features: [{
+          id: 'f1',
+          title: 'F',
+          tasks: [],
+          dependsOn: [],
+          workflow: {
+            mode: 'staged',
+            stages: ['implement'],
+            approvals: { channel: 'telegram', autoAdvance: false },
+            syncTasksToBacklog: true,
+            sessionPolicy: { mode: 'isolated', alwaysIsolatedStages: [] },
+            stepGuidance: {
+              implement: {
+                skills: ['repo-implement-guardrails'],
+                prompt: 'Implement only.',
+              },
+            },
+          },
+        }],
+      }],
+    });
+    mockParse.mockReturnValue(rawV2);
+    mockBacklogSchemaParse.mockReturnValue(makeV2Backlog({
+      epics: [{
+        id: 'e1',
+        title: 'E',
+        features: [{
+          id: 'f1',
+          title: 'F',
+          tool: 'codex',
+          effort: 'high',
+          skills: ['implement'],
+          tasks: [],
+          dependsOn: [],
+          workflow: rawV2.epics[0].features[0].workflow,
+        }],
+      }],
+    }));
+    mockReadFileSync.mockReturnValue('yaml');
+
+    const { loadBacklog } = await import('../../src/core/backlog/load.js');
+    const result = loadBacklog('/abs/backlog.yaml', '/abs');
+    expect(result.epics[0]?.features[0]?.workflow.stepGuidance).toEqual({
+      implement: {
+        skills: ['repo-implement-guardrails'],
+        prompt: 'Implement only.',
+      },
+    });
   });
 });

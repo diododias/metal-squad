@@ -2,7 +2,7 @@ import { Option, type Command } from 'commander';
 import { loadBacklogFromCatalog } from '../core/backlog/load.js';
 import { executeBacklog } from '../core/runner/execute.js';
 import { validateBacklogSkills } from '../core/skills/index.js';
-import { loadConfig } from '../config/index.js';
+import { resolveRuntimeConfig } from '../config/index.js';
 import { findResumablePipeline, getPipelineSnapshot } from '../db/repo.js';
 import { getAdapter } from '../core/adapters/index.js';
 import type { Effort, Tool } from '../core/backlog/schema.js';
@@ -63,7 +63,7 @@ export function registerResume(program: Command): void {
       validateBacklogSkills(backlog, pipeline.cwd);
       const concurrency = opts.concurrency
         ? Number(opts.concurrency)
-        : loadConfig().concurrency;
+        : resolveRuntimeConfig(pipeline.cwd).concurrency;
       await executeBacklog(backlog, {
         cwd: pipeline.cwd,
         concurrency,

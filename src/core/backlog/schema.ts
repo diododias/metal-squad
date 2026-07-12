@@ -26,6 +26,7 @@ export const BudgetSchema = z.object({
 
 export const DefaultsSchema = z.object({
   tool: ToolSchema.default('claude'),
+  model: z.string().trim().min(1).optional(),
   effort: EffortSchema.default('medium'),
   skills: z.array(z.string()).default([]),
   stageSkills: z.record(z.string(), z.array(z.string())).default({}),
@@ -50,12 +51,18 @@ export const WorkflowSessionPolicySchema = z.object({
   alwaysIsolatedStages: z.array(z.string().min(1)).default([]),
 });
 
+export const StepGuidanceSchema = z.object({
+  skills: z.array(z.string()).optional(),
+  prompt: z.string().optional(),
+});
+
 export const WorkflowSchema = z.object({
   mode: WorkflowModeSchema.default('staged'),
   stages: z.array(z.string()).min(1).default(['specify', 'plan', 'tasks', 'implement', 'validate']),
   approvals: WorkflowApprovalsSchema.default({}),
   syncTasksToBacklog: z.boolean().default(true),
   sessionPolicy: WorkflowSessionPolicySchema.default({}),
+  stepGuidance: z.record(z.string(), StepGuidanceSchema).default({}),
 }).superRefine((workflow, ctx) => {
   const seen = new Set<string>();
   for (const [index, stage] of workflow.sessionPolicy.alwaysIsolatedStages.entries()) {
@@ -74,6 +81,19 @@ export const WorkflowSchema = z.object({
       });
     }
     seen.add(stage);
+  }
+
+  for (const [stage, guidance] of Object.entries(workflow.stepGuidance)) {
+    if (!workflow.stages.includes(stage)) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['stepGuidance', stage],
+        message: `Stage "${stage}" must exist in workflow.stages.`,
+      });
+    }
+    if ((guidance.skills?.length ?? 0) === 0 && guidance.prompt === undefined) {
+      continue;
+    }
   }
 });
 
@@ -129,6 +149,7 @@ export type Defaults = z.infer<typeof DefaultsSchema>;
 export type Task = z.infer<typeof TaskSchema>;
 export type WorkflowApprovals = z.infer<typeof WorkflowApprovalsSchema>;
 export type WorkflowSessionPolicy = z.infer<typeof WorkflowSessionPolicySchema>;
+export type StepGuidance = z.infer<typeof StepGuidanceSchema>;
 export type Workflow = z.infer<typeof WorkflowSchema>;
 export type Feature = z.infer<typeof FeatureSchema>;
 export type Epic = z.infer<typeof EpicSchema>;

@@ -59,8 +59,24 @@ Layout padrão de plataforma: **sidebar fixa à esquerda + área de conteúdo à
 - Lista centralizada de todos os gates aguardando decisão em qualquer feature — hoje isso só existia como um painel lateral pequeno e vazio no board.
 - Cada gate mostra a pergunta pendente e ações rápidas (advance/hold/retry) inline, sem precisar abrir o run inteiro.
 
-**Config** (`/config`)
-- Três blocos: Skills declaradas (com origem: repo/global/external/builtin), Tools disponíveis, Resumo do `backlog.yaml` (read-only nesta fase).
+**Config** (`/config`) — detalhada em `#5.1`, cobre toda a superfície de configuração real do software (mapeada no código: `src/config/index.ts`, `src/core/backlog/schema.ts`, `src/core/backlog/prompt.ts`, `src/core/skills/registry.ts`).
+
+### 5.1 Config — mapa completo de configurações e sub-navegação
+
+A página Config ganha sub-abas próprias (mesma convenção visual das tabs do Run Detail), porque a superfície de configuração do `msq` tem várias camadas com precedência distinta. Fonte da verdade para cada campo:
+
+| Sub-aba | Cobre | Camada / arquivo |
+|---|---|---|
+| **Runtime** | `concurrency`, `toolTimeoutMs`, `staleRunThresholdMinutes`, `promptContextCharLimit`, `workflow.autoAdvanceStages`, `workflow.pollIntervalMs`, `web.host/port/auth`, caminho do DB (`MSQ_DB_PATH`) | `~/.config/metal-squad/config.json` (global) + `.msq/config.yaml` (override por repo) — `src/config/index.ts` |
+| **Defaults** | `tool`/`model`/`effort`/`skills`/`stageSkills` em cadeia de precedência: repo config → `backlog.yaml defaults:` → efetivo resolvido | `mergeExecutionDefaults()` em `src/config/index.ts` |
+| **Features & Prompts** | Por feature: `tool/model/effort/maxTokens/autoStart/dependsOn`, `workflow.mode/syncTasksToBacklog`, `workflow.approvals.channel/autoAdvance`, `workflow.sessionPolicy.mode/alwaysIsolatedStages`, `retry.maxAttempts/backoffMs/onFail/fallback[]`, e por stage: skills resolvidas + **`workflow.stepGuidance.<stage>.skills`** (skills extras) e **`workflow.stepGuidance.<stage>.prompt`** (texto livre customizado do step — é o que o usuário pediu para editar) | `backlog.yaml` por feature — `src/core/backlog/schema.ts` (`FeatureSchema`, `WorkflowSchema`, `StepGuidanceSchema`) |
+| **Skills** | Catálogo de skills descobertas com origem (repo/global/external/builtin) — somente leitura; skills de origem repo são arquivos locais editáveis fora da UI | `src/core/skills/registry.ts` (precedência repo > global > external > builtin) |
+| **Notifications** | Canais (telegram/slack/discord/webhook/desktop) e quais eventos disparam notificação (`run:start`, `gate:created`, `run:failed`, `budget:alert`, `run:done`, `stage:approval`, `stage:input`) | `config.json.notifications` |
+| **Budget** | `budget.maxTokens`/`perFeatureMaxTokens` (backlog), `budget.alertAtPercent`/`lastResetDate` (runtime), override de `maxTokens` por feature | `backlog.yaml` + `config.json.budget` |
+
+Cada campo mostra uma tag de origem (`global`/`repo`/`backlog`/`feature`) para deixar explícito qual camada está vencendo — hoje isso só existia via `msq config show --json`, sem UI.
+
+**Editor de prompt por step** (o pedido central desta fase): dentro de Features & Prompts, um stepper horizontal lista os stages da feature selecionada (`specify → plan → tasks → implement → validate`, dinâmico conforme `workflow.stages`). Selecionar um stage mostra: as skills já resolvidas para ele (via `stageSkills`), um campo para adicionar skills extras (`stepGuidance.skills`), e uma textarea grande para o prompt customizado (`stepGuidance.prompt`) — com uma nota explicando que esse texto é concatenado ao final do prompt montado (skills + `stepGuidance`), separado por `---`, conforme `buildPrompt()` em `src/core/backlog/prompt.ts`.
 
 ## 3. Hierarquia de ações (mantida da v1)
 

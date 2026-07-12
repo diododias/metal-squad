@@ -155,7 +155,67 @@ describe('BacklogV2Schema', () => {
         mode: 'isolated',
         alwaysIsolatedStages: [],
       });
+      expect(result.data.epics[0]?.features[0]?.workflow.stepGuidance).toEqual({});
     }
+  });
+
+  it('parses workflow.stepGuidance for declared stages', () => {
+    const result = BacklogV2Schema.safeParse({
+      ...V2_YAML_OBJ,
+      epics: [
+        {
+          ...V2_YAML_OBJ.epics[0],
+          features: [
+            {
+              ...V2_YAML_OBJ.epics[0].features[0],
+              workflow: {
+                ...V2_YAML_OBJ.epics[0].features[0].workflow,
+                stepGuidance: {
+                  plan: {
+                    skills: ['repo-implement-guardrails'],
+                    prompt: 'Touch only the plan step.',
+                  },
+                },
+              },
+            },
+          ],
+        },
+      ],
+    });
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.epics[0]?.features[0]?.workflow.stepGuidance).toEqual({
+        plan: {
+          skills: ['repo-implement-guardrails'],
+          prompt: 'Touch only the plan step.',
+        },
+      });
+    }
+  });
+
+  it('rejects workflow.stepGuidance keys not present in workflow.stages', () => {
+    const result = BacklogV2Schema.safeParse({
+      ...V2_YAML_OBJ,
+      epics: [
+        {
+          ...V2_YAML_OBJ.epics[0],
+          features: [
+            {
+              ...V2_YAML_OBJ.epics[0].features[0],
+              workflow: {
+                ...V2_YAML_OBJ.epics[0].features[0].workflow,
+                stepGuidance: {
+                  validate: {
+                    prompt: 'This stage is not in the workflow.',
+                  },
+                },
+              },
+            },
+          ],
+        },
+      ],
+    });
+    expect(result.success).toBe(false);
   });
 
   it('rejects sessionPolicy.alwaysIsolatedStages entries not present in workflow.stages', () => {

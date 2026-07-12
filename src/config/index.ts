@@ -1,7 +1,10 @@
 import { homedir } from 'node:os';
-import { dirname, join } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { parse } from 'yaml';
 import { z } from 'zod';
+import type { Defaults, Feature } from '../core/backlog/schema.js';
+import { EffortSchema, ToolSchema } from '../core/backlog/schema.js';
 
 const CONFIG_DIR = join(homedir(), '.config', 'metal-squad');
 const DATA_DIR = join(homedir(), '.local', 'share', 'metal-squad');
@@ -67,6 +70,31 @@ const WebConfig = z.object({
   auth: z.enum(['token', 'none']).default('token'),
 });
 
+const RuntimeConfigOverrideSchema = z.object({
+  concurrency: z.number().int().positive().optional(),
+  toolTimeoutMs: z.number().int().positive().optional(),
+  staleRunThresholdMinutes: z.number().int().positive().optional(),
+  promptContextCharLimit: z.number().int().positive().optional(),
+  theme: z.string().trim().min(1).optional(),
+  telegramChatId: z.string().optional(),
+  notifications: NotificationsConfig.partial().optional(),
+  workflow: WorkflowConfig.partial().optional(),
+  budget: BudgetConfig.partial().optional(),
+  web: WebConfig.partial().optional(),
+  stageSkills: z.record(z.string(), z.array(z.string())).optional(),
+});
+
+const RepoDefaultsSchema = z.object({
+  tool: ToolSchema.optional(),
+  model: z.string().trim().min(1).optional(),
+  effort: EffortSchema.optional(),
+  skills: z.array(z.string()).optional(),
+  stageSkills: z.record(z.string(), z.array(z.string())).optional(),
+});
+
+export const REPO_CONFIG_PATH = '.msq/config.yaml';
+export const REPO_CONFIG_ABS_PATH = (cwd = process.cwd()): string => resolve(cwd, REPO_CONFIG_PATH);
+
 export const ConfigSchema = z.object({
   concurrency: z.number().int().positive().default(3),
   toolTimeoutMs: z.number().int().positive().default(600_000),
@@ -82,6 +110,40 @@ export const ConfigSchema = z.object({
 });
 export type Config = z.infer<typeof ConfigSchema>;
 export type WebConfig = z.infer<typeof WebConfig>;
+export type RuntimeConfigOverride = z.infer<typeof RuntimeConfigOverrideSchema>;
+export type RepoDefaults = z.infer<typeof RepoDefaultsSchema>;
+
+export interface RepoConfigFile {
+  runtime: RuntimeConfigOverride;
+  defaults: RepoDefaults;
+}
+
+export interface ResolvedExecutionDefaults {
+  tool: z.infer<typeof ToolSchema>;
+  model?: string;
+  effort: z.infer<typeof EffortSchema>;
+  skills: string[];
+  stageSkills: Record<string, string[]>;
+}
+
+export interface ResolvedConfigSources {
+  globalConfigPath: string;
+  repoConfigPath?: string;
+  backlogPath?: string;
+}
+
+export interface ResolvedConfigSnapshot {
+  runtime: Config;
+  repoDefaults: RepoDefaults;
+  sources: ResolvedConfigSources;
+}
+
+export type ExecutionDefaultsLike = Partial<ResolvedExecutionDefaults> | RepoDefaults | Defaults | Feature;
+
+const RepoConfigFileSchema = z.object({
+  runtime: RuntimeConfigOverrideSchema.default({}),
+  defaults: RepoDefaultsSchema.default({}),
+});
 
 export function loadConfig(): Config {
   if (!existsSync(CONFIG_PATH)) return ConfigSchema.parse({});
@@ -91,6 +153,40 @@ export function loadConfig(): Config {
     const message = error instanceof Error ? error.message : String(error);
     throw new Error(`Invalid metal-squad config at ${CONFIG_PATH}: ${message}`);
   }
+}
+
+export function loadRepoConfig(cwd = process.cwd()): RepoConfigFile {
+  const repoConfigPath = REPO_CONFIG_ABS_PATH(cwd);
+  if (!existsSync(repoConfigPath)) return { runtime: {}, defaults: {} };
+  try {
+    const raw = readFileSync(repoConfigPath, 'utf8');
+    const parsed: unknown = parse(raw);
+    const interpolated = interpolateEnvPlaceholders(parsed, repoConfigPath);
+    return RepoConfigFileSchema.parse(interpolated);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    throw new Error(`Invalid repo config at ${repoConfigPath}: ${message}`);
+  }
+}
+
+export function resolveRuntimeConfig(cwd = process.cwd()): Config {
+  const globalConfig = loadConfig();
+  const repoConfig = loadRepoConfig(cwd);
+  return mergeRuntimeConfig(globalConfig, repoConfig.runtime);
+}
+
+export function resolveConfigSnapshot(cwd = process.cwd()): ResolvedConfigSnapshot {
+  const repoConfigPath = REPO_CONFIG_ABS_PATH(cwd);
+  const hasRepoConfig = existsSync(repoConfigPath);
+  const repoConfig = loadRepoConfig(cwd);
+  return {
+    runtime: mergeRuntimeConfig(loadConfig(), repoConfig.runtime),
+    repoDefaults: repoConfig.defaults,
+    sources: {
+      globalConfigPath: CONFIG_PATH,
+      ...(hasRepoConfig ? { repoConfigPath } : {}),
+    },
+  };
 }
 
 export function saveConfig(cfg: Config): void {
@@ -146,4 +242,91 @@ function normalizeLegacyConfig(raw: unknown): unknown {
   }
 
   return cfg;
+}
+
+export function mergeStageSkills(
+  base: Record<string, string[]> = {},
+  overlay: Record<string, string[]> = {},
+): Record<string, string[]> {
+  return {
+    ...base,
+    ...overlay,
+  };
+}
+
+export function mergeExecutionDefaults(
+  base: ResolvedExecutionDefaults,
+  overlay: ExecutionDefaultsLike = {},
+): ResolvedExecutionDefaults {
+  const overlayStageSkills = 'stageSkills' in overlay ? overlay.stageSkills : undefined;
+  return {
+    tool: overlay.tool ?? base.tool,
+    model: overlay.model ?? base.model,
+    effort: overlay.effort ?? base.effort,
+    skills: overlay.skills ?? base.skills,
+    stageSkills: mergeStageSkills(base.stageSkills, overlayStageSkills),
+  };
+}
+
+export function mergeRuntimeConfig(base: Config, overlay: RuntimeConfigOverride = {}): Config {
+  return ConfigSchema.parse({
+    ...base,
+    ...overlay,
+    notifications: overlay.notifications
+      ? {
+          ...base.notifications,
+          ...overlay.notifications,
+          channels: overlay.notifications.channels ?? base.notifications.channels,
+          events: overlay.notifications.events ?? base.notifications.events,
+        }
+      : base.notifications,
+    workflow: overlay.workflow
+      ? {
+          ...base.workflow,
+          ...overlay.workflow,
+        }
+      : base.workflow,
+    budget: overlay.budget
+      ? {
+          ...base.budget,
+          ...overlay.budget,
+        }
+      : base.budget,
+    web: overlay.web
+      ? {
+          ...base.web,
+          ...overlay.web,
+        }
+      : base.web,
+    stageSkills: mergeStageSkills(base.stageSkills, overlay.stageSkills),
+  });
+}
+
+function interpolateEnvPlaceholders(value: unknown, sourcePath: string, fieldPath = ''): unknown {
+  if (typeof value === 'string') {
+    return value.replace(/\$\{([A-Z0-9_]+)\}/g, (_match: string, envName: string) => {
+      const resolved = process.env[envName];
+      if (resolved === undefined) {
+        const location = fieldPath ? ` at ${fieldPath}` : '';
+        throw new Error(`Missing environment variable ${envName} referenced by ${sourcePath}${location}`);
+      }
+      return resolved;
+    });
+  }
+  if (Array.isArray(value)) {
+    return value.map((entry, index) => interpolateEnvPlaceholders(entry, sourcePath, joinFieldPath(fieldPath, String(index))));
+  }
+  if (value && typeof value === 'object') {
+    return Object.fromEntries(
+      Object.entries(value).map(([key, entry]) => [
+        key,
+        interpolateEnvPlaceholders(entry, sourcePath, joinFieldPath(fieldPath, key)),
+      ]),
+    );
+  }
+  return value;
+}
+
+function joinFieldPath(base: string, segment: string): string {
+  return base ? `${base}.${segment}` : segment;
 }
