@@ -7,6 +7,7 @@ let pragmaTokenUsageColumns: Array<{ name: string }> = [];
 let pragmaTaskRunColumns: Array<{ name: string }> = [];
 let pragmaPipelinesColumns: Array<{ name: string }> = [];
 let pragmaRetryHistoryColumns: Array<{ name: string }> = [];
+let pragmaStageRequestColumns: Array<{ name: string }> = [];
 const mockExecCalls: string[] = [];
 
 const mockExec = vi.fn((sql: string) => { mockExecCalls.push(sql); });
@@ -32,6 +33,9 @@ const mockPrepare = vi.fn((sql: string) => {
   }
   if (sql.includes('PRAGMA table_info(retry_history)')) {
     return { all: makeMockAll(pragmaRetryHistoryColumns), run: vi.fn(), get: vi.fn() };
+  }
+  if (sql.includes('PRAGMA table_info(stage_requests)')) {
+    return { all: makeMockAll(pragmaStageRequestColumns), run: vi.fn(), get: vi.fn() };
   }
   return { all: vi.fn(() => []), run: vi.fn(), get: vi.fn() };
 });
@@ -68,6 +72,7 @@ function resetAll() {
   ];
   pragmaPipelinesColumns = [];
   pragmaRetryHistoryColumns = [{ name: 'tool' }, { name: 'model' }];
+  pragmaStageRequestColumns = [{ name: 'options' }];
   mockExecCalls.length = 0;
   mockDatabase.mockReset();
   mockDatabase.mockReturnValue(mockDb);
@@ -108,6 +113,17 @@ describe('getDb migration — column checks', () => {
 
     const alterCalls = mockExecCalls.filter((s) => s.trim().startsWith('ALTER'));
     expect(alterCalls).toHaveLength(0);
+  });
+
+  it('creates the stage_transition_decisions table in the base schema', async () => {
+    pragmaRunsColumns = [];
+    pragmaTokenUsageColumns = [];
+    pragmaPipelinesColumns = [];
+
+    const { getDb } = await import('../../src/db/index.js');
+    getDb('readwrite');
+
+    expect(mockExecCalls.some((sql) => sql.includes('CREATE TABLE IF NOT EXISTS stage_transition_decisions'))).toBe(true);
   });
 
   it('alters runs table when summary column is missing', async () => {
@@ -360,6 +376,47 @@ describe('getDb migration — column checks', () => {
 
     const alterCalls = mockExecCalls.filter((s) => s.trim().startsWith('ALTER'));
     expect(alterCalls.some((s) => s.includes('retry_history'))).toBe(false);
+  });
+
+  it('alters stage_requests when options column is missing', async () => {
+    pragmaRunsColumns = [
+      { name: 'summary' }, { name: 'input_tokens' }, { name: 'output_tokens' },
+      { name: 'cached_input_tokens' }, { name: 'total_tokens' }, { name: 'pipeline_id' }, { name: 'stage' },
+    ];
+    pragmaTokenUsageColumns = [{ name: 'cached_input' }];
+    pragmaPipelinesColumns = [
+      { name: 'cwd' }, { name: 'plan_json' }, { name: 'done_json' }, { name: 'pending_json' },
+      { name: 'active_json' }, { name: 'aborted_json' }, { name: 'requested_abort_feature_id' },
+      { name: 'resume_count' }, { name: 'resume_summary' },
+    ];
+    pragmaStageRequestColumns = [];
+
+    const { getDb } = await import('../../src/db/index.js');
+    getDb('readwrite');
+
+    const alterCalls = mockExecCalls.filter((s) => s.trim().startsWith('ALTER'));
+    expect(alterCalls.some((s) => s.includes('ALTER TABLE stage_requests ADD COLUMN options TEXT'))).toBe(true);
+  });
+
+  it('does not alter stage_requests when options column already exists (idempotent on second call)', async () => {
+    pragmaRunsColumns = [
+      { name: 'summary' }, { name: 'input_tokens' }, { name: 'output_tokens' },
+      { name: 'cached_input_tokens' }, { name: 'total_tokens' }, { name: 'pipeline_id' }, { name: 'stage' },
+    ];
+    pragmaTokenUsageColumns = [{ name: 'cached_input' }];
+    pragmaPipelinesColumns = [
+      { name: 'cwd' }, { name: 'plan_json' }, { name: 'done_json' }, { name: 'pending_json' },
+      { name: 'active_json' }, { name: 'aborted_json' }, { name: 'requested_abort_feature_id' },
+      { name: 'resume_count' }, { name: 'resume_summary' },
+    ];
+    pragmaStageRequestColumns = [{ name: 'options' }];
+
+    const { getDb } = await import('../../src/db/index.js');
+    getDb('readwrite');
+    getDb('readwrite');
+
+    const alterCalls = mockExecCalls.filter((s) => s.trim().startsWith('ALTER'));
+    expect(alterCalls.some((s) => s.includes('stage_requests'))).toBe(false);
   });
 });
 

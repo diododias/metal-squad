@@ -2,6 +2,17 @@ import { getSecret } from '../../security/secrets.js';
 import { loadConfig } from '../../config/index.js';
 import type { NotificationChannel } from './types.js';
 
+const TELEGRAM_MESSAGE_LIMIT = 4096;
+
+function splitMessage(text: string, limit = TELEGRAM_MESSAGE_LIMIT): string[] {
+  if (text.length <= limit) return [text];
+  const fragments: string[] = [];
+  for (let i = 0; i < text.length; i += limit) {
+    fragments.push(text.slice(i, i + limit));
+  }
+  return fragments;
+}
+
 export class TelegramChannel implements NotificationChannel {
   public readonly name = 'telegram';
 
@@ -14,22 +25,26 @@ export class TelegramChannel implements NotificationChannel {
     const token = await getSecret('telegram-bot-token');
     if (!token) return;
 
-    const body: Record<string, unknown> = {
-      chat_id: this.chatId,
-      text: message,
-    };
-    if (this.forumTopicId !== undefined) {
-      body.message_thread_id = this.forumTopicId;
-    }
-    if (metadata?.reply_markup) {
-      body.reply_markup = metadata.reply_markup;
-    }
+    const fragments = splitMessage(message);
+    for (let i = 0; i < fragments.length; i += 1) {
+      const body: Record<string, unknown> = {
+        chat_id: this.chatId,
+        text: fragments[i],
+      };
+      if (this.forumTopicId !== undefined) {
+        body.message_thread_id = this.forumTopicId;
+      }
+      const isLastFragment = i === fragments.length - 1;
+      if (isLastFragment && metadata?.reply_markup) {
+        body.reply_markup = metadata.reply_markup;
+      }
 
-    await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify(body),
-    });
+      await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+    }
   }
 }
 

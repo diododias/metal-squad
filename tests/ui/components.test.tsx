@@ -69,6 +69,13 @@ describe('ui components', () => {
       skills: ['implement', 'test'],
       tool: 'codex',
       effort: 'medium' as const,
+      workflow: {
+        mode: 'staged' as const,
+        stages: ['specify', 'plan'],
+        approvals: { channel: 'telegram' as const, autoAdvance: false },
+        syncTasksToBacklog: true,
+        sessionPolicy: { mode: 'adaptive' as const, alwaysIsolatedStages: ['specify'] },
+      },
     };
 
     const mainPanelFrame = renderWithTheme(

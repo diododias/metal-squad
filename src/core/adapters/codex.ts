@@ -1,4 +1,4 @@
-import type { ToolAdapter, RunResult, RunFeatureOptions, TokenUsage } from './types.js';
+import type { SessionHandle, ToolAdapter, RunResult, RunFeatureOptions, TokenUsage } from './types.js';
 import type { Effort, Feature } from '../backlog/schema.js';
 import { execFileSync } from 'node:child_process';
 import { loadConfig } from '../../config/index.js';
@@ -9,6 +9,7 @@ import { parseControlSignal } from './control.js';
 interface CodexEvent {
   type?: string;
   message?: string;
+  thread_id?: string;
   error?: {
     message?: string;
   };
@@ -57,16 +58,28 @@ export const codexAdapter: ToolAdapter = {
   },
 
   async runFeature(feature: Feature, prompt: string, opts: RunFeatureOptions): Promise<RunResult> {
-    const args = [
-      'exec',
-      '--json',
-      '--skip-git-repo-check',
-      '--sandbox', 'workspace-write',
-      ...(feature.model ? ['-m', feature.model] : []),
-      ...this.effortFlag(feature.effort),
-      '--',
-      prompt,
-    ];
+    const args = opts.session?.mode === 'resume' && opts.session.handle
+      ? [
+          'exec',
+          'resume',
+          '--json',
+          '--skip-git-repo-check',
+          '--sandbox', 'workspace-write',
+          ...(feature.model ? ['-m', feature.model] : []),
+          ...this.effortFlag(feature.effort),
+          opts.session.handle.sessionId,
+          prompt,
+        ]
+      : [
+          'exec',
+          '--json',
+          '--skip-git-repo-check',
+          '--sandbox', 'workspace-write',
+          ...(feature.model ? ['-m', feature.model] : []),
+          ...this.effortFlag(feature.effort),
+          '--',
+          prompt,
+        ];
 
     const timeoutMs = Math.max(loadConfig().toolTimeoutMs, 1_800_000);
     let code: number;
@@ -125,12 +138,15 @@ export const codexAdapter: ToolAdapter = {
 
     const finalMsg = lastAgentMessage(stdout);
     const usage = this.parseUsage?.(stdout) ?? undefined;
+    const session = buildCodexSessionHandle(stdout, opts, opts.runId);
+    const control = parseControlSignal(finalMsg);
     if (usage) emitUsage(opts.runId, feature, usage);
     return {
       ok: true,
       summary: finalMsg.slice(0, 200),
       usage,
-      control: parseControlSignal(finalMsg),
+      ...(control ? { control } : {}),
+      ...(session ? { session } : {}),
     };
   },
 
@@ -168,6 +184,32 @@ function lastCodexError(transcript: string): string {
     if (error) msg = error;
   }
   return msg;
+}
+
+function buildCodexSessionHandle(
+  transcript: string,
+  opts: RunFeatureOptions,
+  runId: number,
+): SessionHandle | null {
+  const threadId = extractCodexThreadId(transcript) ?? opts.session?.handle?.sessionId;
+  if (!threadId) return null;
+  return {
+    tool: 'codex',
+    sessionId: threadId,
+    capturedFromRunId: runId,
+    capturedAt: new Date().toISOString(),
+  };
+}
+
+function extractCodexThreadId(transcript: string): string | null {
+  let threadId: string | null = null;
+  for (const line of transcript.split('\n')) {
+    const evt = safeJson<CodexEvent>(line);
+    if (evt?.type === 'thread.started' && typeof evt.thread_id === 'string' && evt.thread_id.trim()) {
+      threadId = evt.thread_id;
+    }
+  }
+  return threadId;
 }
 
 function summarizePartialOutput(stdout: string, stderr: string, touchedFiles: string[]): string {

@@ -106,7 +106,8 @@ essa base em vez de criar uma fonte paralela de medicao.
   calculo dos limiares de 50%/70% se nao for resolvido antes — avaliar
   ordem de execucao com o hotfix.
 - Faixa 50%-70% de contexto consumido nao tem comportamento definido pelo
-  relato original; precisa de clarificacao explicita no specify.
+  relato original; a implementacao adotou postura conservadora e abre nova
+  sessao nessa faixa.
 - F43 (edicao de tool/effort por step) e um pedido relacionado mas
   distinto — nao confundir escopo: F41 e sobre reuso de sessao, F43 e sobre
   trocar tool/model/effort por step.
@@ -120,9 +121,42 @@ essa base em vez de criar uma fonte paralela de medicao.
       sempre-isolados) reaproveite a mesma sessao.
 - [ ] Com o modo ligado, um step que termina com >=70% de contexto
       consumido sempre forca nova sessao no proximo step.
+- [ ] Com o modo ligado, um step que termina com >50% e <70% de contexto
+      consumido abre nova sessao por politica conservadora.
 - [ ] Stages listados como sempre-isolados (ex.: `specify`, `plan`) nunca
       reaproveitam sessao, independente do consumo de contexto.
 - [ ] A flag de liga/desliga e a lista de stages sempre-isolados sao
       configuraveis por feature no backlog (schema documentado).
 - [ ] Testes cobrindo os dois limiares (50% e 70%) e a lista de stages
       sempre-isolados.
+
+## Exemplo de backlog
+
+```yaml
+workflow:
+  mode: staged
+  stages:
+    - specify
+    - plan
+    - tasks
+    - implement
+    - validate
+  approvals:
+    channel: telegram
+    autoAdvance: false
+  syncTasksToBacklog: true
+  sessionPolicy:
+    mode: adaptive
+    alwaysIsolatedStages:
+      - specify
+      - plan
+```
+
+## Observabilidade
+
+- Cada transicao gravada em `stage_transition_decisions` registra `decision`,
+  `reason`, `context_window_percent`, `previous_session_id` e
+  `next_session_id`.
+- Motivos persistidos: `adaptive_disabled`, `always_isolated_stage`,
+  `low_usage_reuse`, `mid_usage_conservative`, `high_usage_guardrail`,
+  `missing_context_telemetry` e `session_resume_unavailable`.

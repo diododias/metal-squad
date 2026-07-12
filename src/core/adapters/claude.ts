@@ -1,5 +1,6 @@
+import { randomUUID } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
-import type { ToolAdapter, RunResult, RunFeatureOptions, TokenUsage } from './types.js';
+import type { SessionHandle, ToolAdapter, RunResult, RunFeatureOptions, TokenUsage } from './types.js';
 import type { Effort, Feature } from '../backlog/schema.js';
 import { CliAbortError, CliTimeoutError, runCli } from './spawn.js';
 import { msqEventBus } from '../events/index.js';
@@ -26,6 +27,8 @@ interface StreamUsage {
 interface StreamJsonEvent {
   type: string;
   subtype?: string;
+  session_id?: string;
+  sessionId?: string;
   message?: { content?: ContentBlock[]; usage?: StreamUsage };
   result?: string;
   usage?: StreamUsage;
@@ -49,11 +52,16 @@ export const claudeAdapter: ToolAdapter = {
 
   async runFeature(feature: Feature, prompt: string, opts: RunFeatureOptions): Promise<RunResult> {
     const model = feature.model ? ['--model', feature.model] : this.effortFlag(feature.effort);
+    const assignedSessionId = opts.session?.mode === 'resume'
+      ? opts.session.handle?.sessionId ?? null
+      : randomUUID();
     const args = [
       '--print',
       '--output-format', 'stream-json',
       '--verbose',
       '--dangerously-skip-permissions',
+      ...(opts.session?.mode === 'resume' && assignedSessionId ? ['--resume', assignedSessionId] : []),
+      ...(opts.session?.mode !== 'resume' && assignedSessionId ? ['--session-id', assignedSessionId] : []),
       ...model,
       '--',
       prompt,
@@ -126,12 +134,15 @@ export const claudeAdapter: ToolAdapter = {
 
     const resultEvent = findResultEvent(stdout);
     const usage = this.parseUsage?.(stdout) ?? undefined;
+    const session = buildClaudeSessionHandle(stdout, assignedSessionId, opts.runId);
+    const control = parseControlSignal(resultEvent?.result ?? '');
     if (usage) emitUsage(opts.runId, feature, usage);
     return {
       ok: resultEvent?.subtype !== 'error_max_turns',
       summary: (resultEvent?.result ?? '').slice(0, 200),
       usage,
-      control: parseControlSignal(resultEvent?.result ?? ''),
+      ...(control ? { control } : {}),
+      ...(session ? { session } : {}),
     };
   },
 
@@ -160,6 +171,30 @@ function findResultEvent(transcript: string): StreamJsonEvent | null {
     if (evt?.type === 'result') return evt;
   }
   return null;
+}
+
+function findClaudeSessionId(transcript: string): string | null {
+  for (const line of transcript.split('\n')) {
+    const evt = safeJson<StreamJsonEvent>(line);
+    const sessionId = evt?.session_id ?? evt?.sessionId;
+    if (typeof sessionId === 'string' && sessionId.trim().length > 0) return sessionId;
+  }
+  return null;
+}
+
+function buildClaudeSessionHandle(
+  transcript: string,
+  assignedSessionId: string | null,
+  runId: number,
+): SessionHandle | null {
+  const sessionId = findClaudeSessionId(transcript) ?? assignedSessionId;
+  if (!sessionId) return null;
+  return {
+    tool: 'claude',
+    sessionId,
+    capturedFromRunId: runId,
+    capturedAt: new Date().toISOString(),
+  };
 }
 
 function lastAgentMessage(transcript: string): string {

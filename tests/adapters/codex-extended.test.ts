@@ -224,6 +224,47 @@ describe('codexAdapter.runFeature — success path', () => {
     const [, args] = mockRunCli.mock.calls[0]!;
     expect(args).not.toContain('-m');
   });
+
+  it('captures the thread id as a reusable session handle', async () => {
+    const transcript = [
+      JSON.stringify({ type: 'thread.started', thread_id: 'thread_123' }),
+      JSON.stringify({ type: 'item.completed', item: { type: 'agent_message', text: 'done' } }),
+    ].join('\n');
+    mockRunCli.mockResolvedValue({ code: 0, stdout: transcript, stderr: '' });
+
+    const { codexAdapter } = await import('../../src/core/adapters/codex.js');
+    const result = await codexAdapter.runFeature(feature, 'prompt', { cwd: '/repo', runId: 6 });
+
+    expect(result.session).toMatchObject({
+      tool: 'codex',
+      sessionId: 'thread_123',
+      capturedFromRunId: 6,
+    });
+  });
+
+  it('uses the resume subcommand when a prior session handle is provided', async () => {
+    mockRunCli.mockResolvedValue({ code: 0, stdout: '', stderr: '' });
+
+    const { codexAdapter } = await import('../../src/core/adapters/codex.js');
+    await codexAdapter.runFeature(feature, 'prompt', {
+      cwd: '/repo',
+      runId: 7,
+      session: {
+        mode: 'resume',
+        handle: {
+          tool: 'codex',
+          sessionId: 'thread_123',
+          capturedFromRunId: 1,
+          capturedAt: '2026-07-11T00:00:00Z',
+        },
+      },
+    });
+
+    const [, args] = mockRunCli.mock.calls[0]!;
+    expect(args.slice(0, 3)).toEqual(['exec', 'resume', '--json']);
+    expect(args).toContain('thread_123');
+    expect(args).toContain('prompt');
+  });
 });
 
 describe('codexAdapter.runFeature — failure path', () => {

@@ -1,5 +1,6 @@
 import type { Tool } from '../backlog/schema.js';
 import type { RunResult } from '../adapters/types.js';
+import type { StageTransitionDecision } from '../workflow/sessionPolicy.js';
 
 export type GateDecision = 'approved' | 'skipped' | 'retried';
 export type OutputStream = 'stdout' | 'stderr';
@@ -56,6 +57,7 @@ export interface StageRequestCreatedEvent {
   kind: StageRequestKind;
   prompt: string;
   source?: 'manual' | 'auto';
+  options?: string[];
 }
 
 export interface StageRequestResolvedEvent {
@@ -63,6 +65,8 @@ export interface StageRequestResolvedEvent {
   kind: StageRequestKind;
   response: string;
 }
+
+export type StageTransitionDecidedEvent = StageTransitionDecision;
 
 export interface BudgetAlertEvent {
   percent: number;
@@ -114,6 +118,7 @@ export interface MsqEvents {
   'gate:resolved': GateResolvedEvent;
   'stage:request-created': StageRequestCreatedEvent;
   'stage:request-resolved': StageRequestResolvedEvent;
+  'stage:transition-decided': StageTransitionDecidedEvent;
   'scheduler:paused': Record<string, never>;
   'scheduler:resumed': Record<string, never>;
   'budget:alert': BudgetAlertEvent;

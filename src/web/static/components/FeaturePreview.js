@@ -21,6 +21,7 @@ const DEFAULT_WORKFLOW = {
   stages: ['specify', 'plan', 'tasks', 'implement', 'validate'],
   approvals: { channel: 'telegram', autoAdvance: false },
   syncTasksToBacklog: true,
+  sessionPolicy: { mode: 'isolated', alwaysIsolatedStages: [] },
 };
 
 const PREVIEW_SECTION_ORDER = ['spec', 'config', 'tasks', 'previous', 'dependencies'];

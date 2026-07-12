@@ -24,7 +24,10 @@ export class BacklogCatalogNotFoundError extends Error {
  * shape too — callers should be able to patch just `workflow.stages`
  * without also supplying `mode`/`approvals`/`syncTasksToBacklog`. */
 export type FeaturePatch = Omit<Partial<Feature>, 'workflow' | 'retry'> & {
-  workflow?: Partial<Omit<Workflow, 'approvals'>> & { approvals?: Partial<Workflow['approvals']> };
+  workflow?: Partial<Omit<Workflow, 'approvals' | 'sessionPolicy'>> & {
+    approvals?: Partial<Workflow['approvals']>;
+    sessionPolicy?: Partial<Workflow['sessionPolicy']>;
+  };
   retry?: Partial<Retry>;
 };
 
@@ -320,6 +323,9 @@ function mergeFeaturePatch(current: Feature, patch: FeaturePatch): unknown {
           approvals: patch.workflow.approvals
             ? { ...current.workflow.approvals, ...patch.workflow.approvals }
             : current.workflow.approvals,
+          sessionPolicy: patch.workflow.sessionPolicy
+            ? { ...current.workflow.sessionPolicy, ...patch.workflow.sessionPolicy }
+            : current.workflow.sessionPolicy,
         }
       : current.workflow,
     retry: patch.retry ? { ...(current.retry ?? {}), ...patch.retry } : current.retry,

@@ -181,6 +181,7 @@ function FeatureConfigSection({ feature, settings }) {
     stages: ['specify', 'plan', 'tasks', 'implement', 'validate'],
     approvals: { channel: 'telegram', autoAdvance: false },
     syncTasksToBacklog: true,
+    sessionPolicy: { mode: 'isolated', alwaysIsolatedStages: [] },
   };
   const skills = feature.skills ?? [];
   const dependsOn = feature.dependsOn ?? [];

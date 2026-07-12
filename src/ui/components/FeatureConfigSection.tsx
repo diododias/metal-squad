@@ -21,6 +21,7 @@ const _DEFAULT_WORKFLOW: Workflow = {
   stages: ['specify', 'plan', 'tasks', 'implement', 'validate'],
   approvals: { channel: 'telegram', autoAdvance: false },
   syncTasksToBacklog: true,
+  sessionPolicy: { mode: 'isolated', alwaysIsolatedStages: [] },
 };
 
 interface Props {
@@ -49,8 +50,18 @@ export function FeatureConfigSection({ feature, settings, width }: Props): React
   const retry = feature.retry;
   const retryExplicit = Boolean(retry);
   const resolvedRetry = { ...DEFAULT_RETRY, ...retry };
-  // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- workflow/dependsOn set by Zod defaults
-  const workflow = feature.workflow ?? _DEFAULT_WORKFLOW;
+  const workflow = {
+    ..._DEFAULT_WORKFLOW,
+    ...feature.workflow,
+    approvals: {
+      ..._DEFAULT_WORKFLOW.approvals,
+      ...feature.workflow.approvals,
+    },
+    sessionPolicy: {
+      ..._DEFAULT_WORKFLOW.sessionPolicy,
+      ...feature.workflow.sessionPolicy,
+    },
+  };
   const skills = feature.skills;
   // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
   const dependsOn = feature.dependsOn ?? [];
@@ -82,6 +93,18 @@ export function FeatureConfigSection({ feature, settings, width }: Props): React
         <Text {...theme.role('muted')} bold>Approvals</Text>
         {row(theme, 'channel', workflow.approvals.channel)}
         {row(theme, 'autoAdvance', String(workflow.approvals.autoAdvance))}
+      </Box>
+      <Box marginTop={1} flexDirection="column">
+        <Text {...theme.role('muted')} bold>Session policy</Text>
+        {row(theme, 'mode', workflow.sessionPolicy.mode)}
+        {row(
+          theme,
+          'alwaysIsolatedStages',
+          workflow.sessionPolicy.alwaysIsolatedStages.length > 0
+            ? workflow.sessionPolicy.alwaysIsolatedStages.join(', ')
+            : 'none',
+          workflow.sessionPolicy.alwaysIsolatedStages.length === 0,
+        )}
       </Box>
       <Box marginTop={1} flexDirection="column">
         <Text {...theme.role('muted')} bold>Skills</Text>

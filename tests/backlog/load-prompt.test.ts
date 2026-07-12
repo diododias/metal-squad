@@ -102,6 +102,40 @@ describe('buildPrompt — dynamic skill-based prompt builder', () => {
     expect(prompt).not.toContain('missing.md');
   });
 
+  it('expands directory entries in context into their readable files', async () => {
+    cwd = mkdtempSync(join(tmpdir(), 'msq-buildprompt-'));
+    mkdirSync(join(cwd, 'ctx'));
+    mkdirSync(join(cwd, 'ctx', 'nested'));
+    writeFileSync(join(cwd, 'ctx', 'a.ts'), 'export const a = 1;');
+    writeFileSync(join(cwd, 'ctx', 'nested', 'b.ts'), 'export const b = 2;');
+
+    const { buildPrompt } = await import('../../src/core/backlog/prompt.js');
+    const skills = [
+      {
+        name: 'implement',
+        source: 'builtin' as const,
+        promptTemplate: '{{context}}',
+        metadata: { description: 'impl', inputs: ['context'] },
+      },
+    ];
+    const prompt = buildPrompt(
+      {
+        id: 'f1',
+        title: 'F',
+        context: ['ctx'],
+        tool: 'claude',
+        effort: 'medium',
+        dependsOn: [],
+        tasks: [],
+      },
+      skills,
+      cwd,
+    );
+
+    expect(prompt).toContain('--- ctx/a.ts ---\nexport const a = 1;');
+    expect(prompt).toContain('--- ctx/nested/b.ts ---\nexport const b = 2;');
+  });
+
   it('falls back to builtin implement skill when skills array is empty', async () => {
     const { buildPrompt } = await import('../../src/core/backlog/prompt.js');
     const prompt = buildPrompt(

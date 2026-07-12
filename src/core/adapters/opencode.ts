@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import type { ToolAdapter, RunResult, RunFeatureOptions, TokenUsage } from './types.js';
+import type { SessionHandle, ToolAdapter, RunResult, RunFeatureOptions, TokenUsage } from './types.js';
 import type { Effort, Feature } from '../backlog/schema.js';
 import { CliAbortError, runCli } from './spawn.js';
 import { msqEventBus } from '../events/index.js';
@@ -36,6 +36,8 @@ interface OpenCodePart {
 
 interface OpenCodeResponse {
   type?: string;
+  sessionID?: string;
+  sessionId?: string;
   response?: string;
   usage?: OpenCodeUsage;
   tokens?: OpenCodeUsage;
@@ -77,6 +79,7 @@ export const opencodeAdapter: ToolAdapter = {
       'run',
       '--format', 'json',
       '--thinking',
+      ...(opts.session?.mode === 'resume' && opts.session.handle ? ['--session', opts.session.handle.sessionId] : []),
       ...(feature.model ? ['--model', feature.model] : []),
       '--',
       prompt,
@@ -150,12 +153,15 @@ export const opencodeAdapter: ToolAdapter = {
     const finalText = getOpenCodeFinalText(events)
       || pickTextSnippet(json?.response, json?.result, json?.message)
       || stdout;
+    const session = buildOpenCodeSessionHandle(events, json, opts, opts.runId);
+    const control = parseControlSignal(finalText);
     if (usage) emitUsage(opts.runId, feature, usage);
     return {
       ok: true,
       summary: finalText.slice(0, 200),
       usage,
-      control: parseControlSignal(finalText),
+      ...(control ? { control } : {}),
+      ...(session ? { session } : {}),
     };
   },
 
@@ -268,6 +274,30 @@ function usageFromOpenCodeResponse(json: OpenCodeResponse | null): TokenUsage | 
   const cachedInput = u.cached_input_tokens ?? u.cache_read_input_tokens ?? 0;
   const output = u.output ?? u.output_tokens ?? 0;
   return { input, cachedInput, output, total: input + cachedInput + output };
+}
+
+function extractOpenCodeSessionId(events: OpenCodeResponse[], fallback: OpenCodeResponse | null): string | null {
+  for (const event of [...events, fallback].filter((value): value is OpenCodeResponse => value !== null)) {
+    const sessionId = event.sessionID ?? event.sessionId;
+    if (typeof sessionId === 'string' && sessionId.trim().length > 0) return sessionId;
+  }
+  return null;
+}
+
+function buildOpenCodeSessionHandle(
+  events: OpenCodeResponse[],
+  fallback: OpenCodeResponse | null,
+  opts: RunFeatureOptions,
+  runId: number,
+): SessionHandle | null {
+  const sessionId = extractOpenCodeSessionId(events, fallback) ?? opts.session?.handle?.sessionId;
+  if (!sessionId) return null;
+  return {
+    tool: 'opencode',
+    sessionId,
+    capturedFromRunId: runId,
+    capturedAt: new Date().toISOString(),
+  };
 }
 
 function getOpenCodeFinalText(events: OpenCodeResponse[]): string {

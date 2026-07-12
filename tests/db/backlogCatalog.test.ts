@@ -28,6 +28,10 @@ function makeBacklog(overrides: Partial<BacklogV2> = {}): BacklogV2 {
               stages: ['specify', 'plan', 'tasks', 'implement', 'validate'],
               approvals: { channel: 'telegram', autoAdvance: false },
               syncTasksToBacklog: true,
+              sessionPolicy: {
+                mode: 'isolated',
+                alwaysIsolatedStages: [],
+              },
             },
           },
         ],
@@ -196,6 +200,34 @@ describe('backlogCatalog upsert/diff/load', () => {
       });
       expect(updated.workflow.approvals).toEqual({ channel: 'telegram', autoAdvance: true });
       expect(updated.workflow.stages).toEqual(['specify', 'plan', 'tasks', 'implement', 'validate']);
+    });
+
+    it('deep-merges workflow.sessionPolicy so patching only mode preserves alwaysIsolatedStages', async () => {
+      const { upsertBacklogCatalog, updateCatalogFeature } = await setup();
+      upsertBacklogCatalog(makeBacklog({
+        epics: [{
+          id: 'epic-1',
+          title: 'Epic One',
+          features: [{
+            ...makeBacklog().epics[0]!.features[0]!,
+            workflow: {
+              mode: 'staged',
+              stages: ['specify', 'plan', 'tasks', 'implement', 'validate'],
+              approvals: { channel: 'telegram', autoAdvance: false },
+              syncTasksToBacklog: true,
+              sessionPolicy: { mode: 'isolated', alwaysIsolatedStages: ['specify'] },
+            },
+          }],
+        }],
+      }), 'repo-1');
+
+      const updated = updateCatalogFeature('repo-1', 'feat-1', {
+        workflow: { sessionPolicy: { mode: 'adaptive' } },
+      });
+      expect(updated.workflow.sessionPolicy).toEqual({
+        mode: 'adaptive',
+        alwaysIsolatedStages: ['specify'],
+      });
     });
 
     it('throws on an invalid patch and writes nothing', async () => {

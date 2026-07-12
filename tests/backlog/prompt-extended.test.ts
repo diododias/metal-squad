@@ -2,10 +2,12 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 const mockExistsSync = vi.fn();
 const mockReadFileSync = vi.fn();
+const mockStatSync = vi.fn();
 
 vi.mock('node:fs', () => ({
   existsSync: mockExistsSync,
   readFileSync: mockReadFileSync,
+  statSync: mockStatSync,
 }));
 vi.mock('node:path', async (importOriginal) => {
   const actual = await importOriginal<typeof import('node:path')>();
@@ -16,6 +18,7 @@ beforeEach(() => {
   vi.resetModules();
   mockExistsSync.mockReset().mockReturnValue(false);
   mockReadFileSync.mockReset().mockReturnValue('');
+  mockStatSync.mockReset().mockReturnValue({ isFile: () => true, isDirectory: () => false });
 });
 
 function makeFeature(overrides: Record<string, unknown> = {}) {

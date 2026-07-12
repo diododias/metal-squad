@@ -222,6 +222,7 @@ trabalho executavel (ver "Proximo passo" em cada doc).
 | [F46 — Prompt/Skill Customizado por Step](features/F46-custom-prompt-per-step.md) | Skills | Media |
 | [F47 — Perguntas Interativas via Telegram (Botoes)](features/F47-telegram-interactive-questions.md) | Notificacoes | Alta |
 | [F48 — Card de Demanda Enriquecido](features/F48-enhanced-feature-card.md) | Tela principal | Media |
+| [F49 — Continuidade de Sessao ao Responder Pergunta da IA](features/F49-question-answer-session-continuity.md) | Controle de sessao | Alta |
 
 ### Melhorias / Bugs
 

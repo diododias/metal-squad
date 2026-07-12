@@ -1,5 +1,5 @@
 import { getSecret } from '../../security/secrets.js';
-import { resolveGate, resolveStageRequest, resumePipeline } from '../../db/repo.js';
+import { getStageRequest, resolveGate, resolveStageRequest, resumePipeline } from '../../db/repo.js';
 import type { GateDecision } from '../../db/repo.js';
 
 interface TelegramUpdate {
@@ -12,6 +12,8 @@ interface TelegramUpdate {
 const GATE_CMD = /gate:(\d+)\s+(approv(?:e|ed)|skip(?:ped)?|retr(?:y|ied))/i;
 const STAGE_CMD = /stage:(\d+)\s+(advance|hold|retry)/i;
 const INPUT_CMD = /^input:(\d+)\s+([\s\S]+)$/i;
+// Matches a tap on an option button: input:<requestId>:<optionIndex>
+const INPUT_OPTION_CMD = /^input:(\d+):(\d+)$/;
 
 function parseDecision(raw: string): GateDecision | null {
   const lower = raw.toLowerCase();
@@ -82,6 +84,19 @@ export class TelegramPoller {
             const response = stageMatch[2];
             if (!requestId || !response) continue;
             try { resolveStageRequest(Number(requestId), response.toLowerCase()); } catch { /* DB may be unavailable */ }
+            if (callbackId) void this.answerCallback(token, callbackId);
+            continue;
+          }
+
+          const inputOptionMatch = INPUT_OPTION_CMD.exec(text);
+          if (inputOptionMatch) {
+            const requestId = Number(inputOptionMatch[1]);
+            const optionIndex = Number(inputOptionMatch[2]);
+            try {
+              const row = getStageRequest(requestId);
+              const label = row?.status === 'pending' ? row.options?.[optionIndex] : undefined;
+              if (label !== undefined) resolveStageRequest(requestId, label);
+            } catch { /* DB may be unavailable */ }
             if (callbackId) void this.answerCallback(token, callbackId);
             continue;
           }

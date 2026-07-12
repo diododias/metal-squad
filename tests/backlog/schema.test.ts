@@ -42,6 +42,10 @@ const V2_YAML_OBJ = {
             stages: ['specify', 'plan', 'tasks'],
             approvals: { channel: 'telegram', autoAdvance: false },
             syncTasksToBacklog: true,
+            sessionPolicy: {
+              mode: 'adaptive',
+              alwaysIsolatedStages: ['specify'],
+            },
           },
           specFile: undefined,
           context: ['src/core/backlog/schema.ts'],
@@ -118,7 +122,67 @@ describe('BacklogV2Schema', () => {
       const feat = result.data.epics[0]?.features[0];
       expect(feat?.skills).toEqual(['specify', 'implement']);
       expect(feat?.context).toEqual(['src/core/backlog/schema.ts']);
+      expect(feat?.workflow.sessionPolicy).toEqual({
+        mode: 'adaptive',
+        alwaysIsolatedStages: ['specify'],
+      });
     }
+  });
+
+  it('defaults workflow.sessionPolicy when omitted', () => {
+    const result = BacklogV2Schema.safeParse({
+      ...V2_YAML_OBJ,
+      epics: [
+        {
+          ...V2_YAML_OBJ.epics[0],
+          features: [
+            {
+              ...V2_YAML_OBJ.epics[0].features[0],
+              workflow: {
+                mode: 'staged',
+                stages: ['specify', 'plan'],
+                approvals: { channel: 'telegram', autoAdvance: false },
+                syncTasksToBacklog: true,
+              },
+            },
+          ],
+        },
+      ],
+    });
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.epics[0]?.features[0]?.workflow.sessionPolicy).toEqual({
+        mode: 'isolated',
+        alwaysIsolatedStages: [],
+      });
+    }
+  });
+
+  it('rejects sessionPolicy.alwaysIsolatedStages entries not present in workflow.stages', () => {
+    const result = BacklogV2Schema.safeParse({
+      ...V2_YAML_OBJ,
+      epics: [
+        {
+          ...V2_YAML_OBJ.epics[0],
+          features: [
+            {
+              ...V2_YAML_OBJ.epics[0].features[0],
+              workflow: {
+                mode: 'staged',
+                stages: ['specify', 'plan'],
+                approvals: { channel: 'telegram', autoAdvance: false },
+                syncTasksToBacklog: true,
+                sessionPolicy: {
+                  mode: 'adaptive',
+                  alwaysIsolatedStages: ['validate'],
+                },
+              },
+            },
+          ],
+        },
+      ],
+    });
+    expect(result.success).toBe(false);
   });
 
   it('parses task with taskFile and skills', () => {

@@ -51,7 +51,7 @@ describe('buildMsqWebState pendingFeatures projection', () => {
         effort: 'medium',
         skills: [],
         dependsOn: [],
-        workflow: { mode: 'staged', stages: ['specify'], approvals: { channel: 'telegram', autoAdvance: false }, syncTasksToBacklog: true },
+        workflow: { mode: 'staged', stages: ['specify'], approvals: { channel: 'telegram', autoAdvance: false }, syncTasksToBacklog: true, sessionPolicy: { mode: 'isolated', alwaysIsolatedStages: [] } },
       },
     });
     mocks.getBacklogSettings.mockReturnValue({ stageSkills: {} });
@@ -88,6 +88,47 @@ describe('buildMsqWebState pendingFeatures projection', () => {
     ]);
 
     expect(buildMsqWebState().pendingFeatures).toEqual([]);
+  });
+
+  it('keeps transition audit fields on run rows exposed to the web state', async () => {
+    const { buildMsqWebState } = await import('../../src/web/state.js');
+    mocks.listRunsForTui.mockReturnValue([
+      {
+        runId: 42,
+        repoId: 'repo-1',
+        featureId: 'feat-1',
+        tool: 'codex',
+        pipelineId: 99,
+        stage: 'plan',
+        rawStatus: 'running',
+        status: 'running',
+        startedAt: '2026-07-11T10:00:00.000Z',
+        endedAt: null,
+        totalTokens: 100,
+        inputTokens: 50,
+        outputTokens: 50,
+        gateId: null,
+        gateDecision: null,
+        pipelineStatus: 'running',
+        pipelineCurrentStage: 'plan',
+        pipelineResumeSummary: null,
+        pendingStageRequestId: null,
+        pendingStageRequestKind: null,
+        pendingStageRequestPrompt: null,
+        pendingStageRequestCreatedAt: null,
+        latestTransitionDecision: 'reuse',
+        latestTransitionReason: 'low_usage_reuse',
+        latestTransitionToStage: 'plan',
+        latestTransitionContextWindowPercent: 20,
+        latestTransitionPreviousSessionId: 'thread_1',
+        latestTransitionNextSessionId: 'thread_1',
+      },
+    ]);
+
+    expect(buildMsqWebState().runs[0]).toMatchObject({
+      latestTransitionReason: 'low_usage_reuse',
+      latestTransitionDecision: 'reuse',
+    });
   });
 
   it('removes blocked execution-owned features from pendingFeatures', async () => {

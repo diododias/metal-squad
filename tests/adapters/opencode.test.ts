@@ -145,6 +145,28 @@ describe('opencodeAdapter.runFeature', () => {
     expect(args).not.toContain('--model');
   });
 
+  it('uses --session when resuming a prior opencode session', async () => {
+    mockRunCli.mockResolvedValue({ code: 0, stdout: JSON.stringify({ response: 'done' }), stderr: '' });
+
+    const { opencodeAdapter } = await import('../../src/core/adapters/opencode.js');
+    await opencodeAdapter.runFeature(MOCK_FEATURE as never, 'prompt', {
+      ...MOCK_OPTS,
+      session: {
+        mode: 'resume',
+        handle: {
+          tool: 'opencode',
+          sessionId: 'ses_123',
+          capturedFromRunId: 1,
+          capturedAt: '2026-07-11T00:00:00Z',
+        },
+      },
+    });
+
+    const [, args] = mockRunCli.mock.calls[0]!;
+    expect(args).toContain('--session');
+    expect(args).toContain('ses_123');
+  });
+
   it('returns ok=false with stderr when exit code != 0', async () => {
     mockRunCli.mockResolvedValue({ code: 1, stdout: '', stderr: 'fatal error from tool' });
 

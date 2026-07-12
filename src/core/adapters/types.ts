@@ -10,14 +10,28 @@ export interface TokenUsage {
 export interface RunControlNeedsInput {
   type: 'needs_input';
   prompt: string;
+  options?: string[];
 }
 
 export type RunControl = RunControlNeedsInput;
+
+export interface SessionHandle {
+  tool: Tool;
+  sessionId: string;
+  capturedFromRunId: number;
+  capturedAt: string;
+}
+
+export type SessionReuseMode = 'new' | 'resume';
 
 export interface RunFeatureOptions {
   cwd: string;
   runId: number;
   signal?: AbortSignal;
+  session?: {
+    mode: SessionReuseMode;
+    handle?: SessionHandle;
+  };
 }
 
 export interface RunResult {
@@ -26,6 +40,7 @@ export interface RunResult {
   usage?: TokenUsage;
   control?: RunControl;
   aborted?: boolean;
+  session?: SessionHandle | null;
 }
 
 export interface ToolAdapter {

@@ -289,6 +289,7 @@ describe('FeaturePreview', () => {
       stages: ['specify', 'plan', 'tasks', 'implement', 'validate'],
       approvals: { channel: 'telegram' as const, autoAdvance: false },
       syncTasksToBacklog: true,
+      sessionPolicy: { mode: 'adaptive' as const, alwaysIsolatedStages: ['specify', 'plan'] },
     },
     retry: undefined,
     specFile: undefined,
@@ -316,6 +317,7 @@ describe('FeaturePreview', () => {
     expect(lastFrame()).toContain('maxAttempts: 1');
     expect(lastFrame()).toContain('onFail: stop');
     expect(lastFrame()).toContain('feat-earlier');
+    expect(lastFrame()).toContain('alwaysIsolatedStages: specify, plan');
   });
 });
 
@@ -532,6 +534,7 @@ describe('MainPanel vertical budget', () => {
         stages: ['specify', 'plan', 'tasks', 'implement', 'validate'],
         approvals: { channel: 'telegram' as const, autoAdvance: false },
         syncTasksToBacklog: true,
+        sessionPolicy: { mode: 'isolated' as const, alwaysIsolatedStages: [] },
       },
     };
   }

@@ -1,7 +1,7 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { resolve, dirname, join } from 'node:path';
 import type { Backlog, Effort, Feature, OnFail, Tool } from '../backlog/schema.js';
-import type { RunResult } from '../adapters/types.js';
+import type { RunFeatureOptions, RunResult } from '../adapters/types.js';
 import { topoOrder, selectFeaturePlan } from '../orchestrator/graph.js';
 import { schedule } from '../orchestrator/scheduler.js';
 import { getAdapter } from '../adapters/index.js';
@@ -11,10 +11,12 @@ import {
   createPipeline,
   createRun,
   createStageRequest,
+  createStageTransitionDecision,
   createGate,
   createRetryRecord,
   finishPipeline,
   finishRun,
+  getRunContextTelemetry,
   getPipeline,
   getPipelineSnapshot,
   getStageRequest,
@@ -27,6 +29,7 @@ import {
   updatePipelineSnapshot,
   updatePipelineStage,
   updateRunTool,
+  updateStageTransitionDecisionNextSessionId,
   type PipelineStatus,
   type StageRequestRow,
 } from '../../db/repo.js';
@@ -38,6 +41,7 @@ import { createSkillRegistry } from '../skills/index.js';
 import { syncFeatureTasksToBacklog } from '../backlog/sync.js';
 import type { Skill } from '../skills/types.js';
 import { collectEffectiveStageSkills } from '../workflow/stageSkills.js';
+import { decideStageTransition } from '../workflow/sessionPolicy.js';
 import {
   createBudgetTracker,
   formatBudgetViolation,
@@ -179,6 +183,7 @@ export async function executeBacklog(
     prompt: string,
     stage?: string,
     abortSignal?: AbortSignal,
+    session?: RunFeatureOptions['session'],
   ): Promise<{ runId: number; res: RunResult }> => {
     const runId = createRun(repoId, feature.id, feature.tool, { pipelineId, stage });
     activeRunIds.add(runId);
@@ -198,6 +203,7 @@ export async function executeBacklog(
         runId,
         repoId,
         signal: abortSignal,
+        session,
         resumeOverride: opts.resumeOverride?.featureId === feature.id ? opts.resumeOverride : undefined,
       });
       if (res.usage) {
@@ -458,6 +464,7 @@ type StageExecutor = (
   prompt: string,
   stage?: string,
   abortSignal?: AbortSignal,
+  session?: RunFeatureOptions['session'],
 ) => Promise<{
   runId: number;
   res: RunResult;
@@ -468,6 +475,7 @@ interface RetryRunOptions {
   runId: number;
   repoId: string;
   signal?: AbortSignal;
+  session?: RunFeatureOptions['session'];
   resumeOverride?: ResumeOverride;
 }
 
@@ -494,6 +502,10 @@ function buildRetryCandidates(feature: Feature, resumeOverride?: ResumeOverride)
   return [primary, ...fallbacks];
 }
 
+function resolvePrimaryTool(feature: Feature, resumeOverride?: ResumeOverride): Tool {
+  return buildRetryCandidates(feature, resumeOverride)[0]?.tool ?? feature.tool;
+}
+
 async function runWithRetry(
   feature: Feature,
   prompt: string,
@@ -516,10 +528,14 @@ async function runWithRetry(
 
     for (let localAttempt = 1; localAttempt <= candidate.maxAttempts; localAttempt += 1) {
       attempt += 1;
+      const session = opts.session?.mode === 'resume' && opts.session.handle?.tool === candidate.tool
+        ? opts.session
+        : undefined;
       const res = await adapter.runFeature(candidateFeature, prompt, {
         cwd: opts.cwd,
         runId: opts.runId,
         signal: opts.signal,
+        session,
       });
 
       if (res.ok || res.control?.type === 'needs_input') {
@@ -566,11 +582,14 @@ async function executeStagedFeature(
   abortSignal?: AbortSignal,
 ): Promise<RunResult> {
   const workflow = feature.workflow;
+  const sessionPolicy = workflow.sessionPolicy;
   const autoAdvance = (opts.autoAdvanceStages ?? workflow.approvals.autoAdvance) || config.workflow.autoAdvanceStages;
   const stages = workflow.stages;
   const persistedRequests = listStageRequestsForFeature(pipelineId, feature.id);
   const stageInputs = loadPersistedStageInputs(persistedRequests);
   const currentStage = getPipeline(pipelineId)?.currentStage ?? null;
+  let pendingTransitionDecisionId: number | null = null;
+  let nextStageSession: RunFeatureOptions['session'] | undefined;
   // A gate-blocked stage leaves `currentStage` set and re-enters this
   // function within the same process once the scheduler resumes it — treat
   // that the same as an explicit `msq resume` so it continues from the
@@ -587,7 +606,15 @@ async function executeStagedFeature(
     updatePipelineStage(pipelineId, stage);
     const stageSkillList = resolveStageSkill(feature, stage, registry, opts.cwd, stageSkills);
     const prompt = buildStagePrompt(feature, stage, stageSkillList, opts.cwd, config.promptContextCharLimit, stageInputs.get(stage) ?? []);
-    const { runId, res } = await executeStageRun(feature, prompt, stage, abortSignal);
+    const { runId, res } = await executeStageRun(feature, prompt, stage, abortSignal, nextStageSession);
+    if (pendingTransitionDecisionId !== null) {
+      updateStageTransitionDecisionNextSessionId(
+        pendingTransitionDecisionId,
+        res.session?.sessionId ?? null,
+      );
+      pendingTransitionDecisionId = null;
+    }
+    nextStageSession = undefined;
 
     if (res.control?.type === 'needs_input') {
       const requestId = createStageRequest(
@@ -596,7 +623,7 @@ async function executeStagedFeature(
         stage,
         'input',
         res.control.prompt,
-        { runId },
+        { runId, options: res.control.options },
       );
       const response = await waitForStageRequestResponse(requestId, config.workflow.pollIntervalMs);
       stageInputs.set(stage, [...(stageInputs.get(stage) ?? []), response]);
@@ -624,13 +651,41 @@ async function executeStagedFeature(
     const hasNextStage = index < stages.length - 1;
     if (!hasNextStage) continue;
 
+    const nextStage = stages[index + 1] ?? 'done';
+    const transitionPlan = decideStageTransition({
+      policy: sessionPolicy,
+      telemetry: getRunContextTelemetry(runId),
+      nextStage,
+      expectedTool: resolvePrimaryTool(
+        feature,
+        opts.resumeOverride?.featureId === feature.id ? opts.resumeOverride : undefined,
+      ),
+      previousSession: res.session,
+    });
+    const transitionDecision = {
+      pipelineId,
+      featureId: feature.id,
+      fromRunId: runId,
+      fromStage: stage,
+      toStage: nextStage,
+      policyMode: transitionPlan.policyMode,
+      decision: transitionPlan.decision,
+      reason: transitionPlan.reason,
+      contextWindowPercent: transitionPlan.contextWindowPercent,
+      previousSessionId: transitionPlan.previousSessionId,
+      nextSessionId: null,
+    } as const;
+    pendingTransitionDecisionId = createStageTransitionDecision(transitionDecision);
+    msqEventBus.emit('stage:transition-decided', transitionDecision);
+    nextStageSession = transitionPlan.session.mode === 'resume' ? transitionPlan.session : undefined;
+
     if (autoAdvance) {
       createStageRequest(
         pipelineId,
         feature.id,
         stage,
         'approval',
-        `Auto-advance enabled; next stage: ${stages[index + 1] ?? 'done'}.`,
+        `Auto-advance enabled; next stage: ${nextStage}.`,
         {
           runId,
           response: 'advance',
@@ -645,7 +700,7 @@ async function executeStagedFeature(
       feature.id,
       stage,
       'approval',
-      `Advance to stage ${stages[index + 1] ?? 'done'}?`,
+      `Advance to stage ${nextStage}?`,
       { runId },
     );
     const decision = await waitForStageApproval(
@@ -653,11 +708,13 @@ async function executeStagedFeature(
       pipelineId,
       feature.id,
       stage,
-      stages[index + 1] ?? 'done',
+      nextStage,
       config.workflow.pollIntervalMs,
       runId,
     );
     if (decision === 'retry') {
+      pendingTransitionDecisionId = null;
+      nextStageSession = undefined;
       index -= 1;
       continue;
     }
@@ -702,6 +759,7 @@ function buildStagePrompt(
     'Run only this stage in this session.',
     'Do not continue to later stages after finishing the current stage.',
     'If you need admin input, end your final response with exactly: MSQ_INPUT_REQUIRED: <question>',
+    'If the question has 1-8 discrete answer options, add a line `OPTIONS:` right after it, followed by one `- <label>` line per option (each label 1-60 characters, no duplicates); otherwise omit it for free-text input.',
   ];
   const stageContext: string[] = [];
   if (stage === 'specify') {

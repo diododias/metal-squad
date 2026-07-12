@@ -93,18 +93,26 @@ para nao repetir o mesmo problema na nova UI de botoes.
 
 ## Criterios de aceite
 
-- [ ] Uma pergunta real da IA durante `specify` (ou outro stage que gere
+- [x] Uma pergunta real da IA durante `specify` (ou outro stage que gere
       pergunta) chega ao Telegram como mensagem com botoes representando
       as opcoes reais apresentadas pela IA, nao um "aprovar/rejeitar"
-      generico.
-- [ ] Escolher um botao propaga a resposta correspondente de volta ao step
+      generico. (`parseControlSignal` extrai bloco `OPTIONS:`;
+      `stage:request-created` monta `reply_markup.inline_keyboard`.)
+- [x] Escolher um botao propaga a resposta correspondente de volta ao step
       em execucao, com o mesmo efeito observavel que a resposta livre por
-      texto tem hoje.
-- [ ] Pedidos de aprovacao de gate (nao-pergunta) continuam funcionando
+      texto tem hoje. (`TelegramPoller` reconhece `input:<id>:<index>` e
+      chama `resolveStageRequest` com o rotulo da opcao.)
+- [x] Pedidos de aprovacao de gate (nao-pergunta) continuam funcionando
       como hoje, sem regressao — H19 deve estar resolvido antes de F47
-      entrar em execucao real.
-- [ ] Perguntas cujo texto ultrapassa o limite de mensagem do Telegram sao
+      entrar em execucao real. (branch `kind === 'approval'` inalterado;
+      regex `input:<id>:<index>` nao colide com `GATE_CMD`/`STAGE_CMD`/
+      `input:<id> <texto>`.)
+- [x] Perguntas cujo texto ultrapassa o limite de mensagem do Telegram sao
       tratadas (split/truncamento controlado), nao apenas cortadas
-      silenciosamente.
-- [ ] Testes cobrindo extracao de opcoes do output da IA e o dispatch da
-      notificacao com inline keyboard.
+      silenciosamente. (`TelegramChannel.send` fatia em fragmentos de
+      4096 caracteres, `reply_markup` so no ultimo fragmento.)
+- [x] Testes cobrindo extracao de opcoes do output da IA e o dispatch da
+      notificacao com inline keyboard. (`tests/core/control.test.ts`,
+      `tests/core/events-notifications.test.ts`,
+      `tests/core/notify-telegram-poller.test.ts`,
+      `tests/core/notify-telegram.test.ts`.)

@@ -338,7 +338,7 @@ describe('web server', () => {
   it('includes featureCatalog and backlogSettings in full state', async () => {
     const { createWebServer } = await import('../../src/web/server.js');
     mocks.getFeatureCatalog.mockReturnValue({
-      feat1: { id: 'feat1', title: 'Feature One', tool: 'claude', effort: 'M', skills: [], dependsOn: [], workflow: { mode: 'staged', stages: ['specify'], approvals: { channel: 'telegram', autoAdvance: false }, syncTasksToBacklog: true } },
+      feat1: { id: 'feat1', title: 'Feature One', tool: 'claude', effort: 'M', skills: [], dependsOn: [], workflow: { mode: 'staged', stages: ['specify'], approvals: { channel: 'telegram', autoAdvance: false }, syncTasksToBacklog: true, sessionPolicy: { mode: 'isolated', alwaysIsolatedStages: [] } } },
     });
     mocks.getBacklogSettings.mockReturnValue({ stageSkills: { specify: ['speckit-specify'] } });
 
@@ -965,7 +965,7 @@ describe('web server', () => {
       effort: 'medium',
       skills: [],
       dependsOn: [],
-      workflow: { mode: 'staged', stages: ['specify'], approvals: { channel: 'telegram', autoAdvance: false }, syncTasksToBacklog: true },
+      workflow: { mode: 'staged', stages: ['specify'], approvals: { channel: 'telegram', autoAdvance: false }, syncTasksToBacklog: true, sessionPolicy: { mode: 'isolated', alwaysIsolatedStages: [] } },
     };
     let runs: Array<Record<string, unknown>> = [];
     mocks.getFeatureCatalog.mockReturnValue({ 'feat-1': featureEntry });

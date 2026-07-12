@@ -1,5 +1,5 @@
-import { readFileSync, existsSync } from 'node:fs';
-import { resolve } from 'node:path';
+import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
+import { relative, resolve } from 'node:path';
 import type { Feature } from './schema.js';
 import type { Skill } from '../skills/types.js';
 
@@ -31,6 +31,34 @@ function readOptionalFile(path: string | undefined, cwd: string): string | null 
   return readFileSync(abs, 'utf8');
 }
 
+function collectContextFiles(absPath: string): string[] {
+  const stat = statSync(absPath);
+  if (stat.isFile()) return [absPath];
+  if (!stat.isDirectory()) return [];
+
+  return readdirSync(absPath, { withFileTypes: true })
+    .sort((a, b) => a.name.localeCompare(b.name))
+    .flatMap((entry) => collectContextFiles(resolve(absPath, entry.name)));
+}
+
+function readContextEntry(path: string, cwd: string): string | null {
+  const abs = resolve(cwd, path);
+  if (!existsSync(abs)) return null;
+
+  const entries = collectContextFiles(abs)
+    .map((file) => {
+      try {
+        const content = readFileSync(file, 'utf8');
+        return `--- ${relative(cwd, file)} ---\n${content}`;
+      } catch {
+        return null;
+      }
+    })
+    .filter((entry): entry is string => entry !== null);
+
+  return entries.length > 0 ? entries.join('\n\n') : null;
+}
+
 function buildSpecSection(feature: Feature, cwd: string): string | null {
   const parts: string[] = [];
 
@@ -49,8 +77,7 @@ function buildSpecSection(feature: Feature, cwd: string): string | null {
 function buildContextSection(feature: Feature, cwd: string): string | null {
   const parts = (feature.context ?? [])
     .map((file) => {
-      const content = readOptionalFile(file, cwd);
-      return content ? `--- ${file} ---\n${content}` : null;
+      return readContextEntry(file, cwd);
     })
     .filter((entry): entry is string => entry !== null);
 

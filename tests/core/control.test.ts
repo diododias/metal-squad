@@ -61,4 +61,103 @@ describe('parseControlSignal', () => {
     const result = parseControlSignal('MSQ_INPUT_REQUIRED:Line1\nLine2\nLine3');
     expect(result?.prompt).toBe('Line1\nLine2\nLine3');
   });
+
+  describe('OPTIONS: block — valid extraction', () => {
+    it('extracts options and strips the OPTIONS: block from prompt', () => {
+      const text = [
+        'MSQ_INPUT_REQUIRED: Qual estrategia de cache devemos usar?',
+        'OPTIONS:',
+        '- Cache em memoria',
+        '- Cache em SQLite',
+        '- Sem cache por enquanto',
+      ].join('\n');
+      const result = parseControlSignal(text);
+      expect(result).toEqual({
+        type: 'needs_input',
+        prompt: 'Qual estrategia de cache devemos usar?',
+        options: ['Cache em memoria', 'Cache em SQLite', 'Sem cache por enquanto'],
+      });
+    });
+
+    it('preserves option order', () => {
+      const text = 'MSQ_INPUT_REQUIRED: pick one\nOPTIONS:\n- Third\n- First\n- Second';
+      const result = parseControlSignal(text);
+      expect(result?.options).toEqual(['Third', 'First', 'Second']);
+    });
+
+    it('is case-insensitive for the OPTIONS: marker', () => {
+      const text = 'MSQ_INPUT_REQUIRED: pick one\noptions:\n- A\n- B';
+      const result = parseControlSignal(text);
+      expect(result?.options).toEqual(['A', 'B']);
+    });
+
+    it('accepts exactly 1 option', () => {
+      const text = 'MSQ_INPUT_REQUIRED: pick one\nOPTIONS:\n- Only option';
+      const result = parseControlSignal(text);
+      expect(result?.options).toEqual(['Only option']);
+    });
+
+    it('accepts exactly 8 options', () => {
+      const labels = Array.from({ length: 8 }, (_, i) => `Option ${String(i + 1)}`);
+      const text = `MSQ_INPUT_REQUIRED: pick one\nOPTIONS:\n${labels.map((l) => `- ${l}`).join('\n')}`;
+      const result = parseControlSignal(text);
+      expect(result?.options).toEqual(labels);
+    });
+
+    it('ignores blank lines between option lines', () => {
+      const text = 'MSQ_INPUT_REQUIRED: pick one\nOPTIONS:\n- A\n\n- B\n';
+      const result = parseControlSignal(text);
+      expect(result?.options).toEqual(['A', 'B']);
+    });
+
+    it('stops collecting at the first non-option line', () => {
+      const text = 'MSQ_INPUT_REQUIRED: pick one\nOPTIONS:\n- A\n- B\nnot an option\n- C';
+      const result = parseControlSignal(text);
+      expect(result?.options).toEqual(['A', 'B']);
+    });
+  });
+
+  describe('OPTIONS: block — invalid falls back to free text', () => {
+    it('falls back when there is no "-" line after OPTIONS:', () => {
+      const text = 'MSQ_INPUT_REQUIRED: pick one\nOPTIONS:\nnothing here';
+      const result = parseControlSignal(text);
+      expect(result?.options).toBeUndefined();
+      expect(result?.prompt).toBe('pick one\nOPTIONS:\nnothing here');
+    });
+
+    it('falls back when there are more than 8 options', () => {
+      const labels = Array.from({ length: 9 }, (_, i) => `Option ${String(i + 1)}`);
+      const text = `MSQ_INPUT_REQUIRED: pick one\nOPTIONS:\n${labels.map((l) => `- ${l}`).join('\n')}`;
+      const result = parseControlSignal(text);
+      expect(result?.options).toBeUndefined();
+      expect(result?.prompt).toBe(text.slice('MSQ_INPUT_REQUIRED:'.length).trim());
+    });
+
+    it('falls back when a label is empty', () => {
+      const text = 'MSQ_INPUT_REQUIRED: pick one\nOPTIONS:\n- \n- B';
+      const result = parseControlSignal(text);
+      expect(result?.options).toBeUndefined();
+    });
+
+    it('falls back when a label exceeds 60 characters', () => {
+      const longLabel = 'x'.repeat(61);
+      const text = `MSQ_INPUT_REQUIRED: pick one\nOPTIONS:\n- ${longLabel}\n- B`;
+      const result = parseControlSignal(text);
+      expect(result?.options).toBeUndefined();
+    });
+
+    it('accepts a label at exactly 60 characters', () => {
+      const label = 'x'.repeat(60);
+      const text = `MSQ_INPUT_REQUIRED: pick one\nOPTIONS:\n- ${label}`;
+      const result = parseControlSignal(text);
+      expect(result?.options).toEqual([label]);
+    });
+
+    it('falls back when labels are duplicated', () => {
+      const text = 'MSQ_INPUT_REQUIRED: pick one\nOPTIONS:\n- Same\n- Same';
+      const result = parseControlSignal(text);
+      expect(result?.options).toBeUndefined();
+      expect(result?.prompt).toBe('pick one\nOPTIONS:\n- Same\n- Same');
+    });
+  });
 });

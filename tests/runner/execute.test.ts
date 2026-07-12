@@ -7,13 +7,16 @@ const mockCleanupStaleRuns = vi.fn();
 const mockCreateRun = vi.fn();
 const mockCreatePipeline = vi.fn();
 const mockCreateStageRequest = vi.fn();
+const mockCreateStageTransitionDecision = vi.fn();
 const mockCreateGate = vi.fn();
 const mockCreateRetryRecord = vi.fn();
 const mockUpdateRunTool = vi.fn();
+const mockUpdateStageTransitionDecisionNextSessionId = vi.fn();
 const mockFinishRun = vi.fn();
 const mockFinishPipeline = vi.fn();
 const mockGetPipeline = vi.fn();
 const mockGetPipelineSnapshot = vi.fn();
+const mockGetRunContextTelemetry = vi.fn();
 const mockGetStageRequest = vi.fn();
 const mockListStageRequestsForFeature = vi.fn();
 const mockPausePipeline = vi.fn();
@@ -40,11 +43,14 @@ vi.mock('../../src/db/repo.js', () => ({
   createRun: mockCreateRun,
   createPipeline: mockCreatePipeline,
   createStageRequest: mockCreateStageRequest,
+  createStageTransitionDecision: mockCreateStageTransitionDecision,
   createGate: mockCreateGate,
   createRetryRecord: mockCreateRetryRecord,
   updateRunTool: mockUpdateRunTool,
+  updateStageTransitionDecisionNextSessionId: mockUpdateStageTransitionDecisionNextSessionId,
   finishRun: mockFinishRun,
   finishPipeline: mockFinishPipeline,
+  getRunContextTelemetry: mockGetRunContextTelemetry,
   getPipeline: mockGetPipeline,
   getPipelineSnapshot: mockGetPipelineSnapshot,
   getStageRequest: mockGetStageRequest,
@@ -97,11 +103,14 @@ beforeEach(() => {
   mockCreateRun.mockReset();
   mockCreatePipeline.mockReset();
   mockCreateStageRequest.mockReset();
+  mockCreateStageTransitionDecision.mockReset();
   mockCreateGate.mockReset();
   mockCreateRetryRecord.mockReset();
   mockUpdateRunTool.mockReset();
+  mockUpdateStageTransitionDecisionNextSessionId.mockReset();
   mockFinishRun.mockReset();
   mockFinishPipeline.mockReset();
+  mockGetRunContextTelemetry.mockReset();
   mockGetPipeline.mockReset();
   mockGetPipelineSnapshot.mockReset();
   mockGetStageRequest.mockReset();
@@ -155,6 +164,13 @@ beforeEach(() => {
     return 9;
   });
   mockCreateStageRequest.mockReturnValue(11);
+  mockCreateStageTransitionDecision.mockReturnValue(101);
+  mockGetRunContextTelemetry.mockReturnValue({
+    runId: 7,
+    stage: 'specify',
+    contextWindowPercent: 25,
+    reliable: true,
+  });
   mockGetPipeline.mockImplementation(() => pipelineRow);
   mockGetPipelineSnapshot.mockImplementation((row) => ({
     plan: JSON.parse(row.planJson),
@@ -212,7 +228,7 @@ describe('executeBacklog failure persistence', () => {
               tool: 'codex',
               effort: 'medium',
               dependsOn: [],
-              workflow: { mode: 'single', stages: [], approvals: { channel: 'telegram', autoAdvance: false }, syncTasksToBacklog: true },
+              workflow: { mode: 'single', stages: [], approvals: { channel: 'telegram', autoAdvance: false }, syncTasksToBacklog: true, sessionPolicy: { mode: 'isolated', alwaysIsolatedStages: [] } },
             },
           ],
         },
@@ -281,7 +297,7 @@ describe('executeBacklog failure persistence', () => {
               tool: 'codex',
               effort: 'medium',
               dependsOn: [],
-              workflow: { mode: 'single', stages: [], approvals: { channel: 'telegram', autoAdvance: false }, syncTasksToBacklog: true },
+              workflow: { mode: 'single', stages: [], approvals: { channel: 'telegram', autoAdvance: false }, syncTasksToBacklog: true, sessionPolicy: { mode: 'isolated', alwaysIsolatedStages: [] } },
               retry: {
                 maxAttempts: 3,
                 backoffMs: 10,
@@ -337,7 +353,7 @@ describe('executeBacklog failure persistence', () => {
               tool: 'claude',
               effort: 'medium',
               dependsOn: [],
-              workflow: { mode: 'single', stages: [], approvals: { channel: 'telegram', autoAdvance: false }, syncTasksToBacklog: true },
+              workflow: { mode: 'single', stages: [], approvals: { channel: 'telegram', autoAdvance: false }, syncTasksToBacklog: true, sessionPolicy: { mode: 'isolated', alwaysIsolatedStages: [] } },
               retry: {
                 maxAttempts: 2,
                 backoffMs: 0,
@@ -399,7 +415,7 @@ describe('executeBacklog failure persistence', () => {
               tool: 'claude',
               effort: 'medium',
               dependsOn: [],
-              workflow: { mode: 'single', stages: [], approvals: { channel: 'telegram', autoAdvance: false }, syncTasksToBacklog: true },
+              workflow: { mode: 'single', stages: [], approvals: { channel: 'telegram', autoAdvance: false }, syncTasksToBacklog: true, sessionPolicy: { mode: 'isolated', alwaysIsolatedStages: [] } },
               retry: {
                 maxAttempts: 1,
                 backoffMs: 0,
@@ -446,7 +462,7 @@ describe('executeBacklog failure persistence', () => {
               tool: 'codex',
               effort: 'medium',
               dependsOn: [],
-              workflow: { mode: 'single', stages: [], approvals: { channel: 'telegram', autoAdvance: false }, syncTasksToBacklog: true },
+              workflow: { mode: 'single', stages: [], approvals: { channel: 'telegram', autoAdvance: false }, syncTasksToBacklog: true, sessionPolicy: { mode: 'isolated', alwaysIsolatedStages: [] } },
               retry: {
                 maxAttempts: 1,
                 backoffMs: 0,
@@ -461,7 +477,7 @@ describe('executeBacklog failure persistence', () => {
               tool: 'codex',
               effort: 'medium',
               dependsOn: ['feat-11'],
-              workflow: { mode: 'single', stages: [], approvals: { channel: 'telegram', autoAdvance: false }, syncTasksToBacklog: true },
+              workflow: { mode: 'single', stages: [], approvals: { channel: 'telegram', autoAdvance: false }, syncTasksToBacklog: true, sessionPolicy: { mode: 'isolated', alwaysIsolatedStages: [] } },
             },
           ],
         },
@@ -502,7 +518,7 @@ describe('executeBacklog failure persistence', () => {
               tool: 'codex',
               effort: 'medium',
               dependsOn: [],
-              workflow: { mode: 'single', stages: [], approvals: { channel: 'telegram', autoAdvance: false }, syncTasksToBacklog: true },
+              workflow: { mode: 'single', stages: [], approvals: { channel: 'telegram', autoAdvance: false }, syncTasksToBacklog: true, sessionPolicy: { mode: 'isolated', alwaysIsolatedStages: [] } },
               retry: {
                 maxAttempts: 1,
                 backoffMs: 0,
@@ -574,6 +590,7 @@ describe('executeBacklog failure persistence', () => {
                 stages: ['specify', 'plan'],
                 approvals: { channel: 'telegram', autoAdvance: false },
                 syncTasksToBacklog: false,
+                sessionPolicy: { mode: 'isolated', alwaysIsolatedStages: [] },
               },
             },
           ],
@@ -648,6 +665,7 @@ describe('executeBacklog failure persistence', () => {
                 stages: ['specify'],
                 approvals: { channel: 'telegram', autoAdvance: false },
                 syncTasksToBacklog: false,
+                sessionPolicy: { mode: 'isolated', alwaysIsolatedStages: [] },
               },
             },
           ],
@@ -682,9 +700,69 @@ describe('executeBacklog failure persistence', () => {
       'specify',
       'input',
       'Qual o nome da feature?',
-      { runId: 7 },
+      { runId: 7, options: undefined },
     );
     expect(mockFinishPipeline).toHaveBeenCalledWith(9, 'done');
+  });
+
+  it('propagates control.options to createStageRequest when the adapter returns discrete options', async () => {
+    const backlog: Backlog = {
+      version: 2,
+      repo: 'repo',
+      defaults: { tool: 'codex', effort: 'medium', skills: ['implement'], stageSkills: {} },
+      epics: [
+        {
+          id: 'epic-1',
+          title: 'Epic',
+          features: [
+            {
+              id: 'feat-27',
+              title: 'Feature',
+              spec: 'spec',
+              tasks: [],
+              tool: 'codex',
+              effort: 'medium',
+              dependsOn: [],
+              workflow: {
+                mode: 'staged',
+                stages: ['specify'],
+                approvals: { channel: 'telegram', autoAdvance: false },
+                syncTasksToBacklog: false,
+                sessionPolicy: { mode: 'isolated', alwaysIsolatedStages: [] },
+              },
+            },
+          ],
+        },
+      ],
+    };
+
+    mockRunFeature
+      .mockResolvedValueOnce({
+        ok: true,
+        summary: 'MSQ_INPUT_REQUIRED: Qual estrategia de cache?',
+        control: {
+          type: 'needs_input',
+          prompt: 'Qual estrategia de cache?',
+          options: ['Cache em memoria', 'Cache em SQLite'],
+        },
+      })
+      .mockResolvedValueOnce({ ok: true, summary: 'spec ok' });
+    mockGetStageRequest.mockReturnValue({ status: 'resolved', response: 'Cache em memoria' });
+
+    const { executeBacklog } = await import('../../src/core/runner/execute.js');
+
+    await expect(
+      executeBacklog(backlog, { cwd: '/repo', concurrency: 1 }),
+    ).resolves.toBeUndefined();
+
+    expect(mockCreateStageRequest).toHaveBeenCalledWith(
+      9,
+      'feat-27',
+      'specify',
+      'input',
+      'Qual estrategia de cache?',
+      { runId: 7, options: ['Cache em memoria', 'Cache em SQLite'] },
+    );
   });
 
   it('resumes a staged workflow from the next stage after an approved checkpoint', async () => {
@@ -710,6 +788,7 @@ describe('executeBacklog failure persistence', () => {
                 stages: ['specify', 'plan', 'implement'],
                 approvals: { channel: 'telegram', autoAdvance: false },
                 syncTasksToBacklog: false,
+                sessionPolicy: { mode: 'isolated', alwaysIsolatedStages: [] },
               },
             },
           ],
@@ -765,6 +844,162 @@ describe('executeBacklog failure persistence', () => {
     });
   });
 
+  it('reuses the previous session on low-usage adaptive transitions when the next stage is eligible', async () => {
+    const backlog: Backlog = {
+      version: 2,
+      repo: 'repo',
+      defaults: { tool: 'codex', effort: 'medium', skills: ['implement'], stageSkills: {} },
+      epics: [
+        {
+          id: 'epic-1',
+          title: 'Epic',
+          features: [
+            {
+              id: 'feat-41',
+              title: 'Adaptive Feature',
+              spec: 'spec',
+              tasks: [],
+              tool: 'codex',
+              effort: 'medium',
+              dependsOn: [],
+              workflow: {
+                mode: 'staged',
+                stages: ['specify', 'plan'],
+                approvals: { channel: 'telegram', autoAdvance: false },
+                syncTasksToBacklog: false,
+                sessionPolicy: { mode: 'adaptive', alwaysIsolatedStages: [] },
+              },
+            },
+          ],
+        },
+      ],
+    };
+
+    mockRunFeature
+      .mockResolvedValueOnce({
+        ok: true,
+        summary: 'spec ok',
+        session: {
+          tool: 'codex',
+          sessionId: 'thread_1',
+          capturedFromRunId: 7,
+          capturedAt: '2026-07-11T11:00:00Z',
+        },
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        summary: 'plan ok',
+        session: {
+          tool: 'codex',
+          sessionId: 'thread_1',
+          capturedFromRunId: 8,
+          capturedAt: '2026-07-11T11:05:00Z',
+        },
+      });
+    mockGetStageRequest.mockReturnValue({ status: 'resolved', response: 'advance' });
+    mockGetRunContextTelemetry.mockReturnValue({
+      runId: 7,
+      stage: 'specify',
+      contextWindowPercent: 20,
+      reliable: true,
+    });
+
+    const { executeBacklog } = await import('../../src/core/runner/execute.js');
+
+    await expect(
+      executeBacklog(backlog, { cwd: '/repo', concurrency: 1 }),
+    ).resolves.toBeUndefined();
+
+    expect(mockCreateStageTransitionDecision).toHaveBeenCalledWith(expect.objectContaining({
+      decision: 'reuse',
+      reason: 'low_usage_reuse',
+      previousSessionId: 'thread_1',
+    }));
+    expect(mockRunFeature.mock.calls[1]?.[2]).toEqual({
+      cwd: '/repo',
+      runId: 7,
+      signal: expect.any(AbortSignal),
+      session: {
+        mode: 'resume',
+        handle: {
+          tool: 'codex',
+          sessionId: 'thread_1',
+          capturedFromRunId: 7,
+          capturedAt: '2026-07-11T11:00:00Z',
+        },
+      },
+    });
+    expect(mockUpdateStageTransitionDecisionNextSessionId).toHaveBeenCalledWith(101, 'thread_1');
+  });
+
+  it('forces a new session when the next adaptive stage is always isolated or telemetry is missing', async () => {
+    const backlog: Backlog = {
+      version: 2,
+      repo: 'repo',
+      defaults: { tool: 'codex', effort: 'medium', skills: ['implement'], stageSkills: {} },
+      epics: [
+        {
+          id: 'epic-1',
+          title: 'Epic',
+          features: [
+            {
+              id: 'feat-41',
+              title: 'Adaptive Feature',
+              spec: 'spec',
+              tasks: [],
+              tool: 'codex',
+              effort: 'medium',
+              dependsOn: [],
+              workflow: {
+                mode: 'staged',
+                stages: ['specify', 'plan'],
+                approvals: { channel: 'telegram', autoAdvance: false },
+                syncTasksToBacklog: false,
+                sessionPolicy: { mode: 'adaptive', alwaysIsolatedStages: ['plan'] },
+              },
+            },
+          ],
+        },
+      ],
+    };
+
+    mockRunFeature
+      .mockResolvedValueOnce({
+        ok: true,
+        summary: 'spec ok',
+        session: {
+          tool: 'codex',
+          sessionId: 'thread_1',
+          capturedFromRunId: 7,
+          capturedAt: '2026-07-11T11:00:00Z',
+        },
+      })
+      .mockResolvedValueOnce({ ok: true, summary: 'plan ok' });
+    mockGetStageRequest.mockReturnValue({ status: 'resolved', response: 'advance' });
+    mockGetRunContextTelemetry.mockReturnValue({
+      runId: 7,
+      stage: 'specify',
+      contextWindowPercent: null,
+      reliable: false,
+    });
+
+    const { executeBacklog } = await import('../../src/core/runner/execute.js');
+
+    await expect(
+      executeBacklog(backlog, { cwd: '/repo', concurrency: 1 }),
+    ).resolves.toBeUndefined();
+
+    expect(mockCreateStageTransitionDecision).toHaveBeenCalledWith(expect.objectContaining({
+      decision: 'new_session',
+      reason: 'always_isolated_stage',
+    }));
+    expect(mockRunFeature.mock.calls[1]?.[2]).toEqual({
+      cwd: '/repo',
+      runId: 7,
+      signal: expect.any(AbortSignal),
+    });
+  });
+
   it('applies resumeOverride only to the initial candidate of the target featureId, leaving other pending features on persisted config', async () => {
     const backlog: Backlog = {
       version: 2,
@@ -783,7 +1018,7 @@ describe('executeBacklog failure persistence', () => {
               tool: 'codex',
               effort: 'medium',
               dependsOn: [],
-              workflow: { mode: 'single', stages: [], approvals: { channel: 'telegram', autoAdvance: false }, syncTasksToBacklog: true },
+              workflow: { mode: 'single', stages: [], approvals: { channel: 'telegram', autoAdvance: false }, syncTasksToBacklog: true, sessionPolicy: { mode: 'isolated', alwaysIsolatedStages: [] } },
             },
             {
               id: 'feat-b',
@@ -793,7 +1028,7 @@ describe('executeBacklog failure persistence', () => {
               tool: 'codex',
               effort: 'medium',
               dependsOn: [],
-              workflow: { mode: 'single', stages: [], approvals: { channel: 'telegram', autoAdvance: false }, syncTasksToBacklog: true },
+              workflow: { mode: 'single', stages: [], approvals: { channel: 'telegram', autoAdvance: false }, syncTasksToBacklog: true, sessionPolicy: { mode: 'isolated', alwaysIsolatedStages: [] } },
             },
           ],
         },
@@ -870,7 +1105,7 @@ describe('executeBacklog budget caps', () => {
               tool: 'codex',
               effort: 'medium',
               dependsOn: [],
-              workflow: { mode: 'single', stages: [], approvals: { channel: 'telegram', autoAdvance: false }, syncTasksToBacklog: true },
+              workflow: { mode: 'single', stages: [], approvals: { channel: 'telegram', autoAdvance: false }, syncTasksToBacklog: true, sessionPolicy: { mode: 'isolated', alwaysIsolatedStages: [] } },
             },
           ],
         },
@@ -920,7 +1155,7 @@ describe('executeBacklog budget caps', () => {
               tool: 'codex',
               effort: 'medium',
               dependsOn: [],
-              workflow: { mode: 'single', stages: [], approvals: { channel: 'telegram', autoAdvance: false }, syncTasksToBacklog: true },
+              workflow: { mode: 'single', stages: [], approvals: { channel: 'telegram', autoAdvance: false }, syncTasksToBacklog: true, sessionPolicy: { mode: 'isolated', alwaysIsolatedStages: [] } },
             },
           ],
         },
