@@ -22,6 +22,95 @@ budget:
   maxCostUsd: 100
   perFeatureMaxTokens: 500000
 epics:
+  - id: e07-adaptive-session-control
+    title: E07 — Adaptive Session Control
+    features:
+      - id: feat-39
+        title: "F41 — Reaproveitamento Adaptativo de Sessao entre Steps"
+        spec: >
+          Problema: F27 entrega sessoes isoladas por step (uma sessao nova a
+          cada stage do workflow: specify, plan, tasks, implement, validate).
+          Isso e seguro mas desperdica contexto quando um step termina cedo e
+          ainda sobra muita janela de contexto disponivel. Hoje nao existe
+          nenhum mecanismo de decisao "reusar sessao vs abrir nova" baseado em
+          consumo de contexto, nem um jeito de marcar stages especificos
+          (specify, plan) como "sempre isolados" independente desse
+          reaproveitamento.
+
+
+          Objetivo: adicionar um modo complementar as sessoes isoladas do F27
+          que reaproveite a mesma sessao entre steps consecutivos quando sobra
+          contexto suficiente, com dois limiares de decisao e uma flag geral
+          de liga/desliga: >=70% de contexto consumido ao final de um step
+          forca nova sessao no proximo step; <=50% de contexto consumido ao
+          final de um step permite reaproveitar a mesma sessao no proximo
+          step, se o modo estiver habilitado. A faixa 50%-70% precisa de
+          clarificacao no specify. Alem do limiar global, stages especificos
+          (specify, plan sao os citados pelo usuario) devem poder ser
+          marcados para sempre rodar em sessao isolada, selecionavel pelo
+          usuario por feature.
+
+
+          Escopo esperado (mapeamento fino fica para specify/plan): decisao de
+          reuso de sessao no orchestrator/adapters (hoje sempre abre sessao
+          nova por stage, comportamento do F27); flag de liga/desliga do modo
+          adaptativo no schema do backlog; marcacao de stages sempre-isolados
+          por feature no schema do backlog; leitura da telemetria de contexto
+          por sessao ja existente (F30), sem criar fonte paralela de medicao —
+          atencao a H15 (contagem de tokens confusa/possivelmente incorreta),
+          que pode invalidar o calculo dos limiares se nao for resolvido antes
+          ou junto deste trabalho.
+
+
+          Validacao:
+
+          - Com o modo adaptativo desligado, comportamento observavel identico
+            ao F27 atual (sessao nova a cada step).
+          - Com o modo ligado, step que termina com <=50% de contexto
+            consumido permite reaproveitar sessao no proximo step (se nao
+            estiver na lista de sempre-isolados).
+          - Com o modo ligado, step que termina com >=70% de contexto
+            consumido sempre forca nova sessao no proximo step.
+          - Stages marcados como sempre-isolados nunca reaproveitam sessao,
+            independente do consumo de contexto.
+          - Flag de liga/desliga e lista de stages sempre-isolados
+            configuraveis por feature no backlog.
+          - Testes cobrindo os dois limiares (50% e 70%) e a lista de stages
+            sempre-isolados.
+          - `npm run build`, `npm test` e `npm run typecheck` passam.
+        tool: codex
+        model: gpt-5.4
+        effort: high
+        skills:
+          - dev-flow
+        specFile: docs/features/F41-adaptive-session-reuse.md
+        context:
+          - docs/features/F41-adaptive-session-reuse.md
+          - docs/features/F27-stage-sessions-telegram.md
+          - docs/features/F30-token-context-telemetry.md
+          - docs/ROADMAP.md
+          - .claude/rules/architecture.md
+          - src/core/adapters/
+          - src/core/orchestrator/
+          - src/core/backlog/
+          - src/db/
+        dependsOn: []
+        retry:
+          maxAttempts: 1
+          backoffMs: 5000
+          onFail: stop
+        workflow:
+          mode: staged
+          stages:
+            - specify
+            - plan
+            - tasks
+            - implement
+            - validate
+          approvals:
+            channel: telegram
+            autoAdvance: false
+          syncTasksToBacklog: true
   - id: e08-notifications-interactive
     title: E08 — Interactive Notifications
     features:
