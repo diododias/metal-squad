@@ -90,7 +90,7 @@ describe('buildMsqWebState pendingFeatures projection', () => {
     expect(buildMsqWebState().pendingFeatures).toEqual([]);
   });
 
-  it('keeps transition audit fields on run rows exposed to the web state', async () => {
+  it('keeps guardrail transition audit fields on run rows exposed to the web state', async () => {
     const { buildMsqWebState } = await import('../../src/web/state.js');
     mocks.listRunsForTui.mockReturnValue([
       {
@@ -116,18 +116,18 @@ describe('buildMsqWebState pendingFeatures projection', () => {
         pendingStageRequestKind: null,
         pendingStageRequestPrompt: null,
         pendingStageRequestCreatedAt: null,
-        latestTransitionDecision: 'reuse',
-        latestTransitionReason: 'low_usage_reuse',
+        latestTransitionDecision: 'new_session',
+        latestTransitionReason: 'sixty_percent_guardrail',
         latestTransitionToStage: 'plan',
-        latestTransitionContextWindowPercent: 20,
+        latestTransitionContextWindowPercent: 62,
         latestTransitionPreviousSessionId: 'thread_1',
-        latestTransitionNextSessionId: 'thread_1',
+        latestTransitionNextSessionId: null,
       },
     ]);
 
     expect(buildMsqWebState().runs[0]).toMatchObject({
-      latestTransitionReason: 'low_usage_reuse',
-      latestTransitionDecision: 'reuse',
+      latestTransitionReason: 'sixty_percent_guardrail',
+      latestTransitionDecision: 'new_session',
     });
   });
 

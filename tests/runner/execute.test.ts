@@ -216,6 +216,38 @@ beforeEach(() => {
   });
 });
 
+function createAdaptiveBacklog(alwaysIsolatedStages: string[] = []): Backlog {
+  return {
+    version: 2,
+    repo: 'repo',
+    defaults: { tool: 'codex', effort: 'medium', skills: ['implement'], stageSkills: {} },
+    epics: [
+      {
+        id: 'epic-1',
+        title: 'Epic',
+        features: [
+          {
+            id: 'feat-41',
+            title: 'Adaptive Feature',
+            spec: 'spec',
+            tasks: [],
+            tool: 'codex',
+            effort: 'medium',
+            dependsOn: [],
+            workflow: {
+              mode: 'staged',
+              stages: ['specify', 'plan'],
+              approvals: { channel: 'telegram', autoAdvance: false },
+              syncTasksToBacklog: false,
+              sessionPolicy: { mode: 'adaptive', alwaysIsolatedStages },
+            },
+          },
+        ],
+      },
+    ],
+  };
+}
+
 describe('executeBacklog failure persistence', () => {
   it('stores failed status with partial summary from adapter timeout', async () => {
     const backlog: Backlog = {
@@ -915,35 +947,7 @@ describe('executeBacklog failure persistence', () => {
   });
 
   it('reuses the previous session on low-usage adaptive transitions when the next stage is eligible', async () => {
-    const backlog: Backlog = {
-      version: 2,
-      repo: 'repo',
-      defaults: { tool: 'codex', effort: 'medium', skills: ['implement'], stageSkills: {} },
-      epics: [
-        {
-          id: 'epic-1',
-          title: 'Epic',
-          features: [
-            {
-              id: 'feat-41',
-              title: 'Adaptive Feature',
-              spec: 'spec',
-              tasks: [],
-              tool: 'codex',
-              effort: 'medium',
-              dependsOn: [],
-              workflow: {
-                mode: 'staged',
-                stages: ['specify', 'plan'],
-                approvals: { channel: 'telegram', autoAdvance: false },
-                syncTasksToBacklog: false,
-                sessionPolicy: { mode: 'adaptive', alwaysIsolatedStages: [] },
-              },
-            },
-          ],
-        },
-      ],
-    };
+    const backlog = createAdaptiveBacklog();
 
     mockRunFeature
       .mockResolvedValueOnce({
@@ -1002,36 +1006,103 @@ describe('executeBacklog failure persistence', () => {
     expect(mockUpdateStageTransitionDecisionNextSessionId).toHaveBeenCalledWith(101, 'thread_1');
   });
 
-  it('forces a new session when the next adaptive stage is always isolated or telemetry is missing', async () => {
-    const backlog: Backlog = {
-      version: 2,
-      repo: 'repo',
-      defaults: { tool: 'codex', effort: 'medium', skills: ['implement'], stageSkills: {} },
-      epics: [
-        {
-          id: 'epic-1',
-          title: 'Epic',
-          features: [
-            {
-              id: 'feat-41',
-              title: 'Adaptive Feature',
-              spec: 'spec',
-              tasks: [],
-              tool: 'codex',
-              effort: 'medium',
-              dependsOn: [],
-              workflow: {
-                mode: 'staged',
-                stages: ['specify', 'plan'],
-                approvals: { channel: 'telegram', autoAdvance: false },
-                syncTasksToBacklog: false,
-                sessionPolicy: { mode: 'adaptive', alwaysIsolatedStages: ['plan'] },
-              },
-            },
-          ],
+  it('reuses the previous session in the mid band below sixty percent when a handle is available', async () => {
+    const backlog = createAdaptiveBacklog();
+
+    mockRunFeature
+      .mockResolvedValueOnce({
+        ok: true,
+        summary: 'spec ok',
+        session: {
+          tool: 'codex',
+          sessionId: 'thread_mid',
+          capturedFromRunId: 7,
+          capturedAt: '2026-07-11T11:10:00Z',
         },
-      ],
-    };
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        summary: 'plan ok',
+        session: {
+          tool: 'codex',
+          sessionId: 'thread_mid',
+          capturedFromRunId: 8,
+          capturedAt: '2026-07-11T11:12:00Z',
+        },
+      });
+    mockGetStageRequest.mockReturnValue({ status: 'resolved', response: 'advance' });
+    mockGetRunContextTelemetry.mockReturnValue({
+      runId: 7,
+      stage: 'specify',
+      contextWindowPercent: 55,
+      reliable: true,
+    });
+
+    const { executeBacklog } = await import('../../src/core/runner/execute.js');
+
+    await expect(
+      executeBacklog(backlog, { cwd: '/repo', concurrency: 1 }),
+    ).resolves.toBeUndefined();
+
+    expect(mockCreateStageTransitionDecision).toHaveBeenCalledWith(expect.objectContaining({
+      decision: 'reuse',
+      reason: 'mid_usage_reuse',
+      previousSessionId: 'thread_mid',
+    }));
+    expect(mockRunFeature.mock.calls[1]?.[2]).toEqual({
+      cwd: '/repo',
+      runId: 7,
+      signal: expect.any(AbortSignal),
+      session: {
+        mode: 'resume',
+        handle: {
+          tool: 'codex',
+          sessionId: 'thread_mid',
+          capturedFromRunId: 7,
+          capturedAt: '2026-07-11T11:10:00Z',
+        },
+      },
+    });
+  });
+
+  it('falls back to a new session when adaptive reuse is allowed but no reusable handle is available', async () => {
+    const backlog = createAdaptiveBacklog();
+
+    mockRunFeature
+      .mockResolvedValueOnce({
+        ok: true,
+        summary: 'spec ok',
+        session: null,
+      })
+      .mockResolvedValueOnce({ ok: true, summary: 'plan ok' });
+    mockGetStageRequest.mockReturnValue({ status: 'resolved', response: 'advance' });
+    mockGetRunContextTelemetry.mockReturnValue({
+      runId: 7,
+      stage: 'specify',
+      contextWindowPercent: 55,
+      reliable: true,
+    });
+
+    const { executeBacklog } = await import('../../src/core/runner/execute.js');
+
+    await expect(
+      executeBacklog(backlog, { cwd: '/repo', concurrency: 1 }),
+    ).resolves.toBeUndefined();
+
+    expect(mockCreateStageTransitionDecision).toHaveBeenCalledWith(expect.objectContaining({
+      decision: 'new_session',
+      reason: 'session_resume_unavailable',
+      previousSessionId: null,
+    }));
+    expect(mockRunFeature.mock.calls[1]?.[2]).toEqual({
+      cwd: '/repo',
+      runId: 7,
+      signal: expect.any(AbortSignal),
+    });
+  });
+
+  it('forces a new session when the next adaptive stage is always isolated', async () => {
+    const backlog = createAdaptiveBacklog(['plan']);
 
     mockRunFeature
       .mockResolvedValueOnce({
@@ -1062,6 +1133,128 @@ describe('executeBacklog failure persistence', () => {
     expect(mockCreateStageTransitionDecision).toHaveBeenCalledWith(expect.objectContaining({
       decision: 'new_session',
       reason: 'always_isolated_stage',
+    }));
+    expect(mockRunFeature.mock.calls[1]?.[2]).toEqual({
+      cwd: '/repo',
+      runId: 7,
+      signal: expect.any(AbortSignal),
+    });
+  });
+
+  it('forces a new session when adaptive telemetry is missing', async () => {
+    const backlog = createAdaptiveBacklog();
+
+    mockRunFeature
+      .mockResolvedValueOnce({
+        ok: true,
+        summary: 'spec ok',
+        session: {
+          tool: 'codex',
+          sessionId: 'thread_1',
+          capturedFromRunId: 7,
+          capturedAt: '2026-07-11T11:00:00Z',
+        },
+      })
+      .mockResolvedValueOnce({ ok: true, summary: 'plan ok' });
+    mockGetStageRequest.mockReturnValue({ status: 'resolved', response: 'advance' });
+    mockGetRunContextTelemetry.mockReturnValue({
+      runId: 7,
+      stage: 'specify',
+      contextWindowPercent: null,
+      reliable: false,
+    });
+
+    const { executeBacklog } = await import('../../src/core/runner/execute.js');
+
+    await expect(
+      executeBacklog(backlog, { cwd: '/repo', concurrency: 1 }),
+    ).resolves.toBeUndefined();
+
+    expect(mockCreateStageTransitionDecision).toHaveBeenCalledWith(expect.objectContaining({
+      decision: 'new_session',
+      reason: 'missing_context_telemetry',
+    }));
+    expect(mockRunFeature.mock.calls[1]?.[2]).toEqual({
+      cwd: '/repo',
+      runId: 7,
+      signal: expect.any(AbortSignal),
+    });
+  });
+
+  it('forces a new session at the sixty percent guardrail', async () => {
+    const backlog = createAdaptiveBacklog();
+
+    mockRunFeature
+      .mockResolvedValueOnce({
+        ok: true,
+        summary: 'spec ok',
+        session: {
+          tool: 'codex',
+          sessionId: 'thread_60',
+          capturedFromRunId: 7,
+          capturedAt: '2026-07-11T11:15:00Z',
+        },
+      })
+      .mockResolvedValueOnce({ ok: true, summary: 'plan ok' });
+    mockGetStageRequest.mockReturnValue({ status: 'resolved', response: 'advance' });
+    mockGetRunContextTelemetry.mockReturnValue({
+      runId: 7,
+      stage: 'specify',
+      contextWindowPercent: 60,
+      reliable: true,
+    });
+
+    const { executeBacklog } = await import('../../src/core/runner/execute.js');
+
+    await expect(
+      executeBacklog(backlog, { cwd: '/repo', concurrency: 1 }),
+    ).resolves.toBeUndefined();
+
+    expect(mockCreateStageTransitionDecision).toHaveBeenCalledWith(expect.objectContaining({
+      decision: 'new_session',
+      reason: 'sixty_percent_guardrail',
+      previousSessionId: 'thread_60',
+    }));
+    expect(mockRunFeature.mock.calls[1]?.[2]).toEqual({
+      cwd: '/repo',
+      runId: 7,
+      signal: expect.any(AbortSignal),
+    });
+  });
+
+  it('forces a new session at or above the high-usage guardrail', async () => {
+    const backlog = createAdaptiveBacklog();
+
+    mockRunFeature
+      .mockResolvedValueOnce({
+        ok: true,
+        summary: 'spec ok',
+        session: {
+          tool: 'codex',
+          sessionId: 'thread_70',
+          capturedFromRunId: 7,
+          capturedAt: '2026-07-11T11:20:00Z',
+        },
+      })
+      .mockResolvedValueOnce({ ok: true, summary: 'plan ok' });
+    mockGetStageRequest.mockReturnValue({ status: 'resolved', response: 'advance' });
+    mockGetRunContextTelemetry.mockReturnValue({
+      runId: 7,
+      stage: 'specify',
+      contextWindowPercent: 72,
+      reliable: true,
+    });
+
+    const { executeBacklog } = await import('../../src/core/runner/execute.js');
+
+    await expect(
+      executeBacklog(backlog, { cwd: '/repo', concurrency: 1 }),
+    ).resolves.toBeUndefined();
+
+    expect(mockCreateStageTransitionDecision).toHaveBeenCalledWith(expect.objectContaining({
+      decision: 'new_session',
+      reason: 'high_usage_guardrail',
+      previousSessionId: 'thread_70',
     }));
     expect(mockRunFeature.mock.calls[1]?.[2]).toEqual({
       cwd: '/repo',

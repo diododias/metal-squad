@@ -20,7 +20,8 @@ type TransitionDecisionReason =
   | 'adaptive_disabled'
   | 'always_isolated_stage'
   | 'low_usage_reuse'
-  | 'mid_usage_conservative'
+  | 'mid_usage_reuse'
+  | 'sixty_percent_guardrail'
   | 'high_usage_guardrail'
   | 'missing_context_telemetry'
   | 'session_resume_unavailable';
@@ -62,9 +63,10 @@ Ordered precedence:
 2. `always_isolated_stage` when `toStage` is in `alwaysIsolatedStages`
 3. `missing_context_telemetry` when `runs.context_window_percent` is absent or unusable
 4. `low_usage_reuse` when `contextWindowPercent <= 50`
-5. `mid_usage_conservative` when `50 < contextWindowPercent < 70`
-6. `high_usage_guardrail` when `contextWindowPercent >= 70`
-7. `session_resume_unavailable` when the chosen path was reuse but no valid session handle was available
+5. `mid_usage_reuse` when `50 < contextWindowPercent < 60`
+6. `sixty_percent_guardrail` when `60 <= contextWindowPercent < 70`
+7. `high_usage_guardrail` when `contextWindowPercent >= 70`
+8. `session_resume_unavailable` when the chosen path was reuse but no valid session handle was available
 
 ## Persistence Expectations
 

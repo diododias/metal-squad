@@ -113,143 +113,150 @@ epics:
           syncTasksToBacklog: true
         tasks:
           - id: T001
-            title: Create the shared session-policy decision module in
-              `src/core/workflow/sessionPolicy.ts`
+            title: Refresh adaptive session-policy fixtures and transition expectations in
+              `tests/runner/execute.test.ts` and
+              `tests/db/repo-extended.test.ts`
             status: done
             dependsOn: []
           - id: T002
-            title: "[P] Extend adapter run contracts for continuation handles in
-              `src/core/adapters/types.ts`"
+            title: "[P] Align the validation scenarios and audit examples in
+              `specs/011-adaptive-session-reuse/quickstart.md` and
+              `specs/011-adaptive-session-reuse/contracts/stage-transition-deci\
+              sion.md`"
             status: done
             dependsOn: []
           - id: T003
-            title: "[P] Add transition-decision event payload types in
-              `src/core/events/types.ts`"
+            title: Update the shared transition-decision reason model and threshold
+              evaluation order in `src/core/workflow/sessionPolicy.ts`
             status: done
             dependsOn: []
           - id: T004
-            title: Add the SQLite migration for stage transition audits in `src/db/index.ts`
+            title: "[P] Align stage-transition audit persistence and query helpers with the
+              F41 reason set in `src/db/index.ts` and `src/db/repo.ts`"
             status: done
             dependsOn: []
           - id: T005
-            title: "[P] Add repository helpers for persisting and reading transition
-              decisions in `src/db/repo.ts`"
+            title: "[P] Update staged handoff orchestration to consume the shared transition
+              plan consistently in `src/core/runner/execute.ts` and
+              `src/core/events/types.ts`"
             status: done
             dependsOn: []
           - id: T006
-            title: "[P] Add shared staged-session fixtures for follow-up tests in
-              `tests/runner/execute.test.ts` and
-              `tests/db/repo-extended.test.ts`"
+            title: "[P] [US1] Extend `workflow.sessionPolicy` default and validation
+              coverage in `tests/backlog/schema.test.ts`"
             status: done
             dependsOn: []
           - id: T007
-            title: Wire stage handoff orchestration to the session-policy helper in
-              `src/core/runner/execute.ts`
+            title: "[P] [US1] Extend catalog round-trip and feature-config rendering
+              coverage in `tests/db/backlogCatalog.test.ts`,
+              `tests/ui/components.test.tsx`, and `tests/ui/render.test.tsx`"
             status: done
             dependsOn: []
           - id: T008
-            title: "[P] [US1] Add failing schema cases for `workflow.sessionPolicy` defaults
-              and invalid stage ids in `tests/backlog/schema.test.ts`"
+            title: "[US1] Tighten `sessionPolicy` parsing and stage-membership validation in
+              `src/core/backlog/schema.ts`"
             status: done
             dependsOn: []
           - id: T009
-            title: "[P] [US1] Add catalog round-trip coverage for `sessionPolicy`
-              persistence in `tests/db/backlogCatalog.test.ts`"
+            title: "[US1] Preserve resolved `sessionPolicy` data through catalog load and
+              patch flows in `src/db/backlogCatalog.ts` and
+              `src/core/backlog/load.ts`"
             status: done
             dependsOn: []
           - id: T010
-            title: "[P] [US1] Add feature-config rendering assertions for session policy in
-              `tests/ui/components.test.tsx` and `tests/ui/render.test.tsx`"
+            title: "[US1] Show the resolved session policy in `src/ui/catalog.ts`,
+              `src/ui/components/FeatureConfigSection.tsx`, and
+              `src/web/static/components/FeaturePreview.js`"
             status: done
             dependsOn: []
           - id: T011
-            title: "[US1] Extend workflow schema defaults and validation for `sessionPolicy`
-              in `src/core/backlog/schema.ts`"
+            title: "[P] [US2] Add runner coverage for `<=50%` and `>50% && <60%` reuse
+              decisions in `tests/runner/execute.test.ts`"
             status: done
             dependsOn: []
           - id: T012
-            title: "[US1] Persist and reload `sessionPolicy` through the backlog catalog in
-              `src/db/backlogCatalog.ts` and `src/core/backlog/load.ts`"
+            title: "[P] [US2] Add adapter resume-path coverage for reused sessions in
+              `tests/adapters/codex-extended.test.ts`,
+              `tests/adapters/misc.test.ts`, and
+              `tests/adapters/opencode.test.ts`"
             status: done
             dependsOn: []
           - id: T013
-            title: "[US1] Surface the resolved session policy in `src/ui/catalog.ts` and
-              `src/ui/components/FeatureConfigSection.tsx`"
+            title: "[P] [US2] Add reuse-audit coverage for persisted session handoff details
+              in `tests/db/repo-extended.test.ts` and `tests/web/state.test.ts`"
             status: done
             dependsOn: []
           - id: T014
-            title: "[P] [US2] Add failing low-usage reuse and stage-opt-out coverage in
-              `tests/runner/execute.test.ts`"
-            status: done
-            dependsOn: []
-          - id: T015
-            title: "[P] [US2] Add adapter resume/new-session flag coverage in
-              `tests/adapters/codex-extended.test.ts`,
-              `tests/adapters/opencode.test.ts`, and
-              `tests/adapters/misc.test.ts`"
-            status: done
-            dependsOn: []
-          - id: T016
-            title: "[US2] Implement low-usage reuse and stage-exception decision rules in
+            title: "[US2] Implement `low_usage_reuse`, `mid_usage_reuse`, and
+              resume-unavailable fallback planning in
               `src/core/workflow/sessionPolicy.ts`"
             status: done
             dependsOn: []
-          - id: T017
-            title: "[US2] Capture provider session handles in run results from
-              `src/core/adapters/codex.ts`, `src/core/adapters/claude.ts`, and
-              `src/core/adapters/opencode.ts`"
-            status: done
-            dependsOn: []
-          - id: T018
+          - id: T015
             title: "[US2] Resume eligible next stages with the prior session handle in
               `src/core/runner/execute.ts`"
             status: done
             dependsOn: []
+          - id: T016
+            title: "[US2] Persist and expose reuse decision details in `src/db/repo.ts` and
+              `src/web/state.ts`"
+            status: done
+            dependsOn: []
+          - id: T017
+            title: "[P] [US3] Add runner and DB coverage for always-isolated,
+              missing-telemetry, `>=60% && <70%`, and `>=70%` branches in
+              `tests/runner/execute.test.ts` and
+              `tests/db/repo-extended.test.ts`"
+            status: done
+            dependsOn: []
+          - id: T018
+            title: "[P] [US3] Add migration and read-surface coverage for the guardrail
+              reasons in `tests/db/index-migrate.test.ts`,
+              `tests/ui/hooks.test.ts`, and `tests/web/state.test.ts`"
+            status: done
+            dependsOn: []
           - id: T019
-            title: "[P] [US3] Add failing conservative/high-usage/missing-telemetry audit
-              cases in `tests/runner/execute.test.ts`,
-              `tests/db/repo-extended.test.ts`, and
-              `tests/db/index-migrate.test.ts`"
+            title: "[US3] Replace `mid_usage_conservative` with explicit `mid_usage_reuse`,
+              `sixty_percent_guardrail`, and `high_usage_guardrail` outcomes in
+              `src/core/workflow/sessionPolicy.ts`"
             status: done
             dependsOn: []
           - id: T020
-            title: "[P] [US3] Add operational read-surface coverage for transition reasons
-              in `tests/web/state.test.ts` and `tests/ui/hooks.test.ts`"
+            title: "[US3] Enforce always-isolated and unreliable-telemetry fresh-session
+              fallbacks in `src/core/runner/execute.ts`"
             status: done
             dependsOn: []
           - id: T021
-            title: "[US3] Implement conservative, guardrail, and missing-telemetry branches
-              in `src/core/workflow/sessionPolicy.ts`"
+            title: "[US3] Normalize guardrail reason storage and latest-transition summaries
+              in `src/db/repo.ts` and `src/core/events/types.ts`"
             status: done
             dependsOn: []
           - id: T022
-            title: "[US3] Persist stage transition audit rows and query helpers in
-              `src/db/index.ts` and `src/db/repo.ts`"
+            title: "[US3] Expose guardrail and audit outcomes in `src/ui/hooks/useRuns.ts`,
+              `src/ui/components/MainPanel.tsx`, and
+              `src/web/static/components/RunDetail.js`"
             status: done
             dependsOn: []
           - id: T023
-            title: "[US3] Emit `stage:transition-decided` and store fallback session ids in
-              `src/core/events/index.ts` and `src/core/runner/execute.ts`"
+            title: "[P] Refresh the backlog-policy contract and validation walkthrough in
+              `specs/011-adaptive-session-reuse/contracts/backlog-session-polic\
+              y.md` and `specs/011-adaptive-session-reuse/quickstart.md`"
             status: done
             dependsOn: []
           - id: T024
-            title: "[US3] Expose transition decision history to operational readers in
-              `src/web/state.ts` and `src/db/repo.ts`"
+            title: "[P] Refresh adaptive-session examples and rollout notes in
+              `backlog.yaml` and `docs/features/F41-adaptive-session-reuse.md`"
             status: done
             dependsOn: []
           - id: T025
-            title: "[P] Update the validation and audit-inspection steps in
-              `specs/011-adaptive-session-reuse/quickstart.md`"
-            status: done
-            dependsOn: []
-          - id: T026
-            title: "[P] Refresh adaptive-session examples in `backlog.yaml` and
-              `docs/features/F41-adaptive-session-reuse.md`"
-            status: done
-            dependsOn: []
-          - id: T027
-            title: Execute the regression validation matrix documented in
-              `specs/011-adaptive-session-reuse/quickstart.md`
+            title: Run the adaptive-session regression matrix documented in
+              `specs/011-adaptive-session-reuse/quickstart.md` against
+              `tests/backlog/schema.test.ts`, `tests/db/backlogCatalog.test.ts`,
+              `tests/runner/execute.test.ts`, `tests/db/repo-extended.test.ts`,
+              `tests/adapters/codex-extended.test.ts`,
+              `tests/adapters/misc.test.ts`, `tests/adapters/opencode.test.ts`,
+              `tests/ui/hooks.test.ts`, `tests/ui/render.test.tsx`, and
+              `tests/web/state.test.ts`
             status: done
             dependsOn: []
   - id: e08-notifications-interactive

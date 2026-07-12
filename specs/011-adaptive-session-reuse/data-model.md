@@ -1,7 +1,7 @@
 # Data Model: Adaptive Session Reuse Between Steps
 
 **Feature**: 011-adaptive-session-reuse  
-**Date**: 2026-07-11
+**Date**: 2026-07-12
 
 ## Overview
 
@@ -89,7 +89,8 @@ Allowed reasons for `StageTransitionDecision.reason`.
 | `adaptive_disabled` | Policy mode is `isolated` |
 | `always_isolated_stage` | Next stage was explicitly excluded from reuse |
 | `low_usage_reuse` | `contextWindowPercent <= 50` and reuse is allowed |
-| `mid_usage_conservative` | `50 < contextWindowPercent < 70` |
+| `mid_usage_reuse` | `50 < contextWindowPercent < 60` and reuse remains allowed |
+| `sixty_percent_guardrail` | `60 <= contextWindowPercent < 70` forces a fresh session |
 | `high_usage_guardrail` | `contextWindowPercent >= 70` |
 | `missing_context_telemetry` | The persisted telemetry was absent or unreliable |
 | `session_resume_unavailable` | Policy wanted reuse, but no usable continuation handle existed |
@@ -123,7 +124,8 @@ evaluate transition
   -> new_session / always_isolated_stage
   -> new_session / missing_context_telemetry
   -> reuse       / low_usage_reuse
-  -> new_session / mid_usage_conservative
+  -> reuse       / mid_usage_reuse
+  -> new_session / sixty_percent_guardrail
   -> new_session / high_usage_guardrail
   -> new_session / session_resume_unavailable
 ```

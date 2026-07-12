@@ -5,7 +5,8 @@ export type TransitionDecisionReason =
   | 'adaptive_disabled'
   | 'always_isolated_stage'
   | 'low_usage_reuse'
-  | 'mid_usage_conservative'
+  | 'mid_usage_reuse'
+  | 'sixty_percent_guardrail'
   | 'high_usage_guardrail'
   | 'missing_context_telemetry'
   | 'session_resume_unavailable';
@@ -55,83 +56,125 @@ function isReusableHandle(handle: SessionHandle | null | undefined, expectedTool
   return handle?.tool === expectedTool && handle.sessionId.trim().length > 0;
 }
 
+function buildNewSessionPlan(
+  reason: TransitionDecisionReason,
+  policyMode: WorkflowSessionPolicy['mode'],
+  contextWindowPercent: number | null,
+  previousSessionId: string | null,
+): StageTransitionPlan {
+  return {
+    decision: 'new_session',
+    reason,
+    policyMode,
+    contextWindowPercent,
+    session: { mode: 'new' },
+    previousSessionId,
+  };
+}
+
+function buildReusePlan(
+  reason: Extract<TransitionDecisionReason, 'low_usage_reuse' | 'mid_usage_reuse'>,
+  policyMode: WorkflowSessionPolicy['mode'],
+  contextWindowPercent: number,
+  previousSession: SessionHandle | null | undefined,
+  previousSessionId: string | null,
+  expectedTool: Tool,
+): StageTransitionPlan {
+  if (isReusableHandle(previousSession, expectedTool)) {
+    return {
+      decision: 'reuse',
+      reason,
+      policyMode,
+      contextWindowPercent,
+      session: { mode: 'resume', handle: previousSession },
+      previousSessionId,
+    };
+  }
+
+  return buildNewSessionPlan(
+    'session_resume_unavailable',
+    policyMode,
+    contextWindowPercent,
+    previousSessionId,
+  );
+}
+
 export function decideStageTransition(input: DecideStageTransitionInput): StageTransitionPlan {
   const { policy, telemetry, nextStage, expectedTool, previousSession } = input;
   const previousSessionId = previousSession?.sessionId ?? null;
 
   if (policy.mode === 'isolated') {
-    return {
-      decision: 'new_session',
-      reason: 'adaptive_disabled',
-      policyMode: policy.mode,
-      contextWindowPercent: telemetry.contextWindowPercent,
-      session: { mode: 'new' },
+    return buildNewSessionPlan(
+      'adaptive_disabled',
+      policy.mode,
+      telemetry.contextWindowPercent,
       previousSessionId,
-    };
+    );
   }
 
   if (policy.alwaysIsolatedStages.includes(nextStage)) {
-    return {
-      decision: 'new_session',
-      reason: 'always_isolated_stage',
-      policyMode: policy.mode,
-      contextWindowPercent: telemetry.contextWindowPercent,
-      session: { mode: 'new' },
+    return buildNewSessionPlan(
+      'always_isolated_stage',
+      policy.mode,
+      telemetry.contextWindowPercent,
       previousSessionId,
-    };
+    );
   }
 
   if (!telemetry.reliable) {
-    return {
-      decision: 'new_session',
-      reason: 'missing_context_telemetry',
-      policyMode: policy.mode,
-      contextWindowPercent: telemetry.contextWindowPercent,
-      session: { mode: 'new' },
+    return buildNewSessionPlan(
+      'missing_context_telemetry',
+      policy.mode,
+      telemetry.contextWindowPercent,
       previousSessionId,
-    };
+    );
   }
 
   const percent = telemetry.contextWindowPercent ?? null;
-  if (percent !== null && percent <= 50) {
-    if (isReusableHandle(previousSession, expectedTool)) {
-      return {
-        decision: 'reuse',
-        reason: 'low_usage_reuse',
-        policyMode: policy.mode,
-        contextWindowPercent: percent,
-        session: { mode: 'resume', handle: previousSession },
-        previousSessionId,
-      };
-    }
-
-    return {
-      decision: 'new_session',
-      reason: 'session_resume_unavailable',
-      policyMode: policy.mode,
-      contextWindowPercent: percent,
-      session: { mode: 'new' },
+  if (percent === null) {
+    return buildNewSessionPlan(
+      'missing_context_telemetry',
+      policy.mode,
+      null,
       previousSessionId,
-    };
+    );
   }
 
-  if (percent !== null && percent >= 70) {
-    return {
-      decision: 'new_session',
-      reason: 'high_usage_guardrail',
-      policyMode: policy.mode,
-      contextWindowPercent: percent,
-      session: { mode: 'new' },
+  if (percent <= 50) {
+    return buildReusePlan(
+      'low_usage_reuse',
+      policy.mode,
+      percent,
+      previousSession,
       previousSessionId,
-    };
+      expectedTool,
+    );
   }
 
-  return {
-    decision: 'new_session',
-    reason: 'mid_usage_conservative',
-    policyMode: policy.mode,
-    contextWindowPercent: percent,
-    session: { mode: 'new' },
+  if (percent < 60) {
+    return buildReusePlan(
+      'mid_usage_reuse',
+      policy.mode,
+      percent,
+      previousSession,
+      previousSessionId,
+      expectedTool,
+    );
+  }
+
+  if (percent < 70) {
+    return buildNewSessionPlan(
+      'sixty_percent_guardrail',
+      policy.mode,
+      percent,
+      previousSessionId,
+    );
+  }
+
+  return buildNewSessionPlan(
+    'high_usage_guardrail',
+    policy.mode,
+    percent,
     previousSessionId,
-  };
+  );
 }

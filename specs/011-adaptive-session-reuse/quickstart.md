@@ -69,12 +69,27 @@ rtk npx vitest run tests/runner/execute.test.ts tests/db/repo-extended.test.ts t
 - the next stage receives a resume/continue session handle instead of forcing isolation
 - the persisted audit row records `decision = reuse`
 
-## Scenario 3: Conservative and Guardrail Paths Force New Sessions
+## Scenario 3: Mid-Band Reuse Still Resumes the Prior Session
+
+**Goal**: Prove that the extra `60%` breakpoint preserves reuse for usage strictly above `50%` and below `60%`.
+
+Run targeted runner/db tests after adding the mid-band case:
+
+```bash
+rtk npx vitest run tests/runner/execute.test.ts tests/db/repo-extended.test.ts tests/adapters/codex-extended.test.ts
+```
+
+**Expected outcomes**:
+- a staged run finishing above `50%` and below `60%` emits/persists `mid_usage_reuse`
+- the next eligible stage still receives a resume/continue session handle
+- the persisted audit row records `decision = reuse`
+
+## Scenario 4: Conservative and Guardrail Paths Force New Sessions
 
 **Goal**: Prove that stage exceptions and higher usage never reuse sessions.
 
 Run the same targeted runner/db suite after adding cases for:
-- `50 < usage < 70`
+- `60 <= usage < 70`
 - `usage >= 70`
 - `nextStage` listed in `alwaysIsolatedStages`
 - missing `contextWindowPercent`
@@ -84,12 +99,12 @@ rtk npx vitest run tests/runner/execute.test.ts tests/db/repo-extended.test.ts t
 ```
 
 **Expected outcomes**:
-- `mid_usage_conservative` results in `new_session`
+- `sixty_percent_guardrail` results in `new_session`
 - `high_usage_guardrail` results in `new_session`
 - `always_isolated_stage` overrides low usage
 - `missing_context_telemetry` falls back safely to `new_session`
 
-## Scenario 4: Config Surfaces Show the Effective Policy
+## Scenario 5: Config Surfaces Show the Effective Policy
 
 **Goal**: Prove that the catalog/UI render the resolved policy clearly.
 

@@ -47,6 +47,14 @@ const DEFAULT_RETRY = {
   onFail: 'stop',
 };
 
+function formatTransitionReason(reason) {
+  return reason ? reason.replace(/_/g, ' ') : null;
+}
+
+function formatTransitionDecision(decision) {
+  return decision ? decision.replace(/_/g, ' ') : 'new session';
+}
+
 function getStatusToneClass(status) {
   if (status === 'running') return 'status-running';
   if (status === 'done') return 'status-done';
@@ -200,6 +208,16 @@ function FeatureConfigSection({ feature, settings }) {
       configRow('stages', workflow.stages.join(' → ')),
       configRow('syncTasksToBacklog', String(workflow.syncTasksToBacklog)),
     ),
+    React.createElement(ConfigGroup, { title: 'Session policy' },
+      configRow('mode', workflow.sessionPolicy.mode),
+      configRow(
+        'alwaysIsolatedStages',
+        workflow.sessionPolicy.alwaysIsolatedStages.length > 0
+          ? workflow.sessionPolicy.alwaysIsolatedStages.join(', ')
+          : 'none',
+        workflow.sessionPolicy.alwaysIsolatedStages.length === 0,
+      ),
+    ),
     React.createElement(ConfigGroup, { title: 'Aprovações' },
       configRow('channel', workflow.approvals.channel),
       configRow('autoAdvance', String(workflow.approvals.autoAdvance)),
@@ -274,6 +292,23 @@ function renderSectionContent(sectionId, ctx) {
         : '— ctx';
       const pipelineTokens = run.pipelineTotalTokens ?? run.totalTokens ?? null;
       const sessionTokens = run.totalTokens ?? null;
+      const transitionSummary = run.latestTransitionReason
+        ? [
+            `transition ${formatTransitionDecision(run.latestTransitionDecision)} -> ${run.latestTransitionToStage ?? 'next stage'}`,
+            formatTransitionReason(run.latestTransitionReason),
+            run.latestTransitionContextWindowPercent !== null && run.latestTransitionContextWindowPercent !== undefined
+              ? `${formatPercent(run.latestTransitionContextWindowPercent)} ctx`
+              : null,
+          ].filter(Boolean).join(' · ')
+        : null;
+      const handoffSummary = run.latestTransitionPreviousSessionId || run.latestTransitionNextSessionId
+        ? [
+            'session handoff',
+            run.latestTransitionPreviousSessionId ?? 'new',
+            '->',
+            run.latestTransitionNextSessionId ?? 'new',
+          ].join(' ')
+        : null;
       const head = [
         `${statusGlyph} ${getRunStatusLabel(run)}`,
         `tool ${run.tool}`,
@@ -288,6 +323,10 @@ function renderSectionContent(sectionId, ctx) {
         React.createElement('div', null, head),
         run.pendingStageRequestPrompt &&
           React.createElement('div', { className: 'muted' }, `wait ${run.pendingStageRequestPrompt}`),
+        transitionSummary &&
+          React.createElement('div', { className: 'muted' }, transitionSummary),
+        handoffSummary &&
+          React.createElement('div', { className: 'muted' }, handoffSummary),
         breakdown?.wallMs != null &&
           React.createElement(
             React.Fragment,

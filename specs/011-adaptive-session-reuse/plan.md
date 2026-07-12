@@ -1,6 +1,6 @@
 # Implementation Plan: Adaptive Session Reuse Between Steps
 
-**Branch**: `011-adaptive-session-reuse` | **Date**: 2026-07-11 | **Spec**: [spec.md](./spec.md)
+**Branch**: `011-adaptive-session-reuse` | **Date**: 2026-07-12 | **Spec**: [spec.md](./spec.md)
 
 **Input**: Feature specification from `/specs/011-adaptive-session-reuse/spec.md`
 
@@ -8,7 +8,7 @@
 
 ## Summary
 
-Add a per-feature session policy for staged workflows so `msq` can keep the F27 default of isolated stages by default, but optionally reuse the previous agent session when adaptive mode is enabled and F30 context telemetry shows plenty of headroom. The runner remains the policy owner, adapters gain an explicit resume/session-handle contract, and each stage transition is persisted with an auditable reason (`adaptive disabled`, `always isolated`, `low usage reuse`, `mid/high usage guardrail`, or `missing telemetry`).
+Add a per-feature session policy for staged workflows so `msq` can keep the F27 default of isolated stages by default, but optionally reuse the previous agent session when adaptive mode is enabled and F30 context telemetry shows enough headroom. The runner remains the policy owner, adapters gain an explicit resume/session-handle contract, and each stage transition is persisted with an auditable reason (`adaptive disabled`, `always isolated`, `low usage reuse`, `mid-band reuse`, `60 percent guardrail`, `high usage guardrail`, or `missing telemetry`).
 
 ## Technical Context
 
@@ -37,6 +37,7 @@ Add a per-feature session policy for staged workflows so `msq` can keep the F27 
 **Constraints**:
 - F27 behavior must remain unchanged when adaptive reuse is disabled
 - F30 telemetry (`runs.context_window_percent`) is the only authoritative source for threshold evaluation
+- Adaptive thresholds are banded exactly as specified: `<=50%` reuse, `>50% && <60%` reuse, `>=60% && <70%` new session, `>=70%` new session
 - Current `ToolAdapter` API is stateless, so session reuse must be introduced without breaking adapters that still need isolated fallbacks
 - Ownership must remain split cleanly: backlog/config in `src/core/backlog`, policy logic in runner/workflow, persistence in `src/db`, display in `src/ui`
 
@@ -121,6 +122,7 @@ No constitution violations identified.
 Resolved decisions:
 - Per-feature policy should live under `feature.workflow.sessionPolicy`, not as a new top-level feature field
 - Stage transition decisions should be evaluated centrally in the runner/workflow layer using persisted F30 telemetry
+- The adaptive decision must preserve the explicit `60%` breakpoint so the `>50% && <60%` band remains reusable while `>=60% && <70%` becomes a fresh-session guardrail
 - Adapters should expose a reusable session-handle contract instead of leaking CLI-specific resume commands into the runner
 - Transition decisions need their own audit record instead of overloading `stage_requests`
 - Existing runner/db/backlog/ui tests are the main validation surface for this feature

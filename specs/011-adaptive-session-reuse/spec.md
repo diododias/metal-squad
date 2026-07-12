@@ -87,11 +87,13 @@ tentativa de reaproveitamento.
    com 70% ou mais da janela de contexto consumida, **Then** o stage seguinte
    sempre inicia em sessao nova.
 2. **Given** uma feature com modo adaptativo ligado, **When** um stage termina
-   com consumo estritamente maior que 50% e estritamente menor que 70%,
-   **Then** o sistema aplica a politica definida para a faixa intermediaria
-   [NEEDS CLARIFICATION: a faixa >50% e <70% deve sempre abrir nova sessao,
-   permitir reaproveitamento com aviso, ou seguir outra politica?].
-3. **Given** uma feature com qualquer nivel de consumo de contexto, **When** o
+   com consumo estritamente maior que 50% e estritamente menor que 60%,
+   **Then** o stage seguinte reaproveita a mesma sessao quando nao estiver na
+   lista de stages sempre-isolados.
+3. **Given** uma feature com modo adaptativo ligado, **When** um stage termina
+   com consumo igual ou superior a 60% e estritamente menor que 70%, **Then**
+   o stage seguinte sempre inicia em sessao nova.
+4. **Given** uma feature com qualquer nivel de consumo de contexto, **When** o
    proximo stage estiver marcado como sempre-isolado, **Then** ele nunca
    reaproveita a sessao anterior.
 
@@ -107,8 +109,9 @@ tentativa de reaproveitamento.
   Os valores de fronteira seguem as regras explicitas do recurso: `<=50%`
   permite reaproveitamento e `>=70%` exige nova sessao.
 - O que acontece quando o stage termina na faixa intermediaria entre 50% e 70%?
-  A resposta depende da politica escolhida para essa faixa e precisa ser
-  confirmada nesta etapa.
+  A faixa passa a usar um gate adicional de 60%: consumos estritamente maiores
+  que 50% e menores que 60% continuam elegiveis a reaproveitamento, enquanto
+  consumos de 60% ate abaixo de 70% iniciam nova sessao.
 - O que acontece quando a medicao de contexto necessaria para decidir o
   proximo stage nao esta confiavel ou disponivel para a sessao concluida? O
   sistema nao deve tomar uma decisao ambigua sem uma politica definida e
@@ -147,9 +150,12 @@ tentativa de reaproveitamento.
   limiar, por configuracao sempre-isolada, por modo adaptativo desligado ou por
   falta de telemetria confiavel.
 - **FR-009**: Para consumo de contexto estritamente maior que 50% e estritamente
-  menor que 70%, o sistema MUST [NEEDS CLARIFICATION: qual politica deve reger
-  a faixa intermediaria entre reuso garantido e isolamento obrigatorio?].
-- **FR-010**: Se a telemetria de contexto usada para a decisao nao estiver
+  menor que 60%, o sistema MUST tratar o proximo stage como elegivel para
+  reaproveitamento da mesma sessao, salvo quando o stage de destino estiver na
+  lista de sempre-isolados.
+- **FR-010**: Para consumo de contexto igual ou superior a 60% e estritamente
+  menor que 70%, o sistema MUST iniciar uma nova sessao para o proximo stage.
+- **FR-011**: Se a telemetria de contexto usada para a decisao nao estiver
   disponivel ou nao puder ser considerada confiavel para a transicao, o sistema
   MUST iniciar uma nova sessao para o proximo stage e registrar que a decisao
   ocorreu por falta de medicao confiavel.
@@ -176,13 +182,16 @@ tentativa de reaproveitamento.
   a 50% reaproveitam a sessao anterior.
 - **SC-003**: Com o modo adaptativo ligado, 100% das transicoes com consumo de
   contexto igual ou superior a 70% iniciam uma nova sessao.
-- **SC-004**: Em 100% das transicoes com consumo entre 50% e 70%, o sistema
-  aplica de forma consistente a politica definida para a faixa intermediaria e
-  registra o motivo da decisao.
-- **SC-005**: Em 100% das features que definem stages sempre-isolados, esses
+- **SC-004**: Com o modo adaptativo ligado e sem bloqueio por stage
+  sempre-isolado, 100% das transicoes com consumo estritamente maior que 50% e
+  estritamente menor que 60% reaproveitam a sessao anterior.
+- **SC-005**: Com o modo adaptativo ligado, 100% das transicoes com consumo
+  igual ou superior a 60% e estritamente menor que 70% iniciam uma nova
+  sessao.
+- **SC-006**: Em 100% das features que definem stages sempre-isolados, esses
   stages iniciam em nova sessao independentemente do consumo de contexto da
   sessao anterior.
-- **SC-006**: Em 100% das transicoes de stage avaliadas, o motivo da decisao de
+- **SC-007**: Em 100% das transicoes de stage avaliadas, o motivo da decisao de
   sessao fica disponivel para consulta operacional posterior.
 
 ## Assumptions
@@ -194,6 +203,9 @@ tentativa de reaproveitamento.
   resolvidas ou mitigadas para que os limiares sejam confiaveis.
 - A configuracao de politica de sessao pertence ao backlog no nivel da feature,
   nao a uma preferencia global obrigatoria para todo o projeto.
+- O gate operacional definido para resolver a faixa intermediaria e 60% de
+  contexto consumido: abaixo desse ponto o reuso continua permitido, e a partir
+  dele o proximo stage volta a iniciar em sessao nova.
 - `specify` e `plan` sao exemplos iniciais de stages que podem ser marcados
   como sempre-isolados, mas a funcionalidade nao deve ficar limitada apenas a
   esses dois nomes.

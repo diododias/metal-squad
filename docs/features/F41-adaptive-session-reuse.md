@@ -41,10 +41,10 @@ liga/desliga:
   no proximo step (nunca reaproveitar acima desse teto).
 - **<=50% de contexto consumido** ao final de um step → pode iniciar o
   proximo step reaproveitando a mesma sessao, se o modo estiver habilitado.
-- Entre 50% e 70%: comportamento a decidir na fase de plan/specify tecnico
-  (ex.: manter isolado por seguranca, ou permitir reuso com aviso) — nao
-  faz parte do relato original do usuario, precisa ser resolvido como uma
-  clarificacao antes do plan.
+- **>50% e <60% de contexto consumido** ao final de um step → pode
+  reaproveitar a mesma sessao no proximo step.
+- **>=60% e <70% de contexto consumido** ao final de um step → forcar nova
+  sessao por guardrail conservador antes do teto alto de 70%.
 
 Alem do limiar global, permitir que stages especificos (`specify`, `plan`
 sao os citados no relato) sejam marcados para **sempre** rodar em sessao
@@ -105,9 +105,9 @@ essa base em vez de criar uma fonte paralela de medicao.
 - H15 (contagem de tokens confusa/possivelmente errada) pode invalidar o
   calculo dos limiares de 50%/70% se nao for resolvido antes — avaliar
   ordem de execucao com o hotfix.
-- Faixa 50%-70% de contexto consumido nao tem comportamento definido pelo
-  relato original; a implementacao adotou postura conservadora e abre nova
-  sessao nessa faixa.
+- A precisao do reaproveitamento continua dependente da telemetria de F30:
+  se `context_window_percent` vier ausente ou invalido, o runner deve cair
+  em `missing_context_telemetry` e abrir uma sessao nova.
 - F43 (edicao de tool/effort por step) e um pedido relacionado mas
   distinto — nao confundir escopo: F41 e sobre reuso de sessao, F43 e sobre
   trocar tool/model/effort por step.
@@ -119,16 +119,18 @@ essa base em vez de criar uma fonte paralela de medicao.
 - [ ] Com o modo ligado, um step que termina com <=50% de contexto
       consumido permite que o proximo step (se nao estiver na lista de
       sempre-isolados) reaproveite a mesma sessao.
+- [ ] Com o modo ligado, um step que termina com >50% e <60% de contexto
+      consumido tambem permite reaproveitar a mesma sessao.
+- [ ] Com o modo ligado, um step que termina com >=60% e <70% de contexto
+      consumido abre nova sessao por guardrail conservador.
 - [ ] Com o modo ligado, um step que termina com >=70% de contexto
       consumido sempre forca nova sessao no proximo step.
-- [ ] Com o modo ligado, um step que termina com >50% e <70% de contexto
-      consumido abre nova sessao por politica conservadora.
 - [ ] Stages listados como sempre-isolados (ex.: `specify`, `plan`) nunca
       reaproveitam sessao, independente do consumo de contexto.
 - [ ] A flag de liga/desliga e a lista de stages sempre-isolados sao
       configuraveis por feature no backlog (schema documentado).
-- [ ] Testes cobrindo os dois limiares (50% e 70%) e a lista de stages
-      sempre-isolados.
+- [ ] Testes cobrindo os limiares de 50%, 60% e 70%, a lista de stages
+      sempre-isolados e o fallback por telemetria ausente.
 
 ## Exemplo de backlog
 
@@ -158,5 +160,6 @@ workflow:
   `reason`, `context_window_percent`, `previous_session_id` e
   `next_session_id`.
 - Motivos persistidos: `adaptive_disabled`, `always_isolated_stage`,
-  `low_usage_reuse`, `mid_usage_conservative`, `high_usage_guardrail`,
-  `missing_context_telemetry` e `session_resume_unavailable`.
+  `low_usage_reuse`, `mid_usage_reuse`, `sixty_percent_guardrail`,
+  `high_usage_guardrail`, `missing_context_telemetry` e
+  `session_resume_unavailable`.

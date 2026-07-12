@@ -13,8 +13,8 @@
 
 ## Requirement Completeness
 
-- [ ] No [NEEDS CLARIFICATION] markers remain
-- [ ] Requirements are testable and unambiguous
+- [x] No [NEEDS CLARIFICATION] markers remain
+- [x] Requirements are testable and unambiguous
 - [x] Success criteria are measurable
 - [x] Success criteria are technology-agnostic (no implementation details)
 - [x] All acceptance scenarios are defined
@@ -24,16 +24,15 @@
 
 ## Feature Readiness
 
-- [ ] All functional requirements have clear acceptance criteria
+- [x] All functional requirements have clear acceptance criteria
 - [x] User scenarios cover primary flows
 - [x] Feature meets measurable outcomes defined in Success Criteria
 - [x] No implementation details leak into specification
 
 ## Notes
 
-- Pendente esclarecer a politica para consumo de contexto estritamente maior que
-  50% e estritamente menor que 70%.
-- Ate essa definicao, `FR-009` e o segundo cenario da User Story 3 permanecem
-  intencionalmente abertos para evitar assumir um comportamento nao confirmado.
+- Faixa intermediaria resolvida com gate de 60% de contexto consumido:
+  `>50% e <60%` permite reaproveitamento, enquanto `>=60% e <70%` exige nova
+  sessao.
 - Items marked incomplete require spec updates before `/speckit-clarify` or
   `/speckit-plan`

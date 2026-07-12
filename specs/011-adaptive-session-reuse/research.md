@@ -1,7 +1,7 @@
 # Research: Adaptive Session Reuse Between Steps
 
 **Feature**: 011-adaptive-session-reuse  
-**Date**: 2026-07-11  
+**Date**: 2026-07-12  
 **Status**: Complete
 
 ## Overview
@@ -57,14 +57,16 @@ workflow:
   - `currentStage` and `nextStage`
   - the completed run's persisted telemetry (`runs.context_window_percent`)
   - the previous session handle, if one exists
+- Keeping the `60%` breakpoint explicit avoids collapsing two different product outcomes into one ambiguous middle band
 
 **Decision order**:
 1. If policy mode is `isolated`, force new session
 2. If `nextStage` is in `alwaysIsolatedStages`, force new session
 3. If context telemetry is missing or unreliable, force new session
 4. If usage is `<= 50%`, allow reuse
-5. If usage is `> 50%` and `< 70%`, force new session
-6. If usage is `>= 70%`, force new session
+5. If usage is `> 50%` and `< 60%`, allow reuse
+6. If usage is `>= 60%` and `< 70%`, force new session
+7. If usage is `>= 70%`, force new session
 
 **Alternatives considered**:
 - Let each adapter decide: rejected because thresholds and stage exceptions are product policy, not transport concerns
@@ -126,6 +128,7 @@ interface RunResult {
 - `stage_requests` records approvals and admin inputs, not transition policy outcomes
 - Run summaries and stdout logs are not structured enough for reliable filtering or UI display
 - A dedicated table and event preserve a clean query surface for TUI/web/status tooling
+- Separate reuse-vs-guardrail reasons around the `60%` breakpoint make the audit trail line up with FR-009, FR-010, SC-004, and SC-005
 
 Proposed persisted fields:
 - `pipelineId`
@@ -145,7 +148,8 @@ Proposed persisted fields:
 - `adaptive_disabled`
 - `always_isolated_stage`
 - `low_usage_reuse`
-- `mid_usage_conservative`
+- `mid_usage_reuse`
+- `sixty_percent_guardrail`
 - `high_usage_guardrail`
 - `missing_context_telemetry`
 - `session_resume_unavailable`
@@ -168,7 +172,7 @@ Proposed persisted fields:
 
 **Required automated coverage**:
 - schema/catalog parsing for `workflow.sessionPolicy`
-- transition decisions for `<=50`, `>50 && <70`, `>=70`, and missing telemetry
+- transition decisions for `<=50`, `>50 && <60`, `>=60 && <70`, `>=70`, and missing telemetry
 - always-isolated override behavior
 - adapter resume/new-session argument selection
 - persistence of transition audit records

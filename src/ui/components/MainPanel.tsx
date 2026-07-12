@@ -129,6 +129,14 @@ function stageStatusLabel(stage: WorkflowStageSummary): string {
   return 'pending';
 }
 
+function formatTransitionReason(reason: string | null | undefined): string | null {
+  return reason ? reason.replace(/_/g, ' ') : null;
+}
+
+function formatTransitionDecision(decision: string | null | undefined): string {
+  return decision ? decision.replace(/_/g, ' ') : 'new session';
+}
+
 const COLUMN_EMPTY_LABEL: Record<DashboardGroupId, string> = {
   execution: 'none running',
   todo: 'backlog empty',
@@ -630,6 +638,23 @@ function renderDetailSection(sectionId: DetailSectionId, ctx: DetailSectionConte
       const ctxLabel = selectedRun.contextWindowTokens
         ? `${formatPercent(selectedRun.contextWindowPercent)} ctx`
         : '— ctx';
+      const transitionSummary = selectedRun.latestTransitionReason
+        ? [
+            `transition ${formatTransitionDecision(selectedRun.latestTransitionDecision)} -> ${selectedRun.latestTransitionToStage ?? 'next stage'}`,
+            formatTransitionReason(selectedRun.latestTransitionReason),
+            selectedRun.latestTransitionContextWindowPercent !== null && selectedRun.latestTransitionContextWindowPercent !== undefined
+              ? `${formatPercent(selectedRun.latestTransitionContextWindowPercent)} ctx`
+              : null,
+          ].filter(Boolean).join(' · ')
+        : null;
+      const handoffSummary = selectedRun.latestTransitionPreviousSessionId || selectedRun.latestTransitionNextSessionId
+        ? [
+            'session handoff',
+            selectedRun.latestTransitionPreviousSessionId ?? 'new',
+            '->',
+            selectedRun.latestTransitionNextSessionId ?? 'new',
+          ].join(' ')
+        : null;
       const head: string = [
         `${statusGlyph} ${selectedRun.status}`,
         `tool ${selectedRun.tool}`,
@@ -656,6 +681,16 @@ function renderDetailSection(sectionId: DetailSectionId, ctx: DetailSectionConte
           {selectedRun.pendingStageRequestPrompt && (
             <Text {...theme.role('muted')}>
               wait {truncateText(selectedRun.pendingStageRequestPrompt, Math.max(22, width - 6))}
+            </Text>
+          )}
+          {transitionSummary && (
+            <Text {...theme.role('muted')}>
+              {truncateText(transitionSummary, Math.max(22, width - 4))}
+            </Text>
+          )}
+          {handoffSummary && (
+            <Text {...theme.role('muted')}>
+              {truncateText(handoffSummary, Math.max(22, width - 4))}
             </Text>
           )}
           {breakdown?.wallMs != null && (

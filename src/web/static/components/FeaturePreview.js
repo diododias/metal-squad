@@ -281,6 +281,17 @@ function FeatureConfigForm({ feature, settings, onSaveConfig }) {
       }),
     ),
     configGroup(
+      'Session policy',
+      configRow('mode', workflow.sessionPolicy.mode),
+      configRow(
+        'alwaysIsolatedStages',
+        workflow.sessionPolicy.alwaysIsolatedStages.length > 0
+          ? workflow.sessionPolicy.alwaysIsolatedStages.join(', ')
+          : 'none',
+        workflow.sessionPolicy.alwaysIsolatedStages.length === 0,
+      ),
+    ),
+    configGroup(
       'Aprovações',
       configRow('channel', feature.workflow?.approvals?.channel ?? 'telegram', true),
       React.createElement(
