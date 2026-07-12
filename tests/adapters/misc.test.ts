@@ -102,14 +102,18 @@ describe('claude adapter', () => {
         'PROMPT',
         { cwd: '/repo', runId: 2 },
       ),
-    ).resolves.toEqual({
+    ).resolves.toMatchObject({
       ok: true,
       summary: 'done',
       usage: { input: 2, cachedInput: 0, output: 3, total: 5 },
+      session: {
+        tool: 'claude',
+        capturedFromRunId: 2,
+      },
     });
     expect(mockRunCli).toHaveBeenCalledWith(
       'claude',
-      ['--print', '--output-format', 'stream-json', '--dangerously-skip-permissions', '--model', 'custom', '--', 'PROMPT'],
+      expect.arrayContaining(['--print', '--output-format', 'stream-json', '--verbose', '--dangerously-skip-permissions', '--model', 'custom', '--', 'PROMPT']),
       expect.objectContaining({
         cwd: '/repo',
         heartbeatMs: 30_000,
@@ -273,6 +277,33 @@ describe('claude adapter', () => {
     const doubleDashIdx = args.indexOf('--');
     expect(doubleDashIdx).toBeGreaterThan(-1);
     expect(args[doubleDashIdx + 1]).toBe(frontMatterPrompt);
+  });
+
+  it('uses --resume when a session handle is provided', async () => {
+    mockRunCli.mockResolvedValue({ code: 0, stdout: JSON.stringify({ type: 'result', subtype: 'success', result: 'done' }), stderr: '' });
+    const { claudeAdapter } = await import('../../src/core/adapters/claude.js');
+
+    await claudeAdapter.runFeature(
+      { id: 'feat-1', title: 'F', tool: 'claude', effort: 'medium', dependsOn: [], tasks: [] },
+      'PROMPT',
+      {
+        cwd: '/repo',
+        runId: 5,
+        session: {
+          mode: 'resume',
+          handle: {
+            tool: 'claude',
+            sessionId: 'session-123',
+            capturedFromRunId: 1,
+            capturedAt: '2026-07-11T00:00:00Z',
+          },
+        },
+      },
+    );
+
+    const [, args] = mockRunCli.mock.calls.at(-1)!;
+    expect(args).toContain('--resume');
+    expect(args).toContain('session-123');
   });
 
   it('returns timeout summary with partial output, touched files and parsed usage', async () => {

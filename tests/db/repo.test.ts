@@ -198,3 +198,125 @@ describe('createGate', () => {
     expect(mockRun).toHaveBeenCalledWith(10, 'feat-1', 'repo1');
   });
 });
+
+// F34 item 1: listRunHistoryForFeature returns every run for a feature
+// (not deduplicated to the latest one like listRunsForTui).
+describe('listRunHistoryForFeature', () => {
+  it('returns empty array when no runs', async () => {
+    mockAll.mockReturnValue([]);
+    const { listRunHistoryForFeature } = await import('../../src/db/repo.js');
+    expect(listRunHistoryForFeature('repo1', 'feat-1')).toEqual([]);
+  });
+
+  it('passes repoId, featureId and limit to the query, ordered by started_at DESC', async () => {
+    const rows = [
+      { runId: 3, repoId: 'repo1', featureId: 'feat-1', tool: 'claude', stage: 'implement', status: 'failed', startedAt: '2026-07-08T10:00:00', endedAt: '2026-07-08T10:05:00', totalTokens: 500, pipelineResumeSummary: null },
+      { runId: 1, repoId: 'repo1', featureId: 'feat-1', tool: 'claude', stage: 'specify', status: 'done', startedAt: '2026-07-06T10:00:00', endedAt: '2026-07-06T10:05:00', totalTokens: 1200, pipelineResumeSummary: null },
+    ];
+    mockAll.mockReturnValue(rows);
+    const { listRunHistoryForFeature } = await import('../../src/db/repo.js');
+    const result = listRunHistoryForFeature('repo1', 'feat-1', 5);
+    expect(mockAll).toHaveBeenCalledWith('repo1', 'feat-1', 5);
+    expect(result).toEqual(rows);
+  });
+
+  it('defaults limit to 20', async () => {
+    mockAll.mockReturnValue([]);
+    const { listRunHistoryForFeature } = await import('../../src/db/repo.js');
+    listRunHistoryForFeature('repo1', 'feat-1');
+    expect(mockAll).toHaveBeenCalledWith('repo1', 'feat-1', 20);
+  });
+});
+
+// F34 item 5c: historical token estimate by tool.
+describe('getHistoricalTokenStatsForFeatureProfile', () => {
+  it('returns zeroed stats when there are no completed runs', async () => {
+    mockAll.mockReturnValue([]);
+    const { getHistoricalTokenStatsForFeatureProfile } = await import('../../src/db/repo.js');
+    expect(getHistoricalTokenStatsForFeatureProfile('claude')).toEqual({
+      sampleSize: 0,
+      avgTotalTokens: null,
+      medianTotalTokens: null,
+    });
+  });
+
+  it('computes average and median total tokens across completed runs for the tool', async () => {
+    mockAll.mockReturnValue([{ totalTokens: 100 }, { totalTokens: 300 }, { totalTokens: 200 }]);
+    const { getHistoricalTokenStatsForFeatureProfile } = await import('../../src/db/repo.js');
+    const result = getHistoricalTokenStatsForFeatureProfile('claude');
+    expect(result.sampleSize).toBe(3);
+    expect(result.avgTotalTokens).toBe(200);
+    expect(result.medianTotalTokens).toBe(200);
+    expect(mockAll).toHaveBeenCalledWith('claude');
+  });
+
+  it('ignores null totalTokens values', async () => {
+    mockAll.mockReturnValue([{ totalTokens: null }, { totalTokens: 100 }]);
+    const { getHistoricalTokenStatsForFeatureProfile } = await import('../../src/db/repo.js');
+    const result = getHistoricalTokenStatsForFeatureProfile('codex');
+    expect(result.sampleSize).toBe(1);
+    expect(result.avgTotalTokens).toBe(100);
+  });
+});
+
+// F39 T012: createRetryRecord persisting tool/model, updateRunTool
+describe('createRetryRecord', () => {
+  it('inserts tool and model alongside run_id/attempt/error', async () => {
+    mockRun.mockReturnValue({ lastInsertRowid: 1 });
+    const { createRetryRecord } = await import('../../src/db/repo.js');
+    createRetryRecord(7, 1, 'falha 1', 5000, 'codex', 'gpt-4o');
+    expect(mockRun).toHaveBeenCalledWith(7, 1, 'falha 1', 'codex', 'gpt-4o');
+  });
+
+  it('inserts null tool/model when not provided (legacy call shape)', async () => {
+    mockRun.mockReturnValue({ lastInsertRowid: 1 });
+    const { createRetryRecord } = await import('../../src/db/repo.js');
+    createRetryRecord(7, 1, 'falha 1', 5000);
+    expect(mockRun).toHaveBeenCalledWith(7, 1, 'falha 1', null, null);
+  });
+});
+
+describe('updateRunTool', () => {
+  it('updates the tool column for the given run', async () => {
+    const { updateRunTool } = await import('../../src/db/repo.js');
+    updateRunTool(7, 'codex');
+    expect(mockRun).toHaveBeenCalledWith('codex', 7);
+  });
+});
+
+describe('listRetryHistory', () => {
+  it('returns empty array when no attempts recorded', async () => {
+    mockAll.mockReturnValue([]);
+    const { listRetryHistory } = await import('../../src/db/repo.js');
+    expect(listRetryHistory(7)).toEqual([]);
+  });
+
+  it('returns attempt/tool/model rows ordered by attempt, distinguishing legacy null rows', async () => {
+    const rows = [
+      { attempt: 1, error: 'falha 1', retriedAt: '2026-07-06T10:00:00', tool: null, model: null },
+      { attempt: 2, error: 'falha 2', retriedAt: '2026-07-06T10:01:00', tool: 'codex', model: 'gpt-4o' },
+    ];
+    mockAll.mockReturnValue(rows);
+    const { listRetryHistory } = await import('../../src/db/repo.js');
+    const result = listRetryHistory(7);
+    expect(mockAll).toHaveBeenCalledWith(7);
+    expect(result).toEqual(rows);
+    expect(result[0]!.tool).toBeNull();
+    expect(result[1]!.tool).toBe('codex');
+  });
+});
+
+describe('getRunAccumulatedTokens', () => {
+  it('sums token_usage across all attempts of the same run_id', async () => {
+    mockGet.mockReturnValue({ total: 300 });
+    const { getRunAccumulatedTokens } = await import('../../src/db/repo.js');
+    expect(getRunAccumulatedTokens(7)).toBe(300);
+    expect(mockGet).toHaveBeenCalledWith(7);
+  });
+
+  it('returns 0 when no attempts were recorded for the run', async () => {
+    mockGet.mockReturnValue({ total: 0 });
+    const { getRunAccumulatedTokens } = await import('../../src/db/repo.js');
+    expect(getRunAccumulatedTokens(99)).toBe(0);
+  });
+});

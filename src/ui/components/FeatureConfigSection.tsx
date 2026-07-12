@@ -10,6 +10,7 @@ const DEFAULT_RETRY: Required<Retry> = {
   maxAttempts: 1,
   backoffMs: 5000,
   onFail: 'stop',
+  fallback: [],
 };
 
 // Matches WorkflowSchema's own defaults (schema.ts) — used defensively when a
@@ -20,6 +21,8 @@ const _DEFAULT_WORKFLOW: Workflow = {
   stages: ['specify', 'plan', 'tasks', 'implement', 'validate'],
   approvals: { channel: 'telegram', autoAdvance: false },
   syncTasksToBacklog: true,
+  sessionPolicy: { mode: 'isolated', alwaysIsolatedStages: [] },
+  stepGuidance: {},
 };
 
 interface Props {
@@ -48,8 +51,18 @@ export function FeatureConfigSection({ feature, settings, width }: Props): React
   const retry = feature.retry;
   const retryExplicit = Boolean(retry);
   const resolvedRetry = { ...DEFAULT_RETRY, ...retry };
-  // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- workflow/dependsOn set by Zod defaults
-  const workflow = feature.workflow ?? _DEFAULT_WORKFLOW;
+  const workflow = {
+    ..._DEFAULT_WORKFLOW,
+    ...feature.workflow,
+    approvals: {
+      ..._DEFAULT_WORKFLOW.approvals,
+      ...feature.workflow.approvals,
+    },
+    sessionPolicy: {
+      ..._DEFAULT_WORKFLOW.sessionPolicy,
+      ...feature.workflow.sessionPolicy,
+    },
+  };
   const skills = feature.skills;
   // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
   const dependsOn = feature.dependsOn ?? [];
@@ -66,10 +79,11 @@ export function FeatureConfigSection({ feature, settings, width }: Props): React
     >
       <Text {...theme.role('text')} bold>Feature Config</Text>
       <Box marginTop={1} flexDirection="column">
-        <Text {...theme.role('muted')} bold>Execução</Text>
+        <Text {...theme.role('muted')} bold>Execution</Text>
         {row(theme, 'tool', feature.tool)}
         {row(theme, 'model', feature.model ?? `${feature.tool} (default)`, !feature.model)}
         {row(theme, 'effort', feature.effort)}
+        {row(theme, 'autoStart', String(feature.autoStart ?? false), !feature.autoStart)}
       </Box>
       <Box marginTop={1} flexDirection="column">
         <Text {...theme.role('muted')} bold>Workflow</Text>
@@ -78,9 +92,21 @@ export function FeatureConfigSection({ feature, settings, width }: Props): React
         {row(theme, 'syncTasksToBacklog', String(workflow.syncTasksToBacklog))}
       </Box>
       <Box marginTop={1} flexDirection="column">
-        <Text {...theme.role('muted')} bold>Aprovações</Text>
+        <Text {...theme.role('muted')} bold>Approvals</Text>
         {row(theme, 'channel', workflow.approvals.channel)}
         {row(theme, 'autoAdvance', String(workflow.approvals.autoAdvance))}
+      </Box>
+      <Box marginTop={1} flexDirection="column">
+        <Text {...theme.role('muted')} bold>Session policy</Text>
+        {row(theme, 'mode', workflow.sessionPolicy.mode)}
+        {row(
+          theme,
+          'alwaysIsolatedStages',
+          workflow.sessionPolicy.alwaysIsolatedStages.length > 0
+            ? workflow.sessionPolicy.alwaysIsolatedStages.join(', ')
+            : 'none',
+          workflow.sessionPolicy.alwaysIsolatedStages.length === 0,
+        )}
       </Box>
       <Box marginTop={1} flexDirection="column">
         <Text {...theme.role('muted')} bold>Skills</Text>
@@ -89,7 +115,7 @@ export function FeatureConfigSection({ feature, settings, width }: Props): React
             <Text key={skill} {...theme.role('success')}>- {skill}</Text>
           ))
         ) : (
-          <Text {...theme.role('muted')}>Nenhuma skill declarada na feature.</Text>
+          <Text {...theme.role('muted')}>No skills declared in feature.</Text>
         )}
         {stageSkillEntries.length > 0 && (
           <>
@@ -103,9 +129,9 @@ export function FeatureConfigSection({ feature, settings, width }: Props): React
         )}
       </Box>
       <Box marginTop={1} flexDirection="column">
-        <Text {...theme.role('muted')} bold>Dependências</Text>
+        <Text {...theme.role('muted')} bold>Dependencies</Text>
         <Text {...theme.role('muted')}>
-          {dependsOn.length > 0 ? dependsOn.join(', ') : 'nenhuma'}
+          {dependsOn.length > 0 ? dependsOn.join(', ') : 'none'}
         </Text>
       </Box>
       <Box marginTop={1} flexDirection="column">
@@ -122,10 +148,18 @@ export function FeatureConfigSection({ feature, settings, width }: Props): React
             && row(theme, 'perFeatureMaxTokens', String(settings.budget.perFeatureMaxTokens))}
         </Box>
       )}
+      {settings.configSources && (
+        <Box marginTop={1} flexDirection="column">
+          <Text {...theme.role('muted')} bold>Config sources</Text>
+          {row(theme, 'global', settings.configSources.globalConfigPath)}
+          {row(theme, 'repo', settings.configSources.repoConfigPath ?? 'not found', !settings.configSources.repoConfigPath)}
+          {row(theme, 'resolved defaults', settings.resolvedDefaults ? `${settings.resolvedDefaults.tool}/${settings.resolvedDefaults.effort}` : 'not available', !settings.resolvedDefaults)}
+        </Box>
+      )}
       <Box marginTop={1} flexDirection="column">
-        <Text {...theme.role('muted')} bold>Arquivos</Text>
-        {row(theme, 'specFile', feature.specFile ?? 'não declarado', !feature.specFile)}
-        {row(theme, 'context', feature.context && feature.context.length > 0 ? feature.context.join(', ') : 'nenhum', !feature.context?.length)}
+        <Text {...theme.role('muted')} bold>Files</Text>
+        {row(theme, 'specFile', feature.specFile ?? 'not declared', !feature.specFile)}
+        {row(theme, 'context', feature.context && feature.context.length > 0 ? feature.context.join(', ') : 'none', !feature.context?.length)}
       </Box>
     </Box>
   );

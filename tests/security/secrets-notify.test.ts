@@ -19,7 +19,7 @@ vi.mock('@napi-rs/keyring', () => ({
 }));
 
 vi.mock('../../src/config/index.js', () => ({
-  loadConfig: mockLoadConfig,
+  resolveRuntimeConfig: mockLoadConfig,
 }));
 
 beforeEach(() => {

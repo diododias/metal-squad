@@ -22,6 +22,7 @@ O que ja funciona:
 - ~~Hardening do fluxo `msq-develop`~~ (F25 entregue)
 - ~~Overview em colunas kanban com foco unificado~~ (F31 entregue)
 - ~~Web dashboard acessível pelo navegador~~ (F32 entregue)
+- ~~Polimento de UX do modo web (detalhe de run, kanban, preview de feature)~~ (F34 entregue)
 
 O que ainda falta:
 - Acoplado ao spec-kit (prompt hardcoded) → F01/F02/F03
@@ -30,6 +31,7 @@ O que ainda falta:
 - Sem streaming de output em tempo real → F06
 - Sem arquivos associados a features/tasks → F01
 - Telemetria ainda precisa evoluir no empacotamento/blocos de execucao → F28
+- Catalogo de epics/features/tasks so existe no `backlog.yaml`, runtime nao le do banco → F35
 
 ---
 
@@ -37,12 +39,12 @@ O que ainda falta:
 
 | Fase | Total | Entregues | Pendentes |
 |------|-------|-----------|-----------|
-| Fase 1 — Fundacao | 4 | 1 | 3 |
+| Fase 1 — Fundacao | 5 | 1 | 4 |
 | Fase 2 — TUI moderna | 7 | 2 | 5 |
 | Fase 3 — Orquestracao robusta | 5 | 5 | 0 |
 | Fase 4 — Observability & DX | 7 | 5 | 2 |
 | Fase 5 — Extensibilidade | 4 | 0 | 4 |
-| Fase 6 — Web & Remote Control | 1 | 1 | 0 |
+| Fase 6 — Web & Remote Control | 3 | 3 | 0 |
 | Backlog operacional | 3 | 2 | 1 |
 
 ---
@@ -56,6 +58,7 @@ O que ainda falta:
 | [F01 — YAML Schema v2](features/F01-yaml-schema-v2.md) | Medium | Critica | Pendente |
 | [F02 — Skill Registry](features/F02-skill-registry.md) | Medium | Critica | Pendente |
 | [F03 — Dynamic Prompt Builder](features/F03-dynamic-prompt-builder.md) | Medium | Critica | Pendente |
+| [F35 — Backlog Catalog Import (banco como fonte de verdade em runtime)](features/F35-backlog-catalog-import.md) | Medium | Alta | Pendente |
 | [F15 — Event System](features/F15-event-system.md) | Medium | Critica | Entregue |
 
 **Entrega**: msq funciona com skills parametrizadas, arquivos associados, e emite eventos internos.
@@ -140,9 +143,19 @@ contexto por sessao/step.
 | Feature | Esforco | Prioridade | Status |
 |---------|---------|------------|--------|
 | [F32 — Web Mode](features/F32-web-mode.md) | High | Alta | Entregue |
+| [F34 — Web Run Detail & Control Polish](features/F34-web-run-detail-and-control-polish.md) | High | Alta | Entregue |
+| [F36 — Web Feature/Task Config Persistence](features/F36-web-feature-config-persistence.md) | Medium | Alta | Entregue |
 
 **Entrega**: servidor HTTP/WebSocket com autenticação por token, dashboard kanban,
-gates, detalhe de run, command palette e daemon em background.
+gates, detalhe de run, command palette e daemon em background. F34 adiciona
+historico completo de runs por feature, aba de mudancas de codigo no detalhe de
+run, resolucao de gate/stage-request inline e telemetria ao vivo no kanban,
+busca/filtro no kanban, indicador de conexao claro e uma tela de preview de
+feature com paridade de layout, tentativas anteriores, dependencias e
+estimativa de custo. F36 torna o form de config da feature (tool/model/effort/
+maxTokens/workflow/retry/skills) e das tasks (status/skills/title/dependsOn)
+editavel e persistente no catalogo do banco. F37 remove o override pontual
+de execucao, deixando o "Save Config" como unica forma de customizacao.
 
 ---
 
@@ -179,13 +192,55 @@ F01 (schema v2)
  ├→ F02 (skill registry)
  │   ├→ F03 (dynamic prompt)
  │   └→ F04 (task sizer) ✅
- └→ F22 (per-repo config)
+ ├→ F22 (per-repo config)
+ └→ F35 (backlog catalog import — banco como fonte de verdade)
 
 F15 (event system) ✅
  ├→ F06 (log streaming)
  ├→ F12 (pause/resume) ✅
  ├→ F14 (budget caps) ✅
  └→ F19 (notifications v2)
+
+## Backlog de feedback (triagem 2026-07-11)
+
+Triagem de um lote de feedback de uso real, separado em novas funcionalidades
+e melhorias/bugs. Todos os itens abaixo estao com **status "Pendente —
+triagem"**: os docs linkados descrevem o relato do usuario e o escopo
+provavel, mas ainda precisam de investigacao de codigo antes de virar
+trabalho executavel (ver "Proximo passo" em cada doc).
+
+### Novas funcionalidades
+
+| Item | Area | Prioridade sugerida |
+|------|------|----------------------|
+| [F40 — Visualizacao por Step + Workflow por Projeto](features/F40-workflow-step-view-per-project.md) | Stages / Workflow | Alta |
+| [F41 — Reaproveitamento Adaptativo de Sessao entre Steps](features/F41-adaptive-session-reuse.md) | Controle de sessao | Alta |
+| [F42 — Tela de Detalhe de Runs / Analytics](features/F42-runs-analytics-detail-screen.md) | Analytics | Media |
+| [F43 — Editar Tool/Effort por Step + Resume com Outro Agente (UI)](features/F43-per-step-config-and-resume-agent-switch.md) | Configuracoes | Media |
+| [F44 — Central de Configuracoes do Projeto (multi-projeto/multi-repo)](features/F44-project-settings-hub.md) | Projeto / Configuracoes | Alta |
+| [F45 — Piloto Automatico](features/F45-piloto-automatico.md) | Modo Automatico | Alta |
+| [F46 — Prompt/Skill Customizado por Step](features/F46-custom-prompt-per-step.md) | Skills | Media |
+| [F47 — Perguntas Interativas via Telegram (Botoes)](features/F47-telegram-interactive-questions.md) | Notificacoes | Alta |
+| [F48 — Card de Demanda Enriquecido](features/F48-enhanced-feature-card.md) | Tela principal | Media |
+| [F49 — Continuidade de Sessao ao Responder Pergunta da IA](features/F49-question-answer-session-continuity.md) | Controle de sessao | Alta |
+
+### Melhorias / Bugs
+
+| Item | Area | Prioridade sugerida |
+|------|------|----------------------|
+| [H13 — Live Output / Tool Execution: hierarquia visual e auto scroll (TUI + Web)](hotfixes/H13-tui-live-output-visual-hierarchy.md) | Tela de detalhe / Live Output | Media |
+| [H14 — Etapa atual nao fica visivel](hotfixes/H14-current-stage-not-visible.md) | Stages | Alta |
+| [H15 — Contagem de tokens confusa e aparentemente errada](hotfixes/H15-token-accounting-confusion-and-bug.md) | Controle de sessao | Alta |
+| [H16 — Gate continua aparecendo apos avancado](hotfixes/H16-gate-persists-after-resolved.md) | Gates | Alta |
+| [H17 — Toast nao some depois de aparecer](hotfixes/H17-toast-not-dismissing.md) | UI | Baixa |
+| [H18 — Mapeamento de tasks incorreto (duplicada/fora de ordem/nao carrega)](hotfixes/H18-task-mapping-incorrect.md) | Tasks | Critica |
+| [H19 — Perguntas do specify tratadas como aprovacao + Telegram truncado](hotfixes/H19-specify-questions-misrouted-as-approve.md) | Specify / Telegram | Critica |
+
+**Sugestao de ordem de ataque**: H18 e H19 primeiro (risco de corromper o
+pipeline ou perder input do usuario), depois H15/H16 (confiabilidade de
+dados exibidos), depois o restante dos bugs pequenos (H13/H14/H17) e por
+fim as novas funcionalidades — F44 e F45 sao as maiores em escopo e
+provavelmente merecem quebra em sub-itens antes de entrar em execucao.
 
 F05 (layout multi-panel)
  ├→ F06 (log streaming)
@@ -213,6 +268,9 @@ F09 (command palette) ✅
 
 F31 (dashboard kanban overview) ✅
  └→ F32 (web mode) ✅
+
+F32 (web mode) ✅
+ └→ F34 (web run detail & control polish) ✅
 
 Independentes:
  F10 (theme) ✅, F11 (retry) ✅, F17 (analytics) ✅, F18 (duration) ✅,

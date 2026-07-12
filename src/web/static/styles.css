@@ -54,12 +54,39 @@ html, body, #root {
   min-height: 0;
 }
 
+.kanban-wrapper {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  gap: 8px;
+}
+
+.kanban-filter-bar {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.kanban-filter-bar input,
+.kanban-filter-bar select {
+  background: var(--panel);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 4px 6px;
+  font-family: inherit;
+  font-size: 0.8rem;
+}
+.kanban-filter-search { flex: 1; min-width: 160px; }
+
 .columns {
   flex: 1;
   display: grid;
   grid-template-columns: repeat(4, 1fr);
   gap: 8px;
   min-width: 0;
+  min-height: 0;
 }
 
 .column {
@@ -110,6 +137,40 @@ html, body, #root {
   color: var(--muted);
   display: flex;
   gap: 8px;
+  flex-wrap: wrap;
+}
+.card .card-output-line {
+  margin-top: 6px;
+  font-size: 0.72rem;
+  color: var(--muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.connection-state.live { color: var(--success); }
+.connection-state.reconnecting { color: var(--warning); }
+.connection-state.disconnected { color: var(--danger); }
+.connection-state.never-connected { color: var(--muted); }
+
+.run-detail-blocked-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  margin: 0 8px;
+  background: var(--panel-hover);
+  border: 1px solid var(--warning);
+  border-radius: 4px;
+  font-size: 0.85rem;
+}
+.run-detail-blocked-actions input {
+  background: var(--bg);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 3px 6px;
+  font-family: inherit;
 }
 
 .gates {
@@ -535,11 +596,8 @@ button.danger { border-color: var(--danger); color: var(--danger); }
 }
 
 .output-entry.tool {
-  border: 1px solid var(--border);
-  border-radius: 4px;
-  padding: 4px 6px;
-  margin-bottom: 6px;
-  background: var(--panel);
+  display: inline-block;
+  color: var(--muted);
 }
 
 .output-entry.heartbeat {
@@ -559,17 +617,119 @@ button.danger { border-color: var(--danger); color: var(--danger); }
 }
 
 /* Feature preview */
-.preview-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
-  gap: 10px;
-  overflow-y: auto;
+.link-button {
+  background: none;
+  border: none;
+  color: var(--accent);
+  cursor: pointer;
+  text-decoration: underline;
+  font-family: inherit;
+  font-size: inherit;
+  padding: 0;
+  margin-left: 8px;
 }
 
-.preview-column {
+.dependency-chip {
+  display: inline-block;
+  padding: 2px 8px;
+  margin: 2px 4px 2px 0;
+  border-radius: 999px;
+  font-size: 0.78rem;
+  border: 1px solid var(--border);
+}
+.dependency-chip.done { color: var(--success); border-color: var(--success); }
+.dependency-chip.not-done { color: var(--warning); border-color: var(--warning); }
+
+/* F36: editable feature/task config form */
+.config-form-row {
   display: flex;
-  flex-direction: column;
-  gap: 10px;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 6px;
+}
+.config-form-row label {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 0.8rem;
+  color: var(--muted);
+}
+.config-form-row select,
+.config-form-row input {
+  background: var(--bg);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 3px 6px;
+  font-family: inherit;
+}
+.checkbox-label {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 0.8rem;
+  color: var(--muted);
+}
+.config-actions {
+  margin: 8px 0 16px 0;
+}
+
+.chip-list-editor {
+  margin-bottom: 6px;
+}
+.chip-list-editor input {
+  background: var(--bg);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 3px 6px;
+  font-family: inherit;
+  font-size: 0.8rem;
+}
+.chip-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-bottom: 4px;
+}
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 4px 2px 8px;
+  border-radius: 999px;
+  font-size: 0.78rem;
+  border: 1px solid var(--border);
+  color: var(--text);
+}
+.chip-remove {
+  background: none;
+  border: none;
+  color: var(--muted);
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 0.9rem;
+  line-height: 1;
+  padding: 0 2px;
+}
+.chip-remove:hover {
+  color: var(--danger);
+}
+
+.task-edit-row {
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 8px;
+  margin-bottom: 10px;
+}
+.task-edit-header {
+  margin-bottom: 4px;
+}
+
+.previous-attempt-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
 }
 
 /* Responsive adjustments */

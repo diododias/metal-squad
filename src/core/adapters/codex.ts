@@ -1,13 +1,18 @@
-import type { ToolAdapter, RunResult, RunFeatureOptions, TokenUsage } from './types.js';
+import type { SessionHandle, ToolAdapter, RunResult, RunFeatureOptions, TokenUsage } from './types.js';
 import type { Effort, Feature } from '../backlog/schema.js';
 import { execFileSync } from 'node:child_process';
-import { loadConfig } from '../../config/index.js';
+import { resolveRuntimeConfig } from '../../config/index.js';
 import { CliAbortError, CliTimeoutError, runCli } from './spawn.js';
 import { msqEventBus } from '../events/index.js';
 import { parseControlSignal } from './control.js';
 
 interface CodexEvent {
   type?: string;
+  message?: string;
+  thread_id?: string;
+  error?: {
+    message?: string;
+  };
   usage?: {
     input_tokens?: number;
     cached_input_tokens?: number;
@@ -17,6 +22,7 @@ interface CodexEvent {
   item?: {
     type?: string;
     text?: string;
+    message?: string;
     name?: string;
     tool_name?: string;
     arguments?: unknown;
@@ -42,19 +48,40 @@ export const codexAdapter: ToolAdapter = {
     return ['-c', `model_reasoning_effort="${EFFORT[effort]}"`];
   },
 
-  async runFeature(feature: Feature, prompt: string, opts: RunFeatureOptions): Promise<RunResult> {
-    const args = [
-      'exec',
-      '--json',
-      '--skip-git-repo-check',
-      '--sandbox', 'workspace-write',
-      ...(feature.model ? ['-m', feature.model] : []),
-      ...this.effortFlag(feature.effort),
-      '--',
-      prompt,
-    ];
+  isAvailable(): boolean {
+    try {
+      execFileSync('codex', ['--version'], { stdio: 'ignore' });
+      return true;
+    } catch {
+      return false;
+    }
+  },
 
-    const timeoutMs = Math.max(loadConfig().toolTimeoutMs, 1_800_000);
+  async runFeature(feature: Feature, prompt: string, opts: RunFeatureOptions): Promise<RunResult> {
+    const args = opts.session?.mode === 'resume' && opts.session.handle
+      ? [
+          'exec',
+          'resume',
+          '--json',
+          '--skip-git-repo-check',
+          '--sandbox', 'workspace-write',
+          ...(feature.model ? ['-m', feature.model] : []),
+          ...this.effortFlag(feature.effort),
+          opts.session.handle.sessionId,
+          prompt,
+        ]
+      : [
+          'exec',
+          '--json',
+          '--skip-git-repo-check',
+          '--sandbox', 'workspace-write',
+          ...(feature.model ? ['-m', feature.model] : []),
+          ...this.effortFlag(feature.effort),
+          '--',
+          prompt,
+        ];
+
+    const timeoutMs = Math.max(resolveRuntimeConfig(process.cwd()).toolTimeoutMs, 1_800_000);
     let code: number;
     let stdout: string;
     let stderr: string;
@@ -102,18 +129,24 @@ export const codexAdapter: ToolAdapter = {
         };
       }
       throw error;
-    }
+  }
 
-    if (code !== 0) return { ok: false, summary: stderr.slice(-500) || `exit ${String(code)}` };
+    if (code !== 0) {
+      const stdoutError = lastCodexError(stdout);
+      return { ok: false, summary: stdoutError || stderr.slice(-500) || `exit ${String(code)}` };
+    }
 
     const finalMsg = lastAgentMessage(stdout);
     const usage = this.parseUsage?.(stdout) ?? undefined;
+    const session = buildCodexSessionHandle(stdout, opts, opts.runId);
+    const control = parseControlSignal(finalMsg);
     if (usage) emitUsage(opts.runId, feature, usage);
     return {
       ok: true,
       summary: finalMsg.slice(0, 200),
       usage,
-      control: parseControlSignal(finalMsg),
+      ...(control ? { control } : {}),
+      ...(session ? { session } : {}),
     };
   },
 
@@ -143,6 +176,42 @@ function lastAgentMessage(transcript: string): string {
   return msg;
 }
 
+function lastCodexError(transcript: string): string {
+  let msg = '';
+  for (const line of transcript.split('\n')) {
+    const evt = safeJson<CodexEvent>(line);
+    const error = summarizeCodexErrorEvent(evt);
+    if (error) msg = error;
+  }
+  return msg;
+}
+
+function buildCodexSessionHandle(
+  transcript: string,
+  opts: RunFeatureOptions,
+  runId: number,
+): SessionHandle | null {
+  const threadId = extractCodexThreadId(transcript) ?? opts.session?.handle?.sessionId;
+  if (!threadId) return null;
+  return {
+    tool: 'codex',
+    sessionId: threadId,
+    capturedFromRunId: runId,
+    capturedAt: new Date().toISOString(),
+  };
+}
+
+function extractCodexThreadId(transcript: string): string | null {
+  let threadId: string | null = null;
+  for (const line of transcript.split('\n')) {
+    const evt = safeJson<CodexEvent>(line);
+    if (evt?.type === 'thread.started' && typeof evt.thread_id === 'string' && evt.thread_id.trim()) {
+      threadId = evt.thread_id;
+    }
+  }
+  return threadId;
+}
+
 function summarizePartialOutput(stdout: string, stderr: string, touchedFiles: string[]): string {
   const touchedSummary = formatTouchedFiles(touchedFiles);
   const finalMsg = lastAgentMessage(stdout);
@@ -150,6 +219,11 @@ function summarizePartialOutput(stdout: string, stderr: string, touchedFiles: st
     return touchedSummary
       ? `última mensagem do agente: ${finalMsg.slice(0, 160)}. ${touchedSummary}`
       : `última mensagem do agente: ${finalMsg.slice(0, 160)}`;
+  }
+
+  const stdoutError = lastCodexError(stdout);
+  if (stdoutError) {
+    return touchedSummary ? `erro final: ${stdoutError}. ${touchedSummary}` : `erro final: ${stdoutError}`;
   }
 
   const stderrTail = stderr.trim().slice(-160);
@@ -224,6 +298,7 @@ function createCodexProgress(): {
   let eventCount = 0;
   let lastEventType = '';
   let lastAgentSnippet = '';
+  let lastErrorSnippet = '';
   let lastToolSnippet = '';
   let lastStderrSnippet = '';
 
@@ -249,6 +324,17 @@ function createCodexProgress(): {
           output: {
             line: text,
             source: 'agent',
+          },
+        };
+      }
+
+      const errorLine = summarizeCodexErrorEvent(evt);
+      if (errorLine) {
+        lastErrorSnippet = errorLine;
+        return {
+          output: {
+            line: errorLine,
+            source: 'tool',
           },
         };
       }
@@ -282,6 +368,7 @@ function createCodexProgress(): {
       if (eventCount > 0) parts.push(`eventos=${String(eventCount)}`);
       if (lastEventType) parts.push(`último=${lastEventType}`);
       if (lastAgentSnippet) parts.push(`agente="${lastAgentSnippet}"`);
+      else if (lastErrorSnippet) parts.push(`erro="${lastErrorSnippet}"`);
       else if (lastToolSnippet) parts.push(`tool="${lastToolSnippet}"`);
       else if (lastStderrSnippet) parts.push(`stderr="${lastStderrSnippet}"`);
       return parts.length > 0 ? `[${parts.join(' | ')}]` : undefined;
@@ -330,6 +417,22 @@ function serializeToolPayload(payload: unknown): string {
   } catch {
     return normalizeSnippet(String(payload)); // eslint-disable-line @typescript-eslint/no-base-to-string
   }
+}
+
+function summarizeCodexErrorEvent(evt: CodexEvent | null): string | null {
+  if (!evt?.type) return null;
+
+  if (evt.type === 'error' || evt.type === 'turn.failed') {
+    const message = normalizeSnippet(evt.error?.message ?? evt.message);
+    return message ? `error ${message}` : 'error';
+  }
+
+  if (evt.type === 'item.completed' && evt.item?.type === 'error') {
+    const message = normalizeSnippet(evt.item.message ?? evt.item.text);
+    return message ? `error ${message}` : 'error';
+  }
+
+  return null;
 }
 
 function emitRunOutput(

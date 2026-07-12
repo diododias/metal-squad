@@ -5,6 +5,7 @@ reports/
 dist/
 build/
 coverage/
+.metal-squad/
 *.log
 .DS_Store
 *.db

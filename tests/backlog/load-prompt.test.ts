@@ -102,6 +102,40 @@ describe('buildPrompt — dynamic skill-based prompt builder', () => {
     expect(prompt).not.toContain('missing.md');
   });
 
+  it('expands directory entries in context into their readable files', async () => {
+    cwd = mkdtempSync(join(tmpdir(), 'msq-buildprompt-'));
+    mkdirSync(join(cwd, 'ctx'));
+    mkdirSync(join(cwd, 'ctx', 'nested'));
+    writeFileSync(join(cwd, 'ctx', 'a.ts'), 'export const a = 1;');
+    writeFileSync(join(cwd, 'ctx', 'nested', 'b.ts'), 'export const b = 2;');
+
+    const { buildPrompt } = await import('../../src/core/backlog/prompt.js');
+    const skills = [
+      {
+        name: 'implement',
+        source: 'builtin' as const,
+        promptTemplate: '{{context}}',
+        metadata: { description: 'impl', inputs: ['context'] },
+      },
+    ];
+    const prompt = buildPrompt(
+      {
+        id: 'f1',
+        title: 'F',
+        context: ['ctx'],
+        tool: 'claude',
+        effort: 'medium',
+        dependsOn: [],
+        tasks: [],
+      },
+      skills,
+      cwd,
+    );
+
+    expect(prompt).toContain('--- ctx/a.ts ---\nexport const a = 1;');
+    expect(prompt).toContain('--- ctx/nested/b.ts ---\nexport const b = 2;');
+  });
+
   it('falls back to builtin implement skill when skills array is empty', async () => {
     const { buildPrompt } = await import('../../src/core/backlog/prompt.js');
     const prompt = buildPrompt(
@@ -220,6 +254,56 @@ describe('buildPrompt — dynamic skill-based prompt builder', () => {
 
     expect(prompt).toContain('[truncated to respect promptContextCharLimit]');
     expect(prompt.length).toBeLessThan(140);
+  });
+
+  it('adds step-guidance skill prompts and direct prompt only for the active stage', async () => {
+    const { buildPrompt } = await import('../../src/core/backlog/prompt.js');
+    const feature = {
+      id: 'feat-1',
+      title: 'My Feature',
+      tool: 'claude' as const,
+      effort: 'medium' as const,
+      dependsOn: [],
+      tasks: [],
+      workflow: {
+        mode: 'staged' as const,
+        stages: ['plan', 'implement'],
+        approvals: { channel: 'telegram' as const, autoAdvance: false },
+        syncTasksToBacklog: true,
+        sessionPolicy: { mode: 'isolated' as const, alwaysIsolatedStages: [] },
+        stepGuidance: {
+          implement: {
+            prompt: 'Touch only implementation files.',
+          },
+        },
+      },
+    };
+    const baseSkills = [{
+      name: 'speckit-implement',
+      source: 'builtin' as const,
+      promptTemplate: 'Base implement prompt',
+      metadata: { description: 'base' },
+    }];
+    const stepSkills = [{
+      name: 'repo-implement-guardrails',
+      source: 'repo' as const,
+      promptTemplate: 'Extra guardrails',
+      metadata: { description: 'extra' },
+    }];
+
+    const implementPrompt = buildPrompt(feature as never, baseSkills, '/cwd', {
+      activeStage: 'implement',
+      stepGuidanceSkills: stepSkills,
+    });
+    const planPrompt = buildPrompt(feature as never, baseSkills, '/cwd', {
+      activeStage: 'plan',
+      stepGuidanceSkills: [],
+    });
+
+    expect(implementPrompt).toContain('Base implement prompt');
+    expect(implementPrompt).toContain('Extra guardrails');
+    expect(implementPrompt).toContain('Touch only implementation files.');
+    expect(planPrompt).toBe('Base implement prompt');
   });
 });
 

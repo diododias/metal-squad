@@ -164,6 +164,81 @@ describe('listRuns', () => {
   });
 });
 
+describe('stage transition decisions', () => {
+  it('creates a transition-decision audit row', async () => {
+    const { createStageTransitionDecision } = await import('../../src/db/repo.js');
+    createStageTransitionDecision({
+      pipelineId: 9,
+      featureId: 'feat-41',
+      fromRunId: 7,
+      fromStage: 'specify',
+      toStage: 'plan',
+      policyMode: 'adaptive',
+      decision: 'reuse',
+      reason: 'low_usage_reuse',
+      contextWindowPercent: 25,
+      previousSessionId: 'thread_1',
+      nextSessionId: null,
+    });
+    expect(mockRun).toHaveBeenCalledWith(
+      9,
+      'feat-41',
+      7,
+      'specify',
+      'plan',
+      'adaptive',
+      'reuse',
+      'low_usage_reuse',
+      25,
+      'thread_1',
+      null,
+    );
+  });
+
+  it('reads a run telemetry snapshot with derived reliability', async () => {
+    mockGet.mockReturnValue({
+      runId: 7,
+      stage: 'specify',
+      contextWindowPercent: 48.5,
+    });
+    const { getRunContextTelemetry } = await import('../../src/db/repo.js');
+    expect(getRunContextTelemetry(7)).toEqual({
+      runId: 7,
+      stage: 'specify',
+      contextWindowPercent: 48.5,
+      reliable: true,
+    });
+  });
+
+  it('lists persisted transition decisions', async () => {
+    mockAll.mockReturnValue([
+      {
+        id: 1,
+        pipelineId: 9,
+        featureId: 'feat-41',
+        fromRunId: 7,
+        fromStage: 'specify',
+        toStage: 'plan',
+        policyMode: 'adaptive',
+        decision: 'reuse',
+        reason: 'low_usage_reuse',
+        contextWindowPercent: 25,
+        previousSessionId: 'thread_1',
+        nextSessionId: 'thread_1',
+        createdAt: '2026-07-11T12:00:00Z',
+      },
+    ]);
+    const { listStageTransitionDecisions } = await import('../../src/db/repo.js');
+    expect(listStageTransitionDecisions(9, 'feat-41')).toEqual([
+      expect.objectContaining({
+        id: 1,
+        reason: 'low_usage_reuse',
+        nextSessionId: 'thread_1',
+      }),
+    ]);
+  });
+});
+
 describe('recordRunEvent', () => {
   it('inserts event without metadata', async () => {
     const { recordRunEvent } = await import('../../src/db/repo.js');
@@ -580,6 +655,33 @@ describe('createStageRequest', () => {
     createStageRequest(1, 'feat-1', 'review', 'approval', 'Approve?');
     expect(mockRun.mock.calls[0]).toContain('pending');
   });
+
+  it('serializes options as JSON when provided', async () => {
+    const { createStageRequest } = await import('../../src/db/repo.js');
+    createStageRequest(1, 'feat-1', 'review', 'input', 'Pick one', { options: ['A', 'B'] });
+    expect(mockRun.mock.calls[0]).toContain(JSON.stringify(['A', 'B']));
+  });
+
+  it('stores null options when not provided', async () => {
+    const { createStageRequest } = await import('../../src/db/repo.js');
+    createStageRequest(1, 'feat-1', 'review', 'input', 'Pick one');
+    expect(mockRun.mock.calls[0]).toContain(null);
+  });
+
+  it('emits stage:request-created with options when provided', async () => {
+    const { createStageRequest } = await import('../../src/db/repo.js');
+    createStageRequest(1, 'feat-1', 'review', 'input', 'Pick one', { options: ['A', 'B'] });
+    expect(mockEmit).toHaveBeenCalledWith('stage:request-created', expect.objectContaining({
+      options: ['A', 'B'],
+    }));
+  });
+
+  it('emits stage:request-created without options when not provided', async () => {
+    const { createStageRequest } = await import('../../src/db/repo.js');
+    createStageRequest(1, 'feat-1', 'review', 'approval', 'Approve?');
+    const call = mockEmit.mock.calls[0]?.[1] as Record<string, unknown>;
+    expect(call.options).toBeUndefined();
+  });
 });
 
 describe('resolveStageRequest', () => {
@@ -638,6 +740,20 @@ describe('getStageRequest', () => {
     const { getStageRequest } = await import('../../src/db/repo.js');
     getStageRequest(42);
     expect(mockGet).toHaveBeenCalledWith(42);
+  });
+
+  it('decodes a JSON options column into a string array', async () => {
+    const row = { id: 1, pipelineId: 1, runId: null, featureId: 'f', stage: 'specify', kind: 'input', prompt: 'pick', options: JSON.stringify(['A', 'B']), status: 'pending', response: null, source: 'manual', createdAt: '', resolvedAt: null };
+    mockGet.mockReturnValue(row);
+    const { getStageRequest } = await import('../../src/db/repo.js');
+    expect(getStageRequest(1)?.options).toEqual(['A', 'B']);
+  });
+
+  it('returns undefined options when the column is null', async () => {
+    const row = { id: 1, pipelineId: 1, runId: null, featureId: 'f', stage: 'review', kind: 'approval', prompt: 'ok?', options: null, status: 'pending', response: null, source: 'manual', createdAt: '', resolvedAt: null };
+    mockGet.mockReturnValue(row);
+    const { getStageRequest } = await import('../../src/db/repo.js');
+    expect(getStageRequest(1)?.options).toBeUndefined();
   });
 });
 

@@ -1,4 +1,4 @@
-import { loadConfig } from '../../config/index.js';
+import { resolveRuntimeConfig } from '../../config/index.js';
 import type { NotificableEvent } from '../../config/index.js';
 import type { NotificationChannel } from './types.js';
 import { TelegramChannel } from './telegram.js';
@@ -10,7 +10,7 @@ import { sanitizeNotificationMessage } from './sanitize.js';
 import type { NotificationChannelConfig } from '../../config/index.js';
 
 function buildChannels(): NotificationChannel[] {
-  const { notifications, telegramChatId } = loadConfig();
+  const { notifications, telegramChatId } = resolveRuntimeConfig(process.cwd());
   const channels: NotificationChannelConfig[] = notifications.channels.length > 0
     ? notifications.channels
     : telegramChatId
@@ -33,7 +33,7 @@ export async function dispatch(
   message: string,
   metadata?: Record<string, unknown>,
 ): Promise<void> {
-  const { notifications } = loadConfig();
+  const { notifications } = resolveRuntimeConfig(process.cwd());
   if (!notifications.events.includes(event)) return;
 
   const safeMessage = sanitizeNotificationMessage(message);

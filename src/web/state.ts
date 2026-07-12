@@ -14,7 +14,10 @@ import {
 import { resolveRepo } from '../core/repo.js';
 import { getFeatureCatalog, getBacklogSettings, getPendingFeatures, type FeatureCatalogEntry } from '../ui/catalog.js';
 import { getRunGroup, sortRunsByGroup } from '../ui/dashboardGroups.js';
-import type { MsqWebState, TokenStats, UiNotification } from './types.js';
+import { resolveRuntimeConfig } from '../config/index.js';
+import { resolveThemePreference } from '../ui/theme/resolve.js';
+import type { ThemeRoleName } from '../ui/theme/types.js';
+import type { MsqWebState, ThemeSnapshot, TokenStats, UiNotification } from './types.js';
 
 const DASHBOARD_PERIODS: { label: string; days: number | null }[] = [
   { label: 'today', days: 1 },
@@ -75,7 +78,11 @@ function collectPendingFeatures(runs: RunSummary[]): FeatureCatalogEntry[] {
   try {
     const catalog = getFeatureCatalog();
     const doneFeatureIds = new Set(runs.filter((run) => run.status === 'done').map((run) => run.featureId));
-    const activeFeatureIds = new Set(runs.filter((run) => run.status === 'running' || run.status === 'done').map((run) => run.featureId));
+    const activeFeatureIds = new Set(
+      runs
+        .filter((run) => run.status === 'running' || run.status === 'blocked' || run.status === 'done')
+        .map((run) => run.featureId),
+    );
     return getPendingFeatures(catalog, doneFeatureIds, activeFeatureIds);
   } catch {
     return [];
@@ -98,6 +105,36 @@ function collectDashboardRows(): StatsRunRow[] {
     return listRunsForStats({ sinceDays: 7 });
   } catch {
     return [];
+  }
+}
+
+const FALLBACK_ROLE_COLOR = '#e5e7eb';
+
+function buildThemeSnapshot(): ThemeSnapshot {
+  try {
+    const config = resolveRuntimeConfig(process.cwd());
+    const resolution = resolveThemePreference(config.theme);
+    const textColor = resolution.profile.roles.text.color ?? FALLBACK_ROLE_COLOR;
+    const roles = Object.fromEntries(
+      (Object.entries(resolution.profile.roles) as [ThemeRoleName, { color?: string }][]).map(
+        ([role, style]) => [role, style.color ?? textColor],
+      ),
+    ) as Record<ThemeRoleName, string>;
+    return { name: resolution.active, roles };
+  } catch {
+    return {
+      name: 'default',
+      roles: {
+        text: FALLBACK_ROLE_COLOR,
+        primary: '#22d3ee',
+        success: '#34d399',
+        warning: '#fbbf24',
+        error: '#f87171',
+        muted: '#9ca3af',
+        accent: '#22d3ee',
+        focus: '#22d3ee',
+      },
+    };
   }
 }
 
@@ -133,6 +170,7 @@ export function buildMsqWebState(): MsqWebState {
       rows: collectDashboardRows(),
     },
     notifications: [],
+    theme: buildThemeSnapshot(),
   };
 }
 

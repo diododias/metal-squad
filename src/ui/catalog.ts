@@ -1,6 +1,8 @@
-import { existsSync, readFileSync, statSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { BACKLOG_FILE, loadBacklog } from '../core/backlog/load.js';
+import { mergeExecutionDefaults, resolveConfigSnapshot, type ResolvedConfigSources, type ResolvedExecutionDefaults } from '../config/index.js';
+import { loadBacklogFromCatalog } from '../core/backlog/load.js';
+import { resolveRepo } from '../core/repo.js';
 import type { Budget, Retry, Task, Workflow } from '../core/backlog/schema.js';
 
 const DESCRIPTION_CHAR_LIMIT = 4000;
@@ -29,6 +31,12 @@ export interface FeatureCatalogEntry {
   retry?: Retry;
   specFile?: string;
   context?: string[];
+  /** F36: per-feature config for `budget.perFeatureMaxTokens` — undefined
+    * means the backlog-level default still applies. */
+  maxTokens?: number;
+  /** F45: opt-in auto-pilot flag — when true, feature is eligible for automatic
+   * continuation after qualifying outcomes (success, blocked-human, failed-execution). */
+  autoStart?: boolean;
 }
 
 /** F31 section 5b: backlog-level settings shown alongside per-feature config
@@ -36,6 +44,8 @@ export interface FeatureCatalogEntry {
 export interface BacklogSettings {
   budget?: Budget;
   stageSkills: Record<string, string[]>;
+  configSources?: ResolvedConfigSources;
+  resolvedDefaults?: ResolvedExecutionDefaults;
 }
 
 const DEFAULT_BACKLOG_SETTINGS: BacklogSettings = { stageSkills: {} };
@@ -62,26 +72,25 @@ function readFeatureDescription(
   }
 }
 
-let cachedPath = '';
-let cachedMtimeMs = 0;
 let cachedCatalog: Record<string, FeatureCatalogEntry> = {};
 let cachedSettings: BacklogSettings = DEFAULT_BACKLOG_SETTINGS;
 
+/** Catalog now lives in the DB (populated by `msq backlog load`) rather than
+ * backlog.yaml — see docs/features/F35-backlog-catalog-import.md. Queried
+ * fresh on every call (cheap local SQLite read, same pattern as the rest of
+ * the TUI's DB-backed state). */
 function loadCatalogAndSettings(cwd: string): void {
-  const backlogPath = resolve(cwd, BACKLOG_FILE);
-  if (!existsSync(backlogPath)) {
-    cachedPath = backlogPath;
-    cachedMtimeMs = 0;
-    cachedCatalog = {};
-    cachedSettings = DEFAULT_BACKLOG_SETTINGS;
-    return;
-  }
-
-  const mtimeMs = statSync(backlogPath).mtimeMs;
-  if (cachedPath === backlogPath && cachedMtimeMs === mtimeMs) return;
-
   try {
-    const backlog = loadBacklog(BACKLOG_FILE, cwd);
+    const snapshot = resolveConfigSnapshot(cwd);
+    const { repoId } = resolveRepo(cwd);
+    const backlog = loadBacklogFromCatalog(repoId, cwd);
+    const resolvedDefaults = mergeExecutionDefaults({
+      tool: snapshot.repoDefaults.tool ?? 'claude',
+      model: snapshot.repoDefaults.model,
+      effort: snapshot.repoDefaults.effort ?? 'medium',
+      skills: snapshot.repoDefaults.skills ?? [],
+      stageSkills: snapshot.repoDefaults.stageSkills ?? {},
+    }, backlog.defaults);
     cachedCatalog = Object.fromEntries(
       backlog.epics.flatMap((epic) =>
         epic.features.map((feature) => [
@@ -100,6 +109,8 @@ function loadCatalogAndSettings(cwd: string): void {
             retry: feature.retry,
             specFile: feature.specFile,
             context: feature.context,
+            maxTokens: feature.maxTokens,
+            autoStart: feature.autoStart,
           } satisfies FeatureCatalogEntry,
         ]),
       ),
@@ -107,14 +118,13 @@ function loadCatalogAndSettings(cwd: string): void {
     cachedSettings = {
       budget: backlog.budget,
       stageSkills: 'defaults' in backlog ? backlog.defaults.stageSkills : {},
+      configSources: snapshot.sources,
+      resolvedDefaults,
     };
   } catch {
     cachedCatalog = {};
     cachedSettings = DEFAULT_BACKLOG_SETTINGS;
   }
-
-  cachedPath = backlogPath;
-  cachedMtimeMs = mtimeMs;
 }
 
 export function getFeatureCatalog(cwd = process.cwd()): Record<string, FeatureCatalogEntry> {

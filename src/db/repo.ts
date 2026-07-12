@@ -6,6 +6,11 @@ import { msqEventBus } from '../core/events/index.js';
 import type { OutputSource, OutputStream, RunOutputEvent, TokensUpdateEvent } from '../core/events/types.js';
 import { resolveContextWindow } from '../core/tasks/blocks.js';
 import type { Tool } from '../core/backlog/schema.js';
+import type {
+  SessionContextTelemetrySnapshot,
+  StageTransitionDecision,
+  TransitionDecisionReason,
+} from '../core/workflow/sessionPolicy.js';
 
 export function registerRepo(repoId: string, path: string): void {
   getDb('readwrite')
@@ -166,6 +171,19 @@ export function listRunOutput(runId: number, limit = 120): RunOutputRow[] {
     .all(runId, limit) as RunOutputRow[];
 }
 
+export function listRunOutputAfterId(runId: number, afterId: number, limit = 200): RunOutputRow[] {
+  if (!hasDbFile()) return [];
+  return getDb('readonly')
+    .prepare(
+      `SELECT id, run_id AS runId, feature_id AS featureId, tool, stream, source, line, created_at AS createdAt
+       FROM run_output
+       WHERE run_id = ? AND id > ?
+       ORDER BY id ASC
+       LIMIT ?`,
+    )
+    .all(runId, afterId, limit) as RunOutputRow[];
+}
+
 export interface RunRow {
   id: number;
   repo_id: string;
@@ -233,6 +251,12 @@ export interface RunSummary {
   pendingStageRequestKind: StageRequestKind | null;
   pendingStageRequestPrompt: string | null;
   pendingStageRequestCreatedAt: string | null;
+  latestTransitionDecision?: 'reuse' | 'new_session' | null;
+  latestTransitionReason?: TransitionDecisionReason | null;
+  latestTransitionToStage?: string | null;
+  latestTransitionContextWindowPercent?: number | null;
+  latestTransitionPreviousSessionId?: string | null;
+  latestTransitionNextSessionId?: string | null;
 }
 
 // T003: listRunsForTui — most recent run per feature per repo (US2 deduplication via CTE)
@@ -278,6 +302,15 @@ export function listRunsForTui(limit = 50, repoId?: string): RunSummary[] {
            WHERE status = 'pending'
            GROUP BY pipeline_id, feature_id
          ) latest_pending ON latest_pending.id = sr.id
+       ),
+       latest_transitions AS (
+         SELECT td.*
+         FROM stage_transition_decisions td
+         JOIN (
+           SELECT MAX(id) AS id
+           FROM stage_transition_decisions
+           GROUP BY pipeline_id, feature_id
+         ) latest_transition ON latest_transition.id = td.id
        )
        SELECT
          r.id          AS runId,
@@ -315,7 +348,13 @@ export function listRunsForTui(limit = 50, repoId?: string): RunSummary[] {
          psr.id AS pendingStageRequestId,
          psr.kind AS pendingStageRequestKind,
          psr.prompt AS pendingStageRequestPrompt,
-         psr.created_at AS pendingStageRequestCreatedAt
+         psr.created_at AS pendingStageRequestCreatedAt,
+         ltd.decision AS latestTransitionDecision,
+         ltd.reason AS latestTransitionReason,
+         ltd.to_stage AS latestTransitionToStage,
+         ltd.context_window_percent AS latestTransitionContextWindowPercent,
+         ltd.previous_session_id AS latestTransitionPreviousSessionId,
+         ltd.next_session_id AS latestTransitionNextSessionId
        FROM runs r
        JOIN latest ON latest.id = r.id
        LEFT JOIN latest_usage lu ON lu.runId = r.id
@@ -325,10 +364,84 @@ export function listRunsForTui(limit = 50, repoId?: string): RunSummary[] {
        LEFT JOIN pending_stage_requests psr
          ON psr.pipeline_id = r.pipeline_id
         AND psr.feature_id = r.feature_id
+       LEFT JOIN latest_transitions ltd
+         ON ltd.pipeline_id = r.pipeline_id
+        AND ltd.feature_id = r.feature_id
        ORDER BY r.id DESC
        LIMIT ?`,
     )
     .all(...params) as RunSummary[];
+}
+
+// F34 item 1: full run history for a feature (not deduplicated to the latest
+// run per feature/repo like listRunsForTui), so RunDetail/FeaturePreview can
+// look back at previous attempts of the same feature for stage breakdown,
+// failure context, and token cost estimation.
+export interface RunHistoryEntry {
+  runId: number;
+  repoId: string;
+  featureId: string;
+  tool: 'claude' | 'codex' | 'opencode';
+  stage: string | null;
+  status: RunStatus;
+  startedAt: string;
+  endedAt: string | null;
+  totalTokens: number | null;
+  pipelineResumeSummary: string | null;
+}
+
+export function listRunHistoryForFeature(repoId: string, featureId: string, limit = 20): RunHistoryEntry[] {
+  if (!hasDbFile()) return [];
+  return getDb('readonly')
+    .prepare(
+      `WITH latest_usage AS (
+         SELECT u.run_id AS runId, u.total
+         FROM token_usage u
+         JOIN (
+           SELECT run_id, MAX(id) AS id
+           FROM token_usage
+           GROUP BY run_id
+         ) latest_token_usage ON latest_token_usage.id = u.id
+       ),
+       pending_stage_requests AS (
+         SELECT sr.*
+         FROM stage_requests sr
+         JOIN (
+           SELECT MAX(id) AS id
+           FROM stage_requests
+           WHERE status = 'pending'
+           GROUP BY pipeline_id, feature_id
+         ) latest_pending ON latest_pending.id = sr.id
+       )
+       SELECT
+         r.id          AS runId,
+         r.repo_id     AS repoId,
+         r.feature_id  AS featureId,
+         r.tool,
+         r.stage       AS stage,
+         CASE
+           WHEN psr.id IS NOT NULL THEN 'blocked'
+           WHEN p.status IN ('paused', 'blocked') THEN 'blocked'
+           WHEN p.status IN ('aborting', 'aborted') THEN 'aborted'
+           WHEN p.status = 'failed' THEN 'failed'
+           WHEN p.status = 'running' AND r.status = 'done' THEN 'running'
+           ELSE r.status
+         END           AS status,
+         r.started_at  AS startedAt,
+         r.ended_at    AS endedAt,
+         COALESCE(r.total_tokens, lu.total) AS totalTokens,
+         p.resume_summary AS pipelineResumeSummary
+       FROM runs r
+       LEFT JOIN latest_usage lu ON lu.runId = r.id
+       LEFT JOIN pipelines p ON p.id = r.pipeline_id
+       LEFT JOIN pending_stage_requests psr
+         ON psr.pipeline_id = r.pipeline_id
+        AND psr.feature_id = r.feature_id
+       WHERE r.repo_id = ? AND r.feature_id = ?
+       ORDER BY r.started_at DESC
+       LIMIT ?`,
+    )
+    .all(repoId, featureId, limit) as RunHistoryEntry[];
 }
 
 // Union of feature ids present in pipelines.done_json across every pipeline run
@@ -526,17 +639,52 @@ export function createRetryRecord(
   attempt: number,
   error?: string,
   waitMs?: number,
+  tool?: Tool,
+  model?: string,
 ): void {
   getDb('readwrite')
     .prepare(
-      `INSERT INTO retry_history (run_id, attempt, error)
-       VALUES (?, ?, ?)`,
+      `INSERT INTO retry_history (run_id, attempt, error, tool, model)
+       VALUES (?, ?, ?, ?, ?)`,
     )
-    .run(runId, attempt, error ?? null);
+    .run(runId, attempt, error ?? null, tool ?? null, model ?? null);
   recordRunEvent(runId, 'retry', {
     attempt,
     ...(waitMs !== undefined ? { waitMs } : {}),
   });
+}
+
+export function updateRunTool(runId: number, tool: Tool): void {
+  getDb('readwrite')
+    .prepare(`UPDATE runs SET tool = ? WHERE id = ?`)
+    .run(tool, runId);
+}
+
+export interface RetryHistoryRow {
+  attempt: number;
+  error: string | null;
+  retriedAt: string;
+  tool: string | null;
+  model: string | null;
+}
+
+export function listRetryHistory(runId: number): RetryHistoryRow[] {
+  const rows = getDb('readonly')
+    .prepare(
+      `SELECT attempt, error, retried_at AS retriedAt, tool, model
+       FROM retry_history
+       WHERE run_id = ?
+       ORDER BY attempt ASC`,
+    )
+    .all(runId) as RetryHistoryRow[];
+  return rows;
+}
+
+export function getRunAccumulatedTokens(runId: number): number {
+  const row = getDb('readonly')
+    .prepare(`SELECT COALESCE(SUM(total), 0) AS total FROM token_usage WHERE run_id = ?`)
+    .get(runId) as { total: number };
+  return row.total;
 }
 
 export interface RunEventRow {
@@ -652,6 +800,49 @@ export function listRunsForStats(filters: StatsFilters = {}): StatsRunRow[] {
        ORDER BY r.id DESC`,
     )
     .all(...params) as StatsRunRow[];
+}
+
+// F34 item 5c: historical average/median total_tokens among completed runs
+// with the same tool, used by FeaturePreview as a rough cost estimate before
+// starting a feature. The `runs` table does not track model/effort per run,
+// so this is intentionally scoped to `tool` only — callers must surface that
+// limitation to the user rather than presenting it as an exact match.
+export function getHistoricalTokenStatsForFeatureProfile(
+  tool: string,
+): { sampleSize: number; avgTotalTokens: number | null; medianTotalTokens: number | null } {
+  if (!hasDbFile()) return { sampleSize: 0, avgTotalTokens: null, medianTotalTokens: null };
+  const rows = getDb('readonly')
+    .prepare(
+      `WITH latest_usage AS (
+         SELECT u.run_id AS runId, u.total
+         FROM token_usage u
+         JOIN (
+           SELECT run_id, MAX(id) AS id
+           FROM token_usage
+           GROUP BY run_id
+         ) latest_token_usage ON latest_token_usage.id = u.id
+       )
+       SELECT COALESCE(r.total_tokens, lu.total) AS totalTokens
+       FROM runs r
+       LEFT JOIN latest_usage lu ON lu.runId = r.id
+       WHERE r.tool = ? AND r.status = 'done'`,
+    )
+    .all(tool) as { totalTokens: number | null }[];
+  const values = rows
+    .map((row) => row.totalTokens)
+    .filter((value): value is number => value != null)
+    .sort((a, b) => a - b);
+  if (values.length === 0) return { sampleSize: 0, avgTotalTokens: null, medianTotalTokens: null };
+  const avg = values.reduce((sum, value) => sum + value, 0) / values.length;
+  const mid = Math.floor(values.length / 2);
+  const median = values.length % 2 === 0
+    ? ((values[mid - 1] ?? 0) + (values[mid] ?? 0)) / 2
+    : (values[mid] ?? 0);
+  return {
+    sampleSize: values.length,
+    avgTotalTokens: Math.round(avg),
+    medianTotalTokens: Math.round(median),
+  };
 }
 
 export interface TaskRun {
@@ -862,11 +1053,120 @@ export interface StageRequestRow {
   stage: string;
   kind: StageRequestKind;
   prompt: string;
+  options?: string[] | null;
   status: 'pending' | 'resolved';
   response: string | null;
   source: 'manual' | 'auto';
   createdAt: string;
   resolvedAt: string | null;
+}
+
+export interface StageTransitionDecisionRow extends StageTransitionDecision {
+  id: number;
+  createdAt: string;
+}
+
+export function getRunContextTelemetry(runId: number): SessionContextTelemetrySnapshot {
+  const row = getDb('readonly')
+    .prepare(
+      `SELECT id AS runId, stage, context_window_percent AS contextWindowPercent
+       FROM runs
+       WHERE id = ?`,
+    )
+    .get(runId) as {
+      runId: number;
+      stage: string | null;
+      contextWindowPercent: number | null;
+    } | undefined;
+
+  return {
+    runId,
+    stage: row?.stage ?? null,
+    contextWindowPercent: row?.contextWindowPercent ?? null,
+    reliable: typeof row?.contextWindowPercent === 'number' && Number.isFinite(row.contextWindowPercent) && row.contextWindowPercent >= 0,
+  };
+}
+
+export function createStageTransitionDecision(
+  decision: StageTransitionDecision,
+): number {
+  const info = getDb('readwrite')
+    .prepare(
+      `INSERT INTO stage_transition_decisions
+         (pipeline_id, feature_id, from_run_id, from_stage, to_stage, policy_mode, decision, reason, context_window_percent, previous_session_id, next_session_id)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    )
+    .run(
+      decision.pipelineId,
+      decision.featureId,
+      decision.fromRunId,
+      decision.fromStage,
+      decision.toStage,
+      decision.policyMode,
+      decision.decision,
+      decision.reason,
+      decision.contextWindowPercent,
+      decision.previousSessionId,
+      decision.nextSessionId,
+    );
+  return Number(info.lastInsertRowid);
+}
+
+export function updateStageTransitionDecisionNextSessionId(
+  id: number,
+  nextSessionId: string | null,
+): void {
+  getDb('readwrite')
+    .prepare(
+      `UPDATE stage_transition_decisions
+       SET next_session_id = ?
+       WHERE id = ?`,
+    )
+    .run(nextSessionId, id);
+}
+
+export function listStageTransitionDecisions(
+  pipelineId: number,
+  featureId?: string,
+): StageTransitionDecisionRow[] {
+  if (!hasDbFile()) return [];
+  const sql = featureId
+    ? `SELECT id,
+              pipeline_id AS pipelineId,
+              feature_id AS featureId,
+              from_run_id AS fromRunId,
+              from_stage AS fromStage,
+              to_stage AS toStage,
+              policy_mode AS policyMode,
+              decision,
+              reason,
+              context_window_percent AS contextWindowPercent,
+              previous_session_id AS previousSessionId,
+              next_session_id AS nextSessionId,
+              created_at AS createdAt
+       FROM stage_transition_decisions
+       WHERE pipeline_id = ? AND feature_id = ?
+       ORDER BY id ASC`
+    : `SELECT id,
+              pipeline_id AS pipelineId,
+              feature_id AS featureId,
+              from_run_id AS fromRunId,
+              from_stage AS fromStage,
+              to_stage AS toStage,
+              policy_mode AS policyMode,
+              decision,
+              reason,
+              context_window_percent AS contextWindowPercent,
+              previous_session_id AS previousSessionId,
+              next_session_id AS nextSessionId,
+              created_at AS createdAt
+       FROM stage_transition_decisions
+       WHERE pipeline_id = ?
+       ORDER BY id ASC`;
+
+  return featureId
+    ? getDb('readonly').prepare(sql).all(pipelineId, featureId) as StageTransitionDecisionRow[]
+    : getDb('readonly').prepare(sql).all(pipelineId) as StageTransitionDecisionRow[];
 }
 
 export function createPipeline(
@@ -1092,7 +1392,7 @@ export function listResumablePipelines(): PipelineRow[] {
          updated_at AS updatedAt,
          ended_at AS endedAt
        FROM pipelines
-       WHERE status IN ('paused', 'aborted')
+       WHERE status IN ('paused', 'aborted', 'failed', 'blocked')
           OR json_array_length(pending_json) > 0
           OR json_array_length(aborted_json) > 0
        ORDER BY id DESC`,
@@ -1134,14 +1434,16 @@ export function createStageRequest(
     runId?: number;
     response?: string;
     source?: 'manual' | 'auto';
+    options?: string[];
   } = {},
 ): number {
   const status = opts.response ? 'resolved' : 'pending';
+  const optionsJson = opts.options && opts.options.length > 0 ? JSON.stringify(opts.options) : null;
   const info = getDb('readwrite')
     .prepare(
       `INSERT INTO stage_requests
-         (pipeline_id, run_id, feature_id, stage, kind, prompt, status, response, source, resolved_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         (pipeline_id, run_id, feature_id, stage, kind, prompt, options, status, response, source, resolved_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     )
     .run(
       pipelineId,
@@ -1150,6 +1452,7 @@ export function createStageRequest(
       stage,
       kind,
       prompt,
+      optionsJson,
       status,
       opts.response ?? null,
       opts.source ?? 'manual',
@@ -1164,6 +1467,7 @@ export function createStageRequest(
     kind,
     prompt,
     source: opts.source ?? 'manual',
+    options: opts.options,
   });
   return requestId;
 }
@@ -1188,9 +1492,21 @@ export function resolveStageRequest(id: number, response: string): void {
   }
 }
 
+function decodeStageRequestOptions(value: unknown): string[] | undefined {
+  if (typeof value !== 'string' || !value) return undefined;
+  try {
+    const parsed = JSON.parse(value) as unknown;
+    if (!Array.isArray(parsed)) return undefined;
+    const options = parsed.filter((entry): entry is string => typeof entry === 'string');
+    return options.length > 0 ? options : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 export function getStageRequest(id: number): StageRequestRow | null {
   if (!hasDbFile()) return null;
-  return (getDb('readonly')
+  const row = (getDb('readonly')
     .prepare(
       `SELECT
          id,
@@ -1200,6 +1516,7 @@ export function getStageRequest(id: number): StageRequestRow | null {
          stage,
          kind,
          prompt,
+         options,
          status,
          response,
          source,
@@ -1209,11 +1526,13 @@ export function getStageRequest(id: number): StageRequestRow | null {
        WHERE id = ?`,
     )
     .get(id) as StageRequestRow | undefined) ?? null;
+  if (row) row.options = decodeStageRequestOptions(row.options);
+  return row;
 }
 
 export function listPendingStageRequests(): StageRequestRow[] {
   if (!hasDbFile()) return [];
-  return getDb('readonly')
+  const rows = getDb('readonly')
     .prepare(
       `SELECT
          id,
@@ -1223,6 +1542,7 @@ export function listPendingStageRequests(): StageRequestRow[] {
          stage,
          kind,
          prompt,
+         options,
          status,
          response,
          source,
@@ -1233,6 +1553,8 @@ export function listPendingStageRequests(): StageRequestRow[] {
        ORDER BY id ASC`,
     )
     .all() as StageRequestRow[];
+  for (const row of rows) row.options = decodeStageRequestOptions(row.options);
+  return rows;
 }
 
 export function listStageRequestsForFeature(
@@ -1240,7 +1562,7 @@ export function listStageRequestsForFeature(
   featureId: string,
 ): StageRequestRow[] {
   if (!hasDbFile()) return [];
-  return getDb('readonly')
+  const rows = getDb('readonly')
     .prepare(
       `SELECT
          id,
@@ -1250,6 +1572,7 @@ export function listStageRequestsForFeature(
          stage,
          kind,
          prompt,
+         options,
          status,
          response,
          source,
@@ -1260,6 +1583,8 @@ export function listStageRequestsForFeature(
        ORDER BY id ASC`,
     )
     .all(pipelineId, featureId) as StageRequestRow[];
+  for (const row of rows) row.options = decodeStageRequestOptions(row.options);
+  return rows;
 }
 
 function encodeJson(value: string[]): string {

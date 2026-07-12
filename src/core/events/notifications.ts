@@ -33,7 +33,7 @@ export function attachEventNotifications(
         },
       }).catch(() => { /* ignore dispatch errors */ });
     }),
-    eventBus.subscribe('stage:request-created', ({ requestId, featureId, stage, kind, prompt, source }) => {
+    eventBus.subscribe('stage:request-created', ({ requestId, featureId, stage, kind, prompt, source, options }) => {
       if (kind === 'approval') {
         if (source === 'auto') {
           const message = [
@@ -71,15 +71,25 @@ export function attachEventNotifications(
         return;
       }
 
+      const hasOptions = Boolean(options && options.length > 0);
       const message = [
         `metal-squad: ${featureId} needs human input at stage ${stage}`,
         prompt,
-        `Reply: input:${String(requestId)} <text>`,
+        ...(hasOptions ? [] : [`Reply: input:${String(requestId)} <text>`]),
       ].join('\n');
       void dispatch('stage:input', message, {
         requestId,
         featureId,
         stage,
+        ...(hasOptions
+          ? {
+              reply_markup: {
+                inline_keyboard: (options ?? []).map((label, i) => [
+                  { text: label, callback_data: `input:${String(requestId)}:${String(i)}` },
+                ]),
+              },
+            }
+          : {}),
       }).catch(() => { /* ignore dispatch errors */ });
     }),
     eventBus.subscribe('run:failed', ({ featureId, error }) => {

@@ -1,5 +1,5 @@
 import type { Command } from 'commander';
-import { loadBacklog } from '../core/backlog/load.js';
+import { loadBacklogFromCatalog } from '../core/backlog/load.js';
 import type { BacklogV2, Feature } from '../core/backlog/schema.js';
 import { buildPrompt } from '../core/backlog/prompt.js';
 import {
@@ -9,7 +9,7 @@ import {
 } from '../core/backlog/decompose.js';
 import { getAdapter } from '../core/adapters/index.js';
 import { createSkillRegistry } from '../core/skills/index.js';
-import { loadConfig } from '../config/index.js';
+import { resolveRuntimeConfig } from '../config/index.js';
 import { resolveRepo } from '../core/repo.js';
 import { assertWritableDbPath, DbAccessError } from '../db/index.js';
 import { createRun, finishRun, recordUsage, registerRepo } from '../db/repo.js';
@@ -23,20 +23,20 @@ export function registerDecompose(program: Command): void {
       try {
         assertWritableDbPath();
         const cwd = process.cwd();
-        const backlog = loadBacklog(undefined, cwd);
+        const { repoId, path } = resolveRepo(cwd);
+        const backlog = loadBacklogFromCatalog(repoId);
         const feature = findFeature(backlog, featureId);
         if (!feature) {
           throw new Error(`Feature not found in backlog: ${featureId}`);
         }
 
-        const config = loadConfig();
+        const config = resolveRuntimeConfig(cwd);
         const registry = createSkillRegistry();
         const skills = registry.resolve(['decompose'], cwd);
         const prompt = buildPrompt(feature, skills, cwd, {
           maxContextChars: config.promptContextCharLimit,
         });
 
-        const { repoId, path } = resolveRepo(cwd);
         registerRepo(repoId, path);
         const runId = createRun(repoId, feature.id, feature.tool, { stage: 'decompose' });
 
@@ -56,6 +56,7 @@ export function registerDecompose(program: Command): void {
         if (opts.apply) {
           const count = applyDecomposedTasks(feature.id, output.tasks, cwd);
           console.log(`\nbacklog.yaml updated: ${String(count)} tasks applied to ${feature.id}.`);
+          console.log('Rode "msq backlog load" para publicar essas mudancas no catalogo.');
         } else {
           console.log('\nRun again with --apply to update backlog.yaml.');
         }

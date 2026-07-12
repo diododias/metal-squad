@@ -2,11 +2,13 @@ import type { Command } from 'commander';
 import {
   cleanupStaleRuns,
   getPipelineSnapshot,
+  getRunAccumulatedTokens,
   listPipelineOverviews,
   listResumablePipelines,
+  listRetryHistory,
   listRuns,
 } from '../db/repo.js';
-import { loadConfig } from '../config/index.js';
+import { resolveRuntimeConfig } from '../config/index.js';
 
 export function registerStatus(program: Command): void {
   program
@@ -21,7 +23,7 @@ export function registerStatus(program: Command): void {
     .action(async (opts: { limit: string; repairStale?: boolean; staleMinutes?: string }) => { // eslint-disable-line @typescript-eslint/require-await
       const staleRunThresholdMinutes = opts.staleMinutes
         ? Number(opts.staleMinutes)
-        : loadConfig().staleRunThresholdMinutes;
+        : resolveRuntimeConfig(process.cwd()).staleRunThresholdMinutes;
       const repaired = opts.repairStale
         ? cleanupStaleRuns(staleRunThresholdMinutes)
         : 0;
@@ -50,9 +52,25 @@ export function registerStatus(program: Command): void {
         })),
       );
 
+      for (const r of rows) {
+        const attempts = listRetryHistory(r.id);
+        if (attempts.length === 0) continue;
+        const accumulatedTokens = getRunAccumulatedTokens(r.id);
+        console.log(`Attempt history (run ${String(r.id)}, total tokens: ${String(accumulatedTokens)}):`);
+        console.table(
+          attempts.map((a) => ({
+            attempt: a.attempt,
+            tool: a.tool ?? 'nao registrado',
+            model: a.model ?? 'nao registrado',
+            error: a.error ?? '-',
+            retried_at: a.retriedAt,
+          })),
+        );
+      }
+
       const visiblePipelines = listPipelineOverviews(Number(opts.limit));
       if (visiblePipelines.length > 0) {
-        console.log('Pipelines ativas/pendentes:');
+        console.log('Active/pending pipelines:');
         console.table(
           visiblePipelines.map((pipeline) => ({
             pipeline_id: pipeline.id,
@@ -73,7 +91,7 @@ export function registerStatus(program: Command): void {
 
       const resumable = listResumablePipelines();
       if (resumable.length === 0) return;
-      console.log('Pipelines retomáveis:');
+      console.log('Resumable pipelines:');
       console.table(
         resumable.map((pipeline) => {
           const snapshot = getPipelineSnapshot(pipeline);

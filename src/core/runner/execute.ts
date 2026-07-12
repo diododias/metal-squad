@@ -1,9 +1,19 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { resolve, dirname, join } from 'node:path';
-import type { Backlog, Feature, OnFail } from '../backlog/schema.js';
-import type { RunResult } from '../adapters/types.js';
+import { spawn } from 'node:child_process';
+import type { Backlog, Effort, Feature, OnFail, Tool } from '../backlog/schema.js';
+import type { RunFeatureOptions, RunResult } from '../adapters/types.js';
 import { topoOrder, selectFeaturePlan } from '../orchestrator/graph.js';
 import { schedule } from '../orchestrator/scheduler.js';
+import {
+  classifyBlockedOutcome,
+  classifyFailedOutcome,
+  classifySuccessOutcome,
+  buildAutoPilotDecision,
+  selectNextAutoStartCandidate,
+  shouldEvaluateNextCandidate,
+} from '../orchestrator/autoPilot.js';
+import type { AutoPilotOutcomeKind } from '../events/types.js';
 import { getAdapter } from '../adapters/index.js';
 import { resolveRepo } from '../repo.js';
 import {
@@ -11,13 +21,17 @@ import {
   createPipeline,
   createRun,
   createStageRequest,
+  createStageTransitionDecision,
   createGate,
   createRetryRecord,
   finishPipeline,
   finishRun,
+  getRunContextTelemetry,
   getPipeline,
   getPipelineSnapshot,
   getStageRequest,
+  listCompletedFeatureIds,
+  listRunsForTui,
   listStageRequestsForFeature,
   pausePipeline,
   recordUsage,
@@ -26,16 +40,21 @@ import {
   cleanupStaleRuns,
   updatePipelineSnapshot,
   updatePipelineStage,
+  updateRunTool,
+  updateStageTransitionDecisionNextSessionId,
   type PipelineStatus,
   type StageRequestRow,
 } from '../../db/repo.js';
+import { getCatalogFeature } from '../../db/backlogCatalog.js';
 import { dispatch } from '../notify/manager.js';
 import { startTelegramPoller, stopTelegramPoller } from '../notify/telegram-poller.js';
-import { loadConfig } from '../../config/index.js';
+import { resolveRuntimeConfig } from '../../config/index.js';
 import { buildPrompt } from '../backlog/prompt.js';
 import { createSkillRegistry } from '../skills/index.js';
 import { syncFeatureTasksToBacklog } from '../backlog/sync.js';
 import type { Skill } from '../skills/types.js';
+import { collectEffectiveStageSkills } from '../workflow/stageSkills.js';
+import { decideStageTransition } from '../workflow/sessionPolicy.js';
 import {
   createBudgetTracker,
   formatBudgetViolation,
@@ -51,13 +70,12 @@ import {
 import { loadBudgetState, saveBudgetState } from '../../db/repo.js';
 import { saveConfig } from '../../config/index.js';
 
-const SYSTEM_STAGE_SKILLS: Record<string, string[]> = {
-  specify: ['speckit-specify'],
-  plan: ['speckit-plan'],
-  tasks: ['speckit-tasks'],
-  implement: ['speckit-implement', 'dev-flow'],
-  validate: ['reviewr'],
-};
+export interface ResumeOverride {
+  featureId: string;
+  tool?: Tool;
+  model?: string;
+  effort?: Effort;
+}
 
 export interface ExecuteOptions {
   cwd: string;
@@ -65,18 +83,26 @@ export interface ExecuteOptions {
   featureId?: string;
   autoAdvanceStages?: boolean;
   resumePipelineId?: number;
+  resumeOverride?: ResumeOverride;
 }
 
 export async function executeBacklog(
   backlog: Backlog,
   opts: ExecuteOptions,
 ): Promise<void> {
-  const config = loadConfig();
+  const config = resolveRuntimeConfig(opts.cwd);
   const { repoId, path } = resolveRepo(opts.cwd);
   registerRepo(repoId, path);
   cleanupStaleRuns(config.staleRunThresholdMinutes);
   const activeRunIds = new Set<number>();
   const activeControllers = new Map<string, AbortController>();
+  const lastRunIdByFeature = new Map<string, number>();
+  const featureMaxTokens = new Map<string, number>();
+  for (const epic of backlog.epics) {
+    for (const feature of epic.features) {
+      if (feature.maxTokens !== undefined) featureMaxTokens.set(feature.id, feature.maxTokens);
+    }
+  }
   const budget = createBudgetTracker(resolveBudgetLimits(
     backlog.version === 2 ? backlog.budget : undefined,
     config.budget,
@@ -85,15 +111,12 @@ export async function executeBacklog(
     saveConfig,
     loadState: loadBudgetState,
     saveState: saveBudgetState,
-  });
+  }, featureMaxTokens);
   let budgetPauseTriggered = false;
+  let autoPilotProtectiveStop = false;
 
   const repoStageSkills = backlog.version === 2 ? backlog.defaults.stageSkills : {};
-  const effectiveStageSkills: Record<string, string[]> = {
-    ...SYSTEM_STAGE_SKILLS,
-    ...config.stageSkills,
-    ...repoStageSkills,
-  };
+  const effectiveStageSkills = collectEffectiveStageSkills(repoStageSkills, config.stageSkills);
 
   const resolvedPlan = opts.featureId
     ? selectFeaturePlan(backlog, opts.featureId)
@@ -138,13 +161,22 @@ export async function executeBacklog(
   const detachNotifications = attachEventNotifications();
   startTelegramPoller();
 
-  const handleGlobalBudgetViolation = (violation: BudgetViolation, featureId: string): void => {
+  const handleGlobalBudgetViolation = (violation: BudgetViolation, feature: Feature): void => {
     if (budgetPauseTriggered) return;
     budgetPauseTriggered = true;
-    const gateRunId = createRun(repoId, featureId, 'budget', { pipelineId });
-    finishRun(gateRunId, 'blocked', formatBudgetViolation(violation));
-    createGate(gateRunId, featureId, repoId);
+    autoPilotProtectiveStop = true;
+    const gateRunId = createRun(repoId, feature.id, 'budget', { pipelineId });
+    const summary = formatBudgetViolation(violation);
+    finishRun(gateRunId, 'blocked', summary);
+    createGate(gateRunId, feature.id, repoId);
     pausePipeline(pipelineId);
+    msqEventBus.emit('run:blocked', {
+      runId: gateRunId,
+      featureId: feature.id,
+      tool: feature.tool,
+      reason: 'budget',
+      summary,
+    });
     msqEventBus.emit('budget:alert', {
       percent: 100,
       spent: Math.round(violation.spent * 100) / 100,
@@ -163,9 +195,17 @@ export async function executeBacklog(
     }
     for (const violation of violations) {
       if (violation.scope === 'global') {
-        handleGlobalBudgetViolation(violation, feature.id);
+        handleGlobalBudgetViolation(violation, feature);
       } else {
         createGate(runId, feature.id, repoId);
+        autoPilotProtectiveStop = true;
+        msqEventBus.emit('run:blocked', {
+          runId,
+          featureId: feature.id,
+          tool: feature.tool,
+          reason: 'token',
+          summary: formatBudgetViolation(violation),
+        });
       }
     }
   };
@@ -175,8 +215,10 @@ export async function executeBacklog(
     prompt: string,
     stage?: string,
     abortSignal?: AbortSignal,
+    session?: RunFeatureOptions['session'],
   ): Promise<{ runId: number; res: RunResult }> => {
     const runId = createRun(repoId, feature.id, feature.tool, { pipelineId, stage });
+    lastRunIdByFeature.set(feature.id, runId);
     activeRunIds.add(runId);
     msqEventBus.emit('run:start', { runId, featureId: feature.id, tool: feature.tool, stage });
     if (stage) {
@@ -194,6 +236,8 @@ export async function executeBacklog(
         runId,
         repoId,
         signal: abortSignal,
+        session,
+        resumeOverride: opts.resumeOverride?.featureId === feature.id ? opts.resumeOverride : undefined,
       });
       if (res.usage) {
         recordUsage(runId, res.usage);
@@ -212,6 +256,13 @@ export async function executeBacklog(
             endedAt: new Date().toISOString(),
           });
         }
+        msqEventBus.emit('run:blocked', {
+          runId,
+          featureId: feature.id,
+          tool: feature.tool,
+          reason: 'needs_input',
+          summary: res.summary,
+        });
         activeRunIds.delete(runId);
         return { runId, res };
       }
@@ -233,6 +284,7 @@ export async function executeBacklog(
           featureId: feature.id,
           tool: feature.tool,
           error: res.summary,
+          kind: 'aborted',
         });
         activeRunIds.delete(runId);
         return { runId, res };
@@ -258,12 +310,21 @@ export async function executeBacklog(
           tool: feature.tool,
           result: res,
         });
+      } else if (status === 'blocked') {
+        msqEventBus.emit('run:blocked', {
+          runId,
+          featureId: feature.id,
+          tool: feature.tool,
+          reason: 'gate',
+          summary: res.summary,
+        });
       } else {
         msqEventBus.emit('run:failed', {
           runId,
           featureId: feature.id,
           tool: feature.tool,
           error: res.summary,
+          kind: 'execution',
         });
       }
       activeRunIds.delete(runId);
@@ -286,6 +347,7 @@ export async function executeBacklog(
         featureId: feature.id,
         tool: feature.tool,
         error: message,
+        kind: 'execution',
       });
       activeRunIds.delete(runId);
       throw err;
@@ -295,7 +357,7 @@ export async function executeBacklog(
   const execute = async (feature: Feature): Promise<RunResult> => {
     const violation = budget.globalViolation();
     if (violation) {
-      handleGlobalBudgetViolation(violation, feature.id);
+      handleGlobalBudgetViolation(violation, feature);
       return {
         ok: false,
         aborted: true,
@@ -344,6 +406,86 @@ export async function executeBacklog(
   process.once('SIGINT', handleSignal);
   process.once('SIGTERM', handleSignal);
 
+  // F45: after a feature that opted into `autoStart` reaches a qualifying
+  // outcome, spawn the next eligible autoStart feature as a new detached
+  // process — the same "fire and forget" idiom `src/web/server.ts` already
+  // uses to launch feature runs, since a running `msq run --feature` process
+  // has no in-process event channel to any other feature's run.
+  const dispatchNextAutoStartFeature = (featureId: string): void => {
+    const entrypoint = process.argv[1];
+    if (!entrypoint) {
+      msqEventBus.emit('ui:notice', {
+        message: `Auto-pilot could not start ${featureId}: CLI entrypoint was not resolved.`,
+      });
+      return;
+    }
+    const child = spawn(
+      process.execPath,
+      [...process.execArgv, entrypoint, 'run', '--feature', featureId],
+      { detached: true, stdio: 'ignore', cwd: opts.cwd },
+    );
+    child.once('error', (error) => {
+      msqEventBus.emit('ui:notice', { message: `Auto-pilot could not start ${featureId}: ${error.message}` });
+    });
+    child.unref();
+    msqEventBus.emit('ui:info', { message: `Auto-pilot starting ${featureId}...` });
+  };
+
+  const evaluateAutoPilot = (feature: Feature, result: RunResult): void => {
+    // Auto-pilot only spawns a *new* detached process for the next feature —
+    // when this run already covers the whole backlog in-process (bare `msq
+    // run`, no --feature), the scheduler above already dispatches every
+    // remaining feature itself, so spawning here would double-start work.
+    if (!opts.featureId) return;
+    const liveFeature = getCatalogFeature(repoId, feature.id) ?? feature;
+    if (!liveFeature.autoStart) return;
+
+    const triggerRunId = lastRunIdByFeature.get(feature.id) ?? 0;
+
+    let outcomeKind: AutoPilotOutcomeKind;
+    if (autoPilotProtectiveStop) {
+      outcomeKind = 'blocked-protective';
+    } else if (result.aborted) {
+      outcomeKind = classifyFailedOutcome('aborted');
+    } else if (result.ok) {
+      outcomeKind = classifySuccessOutcome();
+    } else if (result.control?.type === 'needs_input') {
+      outcomeKind = classifyBlockedOutcome('needs_input');
+    } else if (getOnFailPolicy(feature) === 'gate') {
+      outcomeKind = classifyBlockedOutcome('gate');
+    } else {
+      outcomeKind = classifyFailedOutcome('execution');
+    }
+
+    let selected: Feature | undefined;
+    if (shouldEvaluateNextCandidate(outcomeKind)) {
+      const doneFeatureIds = listCompletedFeatureIds(repoId);
+      const activeRuns = listRunsForTui(500, repoId);
+      const activeFeatureIds = new Set(
+        activeRuns
+          .filter((run) => run.status === 'running' || run.status === 'blocked')
+          .map((run) => run.featureId),
+      );
+      const fullOrder = topoOrder(backlog);
+      selected = selectNextAutoStartCandidate(fullOrder, doneFeatureIds, activeFeatureIds, {
+        getLiveFeature: (id) => getCatalogFeature(repoId, id),
+      });
+    }
+
+    const decision = buildAutoPilotDecision({
+      triggerFeatureId: feature.id,
+      triggerRunId,
+      triggerKind: outcomeKind,
+      selected,
+    });
+
+    msqEventBus.emit('autopilot:decision', decision);
+
+    if (decision.action === 'start' && decision.selectedFeatureId) {
+      dispatchNextAutoStartFeature(decision.selectedFeatureId);
+    }
+  };
+
   const scheduler = schedule(ordered, {
     concurrency: opts.concurrency,
     initialDone,
@@ -370,7 +512,10 @@ export async function executeBacklog(
     },
     onDone: (feature, result) => {
       const current = getPipeline(pipelineId);
-      if (!current) return;
+      if (!current) {
+        evaluateAutoPilot(feature, result);
+        return;
+      }
       const snapshot = getPipelineSnapshot(current);
       const withoutActive = snapshot.active.filter((item) => item !== feature.id);
       if (result.aborted) {
@@ -381,19 +526,31 @@ export async function executeBacklog(
           status: current.status === 'aborting' ? 'aborting' : 'paused',
           clearAbortRequest: true,
         });
+        // Evaluate after the snapshot write commits, so a DB-backed
+        // done/active lookup during selection reflects this feature's own
+        // just-finished outcome instead of stale pre-completion state.
+        evaluateAutoPilot(feature, result);
         return;
       }
       const shouldCountAsDone = result.ok || getOnFailPolicy(feature) === 'continue';
+      // A genuine failure (stop/gate policy, not aborted) must land in `aborted` —
+      // the "needs rerun" bucket — instead of nowhere. Otherwise it vanishes from
+      // pending/active/done/aborted entirely and `msq resume`/the TUI have no
+      // record that this feature still needs to run (see F39 resume flow).
+      const needsRerun = !shouldCountAsDone;
       updatePipelineSnapshot(pipelineId, {
         active: withoutActive,
         done: shouldCountAsDone
           ? [...snapshot.done.filter((item) => item !== feature.id), feature.id]
           : snapshot.done,
         pending: snapshot.pending.filter((item) => item !== feature.id),
-        aborted: snapshot.aborted.filter((item) => item !== feature.id),
+        aborted: needsRerun
+          ? [...snapshot.aborted.filter((item) => item !== feature.id), feature.id]
+          : snapshot.aborted.filter((item) => item !== feature.id),
       }, {
         clearAbortRequest: true,
       });
+      evaluateAutoPilot(feature, result);
     },
   });
 
@@ -446,6 +603,7 @@ type StageExecutor = (
   prompt: string,
   stage?: string,
   abortSignal?: AbortSignal,
+  session?: RunFeatureOptions['session'],
 ) => Promise<{
   runId: number;
   res: RunResult;
@@ -456,6 +614,35 @@ interface RetryRunOptions {
   runId: number;
   repoId: string;
   signal?: AbortSignal;
+  session?: RunFeatureOptions['session'];
+  resumeOverride?: ResumeOverride;
+}
+
+interface RetryCandidate {
+  tool: Tool;
+  model?: string;
+  effort: Effort;
+  maxAttempts: number;
+}
+
+function buildRetryCandidates(feature: Feature, resumeOverride?: ResumeOverride): RetryCandidate[] {
+  const primary: RetryCandidate = {
+    tool: resumeOverride?.tool ?? feature.tool,
+    model: resumeOverride?.model ?? feature.model,
+    effort: resumeOverride?.effort ?? feature.effort,
+    maxAttempts: feature.retry?.maxAttempts ?? 1,
+  };
+  const fallbacks = (feature.retry?.fallback ?? []).map((alt) => ({
+    tool: alt.tool,
+    model: alt.model ?? feature.model,
+    effort: alt.effort ?? feature.effort,
+    maxAttempts: alt.maxAttempts,
+  }));
+  return [primary, ...fallbacks];
+}
+
+function resolvePrimaryTool(feature: Feature, resumeOverride?: ResumeOverride): Tool {
+  return buildRetryCandidates(feature, resumeOverride)[0]?.tool ?? feature.tool;
 }
 
 async function runWithRetry(
@@ -463,31 +650,57 @@ async function runWithRetry(
   prompt: string,
   opts: RetryRunOptions,
 ): Promise<RunResult> {
-  const adapter = getAdapter(feature.tool);
-  const maxAttempts = feature.retry?.maxAttempts ?? 1;
   const backoffMs = feature.retry?.backoffMs ?? 5000;
+  const candidates = buildRetryCandidates(feature, opts.resumeOverride);
   let lastResult: RunResult | null = null;
+  let lastCandidateTool: Tool | null = null;
+  let attempt = 0;
 
-  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
-    const res = await adapter.runFeature(feature, prompt, {
-      cwd: opts.cwd,
-      runId: opts.runId,
-      signal: opts.signal,
-    });
+  for (const [candidateIndex, candidate] of candidates.entries()) {
+    const adapter = getAdapter(candidate.tool);
+    const candidateFeature: Feature = {
+      ...feature,
+      tool: candidate.tool,
+      model: candidate.model,
+      effort: candidate.effort,
+    };
 
-    if (res.ok || res.control?.type === 'needs_input') return res;
+    for (let localAttempt = 1; localAttempt <= candidate.maxAttempts; localAttempt += 1) {
+      attempt += 1;
+      const session = opts.session?.mode === 'resume' && opts.session.handle?.tool === candidate.tool
+        ? opts.session
+        : undefined;
+      const res = await adapter.runFeature(candidateFeature, prompt, {
+        cwd: opts.cwd,
+        runId: opts.runId,
+        signal: opts.signal,
+        session,
+      });
 
-    lastResult = res;
+      if (res.ok || res.control?.type === 'needs_input') {
+        if (candidate.tool !== feature.tool) updateRunTool(opts.runId, candidate.tool);
+        return res;
+      }
 
-    if (attempt < maxAttempts) {
-      const waitMs = backoffWithJitter(backoffMs, attempt);
-      createRetryRecord(opts.runId, attempt, res.summary, waitMs);
-      await sleep(waitMs);
+      lastResult = res;
+      lastCandidateTool = candidate.tool;
+
+      const isLastAttemptOfCandidate = localAttempt === candidate.maxAttempts;
+      const isLastCandidate = candidateIndex === candidates.length - 1;
+      if (!(isLastAttemptOfCandidate && isLastCandidate)) {
+        const waitMs = backoffWithJitter(backoffMs, attempt);
+        createRetryRecord(opts.runId, attempt, res.summary, waitMs, candidate.tool, candidate.model);
+        await sleep(waitMs);
+      }
     }
   }
 
   if (!lastResult) {
     throw new Error(`Feature ${feature.id} did not produce a run result.`);
+  }
+
+  if (lastCandidateTool && lastCandidateTool !== feature.tool) {
+    updateRunTool(opts.runId, lastCandidateTool);
   }
 
   if (getOnFailPolicy(feature) === 'gate') {
@@ -501,30 +714,72 @@ async function executeStagedFeature(
   feature: Feature,
   pipelineId: number,
   registry: ReturnType<typeof createSkillRegistry>,
-  config: ReturnType<typeof loadConfig>,
+  config: ReturnType<typeof resolveRuntimeConfig>,
   opts: ExecuteOptions,
   executeStageRun: StageExecutor,
   stageSkills: Record<string, string[]>,
   abortSignal?: AbortSignal,
 ): Promise<RunResult> {
   const workflow = feature.workflow;
-  const autoAdvance = (opts.autoAdvanceStages ?? workflow.approvals.autoAdvance) || config.workflow.autoAdvanceStages;
+  const sessionPolicy = workflow.sessionPolicy;
+  // Re-read `approvals.autoAdvance` from the catalog at each transition
+  // rather than caching it once — the web UI lets the user flip this
+  // checkbox while a run is already in flight, and that edit must take
+  // effect on the very next stage transition instead of only on future runs.
+  const resolveAutoAdvance = (): boolean => {
+    if (opts.autoAdvanceStages !== undefined) return opts.autoAdvanceStages;
+    let featureAutoAdvance = workflow.approvals.autoAdvance;
+    try {
+      const { repoId } = resolveRepo(opts.cwd);
+      const liveFeature = getCatalogFeature(repoId, feature.id);
+      if (liveFeature) featureAutoAdvance = liveFeature.workflow.approvals.autoAdvance;
+    } catch {
+      // catalog read failed (e.g. sandboxed harness DB) — fall back to the
+      // value captured when this run started rather than aborting a stage
+      // transition over a config re-check.
+    }
+    return featureAutoAdvance || config.workflow.autoAdvanceStages;
+  };
   const stages = workflow.stages;
   const persistedRequests = listStageRequestsForFeature(pipelineId, feature.id);
   const stageInputs = loadPersistedStageInputs(persistedRequests);
+  const currentStage = getPipeline(pipelineId)?.currentStage ?? null;
+  let pendingTransitionDecisionId: number | null = null;
+  let nextStageSession: RunFeatureOptions['session'] | undefined;
+  // A gate-blocked stage leaves `currentStage` set and re-enters this
+  // function within the same process once the scheduler resumes it — treat
+  // that the same as an explicit `msq resume` so it continues from the
+  // stage that was in flight instead of restarting from stage 0.
   const startIndex = determineStageStartIndex(
     stages,
-    getPipeline(pipelineId)?.currentStage ?? null,
+    currentStage,
     persistedRequests,
-    Boolean(opts.resumePipelineId),
+    Boolean(opts.resumePipelineId) || currentStage !== null,
   );
 
   for (let index = startIndex; index < stages.length; index += 1) {
     const stage = stages[index] ?? 'implement';
     updatePipelineStage(pipelineId, stage);
     const stageSkillList = resolveStageSkill(feature, stage, registry, opts.cwd, stageSkills);
-    const prompt = buildStagePrompt(feature, stage, stageSkillList, opts.cwd, config.promptContextCharLimit, stageInputs.get(stage) ?? []);
-    const { runId, res } = await executeStageRun(feature, prompt, stage, abortSignal);
+    const stepGuidanceSkills = resolveStepGuidanceSkills(feature, stage, registry, opts.cwd);
+    const prompt = buildStagePrompt(
+      feature,
+      stage,
+      stageSkillList,
+      stepGuidanceSkills,
+      opts.cwd,
+      config.promptContextCharLimit,
+      stageInputs.get(stage) ?? [],
+    );
+    const { runId, res } = await executeStageRun(feature, prompt, stage, abortSignal, nextStageSession);
+    if (pendingTransitionDecisionId !== null) {
+      updateStageTransitionDecisionNextSessionId(
+        pendingTransitionDecisionId,
+        res.session?.sessionId ?? null,
+      );
+      pendingTransitionDecisionId = null;
+    }
+    nextStageSession = undefined;
 
     if (res.control?.type === 'needs_input') {
       const requestId = createStageRequest(
@@ -533,7 +788,7 @@ async function executeStagedFeature(
         stage,
         'input',
         res.control.prompt,
-        { runId },
+        { runId, options: res.control.options },
       );
       const response = await waitForStageRequestResponse(requestId, config.workflow.pollIntervalMs);
       stageInputs.set(stage, [...(stageInputs.get(stage) ?? []), response]);
@@ -561,13 +816,41 @@ async function executeStagedFeature(
     const hasNextStage = index < stages.length - 1;
     if (!hasNextStage) continue;
 
-    if (autoAdvance) {
+    const nextStage = stages[index + 1] ?? 'done';
+    const transitionPlan = decideStageTransition({
+      policy: sessionPolicy,
+      telemetry: getRunContextTelemetry(runId),
+      nextStage,
+      expectedTool: resolvePrimaryTool(
+        feature,
+        opts.resumeOverride?.featureId === feature.id ? opts.resumeOverride : undefined,
+      ),
+      previousSession: res.session,
+    });
+    const transitionDecision = {
+      pipelineId,
+      featureId: feature.id,
+      fromRunId: runId,
+      fromStage: stage,
+      toStage: nextStage,
+      policyMode: transitionPlan.policyMode,
+      decision: transitionPlan.decision,
+      reason: transitionPlan.reason,
+      contextWindowPercent: transitionPlan.contextWindowPercent,
+      previousSessionId: transitionPlan.previousSessionId,
+      nextSessionId: null,
+    } as const;
+    pendingTransitionDecisionId = createStageTransitionDecision(transitionDecision);
+    msqEventBus.emit('stage:transition-decided', transitionDecision);
+    nextStageSession = transitionPlan.session.mode === 'resume' ? transitionPlan.session : undefined;
+
+    if (resolveAutoAdvance()) {
       createStageRequest(
         pipelineId,
         feature.id,
         stage,
         'approval',
-        `Auto-advance enabled; next stage: ${stages[index + 1] ?? 'done'}.`,
+        `Auto-advance enabled; next stage: ${nextStage}.`,
         {
           runId,
           response: 'advance',
@@ -582,7 +865,7 @@ async function executeStagedFeature(
       feature.id,
       stage,
       'approval',
-      `Advance to stage ${stages[index + 1] ?? 'done'}?`,
+      `Advance to stage ${nextStage}?`,
       { runId },
     );
     const decision = await waitForStageApproval(
@@ -590,11 +873,13 @@ async function executeStagedFeature(
       pipelineId,
       feature.id,
       stage,
-      stages[index + 1] ?? 'done',
+      nextStage,
       config.workflow.pollIntervalMs,
       runId,
     );
     if (decision === 'retry') {
+      pendingTransitionDecisionId = null;
+      nextStageSession = undefined;
       index -= 1;
       continue;
     }
@@ -629,16 +914,22 @@ function buildStagePrompt(
   feature: Feature,
   stage: string,
   skills: Skill[],
+  stepGuidanceSkills: Skill[],
   cwd: string,
   maxContextChars: number,
   adminInputs: string[],
 ): string {
-  const basePrompt = buildPrompt(feature, skills, cwd, { maxContextChars });
+  const basePrompt = buildPrompt(feature, skills, cwd, {
+    maxContextChars,
+    activeStage: stage,
+    stepGuidanceSkills,
+  });
   const stageNotes = [
     `Current workflow stage: ${stage}.`,
     'Run only this stage in this session.',
     'Do not continue to later stages after finishing the current stage.',
     'If you need admin input, end your final response with exactly: MSQ_INPUT_REQUIRED: <question>',
+    'If the question has 1-8 discrete answer options, add a line `OPTIONS:` right after it, followed by one `- <label>` line per option (each label 1-60 characters, no duplicates); otherwise omit it for free-text input.',
   ];
   const stageContext: string[] = [];
   if (stage === 'specify') {
@@ -656,6 +947,18 @@ function buildStagePrompt(
 
   const appendedSections = [stageNotes.join('\n'), ...stageContext].filter((section) => section.trim().length > 0);
   return `${basePrompt}\n\n---\n\n${appendedSections.join('\n\n')}`.trim();
+}
+
+function resolveStepGuidanceSkills(
+  feature: Feature,
+  stage: string,
+  registry: ReturnType<typeof createSkillRegistry>,
+  cwd: string,
+): Skill[] {
+  // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- staged tests still construct partial workflow objects
+  const names = feature.workflow.stepGuidance?.[stage]?.skills ?? [];
+  if (names.length === 0) return [];
+  return registry.resolve([...new Set(names)], cwd);
 }
 
 function buildSpecifyStageDescription(

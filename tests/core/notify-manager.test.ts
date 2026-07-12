@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-const mockLoadConfig = vi.fn();
+const mockResolveRuntimeConfig = vi.fn();
 const mockTelegramSend = vi.fn();
 const mockSlackSend = vi.fn();
 const mockDiscordSend = vi.fn();
@@ -14,7 +14,7 @@ const MockWebhookChannel = vi.fn(() => ({ send: mockWebhookSend }));
 const MockDesktopChannel = vi.fn(() => ({ send: mockDesktopSend }));
 
 vi.mock('../../src/config/index.js', () => ({
-  loadConfig: mockLoadConfig,
+  resolveRuntimeConfig: mockResolveRuntimeConfig,
 }));
 vi.mock('../../src/core/notify/telegram.js', () => ({ TelegramChannel: MockTelegramChannel }));
 vi.mock('../../src/core/notify/slack.js', () => ({ SlackChannel: MockSlackChannel }));
@@ -38,7 +38,7 @@ function makeConfig(overrides: {
 
 beforeEach(() => {
   vi.resetModules();
-  mockLoadConfig.mockReset();
+  mockResolveRuntimeConfig.mockReset();
   mockTelegramSend.mockReset().mockResolvedValue(undefined);
   mockSlackSend.mockReset().mockResolvedValue(undefined);
   mockDiscordSend.mockReset().mockResolvedValue(undefined);
@@ -53,7 +53,7 @@ beforeEach(() => {
 
 describe('dispatch', () => {
   it('does nothing when event is not in notifications.events', async () => {
-    mockLoadConfig.mockReturnValue(makeConfig({ events: ['run:done'] }));
+    mockResolveRuntimeConfig.mockReturnValue(makeConfig({ events: ['run:done'] }));
     const { dispatch } = await import('../../src/core/notify/manager.js');
 
     await dispatch('run:start', 'msg');
@@ -63,7 +63,7 @@ describe('dispatch', () => {
   });
 
   it('uses DesktopChannel fallback when no channels and no telegramChatId', async () => {
-    mockLoadConfig.mockReturnValue(makeConfig({ channels: [], telegramChatId: undefined }));
+    mockResolveRuntimeConfig.mockReturnValue(makeConfig({ channels: [], telegramChatId: undefined }));
     const { dispatch } = await import('../../src/core/notify/manager.js');
 
     await dispatch('run:start', 'fallback message');
@@ -72,7 +72,7 @@ describe('dispatch', () => {
   });
 
   it('passes metadata to DesktopChannel fallback', async () => {
-    mockLoadConfig.mockReturnValue(makeConfig({ channels: [] }));
+    mockResolveRuntimeConfig.mockReturnValue(makeConfig({ channels: [] }));
     const { dispatch } = await import('../../src/core/notify/manager.js');
     const meta = { featureId: 'feat-1' };
 
@@ -82,7 +82,7 @@ describe('dispatch', () => {
   });
 
   it('builds TelegramChannel from telegramChatId when channels is empty', async () => {
-    mockLoadConfig.mockReturnValue(makeConfig({ channels: [], telegramChatId: 'chat123' }));
+    mockResolveRuntimeConfig.mockReturnValue(makeConfig({ channels: [], telegramChatId: 'chat123' }));
     const { dispatch } = await import('../../src/core/notify/manager.js');
 
     await dispatch('run:start', 'hello telegram');
@@ -92,7 +92,7 @@ describe('dispatch', () => {
   });
 
   it('builds TelegramChannel from explicit channel config', async () => {
-    mockLoadConfig.mockReturnValue(makeConfig({
+    mockResolveRuntimeConfig.mockReturnValue(makeConfig({
       channels: [{ type: 'telegram', chatId: 'explicit123', forumTopicId: 42 }],
     }));
     const { dispatch } = await import('../../src/core/notify/manager.js');
@@ -104,7 +104,7 @@ describe('dispatch', () => {
   });
 
   it('builds SlackChannel from explicit channel config', async () => {
-    mockLoadConfig.mockReturnValue(makeConfig({
+    mockResolveRuntimeConfig.mockReturnValue(makeConfig({
       channels: [{ type: 'slack', webhookUrl: 'https://hooks.slack.com/abc' }],
     }));
     const { dispatch } = await import('../../src/core/notify/manager.js');
@@ -116,7 +116,7 @@ describe('dispatch', () => {
   });
 
   it('builds DiscordChannel from explicit channel config', async () => {
-    mockLoadConfig.mockReturnValue(makeConfig({
+    mockResolveRuntimeConfig.mockReturnValue(makeConfig({
       channels: [{ type: 'discord', webhookUrl: 'https://discord.com/api/webhooks/xyz' }],
     }));
     const { dispatch } = await import('../../src/core/notify/manager.js');
@@ -128,7 +128,7 @@ describe('dispatch', () => {
   });
 
   it('builds WebhookChannel from explicit channel config', async () => {
-    mockLoadConfig.mockReturnValue(makeConfig({
+    mockResolveRuntimeConfig.mockReturnValue(makeConfig({
       channels: [{ type: 'webhook', url: 'https://example.com/hook' }],
     }));
     const { dispatch } = await import('../../src/core/notify/manager.js');
@@ -140,7 +140,7 @@ describe('dispatch', () => {
   });
 
   it('builds DesktopChannel from explicit channel config', async () => {
-    mockLoadConfig.mockReturnValue(makeConfig({
+    mockResolveRuntimeConfig.mockReturnValue(makeConfig({
       channels: [{ type: 'desktop' }],
     }));
     const { dispatch } = await import('../../src/core/notify/manager.js');
@@ -152,7 +152,7 @@ describe('dispatch', () => {
   });
 
   it('sends to all channels when multiple are configured', async () => {
-    mockLoadConfig.mockReturnValue(makeConfig({
+    mockResolveRuntimeConfig.mockReturnValue(makeConfig({
       channels: [
         { type: 'telegram', chatId: 'c1' },
         { type: 'slack', webhookUrl: 'https://slack/hook' },
@@ -167,7 +167,7 @@ describe('dispatch', () => {
   });
 
   it('does not throw when a channel send rejects', async () => {
-    mockLoadConfig.mockReturnValue(makeConfig({
+    mockResolveRuntimeConfig.mockReturnValue(makeConfig({
       channels: [{ type: 'telegram', chatId: 'c1' }],
     }));
     mockTelegramSend.mockRejectedValue(new Error('network error'));
@@ -177,7 +177,7 @@ describe('dispatch', () => {
   });
 
   it('does not throw when DesktopChannel fallback rejects', async () => {
-    mockLoadConfig.mockReturnValue(makeConfig({ channels: [] }));
+    mockResolveRuntimeConfig.mockReturnValue(makeConfig({ channels: [] }));
     mockDesktopSend.mockRejectedValue(new Error('desktop error'));
     const { dispatch } = await import('../../src/core/notify/manager.js');
 
@@ -185,7 +185,7 @@ describe('dispatch', () => {
   });
 
   it('prefers explicit channels over telegramChatId when both present', async () => {
-    mockLoadConfig.mockReturnValue(makeConfig({
+    mockResolveRuntimeConfig.mockReturnValue(makeConfig({
       channels: [{ type: 'slack', webhookUrl: 'https://slack/hook' }],
       telegramChatId: 'ignored',
     }));

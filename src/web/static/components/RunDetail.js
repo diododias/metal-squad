@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import {
   STATUS_ICON,
   formatElapsed,
@@ -12,7 +12,7 @@ import {
 } from '../lib/format.js';
 import { summarizeTaskRuns } from '../lib/workflow.js';
 
-const DETAIL_SECTION_ORDER = ['summary', 'spec', 'workflow', 'config', 'skills', 'tasks', 'output'];
+export const DETAIL_SECTION_ORDER = ['summary', 'spec', 'workflow', 'config', 'skills', 'tasks', 'changes', 'output'];
 
 const DETAIL_SECTION_LABEL = {
   summary: 'Run Summary',
@@ -21,7 +21,14 @@ const DETAIL_SECTION_LABEL = {
   config: 'Feature Config',
   skills: 'Declared Skills',
   tasks: 'Tasks',
+  changes: 'Changes',
   output: 'Live Output',
+};
+
+const CHANGE_STATUS_ICON = {
+  added: '+',
+  modified: '~',
+  deleted: '-',
 };
 
 const DEFAULT_STEPPER_STAGES = ['specify', 'plan', 'tasks', 'implement', 'validate'];
@@ -39,6 +46,14 @@ const DEFAULT_RETRY = {
   backoffMs: 5000,
   onFail: 'stop',
 };
+
+function formatTransitionReason(reason) {
+  return reason ? reason.replace(/_/g, ' ') : null;
+}
+
+function formatTransitionDecision(decision) {
+  return decision ? decision.replace(/_/g, ' ') : 'new session';
+}
 
 function getStatusToneClass(status) {
   if (status === 'running') return 'status-running';
@@ -100,7 +115,7 @@ function WorkflowStepper({ stages, workflowStages, currentStage }) {
   );
 }
 
-function TabBar({ sections, activeTab, labels, onSelect }) {
+export function TabBar({ sections, activeTab, labels, onSelect }) {
   return React.createElement(
     'div',
     { className: 'tab-bar' },
@@ -118,7 +133,7 @@ function TabBar({ sections, activeTab, labels, onSelect }) {
   );
 }
 
-function DetailSection({ title, children }) {
+export function DetailSection({ title, children }) {
   return React.createElement(
     'div',
     { className: 'detail-section' },
@@ -127,31 +142,32 @@ function DetailSection({ title, children }) {
   );
 }
 
-function renderOutputEntry(entry, maxWidth) {
+function renderOutputEntry(entry, maxWidth, fallbackIndex) {
+  const key = entry.id != null ? `row-${entry.id}` : `idx-${fallbackIndex ?? 0}`;
   if (entry.source === 'tool') {
     return React.createElement(
       'div',
-      { key: entry.id, className: 'output-entry tool' },
-      truncateText(entry.line, maxWidth),
+      { key, className: 'output-entry tool' },
+      `TOOL> ${truncateText(entry.line, maxWidth - 6)}`,
     );
   }
   if (entry.source === 'heartbeat') {
     return React.createElement(
       'div',
-      { key: entry.id, className: 'output-entry heartbeat' },
+      { key, className: 'output-entry heartbeat' },
       formatHeartbeatLine(entry.line, maxWidth),
     );
   }
   if (entry.source === 'stderr') {
     return React.createElement(
       'div',
-      { key: entry.id, className: 'output-entry stderr' },
+      { key, className: 'output-entry stderr' },
       `ERR> ${truncateText(entry.line, maxWidth - 5)}`,
     );
   }
   return React.createElement(
     'div',
-    { key: entry.id, className: `output-entry ${entry.source || 'stdout'}` },
+    { key, className: `output-entry ${entry.source || 'stdout'}` },
     truncateText(entry.line, maxWidth),
   );
 }
@@ -173,6 +189,7 @@ function FeatureConfigSection({ feature, settings }) {
     stages: ['specify', 'plan', 'tasks', 'implement', 'validate'],
     approvals: { channel: 'telegram', autoAdvance: false },
     syncTasksToBacklog: true,
+    sessionPolicy: { mode: 'isolated', alwaysIsolatedStages: [] },
   };
   const skills = feature.skills ?? [];
   const dependsOn = feature.dependsOn ?? [];
@@ -190,6 +207,16 @@ function FeatureConfigSection({ feature, settings }) {
       configRow('mode', workflow.mode),
       configRow('stages', workflow.stages.join(' → ')),
       configRow('syncTasksToBacklog', String(workflow.syncTasksToBacklog)),
+    ),
+    React.createElement(ConfigGroup, { title: 'Session policy' },
+      configRow('mode', workflow.sessionPolicy.mode),
+      configRow(
+        'alwaysIsolatedStages',
+        workflow.sessionPolicy.alwaysIsolatedStages.length > 0
+          ? workflow.sessionPolicy.alwaysIsolatedStages.join(', ')
+          : 'none',
+        workflow.sessionPolicy.alwaysIsolatedStages.length === 0,
+      ),
     ),
     React.createElement(ConfigGroup, { title: 'Aprovações' },
       configRow('channel', workflow.approvals.channel),
@@ -247,6 +274,9 @@ function renderSectionContent(sectionId, ctx) {
     backlogSettings,
     taskRuns,
     breakdown,
+    previousAttemptTaskRuns,
+    previousAttemptInfo,
+    runChanges,
     outputLines,
     outputPaused,
     logsVisible,
@@ -262,6 +292,23 @@ function renderSectionContent(sectionId, ctx) {
         : '— ctx';
       const pipelineTokens = run.pipelineTotalTokens ?? run.totalTokens ?? null;
       const sessionTokens = run.totalTokens ?? null;
+      const transitionSummary = run.latestTransitionReason
+        ? [
+            `transition ${formatTransitionDecision(run.latestTransitionDecision)} -> ${run.latestTransitionToStage ?? 'next stage'}`,
+            formatTransitionReason(run.latestTransitionReason),
+            run.latestTransitionContextWindowPercent !== null && run.latestTransitionContextWindowPercent !== undefined
+              ? `${formatPercent(run.latestTransitionContextWindowPercent)} ctx`
+              : null,
+          ].filter(Boolean).join(' · ')
+        : null;
+      const handoffSummary = run.latestTransitionPreviousSessionId || run.latestTransitionNextSessionId
+        ? [
+            'session handoff',
+            run.latestTransitionPreviousSessionId ?? 'new',
+            '->',
+            run.latestTransitionNextSessionId ?? 'new',
+          ].join(' ')
+        : null;
       const head = [
         `${statusGlyph} ${getRunStatusLabel(run)}`,
         `tool ${run.tool}`,
@@ -276,6 +323,10 @@ function renderSectionContent(sectionId, ctx) {
         React.createElement('div', null, head),
         run.pendingStageRequestPrompt &&
           React.createElement('div', { className: 'muted' }, `wait ${run.pendingStageRequestPrompt}`),
+        transitionSummary &&
+          React.createElement('div', { className: 'muted' }, transitionSummary),
+        handoffSummary &&
+          React.createElement('div', { className: 'muted' }, handoffSummary),
         breakdown?.wallMs != null &&
           React.createElement(
             React.Fragment,
@@ -306,8 +357,11 @@ function renderSectionContent(sectionId, ctx) {
     }
 
     case 'workflow': {
+      const currentHasData = taskRuns && taskRuns.length > 0;
+      const effectiveTaskRuns = currentHasData ? taskRuns : (previousAttemptTaskRuns || []);
       const stages = feature?.workflow?.stages ?? DEFAULT_STEPPER_STAGES;
-      const workflowStages = summarizeTaskRuns(taskRuns, stages);
+      const workflowStages = summarizeTaskRuns(effectiveTaskRuns, stages);
+      const usingPreviousAttempt = !currentHasData && workflowStages.length > 0 && previousAttemptInfo;
       return React.createElement(
         DetailSection,
         { title: DETAIL_SECTION_LABEL.workflow },
@@ -315,10 +369,10 @@ function renderSectionContent(sectionId, ctx) {
           'div',
           { className: 'muted' },
           workflowStages.length > 0
-            ? 'Per-stage task breakdown:'
-            : run.pipelineResumeSummary
-              ? run.pipelineResumeSummary
-              : 'No workflow steps recorded for this run yet.',
+            ? usingPreviousAttempt
+              ? `Showing task breakdown from previous attempt (run #${previousAttemptInfo.runId}, ${previousAttemptInfo.status})`
+              : 'Per-stage task breakdown:'
+            : `Task breakdown not applicable at this stage — no stage session has run yet for ${run.featureId}.`,
         ),
         workflowStages.length > 0 &&
           workflowStages.map((stage) =>
@@ -380,18 +434,95 @@ function renderSectionContent(sectionId, ctx) {
 
     case 'tasks': {
       const declaredTasks = feature?.tasks ?? [];
+      if (declaredTasks.length > 0) {
+        return React.createElement(
+          DetailSection,
+          { title: DETAIL_SECTION_LABEL.tasks },
+          declaredTasks.slice(0, dense ? 5 : declaredTasks.length).map((task) =>
+            React.createElement(
+              'div',
+              { key: task.id, className: 'muted' },
+              `${BACKLOG_TASK_ICON[task.status] ?? '○'} ${task.id} — ${task.title}`,
+            ),
+          ),
+        );
+      }
+
+      const currentHasData = taskRuns && taskRuns.length > 0;
+      const effectiveTaskRuns = currentHasData ? taskRuns : (previousAttemptTaskRuns || []);
+      const usingPreviousAttempt = !currentHasData && effectiveTaskRuns.length > 0 && previousAttemptInfo;
+
       return React.createElement(
         DetailSection,
         { title: DETAIL_SECTION_LABEL.tasks },
-        declaredTasks.length > 0
-          ? declaredTasks.slice(0, dense ? 5 : declaredTasks.length).map((task) =>
-              React.createElement(
-                'div',
-                { key: task.id, className: 'muted' },
-                `${BACKLOG_TASK_ICON[task.status] ?? '○'} ${task.id} — ${task.title}`,
+        effectiveTaskRuns.length > 0
+          ? React.createElement(
+              React.Fragment,
+              null,
+              usingPreviousAttempt &&
+                React.createElement(
+                  'div',
+                  { className: 'muted' },
+                  `Showing task breakdown from previous attempt (run #${previousAttemptInfo.runId}, ${previousAttemptInfo.status})`,
+                ),
+              effectiveTaskRuns.slice(0, dense ? 5 : effectiveTaskRuns.length).map((task) =>
+                React.createElement(
+                  'div',
+                  { key: task.id, className: 'muted' },
+                  `${BACKLOG_TASK_ICON[task.status] ?? '○'} ${task.taskId} — ${task.title}`,
+                ),
               ),
             )
-          : React.createElement('div', { className: 'muted' }, `No task breakdown declared for ${run.featureId} in the backlog.`),
+          : React.createElement(
+              'div',
+              { className: 'muted' },
+              `Task breakdown not applicable at this stage — no stage session has run yet for ${run.featureId}.`,
+            ),
+      );
+    }
+
+    case 'changes': {
+      if (!runChanges) {
+        return React.createElement(
+          DetailSection,
+          { title: DETAIL_SECTION_LABEL.changes },
+          React.createElement('div', { className: 'muted' }, 'Loading changes...'),
+        );
+      }
+      if (runChanges.notApplicableReason) {
+        return React.createElement(
+          DetailSection,
+          { title: DETAIL_SECTION_LABEL.changes },
+          React.createElement('div', { className: 'muted' }, runChanges.notApplicableReason),
+        );
+      }
+      const totalAdditions = runChanges.files.reduce((sum, file) => sum + file.additions, 0);
+      const totalDeletions = runChanges.files.reduce((sum, file) => sum + file.deletions, 0);
+      return React.createElement(
+        DetailSection,
+        { title: DETAIL_SECTION_LABEL.changes },
+        React.createElement(
+          'div',
+          { className: 'muted' },
+          [
+            runChanges.branch ? `branch ${runChanges.branch}` : null,
+            `${runChanges.files.length} file(s)`,
+            `+${totalAdditions} -${totalDeletions}`,
+          ]
+            .filter(Boolean)
+            .join('  ·  '),
+        ),
+        runChanges.remoteUrl &&
+          React.createElement('div', { className: 'muted' }, `remote: ${runChanges.remoteUrl}`),
+        runChanges.files.length === 0
+          ? React.createElement('div', { className: 'muted' }, 'No working tree changes detected for this run.')
+          : runChanges.files.map((file) =>
+              React.createElement(
+                'div',
+                { key: file.path, className: 'muted' },
+                `${CHANGE_STATUS_ICON[file.status] ?? '~'} ${file.path}  (+${file.additions} -${file.deletions})`,
+              ),
+            ),
       );
     }
 
@@ -421,7 +552,7 @@ function renderSectionContent(sectionId, ctx) {
                 'div',
                 { className: 'output-log' },
                 outputToRender.length > 0
-                  ? outputToRender.map((entry) => renderOutputEntry(entry, 1000))
+                  ? outputToRender.map((entry, index) => renderOutputEntry(entry, 1000, index))
                   : React.createElement(
                       'div',
                       { className: 'muted' },
@@ -440,12 +571,64 @@ function renderSectionContent(sectionId, ctx) {
   }
 }
 
+function InlineBlockedActions({ run, onResolveGate, onForceGate, onResolveStageRequest }) {
+  const [stageResponse, setStageResponse] = useState('');
+
+  if (run.status !== 'blocked') return null;
+
+  if (run.gateId != null) {
+    return React.createElement(
+      'div',
+      { className: 'run-detail-blocked-actions' },
+      React.createElement('span', { className: 'muted' }, 'Gate pending:'),
+      React.createElement('button', { onClick: () => onResolveGate('approved') }, 'approve'),
+      React.createElement('button', { onClick: () => onResolveGate('skipped') }, 'skip'),
+      React.createElement('button', { onClick: () => onResolveGate('retried') }, 'retry'),
+      React.createElement('button', { className: 'primary', onClick: onForceGate }, 'force'),
+    );
+  }
+
+  if (run.pendingStageRequestId != null) {
+    if (run.pendingStageRequestKind === 'input') {
+      return React.createElement(
+        'div',
+        { className: 'run-detail-blocked-actions' },
+        React.createElement('span', { className: 'muted' }, run.pendingStageRequestPrompt || 'Input requested:'),
+        React.createElement('input', {
+          type: 'text',
+          value: stageResponse,
+          onChange: (e) => setStageResponse(e.target.value),
+          placeholder: 'response...',
+        }),
+        React.createElement(
+          'button',
+          { className: 'primary', onClick: () => onResolveStageRequest(stageResponse) },
+          'submit',
+        ),
+      );
+    }
+    return React.createElement(
+      'div',
+      { className: 'run-detail-blocked-actions' },
+      React.createElement('span', { className: 'muted' }, run.pendingStageRequestPrompt || 'Stage approval pending:'),
+      React.createElement('button', { onClick: () => onResolveStageRequest('advance') }, 'advance'),
+      React.createElement('button', { onClick: () => onResolveStageRequest('hold') }, 'hold'),
+      React.createElement('button', { className: 'primary', onClick: () => onResolveStageRequest('retry') }, 'retry'),
+    );
+  }
+
+  return null;
+}
+
 export function RunDetail({
   run,
   feature,
   backlogSettings,
   taskRuns,
   breakdown,
+  previousAttemptTaskRuns,
+  previousAttemptInfo,
+  runChanges,
   outputLines,
   outputPaused,
   logsVisible,
@@ -459,6 +642,9 @@ export function RunDetail({
   onResume,
   onAbort,
   onClose,
+  onResolveGate,
+  onForceGate,
+  onResolveStageRequest,
 }) {
   const pipelineTokens = run.pipelineTotalTokens ?? run.totalTokens ?? null;
   const sessionTokens = run.totalTokens ?? null;
@@ -496,6 +682,7 @@ export function RunDetail({
           React.createElement('button', { onClick: onClose }, 'close'),
         ),
       ),
+      React.createElement(InlineBlockedActions, { run, onResolveGate, onForceGate, onResolveStageRequest }),
       React.createElement(
         'div',
         { className: 'metrics-grid' },
@@ -535,6 +722,9 @@ export function RunDetail({
           backlogSettings,
           taskRuns,
           breakdown,
+          previousAttemptTaskRuns,
+          previousAttemptInfo,
+          runChanges,
           outputLines,
           outputPaused,
           logsVisible,
@@ -544,7 +734,7 @@ export function RunDetail({
       React.createElement(
         'footer',
         { className: 'run-detail-footer' },
-        `Tab ${activeTab + 1}/${DETAIL_SECTION_ORDER.length} · Tab/Shift+Tab cycle · 1-7 jump · i density: ${dense ? 'dense' : 'rich'} · Ctrl+S ${outputPaused ? 'resume' : 'pause'} output · Ctrl+L toggle logs`,
+        `Tab ${activeTab + 1}/${DETAIL_SECTION_ORDER.length} · Tab/Shift+Tab cycle · 1-${DETAIL_SECTION_ORDER.length} jump · i density: ${dense ? 'dense' : 'rich'} · Ctrl+S ${outputPaused ? 'resume' : 'pause'} output · Ctrl+L toggle logs`,
       ),
     ),
   );
