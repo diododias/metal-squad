@@ -196,4 +196,56 @@ describe('buildMsqWebState pendingFeatures projection', () => {
       expect.objectContaining({ id: 'feat-1' }),
     ]);
   });
+
+  it('exposes autoStart flag in featureCatalog projection', async () => {
+    const { buildMsqWebState } = await import('../../src/web/state.js');
+    mocks.listRunsForTui.mockReturnValue([]);
+    mocks.getFeatureCatalog.mockReturnValue({
+      'feat-1': {
+        id: 'feat-1',
+        title: 'Auto-start Feature',
+        tool: 'claude',
+        effort: 'medium',
+        skills: [],
+        dependsOn: [],
+        workflow: { mode: 'staged', stages: ['specify'], approvals: { channel: 'telegram', autoAdvance: false }, syncTasksToBacklog: true, sessionPolicy: { mode: 'isolated', alwaysIsolatedStages: [] } },
+        autoStart: true,
+      },
+      'feat-2': {
+        id: 'feat-2',
+        title: 'Manual Feature',
+        tool: 'claude',
+        effort: 'medium',
+        skills: [],
+        dependsOn: [],
+        workflow: { mode: 'staged', stages: ['specify'], approvals: { channel: 'telegram', autoAdvance: false }, syncTasksToBacklog: true, sessionPolicy: { mode: 'isolated', alwaysIsolatedStages: [] } },
+        autoStart: false,
+      },
+    });
+
+    const state = buildMsqWebState();
+
+    expect(state.featureCatalog['feat-1'].autoStart).toBe(true);
+    expect(state.featureCatalog['feat-2'].autoStart).toBe(false);
+  });
+
+  it('exposes autoStart in pendingFeatures', async () => {
+    const { buildMsqWebState } = await import('../../src/web/state.js');
+    mocks.listRunsForTui.mockReturnValue([]);
+    mocks.getFeatureCatalog.mockReturnValue({
+      'feat-1': {
+        id: 'feat-1',
+        title: 'Auto Feature',
+        tool: 'claude',
+        effort: 'medium',
+        skills: [],
+        dependsOn: [],
+        workflow: { mode: 'staged', stages: ['specify'], approvals: { channel: 'telegram', autoAdvance: false }, syncTasksToBacklog: true, sessionPolicy: { mode: 'isolated', alwaysIsolatedStages: [] } },
+        autoStart: true,
+      },
+    });
+
+    const state = buildMsqWebState();
+    expect(state.pendingFeatures[0]?.autoStart).toBe(true);
+  });
 });

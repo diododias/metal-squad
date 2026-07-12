@@ -31,6 +31,7 @@ export function schedule(
   const done = new Set<string>(opts.initialDone ?? []);
   const remaining = [...ordered];
   const active = new Map<string, Feature>();
+  const abortRequested = new Set<string>();
   let state: SchedulerState = 'running';
   let settled = false;
   let resolveResult!: (value: SchedulerOutcome) => void;
@@ -99,12 +100,24 @@ export function schedule(
           opts.onDone?.(feature, resultValue);
 
           if (resultValue.aborted) {
+            const wasRequested = abortRequested.delete(feature.id);
             if (state === 'aborting') {
               maybeFinish();
               return;
             }
+            // A single-feature abort requested via `abortFeature()` requeues
+            // and waits for an explicit `resume()`. An abort that arrives
+            // without ever being requested (adapter self-cancel, budget
+            // protective stop) has no one left to call resume — treat it
+            // like a whole-pipeline abort so the scheduler settles instead
+            // of endlessly re-dispatching the same feature.
             remaining.unshift(feature);
-            pump();
+            if (wasRequested) {
+              pump();
+              return;
+            }
+            setState('aborting');
+            maybeFinish();
             return;
           }
 
@@ -157,6 +170,7 @@ export function schedule(
     abortFeature(featureId: string): boolean {
       const feature = active.get(featureId);
       if (!feature || settled) return false;
+      abortRequested.add(featureId);
       opts.onAbortFeature?.(featureId);
       return true;
     },

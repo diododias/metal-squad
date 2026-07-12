@@ -314,6 +314,62 @@ describe('web server', () => {
     socket.close();
   });
 
+  it('broadcasts run:blocked events to authenticated clients', async () => {
+    const { createWebServer } = await import('../../src/web/server.js');
+    const { msqEventBus } = await import('../../src/core/events/index.js');
+    server = createWebServer({ host: '127.0.0.1', port: 0, auth: 'token', token: 'secret' });
+    await new Promise<void>((resolve) => server!.server.listen(0, '127.0.0.1', resolve));
+    const address = server!.server.address() as { port: number };
+    const wsUrl = `ws://127.0.0.1:${address.port}/ws`;
+
+    const socket = new WebSocket(wsUrl);
+    await waitForOpen(socket);
+    socket.send(JSON.stringify({ type: 'auth', token: 'secret' }));
+    await waitForSocketMessage(socket); // state:full
+
+    msqEventBus.emit('run:blocked', {
+      runId: 7,
+      featureId: 'feat-1',
+      tool: 'claude',
+      reason: 'gate',
+      summary: 'aguardando decisão humana',
+    });
+    const message = await waitForSocketMessage(socket);
+    expect((message as { type: string }).type).toBe('run:blocked');
+    expect((message as { payload: { reason: string } }).payload.reason).toBe('gate');
+    socket.close();
+  });
+
+  it('broadcasts autopilot:decision events to authenticated clients', async () => {
+    const { createWebServer } = await import('../../src/web/server.js');
+    const { msqEventBus } = await import('../../src/core/events/index.js');
+    server = createWebServer({ host: '127.0.0.1', port: 0, auth: 'token', token: 'secret' });
+    await new Promise<void>((resolve) => server!.server.listen(0, '127.0.0.1', resolve));
+    const address = server!.server.address() as { port: number };
+    const wsUrl = `ws://127.0.0.1:${address.port}/ws`;
+
+    const socket = new WebSocket(wsUrl);
+    await waitForOpen(socket);
+    socket.send(JSON.stringify({ type: 'auth', token: 'secret' }));
+    await waitForSocketMessage(socket); // state:full
+
+    msqEventBus.emit('autopilot:decision', {
+      triggerFeatureId: 'feat-1',
+      triggerRunId: 7,
+      triggerKind: 'success',
+      action: 'start',
+      selectedFeatureId: 'feat-2',
+      reason: 'Starting next eligible autoStart feature: feat-2.',
+    });
+    const message = await waitForSocketMessage(socket);
+    expect((message as { type: string }).type).toBe('autopilot:decision');
+    expect((message as { payload: { action: string; selectedFeatureId: string } }).payload).toMatchObject({
+      action: 'start',
+      selectedFeatureId: 'feat-2',
+    });
+    socket.close();
+  });
+
   it('executes resolveGate action received via WebSocket', async () => {
     const { createWebServer } = await import('../../src/web/server.js');
     server = createWebServer({ host: '127.0.0.1', port: 0, auth: 'token', token: 'secret' });
@@ -550,6 +606,36 @@ describe('web server', () => {
       expect.objectContaining({ effort: 'high', maxTokens: 5000 }),
     );
     expect((stateMessage as { type: string }).type).toBe('state:full');
+
+    socket.close();
+  });
+
+  it('persists an autoStart patch through action:updateFeatureConfig', async () => {
+    const { createWebServer } = await import('../../src/web/server.js');
+    mocks.updateCatalogFeature.mockReturnValue({ id: 'feat1', autoStart: true });
+
+    server = createWebServer({ host: '127.0.0.1', port: 0, auth: 'token', token: 'secret' });
+    await new Promise<void>((resolve) => server!.server.listen(0, '127.0.0.1', resolve));
+    const address = server!.server.address() as { port: number };
+    const wsUrl = `ws://127.0.0.1:${address.port}/ws`;
+
+    const socket = new WebSocket(wsUrl);
+    await waitForOpen(socket);
+    socket.send(JSON.stringify({ type: 'auth', token: 'secret' }));
+    await waitForSocketMessage(socket); // state:full
+
+    socket.send(JSON.stringify({
+      type: 'action:updateFeatureConfig',
+      featureId: 'feat1',
+      patch: { autoStart: true },
+    }));
+
+    await waitForMessageType(socket, 'state:full');
+    expect(mocks.updateCatalogFeature).toHaveBeenCalledWith(
+      'repo-1',
+      'feat1',
+      expect.objectContaining({ autoStart: true }),
+    );
 
     socket.close();
   });

@@ -18,288 +18,6 @@ defaults:
     validate:
       - review
 epics:
-  - id: e08-notifications-interactive
-    title: E08 — Interactive Notifications
-    features:
-      - id: feat-40
-        title: F47 — Perguntas Interativas via Telegram (Botoes)
-        spec: >
-          Problema: quando a IA levanta uma pergunta de esclarecimento durante
-          um step (ex. specify), a notificacao que chega no Telegram hoje exige
-          resposta livre por texto, em vez de oferecer botoes (inline keyboard)
-          com as opcoes que a propria IA apresentou. Este item depende
-          diretamente de H19: hoje o sistema as vezes trata uma pergunta da IA
-          como se fosse um pedido de aprovacao de gate (avancar/nao avancar), em
-          vez de rotear como pergunta genuina para o Telegram — sem esse
-          roteamento estar correto, nao ha "pergunta" confiavel para transformar
-          em botoes.
-
-
-          Objetivo: quando o sistema identificar corretamente que a IA fez uma
-          pergunta (apos H19 resolver a deteccao pergunta-vs-aprovacao), a
-          notificacao no Telegram deve apresentar as opcoes de resposta como
-          botoes, usando o mesmo conteudo de pergunta/opcoes que a IA gerou —
-          nao um "aprovar/rejeitar" generico. O usuario responde com um toque no
-          botao correspondente, e essa escolha e propagada de volta ao step em
-          execucao com o mesmo efeito que a resposta livre por texto teria hoje.
-
-
-          Escopo esperado (mapeamento fino fica para specify/plan):
-          src/core/events/ (dispatch de notificacao Telegram, suporte a inline
-          keyboard e tratamento do callback do botao como resposta);
-          runner/orchestrator (ponto de deteccao "pergunta vs aprovacao", owned
-          por H19, e extracao das opcoes de resposta do output da IA);
-          skills/prompts do step specify (e outros stages que podem gerar
-          perguntas) para garantir formato de output parseavel. F47 assume H19
-          resolvido antes de entrar em execucao real — implementar botoes sobre
-          deteccao errada de pergunta vs aprovacao propagaria o bug com uma UI
-          melhor. Avaliar tambem o problema secundario de H19 de mensagens
-          truncadas no Telegram ao desenhar o texto da pergunta antes dos
-          botoes.
-
-
-          Validacao:
-
-          - Uma pergunta real da IA durante specify (ou outro stage que gere
-            pergunta) chega ao Telegram como mensagem com botoes
-            representando as opcoes reais apresentadas pela IA, nao um
-            "aprovar/rejeitar" generico.
-          - Escolher um botao propaga a resposta correspondente de volta ao
-            step em execucao, com o mesmo efeito observavel que a resposta
-            livre por texto tem hoje.
-          - Pedidos de aprovacao de gate (nao-pergunta) continuam
-            funcionando como hoje, sem regressao.
-          - Perguntas cujo texto ultrapassa o limite de mensagem do Telegram
-            sao tratadas (split/truncamento controlado).
-          - Testes cobrindo extracao de opcoes do output da IA e o dispatch
-            da notificacao com inline keyboard.
-          - `npm run build`, `npm test` e `npm run typecheck` passam.
-        tool: codex
-        model: gpt-5.4
-        effort: high
-        skills:
-          - dev-flow
-        specFile: docs/features/F47-telegram-interactive-questions.md
-        context:
-          - docs/features/F47-telegram-interactive-questions.md
-          - docs/features/F19-notifications-v2.md
-          - docs/features/F27-stage-sessions-telegram.md
-          - docs/ROADMAP.md
-          - .claude/rules/architecture.md
-          - src/core/events/
-          - src/core/orchestrator/
-        dependsOn: []
-        retry:
-          maxAttempts: 1
-          backoffMs: 5000
-          onFail: stop
-        workflow:
-          mode: staged
-          stages:
-            - specify
-            - plan
-            - tasks
-            - implement
-            - validate
-          approvals:
-            channel: telegram
-            autoAdvance: true
-          syncTasksToBacklog: true
-        tasks:
-          - id: T001
-            title: Rodar baseline completo (`rtk npm run build && rtk npm test && rtk npm
-              run typecheck && rtk npm run lint`) e confirmar que passa sem
-              erros antes de iniciar qualquer mudanca
-              (`.claude/rules/testing.md`)
-            status: todo
-            dependsOn: []
-          - id: T002
-            title: "[P] Adicionar coluna nullable `options TEXT` em `stage_requests` via
-              migracao `ALTER TABLE`, seguindo o padrao `ensure*Column` ja usado
-              (`ensureTaskRunColumn`/`ensurePipelineColumn`/`ensureRetryHistory\
-              Column`) em src/db/index.ts"
-            status: todo
-            dependsOn: []
-          - id: T003
-            title: "[P] Estender `RunControlNeedsInput` com `options?: string[]` (rotulos na
-              ordem apresentada pela IA) em src/core/adapters/types.ts"
-            status: todo
-            dependsOn: []
-          - id: T004
-            title: "[P] Estender `StageRequestCreatedEvent` com `options?: string[]` em
-              src/core/events/types.ts"
-            status: todo
-            dependsOn: []
-          - id: T005
-            title: "Estender `StageRequestRow` (`options?: string[] | null`),
-              `createStageRequest` (novo `opts.options?: string[]`, serializado
-              como JSON na coluna nova e incluido no payload emitido para
-              `stage:request-created`) e `getStageRequest` (deserializa a coluna
-              `options` de volta para `string[] | undefined`) em src/db/repo.ts
-              (depende de T002, T004)"
-            status: todo
-            dependsOn: []
-          - id: T006
-            title: "[P] Estender testes de migracao para a nova coluna `options` (coluna
-              existe, default `NULL`, idempotente em segunda chamada de
-              `migrate`) em tests/db/index-migrate.test.ts (depende de T002)"
-            status: todo
-            dependsOn: []
-          - id: T007
-            title: "[P] Estender testes de round-trip de `options` (`createStageRequest`
-              com/sem `options` → `getStageRequest` retorna
-              `string[]`/`undefined` corretamente; evento emitido carrega
-              `options`) em tests/db/repo.test.ts e
-              tests/db/repo-extended.test.ts (depende de T005)"
-            status: todo
-            dependsOn: []
-          - id: T008
-            title: "[P] [US1] Testes de extracao valida do bloco `OPTIONS:` (1-8 opcoes,
-              ordem preservada, `prompt` fica sem o bloco `OPTIONS:` cru) em
-              tests/core/control.test.ts"
-            status: todo
-            dependsOn: []
-          - id: T009
-            title: "[P] [US1] Testes de fallback do bloco `OPTIONS:` invalido (nenhuma linha
-              `-`, mais de 8 opcoes, rotulo vazio ou > 60 caracteres, rotulos
-              duplicados → `options` ausente, `prompt` = texto integral
-              original) em tests/core/control.test.ts"
-            status: todo
-            dependsOn: []
-          - id: T010
-            title: "[P] [US1] Teste garantindo que `executeStagedFeature` propaga
-              `res.control.options` para a chamada `createStageRequest(..., {
-              runId })` no caminho `needs_input` em
-              tests/runner/execute.test.ts"
-            status: todo
-            dependsOn: []
-          - id: T011
-            title: "[P] [US1] Teste garantindo que `stage:request-created` com
-              `kind:'input'` e `options` presente monta
-              `reply_markup.inline_keyboard` (um botao por opcao,
-              `callback_data: input:<requestId>:<index>`) e omite a linha
-              `Reply: input:<id> <text>` da mensagem em
-              tests/core/events-notifications.test.ts"
-            status: todo
-            dependsOn: []
-          - id: T012
-            title: "[P] [US1] Teste garantindo que um callback `input:<id>:<index>` resolve
-              `options[index]` via `getStageRequest(id)` e chama
-              `resolveStageRequest(id, label)` em
-              tests/core/notify-telegram-poller.test.ts"
-            status: todo
-            dependsOn: []
-          - id: T013
-            title: "[US1] Estender `parseControlSignal` para detectar o bloco `OPTIONS:`
-              conforme a gramatica de `contracts/control-signal-format.md`
-              (marcador de linha `OPTIONS:` case-insensitive; linhas `-
-              <rotulo>` ate a primeira linha que nao comeca com `-`; validar `1
-              <= options.length <= 8`, `1 <= label.length <= 60`, sem duplicata
-              exata; em qualquer violacao, `options` fica `undefined` e `prompt`
-              preserva o texto integral original) em
-              src/core/adapters/control.ts (depende de T003; faz T008/T009
-              passarem)"
-            status: todo
-            dependsOn: []
-          - id: T014
-            title: "[US1] Instruir o formato `OPTIONS:` no `buildStagePrompt` (nova linha
-              apos a instrucao existente de `MSQ_INPUT_REQUIRED:` em
-              `stageNotes`) em src/core/runner/execute.ts"
-            status: todo
-            dependsOn: []
-          - id: T015
-            title: "[US1] Propagar `res.control.options` na chamada
-              `createStageRequest(pipelineId, feature.id, stage, 'input',
-              res.control.prompt, { runId, options: res.control.options })` em
-              src/core/runner/execute.ts (linha ~619-627) (depende de T005,
-              T013; faz T010 passar)"
-            status: todo
-            dependsOn: []
-          - id: T016
-            title: "[US1] Montar `reply_markup.inline_keyboard` (um botao por opcao,
-              `callback_data: 'input:' + requestId + ':' + index`) no branch
-              `kind === 'input'` de `stage:request-created` quando `options`
-              presente e nao-vazio, omitindo a linha `Reply: input:<id> <text>`
-              nesse caso; manter o comportamento atual (texto livre, sem
-              `reply_markup`) quando `options` ausente, em
-              src/core/events/notifications.ts (depende de T004, T005; faz T011
-              passar)"
-            status: todo
-            dependsOn: []
-          - id: T017
-            title: "[US1] Adicionar reconhecimento de `input:<id>:<index>` (novo regex, ex.
-              `/^input:(\\d+):(\\d+)$/`) em `TelegramPoller`: resolver
-              `options[index]` via `getStageRequest(requestId)`, chamar
-              `resolveStageRequest(requestId, label)` quando o indice e valido e
-              o pedido ainda esta `pending`; nao escrever nada quando o indice e
-              invalido ou o pedido ja foi resolvido; chamar `answerCallback`
-              incondicionalmente quando houver `callback_query.id`, em
-              src/core/notify/telegram-poller.ts (depende de T005; faz T012
-              passar)"
-            status: todo
-            dependsOn: []
-          - id: T018
-            title: "[P] [US2] Teste de regressao garantindo que o branch `kind ===
-              'approval'` de `stage:request-created` continua montando os botoes
-              fixos Advance/Retry/Hold (ou a mensagem `auto-advance`), sem
-              qualquer opcao \"inventada\" de pergunta, em
-              tests/core/events-notifications.test.ts"
-            status: todo
-            dependsOn: []
-          - id: T019
-            title: "[P] [US2] Teste de regressao garantindo que o novo regex
-              `input:<id>:<index>` nao colide com `GATE_CMD`, `STAGE_CMD` nem
-              com o formato existente `input:<id> <texto>` (espaco, nao
-              dois-pontos) em tests/core/notify-telegram-poller.test.ts"
-            status: todo
-            dependsOn: []
-          - id: T020
-            title: "[US2] Rodar a suite completa (`rtk npm run build && rtk npm test && rtk
-              npm run typecheck && rtk npm run lint`) e confirmar zero
-              regressoes nos testes existentes de aprovacao de gate (SC-003)
-              (depende de T013-T017, T018, T019)"
-            status: todo
-            dependsOn: []
-          - id: T021
-            title: "[P] [US3] Teste garantindo que `TelegramChannel.send` fatia texto > 4096
-              caracteres em multiplas chamadas `sendMessage` sequenciais sem
-              perda de conteudo em tests/core/notify-telegram.test.ts"
-            status: todo
-            dependsOn: []
-          - id: T022
-            title: "[P] [US3] Teste garantindo que `reply_markup` e enviado apenas no ultimo
-              fragmento quando ha split, e que mensagens <= 4096 caracteres
-              continuam em uma unica chamada (comportamento atual preservado) em
-              tests/core/notify-telegram.test.ts"
-            status: todo
-            dependsOn: []
-          - id: T023
-            title: "[US3] Implementar split de mensagem > 4096 caracteres em fragmentos
-              sequenciais dentro de `TelegramChannel.send`, chamando
-              `sendMessage` uma vez por fragmento e anexando `reply_markup`
-              (quando presente em `metadata`) somente ao ultimo fragmento, em
-              src/core/notify/telegram.ts (depende de T021, T022 para o
-              comportamento esperado)"
-            status: todo
-            dependsOn: []
-          - id: T024
-            title: '[P] Atualizar os checkboxes de "Criterios de aceite" em
-              docs/features/F47-telegram-interactive-questions.md refletindo o
-              escopo efetivamente implementado'
-            status: todo
-            dependsOn: []
-          - id: T025
-            title: Rodar a suite focada de `quickstart.md` (`rtk npx vitest run
-              tests/core/control.test.ts tests/core/events-notifications.test.ts
-              tests/core/events-notifications-full.test.ts
-              tests/core/notify-telegram.test.ts
-              tests/core/notify-telegram-poller.test.ts tests/db/repo.test.ts
-              tests/db/repo-extended.test.ts tests/runner/execute.test.ts
-              tests/db/index-migrate.test.ts`) seguida do baseline completo
-              (`rtk npm run build && rtk npm test && rtk npm run typecheck &&
-              rtk npm run lint`) como validacao final (depende de T001-T023)
-            status: todo
-            dependsOn: []
   - id: e09-skills-system
     title: E01 — Skills System (Fase 1)
     features:
@@ -547,288 +265,6 @@ epics:
             channel: telegram
             autoAdvance: true
           syncTasksToBacklog: true
-  - id: e10-modern-tui
-    title: E02 — Modern TUI (Fase 2)
-    features:
-      - id: feat-45
-        title: F05 — Layout Multi-Painel
-        spec: >
-          Problema: a TUI atual (tabela de runs + painel de gates) nao tem a
-          estrutura de layout multi-painel necessaria para acomodar streaming de
-          log, status bar rica e navegacao de sessao (F06/F07/F08/F24 dependem
-          desta fundacao).
-
-          Objetivo: entregar o layout multi-painel base equivalente a
-          opencode/claude- code, servindo de fundacao estrutural para as demais
-          features de Fase 2.
-
-          Escopo esperado: src/ui/ (componentes de layout, App.tsx), sem acoplar
-          ainda o streaming (F06) ou status bar (F07) especificos.
-
-          Validacao: TUI renderiza layout multi-painel sem regressao nos testes
-          de tests/ui/; npm run build, npm test e npm run typecheck passam.
-        tool: claude
-        model: sonnet
-        effort: high
-        skills:
-          - dev-flow
-        specFile: docs/features/F05-layout-multi-panel.md
-        context:
-          - docs/features/F05-layout-multi-panel.md
-          - docs/ROADMAP.md
-          - .claude/rules/architecture.md
-          - .claude/rules/harness.md
-          - src/ui/
-        dependsOn: []
-        retry:
-          maxAttempts: 1
-          backoffMs: 5000
-          onFail: stop
-        workflow:
-          mode: staged
-          stages:
-            - specify
-            - plan
-            - tasks
-            - implement
-            - validate
-          approvals:
-            channel: telegram
-            autoAdvance: true
-          syncTasksToBacklog: true
-      - id: feat-46
-        title: F06 — Log Streaming
-        spec: >
-          Problema: nao ha streaming de output em tempo real na TUI; a leitura
-          de log de uma run em andamento e limitada em relacao ao que o adapter
-          efetivamente produz.
-
-          Objetivo: exibir output do adapter em streaming dentro do layout
-          multi-painel (F05), reaproveitando o event system (F15, entregue) como
-          fonte de eventos.
-
-          Escopo esperado: src/ui/, src/core/events/, adapters (heartbeat/output
-          parcial ja existente nos hotfixes H02/H04).
-
-          Validacao: output de uma run real aparece incrementalmente na TUI sem
-          travar a UI; npm run build, npm test e npm run typecheck passam.
-        tool: claude
-        model: sonnet
-        effort: high
-        skills:
-          - dev-flow
-        specFile: docs/features/F06-log-streaming.md
-        context:
-          - docs/features/F06-log-streaming.md
-          - docs/features/F05-layout-multi-panel.md
-          - docs/features/F15-event-system.md
-          - docs/ROADMAP.md
-          - .claude/rules/architecture.md
-          - src/ui/
-          - src/core/events/
-        dependsOn:
-          - feat-45
-        retry:
-          maxAttempts: 1
-          backoffMs: 5000
-          onFail: stop
-        workflow:
-          mode: staged
-          stages:
-            - specify
-            - plan
-            - tasks
-            - implement
-            - validate
-          approvals:
-            channel: telegram
-            autoAdvance: true
-          syncTasksToBacklog: true
-      - id: feat-47
-        title: F07 — Status Bar
-        spec: >
-          Problema: a TUI nao tem uma status bar dedicada com resumo de estado
-          (run atual, budget, gates pendentes) sempre visivel.
-
-          Objetivo: adicionar status bar ao layout multi-painel (F05) com os
-          indicadores mais relevantes de estado global do msq.
-
-          Escopo esperado: src/ui/ (componente de status bar).
-
-          Validacao: status bar reflete estado real (run/budget/gates) em
-          cenarios de teste de tests/ui/; npm run build, npm test e npm run
-          typecheck passam.
-        tool: codex
-        model: gpt-5.4
-        effort: low
-        skills:
-          - dev-flow
-        specFile: docs/features/F07-status-bar.md
-        context:
-          - docs/features/F07-status-bar.md
-          - docs/features/F05-layout-multi-panel.md
-          - docs/ROADMAP.md
-          - .claude/rules/architecture.md
-          - src/ui/
-        dependsOn:
-          - feat-45
-        retry:
-          maxAttempts: 1
-          backoffMs: 5000
-          onFail: stop
-        workflow:
-          mode: staged
-          stages:
-            - specify
-            - plan
-            - tasks
-            - implement
-            - validate
-          approvals:
-            channel: telegram
-            autoAdvance: true
-          syncTasksToBacklog: true
-      - id: feat-48
-        title: F08 — Session Navigation
-        spec: >
-          Problema: navegar entre sessoes/runs dentro da TUI e limitado, sem um
-          modelo de navegacao rico equivalente ao esperado para uma TUI moderna
-          de orquestracao.
-
-          Objetivo: adicionar navegacao de sessao (entre runs/features/stages)
-          sobre o layout multi-painel (F05).
-
-          Escopo esperado: src/ui/ (hooks e componentes de navegacao).
-
-          Validacao: navegacao coberta por tests/ui/ sem regressao em
-          foco/atalhos existentes; npm run build, npm test e npm run typecheck
-          passam.
-        tool: codex
-        model: gpt-5.4
-        effort: medium
-        skills:
-          - dev-flow
-        specFile: docs/features/F08-session-navigation.md
-        context:
-          - docs/features/F08-session-navigation.md
-          - docs/features/F05-layout-multi-panel.md
-          - docs/ROADMAP.md
-          - .claude/rules/architecture.md
-          - src/ui/
-        dependsOn:
-          - feat-45
-        retry:
-          maxAttempts: 1
-          backoffMs: 5000
-          onFail: stop
-        workflow:
-          mode: staged
-          stages:
-            - specify
-            - plan
-            - tasks
-            - implement
-            - validate
-          approvals:
-            channel: telegram
-            autoAdvance: true
-          syncTasksToBacklog: true
-      - id: feat-49
-        title: F24 — Task & Stage Progress
-        spec: >
-          Problema: a TUI ainda precisa de mais capacidade estrutural para
-          mostrar progresso granular por task/stage (item ja 'Em progresso' no
-          roadmap, precisa ser concluido).
-
-          Objetivo: expor progresso por task e por stage do workflow staged
-          (F27, entregue) dentro do layout multi-painel (F05).
-
-          Escopo esperado: src/ui/, integracao com telemetria de token/context
-          (F30, entregue).
-
-          Validacao: progresso por task/stage visivel e testado em tests/ui/;
-          npm run build, npm test e npm run typecheck passam.
-        tool: codex
-        model: gpt-5.4
-        effort: medium
-        skills:
-          - dev-flow
-        specFile: docs/features/F24-task-stage-progress.md
-        context:
-          - docs/features/F24-task-stage-progress.md
-          - docs/features/F05-layout-multi-panel.md
-          - docs/features/F30-token-context-telemetry.md
-          - docs/ROADMAP.md
-          - .claude/rules/architecture.md
-          - src/ui/
-        dependsOn:
-          - feat-45
-        retry:
-          maxAttempts: 1
-          backoffMs: 5000
-          onFail: stop
-        workflow:
-          mode: staged
-          stages:
-            - specify
-            - plan
-            - tasks
-            - implement
-            - validate
-          approvals:
-            channel: telegram
-            autoAdvance: true
-          syncTasksToBacklog: true
-  - id: e11-orchestration-v2
-    title: E03 — Orchestration v2 (Fase 4)
-    features:
-      - id: feat-51
-        title: F13 — Execution Graph
-        spec: >
-          Problema: nao ha visualizacao do grafo de dependencias de execucao
-          (epics/features/tasks) dentro da TUI, dificultando entender ordem e
-          bloqueios reais do scheduler.
-
-          Objetivo: expor o grafo de execucao (topological order do
-          orchestrator) como visualizacao navegavel no layout multi-painel
-          (F05).
-
-          Escopo esperado: src/core/orchestrator/ (fonte do grafo), src/ui/
-          (visualizacao).
-
-          Validacao: grafo exibido reflete ordenacao real do scheduler em
-          cenarios de teste; npm run build, npm test e npm run typecheck passam.
-        tool: codex
-        model: gpt-5.4
-        effort: medium
-        skills:
-          - dev-flow
-        specFile: docs/features/F13-execution-graph.md
-        context:
-          - docs/features/F13-execution-graph.md
-          - docs/features/F05-layout-multi-panel.md
-          - docs/ROADMAP.md
-          - .claude/rules/architecture.md
-          - src/core/orchestrator/
-          - src/ui/
-        dependsOn:
-          - feat-45
-        retry:
-          maxAttempts: 1
-          backoffMs: 5000
-          onFail: stop
-        workflow:
-          mode: staged
-          stages:
-            - specify
-            - plan
-            - tasks
-            - implement
-            - validate
-          approvals:
-            channel: telegram
-            autoAdvance: true
-          syncTasksToBacklog: true
   - id: e12-observability
     title: E04 — Observability (Fase 4)
     features:
@@ -894,8 +330,8 @@ epics:
           Validacao: adapters existentes (claude/codex/opencode) continuam
           funcionando via o novo mecanismo de plugin sem regressao; npm run
           build, npm test e npm run typecheck passam.
-        tool: claude
-        model: sonnet
+        tool: codex
+        model: gpt-5.4
         effort: high
         skills:
           - dev-flow
@@ -905,48 +341,6 @@ epics:
           - docs/ROADMAP.md
           - .claude/rules/architecture.md
           - src/core/adapters/
-        dependsOn: []
-        retry:
-          maxAttempts: 1
-          backoffMs: 5000
-          onFail: stop
-        workflow:
-          mode: staged
-          stages:
-            - specify
-            - plan
-            - tasks
-            - implement
-            - validate
-          approvals:
-            channel: telegram
-            autoAdvance: true
-          syncTasksToBacklog: true
-      - id: feat-53
-        title: F21 — Setup Wizard
-        spec: >
-          Problema: configurar o msq pela primeira vez (repo, adapters, secrets,
-          Telegram) exige edicao manual de config/backlog sem um fluxo guiado.
-
-          Objetivo: adicionar um setup wizard interativo (`msq init` estendido)
-          cobrindo os passos de configuracao inicial mais comuns.
-
-          Escopo esperado: src/commands/ (comando init), src/config/.
-
-          Validacao: wizard produz uma config valida ponta a ponta em um repo
-          novo; npm run build, npm test e npm run typecheck passam.
-        tool: codex
-        model: gpt-5.4
-        effort: medium
-        skills:
-          - dev-flow
-        specFile: docs/features/F21-setup-wizard.md
-        context:
-          - docs/features/F21-setup-wizard.md
-          - docs/ROADMAP.md
-          - .claude/rules/architecture.md
-          - src/commands/
-          - src/config/
         dependsOn: []
         retry:
           maxAttempts: 1
@@ -1008,270 +402,8 @@ epics:
             channel: telegram
             autoAdvance: true
           syncTasksToBacklog: true
-      - id: feat-55
-        title: F23 — Agent Config Gen
-        spec: >
-          Problema: gerar config de agente (ex.: arquivos de skill/adapter para
-          uma tool especifica) e manual hoje.
-
-          Objetivo: adicionar geracao automatica de config de agente a partir do
-          backlog/skills existentes.
-
-          Escopo esperado: src/core/skills/, src/commands/.
-
-          Validacao: config gerada e valida para pelo menos um adapter
-          existente; npm run build, npm test e npm run typecheck passam.
-        tool: codex
-        model: gpt-5.4
-        effort: low
-        skills:
-          - dev-flow
-        specFile: docs/features/F23-agent-config-gen.md
-        context:
-          - docs/features/F23-agent-config-gen.md
-          - docs/ROADMAP.md
-          - .claude/rules/architecture.md
-          - src/core/skills/
-          - src/commands/
-        dependsOn: []
-        retry:
-          maxAttempts: 1
-          backoffMs: 5000
-          onFail: stop
-        workflow:
-          mode: staged
-          stages:
-            - specify
-            - plan
-            - tasks
-            - implement
-            - validate
-          approvals:
-            channel: telegram
-            autoAdvance: true
-          syncTasksToBacklog: true
-  - id: e14-stages-workflow
-    title: E — Stages / Workflow (feedback 2026-07-11)
-    features:
-      - id: feat-57
-        title: F40 — Visualizacao por Step + Workflow Customizavel por Projeto
-        spec: >
-          Problema: na tela principal nao fica claro em qual step do workflow
-          (specify/plan/tasks/implement/validate) uma feature esta; o workflow
-          de steps tambem parece fixo, sem customizacao por projeto/repo.
-
-          Objetivo: adicionar visualizacao por step na tela principal (TUI e
-          web) e permitir customizar o workflow por projeto.
-
-          Escopo esperado (investigacao no specify antes de codificar):
-          src/core/backlog/ (schema/loader de workflow), src/ui/ e
-          src/web/static/components/ (nova visao por step), src/config/ ou
-          src/core/backlog/ (persistencia de workflow por projeto, possivel
-          extensao de F22).
-
-          Validacao: tela principal mostra o step atual de cada feature;
-          workflow customizado por projeto e respeitado nas runs; npm run build,
-          npm test e npm run typecheck passam.
-        tool: codex
-        model: gpt-5.4
-        effort: medium
-        skills:
-          - dev-flow
-        specFile: docs/features/F40-workflow-step-view-per-project.md
-        context:
-          - docs/features/F40-workflow-step-view-per-project.md
-          - docs/features/F24-task-stage-progress.md
-          - docs/features/F22-per-repo-config.md
-          - docs/ROADMAP.md
-          - .claude/rules/architecture.md
-          - src/core/backlog/
-          - src/ui/
-          - src/web/static/components/
-        dependsOn: []
-        retry:
-          maxAttempts: 1
-          backoffMs: 5000
-          onFail: stop
-        workflow:
-          mode: staged
-          stages:
-            - specify
-            - plan
-            - tasks
-            - implement
-            - validate
-          approvals:
-            channel: telegram
-            autoAdvance: true
-          syncTasksToBacklog: true
-  - id: e15-analytics
-    title: E — Analytics (feedback 2026-07-11)
-    features:
-      - id: feat-58
-        title: F42 — Tela de Detalhe de Runs / Analytics com Tempo Total Somado
-        spec: >
-          Problema: F17/F18 entregaram analytics CLI e tracking de duracao, mas
-          falta uma tela que agregue tempo total gasto somando todas as runs de
-          uma feature/pipeline, servindo de detalhe de analytics navegavel a
-          partir da tela principal.
-
-          Objetivo: adicionar tela de detalhe de runs/analytics com tempo total
-          somado, reaproveitando a agregacao ja existente de F17/F18 sem
-          duplicar logica.
-
-          Escopo esperado (investigacao no specify antes de codificar): src/db/
-          (queries de agregacao), src/web/static/components/ (nova tela),
-          src/commands/ (se tambem exposto via CLI).
-
-          Validacao: tela mostra tempo total somado corretamente para uma
-          feature com multiplas runs; npm run build, npm test e npm run
-          typecheck passam.
-        tool: codex
-        model: gpt-5.4
-        effort: medium
-        skills:
-          - dev-flow
-        specFile: docs/features/F42-runs-analytics-detail-screen.md
-        context:
-          - docs/features/F42-runs-analytics-detail-screen.md
-          - docs/features/F17-analytics-cli.md
-          - docs/features/F18-duration-tracking.md
-          - docs/features/F16-cost-dashboard.md
-          - docs/ROADMAP.md
-          - .claude/rules/architecture.md
-          - src/db/
-          - src/web/static/components/
-        dependsOn: []
-        retry:
-          maxAttempts: 1
-          backoffMs: 5000
-          onFail: stop
-        workflow:
-          mode: staged
-          stages:
-            - specify
-            - plan
-            - tasks
-            - implement
-            - validate
-          approvals:
-            channel: telegram
-            autoAdvance: true
-          syncTasksToBacklog: true
-  - id: e16-configuracoes
-    title: E — Configuracoes / Projeto (feedback 2026-07-11)
-    features:
-      - id: feat-59
-        title: F43 — Editar Tool/Effort por Step + Retomar com Outro Agente (UI)
-        spec: >
-          Problema: F36 tornou tool/model/effort editavel a nivel de feature;
-          falta granularidade por step dentro da mesma feature. A troca de
-          agente no resume ja existe via CLI (F39), mas nao esta exposta na UI.
-
-          Objetivo: permitir editar tool/effort por step e expor na UI/dashboard
-          a troca de agente ao retomar (ja suportada via CLI).
-
-          Escopo esperado (investigacao no specify antes de codificar):
-          src/core/backlog/ (schema de override por step),
-          src/web/static/components/ (form de config, extensao de F36 + UI de
-          resume), src/commands/ (contrato ja existente de run/resume).
-
-          Validacao: override de tool/effort por step aplicado corretamente na
-          run; resume com outro agente funciona pela UI com o mesmo efeito do
-          CLI (F39); npm run build, npm test e npm run typecheck passam.
-        tool: codex
-        model: gpt-5.4
-        effort: medium
-        skills:
-          - dev-flow
-        specFile: docs/features/F43-per-step-config-and-resume-agent-switch.md
-        context:
-          - docs/features/F43-per-step-config-and-resume-agent-switch.md
-          - docs/features/F36-web-feature-config-persistence.md
-          - docs/features/F39-adapter-fallback-resume.md
-          - docs/ROADMAP.md
-          - .claude/rules/architecture.md
-          - src/core/backlog/
-          - src/web/static/components/
-          - src/commands/
-        dependsOn: []
-        retry:
-          maxAttempts: 1
-          backoffMs: 5000
-          onFail: stop
-        workflow:
-          mode: staged
-          stages:
-            - specify
-            - plan
-            - tasks
-            - implement
-            - validate
-          approvals:
-            channel: telegram
-            autoAdvance: true
-          syncTasksToBacklog: true
-      - id: feat-60
-        title: F44 — Central de Configuracoes do Projeto (Multi-Projeto, Multi-Repo,
-          Workflow, Skills, Telegram, Notificacoes)
-        spec: >
-          Problema: config hoje parece amarrada a um unico projeto/repo. O
-          pedido cobre uma tela central de configuracoes: workflow/steps (F40),
-          skills por workflow, cadastro de multiplos projetos com um ou mais
-          repositorios cada, config de Telegram e notificacoes em geral.
-
-          Objetivo: entregar a central de configuracoes descrita, tratando-a
-          como o maior item do lote de feedback — o specify/plan devem avaliar
-          quebrar em sub- features (ex.: multi-projeto/multi-repo primeiro, hub
-          de UI depois) antes de virar trabalho executavel de uma vez.
-
-          Escopo esperado (investigacao no specify antes de codificar):
-          src/config/ (modelo atual assume um repo por instancia), src/db/
-          (schema de projetos/repos), src/web/static/components/ (tela nova),
-          src/core/skills/ (precedence de skills por workflow, ja documentada em
-          .claude/rules/architecture.md, nao duplicar).
-
-          Validacao: cadastro de mais de um projeto/repo funciona sem quebrar o
-          fluxo single-repo atual; config de Telegram/notificacoes editavel pela
-          tela central; npm run build, npm test e npm run typecheck passam.
-        tool: claude
-        model: sonnet
-        effort: high
-        skills:
-          - dev-flow
-        specFile: docs/features/F44-project-settings-hub.md
-        context:
-          - docs/features/F44-project-settings-hub.md
-          - docs/features/F22-per-repo-config.md
-          - docs/features/F21-setup-wizard.md
-          - docs/features/F19-notifications-v2.md
-          - docs/features/F40-workflow-step-view-per-project.md
-          - docs/ROADMAP.md
-          - .claude/rules/architecture.md
-          - .claude/rules/repo-context.md
-          - src/config/
-          - src/db/
-          - src/web/static/components/
-          - src/core/skills/
-        dependsOn: []
-        retry:
-          maxAttempts: 1
-          backoffMs: 5000
-          onFail: stop
-        workflow:
-          mode: staged
-          stages:
-            - specify
-            - plan
-            - tasks
-            - implement
-            - validate
-          approvals:
-            channel: telegram
-            autoAdvance: true
-          syncTasksToBacklog: true
   - id: e17-modo-automatico
-    title: E — Modo Automatico (feedback 2026-07-11)
+    title: E — Modo Automatico
     features:
       - id: feat-61
         title: F45 — Piloto Automatico (Auto-Pilot de Backlog)
@@ -1296,8 +428,8 @@ epics:
           elegivel automaticamente; bloqueio/falha nao-budget pula para a
           proxima demanda auto- exec; demandas sem a flag continuam so manuais;
           npm run build, npm test e npm run typecheck passam.
-        tool: claude
-        model: sonnet
+        tool: codex
+        model: gpt-5.4
         effort: high
         skills:
           - dev-flow
@@ -1328,8 +460,157 @@ epics:
             channel: telegram
             autoAdvance: true
           syncTasksToBacklog: true
+        tasks:
+          - id: T001
+            title: Add the `autoStart` feature flag to shared config contracts in
+              `src/core/backlog/schema.ts` and `src/web/types.ts`
+            status: todo
+            dependsOn: []
+          - id: T002
+            title: "[P] Thread resolved `autoStart` data through catalog projections in
+              `src/db/backlogCatalog.ts`, `src/ui/catalog.ts`, and
+              `src/web/state.ts`"
+            status: todo
+            dependsOn: []
+          - id: T003
+            title: "[P] Add baseline config/state regression coverage for `autoStart`
+              defaults and pending-feature projections in
+              `tests/ui/catalog.test.ts` and `tests/web/state.test.ts`"
+            status: todo
+            dependsOn: []
+          - id: T004
+            title: Add explicit auto-pilot event contracts for blocked outcomes, failure
+              kinds, and decision telemetry in `src/core/events/types.ts`
+            status: todo
+            dependsOn: []
+          - id: T005
+            title: "[P] Broadcast the new runtime events through shared event wiring in
+              `src/core/events/index.ts` and `src/web/server.ts`"
+            status: todo
+            dependsOn: []
+          - id: T006
+            title: "[P] Create shared outcome classification and next-candidate selection
+              helpers in `src/core/orchestrator/autoPilot.ts`"
+            status: todo
+            dependsOn: []
+          - id: T007
+            title: Wire live catalog feature re-reads into continuation decisions in
+              `src/core/runner/execute.ts` and `src/db/backlogCatalog.ts`
+            status: todo
+            dependsOn: []
+          - id: T008
+            title: "[P] [US1] Add success-handoff scheduler coverage for deterministic
+              next-feature selection in `tests/orchestrator/scheduler.test.ts`"
+            status: todo
+            dependsOn: []
+          - id: T009
+            title: "[P] [US1] Add runner-level regression coverage for success-triggered
+              auto-dispatch in `tests/runner/execute.test.ts`"
+            status: todo
+            dependsOn: []
+          - id: T010
+            title: "[US1] Implement success-triggered auto-pilot decisions in
+              `src/core/orchestrator/autoPilot.ts`"
+            status: todo
+            dependsOn: []
+          - id: T011
+            title: "[US1] Integrate success-triggered continuation into `executeBacklog` in
+              `src/core/runner/execute.ts`"
+            status: todo
+            dependsOn: []
+          - id: T012
+            title: "[US1] Preserve deterministic dependency order and single-start dedupe
+              when dispatching the next feature in
+              `src/core/orchestrator/scheduler.ts` and
+              `src/core/runner/execute.ts`"
+            status: todo
+            dependsOn: []
+          - id: T013
+            title: "[P] [US2] Add blocked-human and ordinary-failure continuation coverage
+              in `tests/runner/execute.test.ts`"
+            status: todo
+            dependsOn: []
+          - id: T014
+            title: "[P] [US2] Add event/telemetry coverage for `run:blocked` and
+              `autopilot:decision` broadcasting in `tests/web/server.test.ts`"
+            status: todo
+            dependsOn: []
+          - id: T015
+            title: "[US2] Emit dedicated `run:blocked` outcomes for gate and input waits in
+              `src/core/runner/execute.ts`"
+            status: todo
+            dependsOn: []
+          - id: T016
+            title: "[US2] Distinguish ordinary execution failures from manual aborts in
+              `src/core/runner/execute.ts` and `src/core/events/types.ts`"
+            status: todo
+            dependsOn: []
+          - id: T017
+            title: "[US2] Extend `src/core/orchestrator/autoPilot.ts` to continue after
+              `blocked-human` and `failed-execution` outcomes without
+              duplicating active features"
+            status: todo
+            dependsOn: []
+          - id: T018
+            title: "[US2] Surface blocked/failure auto-pilot decisions to web subscribers in
+              `src/web/server.ts` and `src/web/state.ts`"
+            status: todo
+            dependsOn: []
+          - id: T019
+            title: "[P] [US3] Add manual-only skip and protective-stop regression coverage
+              in `tests/runner/execute.test.ts`"
+            status: todo
+            dependsOn: []
+          - id: T020
+            title: "[P] [US3] Add config patch and UI projection coverage for the
+              `autoStart` flag in `tests/web/server.test.ts`,
+              `tests/ui/render.test.tsx`, and `tests/ui/components.test.tsx`"
+            status: todo
+            dependsOn: []
+          - id: T021
+            title: "[US3] Exclude manual-only features from automatic candidate selection in
+              `src/core/orchestrator/autoPilot.ts` and `src/ui/catalog.ts`"
+            status: todo
+            dependsOn: []
+          - id: T022
+            title: "[US3] Treat budget/token stops as hard auto-pilot stop conditions in
+              `src/core/runner/execute.ts` and
+              `src/core/orchestrator/autoPilot.ts`"
+            status: todo
+            dependsOn: []
+          - id: T023
+            title: "[US3] Accept and persist `autoStart` edits from the web control surface
+              in `src/web/types.ts`, `src/web/server.ts`, and
+              `src/db/backlogCatalog.ts`"
+            status: todo
+            dependsOn: []
+          - id: T024
+            title: "[US3] Expose the `autoStart` flag in operator-facing config views in
+              `src/web/static/components/FeaturePreview.js` and
+              `src/ui/components/FeatureConfigSection.tsx`"
+            status: todo
+            dependsOn: []
+          - id: T025
+            title: "[P] Document the new `autoStart` behavior and outcome rules in
+              `docs/features/F45-piloto-automatico.md` and `README.md`"
+            status: todo
+            dependsOn: []
+          - id: T026
+            title: Run the focused validation flow from
+              `specs/014-backlog-auto-pilot/quickstart.md` via
+              `tests/orchestrator/scheduler.test.ts`,
+              `tests/runner/execute.test.ts`, and `tests/web/server.test.ts`
+            status: todo
+            dependsOn: []
+          - id: T027
+            title: Run the repo baseline validation referenced by
+              `specs/014-backlog-auto-pilot/quickstart.md` and `package.json`
+              with `rtk npm run build`, `rtk npm test`, and `rtk npm run
+              typecheck`
+            status: todo
+            dependsOn: []
   - id: e18-skills-customization
-    title: E — Skills (feedback 2026-07-11)
+    title: E — Skills
     features:
       - id: feat-62
         title: F46 — Prompt/Skill Customizado por Step
@@ -1364,57 +645,6 @@ epics:
           - .claude/rules/architecture.md
           - src/core/skills/
           - src/core/backlog/
-        dependsOn: []
-        retry:
-          maxAttempts: 1
-          backoffMs: 5000
-          onFail: stop
-        workflow:
-          mode: staged
-          stages:
-            - specify
-            - plan
-            - tasks
-            - implement
-            - validate
-          approvals:
-            channel: telegram
-            autoAdvance: true
-          syncTasksToBacklog: true
-  - id: e19-tela-principal
-    title: E — Tela principal (feedback 2026-07-11)
-    features:
-      - id: feat-63
-        title: F48 — Card de Demanda Enriquecido na Tela Principal
-        spec: >
-          Problema: o card de feature no kanban (F31) nao expoe numero feat,
-          descritivo, tool, modelo, effort, ultima mensagem da IA, consumo de
-          tokens e tempo de execucao de forma direta — usuario precisa entrar no
-          detalhe para ver isso.
-
-          Objetivo: enriquecer o card do kanban com esse conjunto de
-          informacoes, promovendo dados ja existentes em outras telas quando
-          possivel em vez de criar consultas novas redundantes.
-
-          Escopo esperado (investigacao no specify antes de codificar):
-          src/web/static/components/ (componente de card do kanban, F31),
-          src/db/ (confirmar consulta unica sem N+1 para os campos exigidos).
-
-          Validacao: card mostra todos os campos pedidos sem N+1 na listagem do
-          kanban; npm run build, npm test e npm run typecheck passam.
-        tool: codex
-        model: gpt-5.4
-        effort: low
-        skills:
-          - dev-flow
-        specFile: docs/features/F48-enhanced-feature-card.md
-        context:
-          - docs/features/F48-enhanced-feature-card.md
-          - docs/features/F31-dashboard-kanban-overview.md
-          - docs/ROADMAP.md
-          - .claude/rules/architecture.md
-          - src/web/static/components/
-          - src/db/
         dependsOn: []
         retry:
           maxAttempts: 1

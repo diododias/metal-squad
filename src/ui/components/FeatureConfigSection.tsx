@@ -82,6 +82,7 @@ export function FeatureConfigSection({ feature, settings, width }: Props): React
         {row(theme, 'tool', feature.tool)}
         {row(theme, 'model', feature.model ?? `${feature.tool} (default)`, !feature.model)}
         {row(theme, 'effort', feature.effort)}
+        {row(theme, 'autoStart', String(feature.autoStart ?? false), !feature.autoStart)}
       </Box>
       <Box marginTop={1} flexDirection="column">
         <Text {...theme.role('muted')} bold>Workflow</Text>

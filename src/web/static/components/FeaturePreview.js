@@ -121,6 +121,7 @@ function buildFeatureFormState(feature) {
     model: feature.model ?? '',
     effort: feature.effort,
     maxTokens: feature.maxTokens !== undefined ? String(feature.maxTokens) : '',
+    autoStart: feature.autoStart ?? false,
     skills: feature.skills ?? [],
     workflowMode: workflow.mode,
     workflowStages: workflow.stages,
@@ -146,6 +147,8 @@ function buildFeatureConfigPatch(form, feature) {
     const parsed = Number(form.maxTokens.trim());
     if (form.maxTokens.trim() && Number.isFinite(parsed) && parsed > 0) patch.maxTokens = parsed;
   }
+
+  if (form.autoStart !== (feature.autoStart ?? false)) patch.autoStart = form.autoStart;
 
   if (JSON.stringify(form.skills) !== JSON.stringify(feature.skills ?? [])) patch.skills = form.skills;
 
@@ -226,6 +229,16 @@ function FeatureConfigForm({ feature, settings, onSaveConfig }) {
             { value: form.effort, onChange: (e) => set('effort')(e.target.value) },
             EFFORT_OPTIONS.map((effort) => React.createElement('option', { key: effort, value: effort }, effort)),
           ),
+        ),
+        React.createElement(
+          'label',
+          { className: 'checkbox-label' },
+          React.createElement('input', {
+            type: 'checkbox',
+            checked: form.autoStart,
+            onChange: (e) => set('autoStart')(e.target.checked),
+          }),
+          ' autoStart',
         ),
       ),
     ),
