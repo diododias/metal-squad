@@ -31,10 +31,15 @@ const mockAttachDefaultEventLogger = vi.fn();
 const mockAttachEventNotifications = vi.fn();
 const mockAttachRunPersistence = vi.fn();
 const mockCreateSkillRegistry = vi.fn();
+const mockGetCatalogFeature = vi.fn();
 let pipelineRow: any;
 
 vi.mock('../../src/core/repo.js', () => ({
   resolveRepo: mockResolveRepo,
+}));
+
+vi.mock('../../src/db/backlogCatalog.js', () => ({
+  getCatalogFeature: mockGetCatalogFeature,
 }));
 
 vi.mock('../../src/db/repo.js', () => ({
@@ -127,6 +132,8 @@ beforeEach(() => {
   mockAttachEventNotifications.mockReset();
   mockAttachRunPersistence.mockReset();
   mockCreateSkillRegistry.mockReset();
+  mockGetCatalogFeature.mockReset();
+  mockGetCatalogFeature.mockReturnValue(undefined);
   mockResolveRepo.mockReturnValue({ repoId: 'repo-1', path: '/repo' });
   mockCreateRun.mockReturnValue(7);
   pipelineRow = {
@@ -639,6 +646,69 @@ describe('executeBacklog failure persistence', () => {
     );
     expect(mockRunFeature.mock.calls[0]?.[1]).toContain('Feature: Feature');
     expect(mockRunFeature.mock.calls[0]?.[1]).toContain('Summary:\nspec');
+    expect(mockFinishPipeline).toHaveBeenCalledWith(9, 'done');
+  });
+
+  it('honors autoAdvance toggled mid-run via the catalog instead of the value captured at run start', async () => {
+    const backlog: Backlog = {
+      version: 2,
+      repo: 'repo',
+      defaults: { tool: 'codex', effort: 'medium', skills: ['implement'], stageSkills: {} },
+      epics: [
+        {
+          id: 'epic-1',
+          title: 'Epic',
+          features: [
+            {
+              id: 'feat-27',
+              title: 'Feature',
+              spec: 'spec',
+              tasks: [],
+              tool: 'codex',
+              effort: 'medium',
+              dependsOn: [],
+              workflow: {
+                mode: 'staged',
+                stages: ['specify', 'plan'],
+                // Run started with autoAdvance disabled...
+                approvals: { channel: 'telegram', autoAdvance: false },
+                syncTasksToBacklog: false,
+                sessionPolicy: { mode: 'isolated', alwaysIsolatedStages: [] },
+              },
+            },
+          ],
+        },
+      ],
+    };
+
+    // ...but the user flips the checkbox in the web UI while the run is in
+    // flight, which patches the catalog row read by `getCatalogFeature`.
+    mockGetCatalogFeature.mockReturnValue({
+      workflow: { approvals: { autoAdvance: true } },
+    });
+
+    mockRunFeature
+      .mockResolvedValueOnce({ ok: true, summary: 'spec ok' })
+      .mockResolvedValueOnce({ ok: true, summary: 'plan ok' });
+
+    const { executeBacklog } = await import('../../src/core/runner/execute.js');
+
+    await expect(
+      executeBacklog(backlog, { cwd: '/repo', concurrency: 1 }),
+    ).resolves.toBeUndefined();
+
+    expect(mockGetCatalogFeature).toHaveBeenCalledWith('repo-1', 'feat-27');
+    // Auto-advance path: a resolved 'approval' request is recorded with
+    // source 'auto', and execution never blocks on mockGetStageRequest.
+    expect(mockCreateStageRequest).toHaveBeenCalledWith(
+      9,
+      'feat-27',
+      'specify',
+      'approval',
+      'Auto-advance enabled; next stage: plan.',
+      { runId: 7, response: 'advance', source: 'auto' },
+    );
+    expect(mockGetStageRequest).not.toHaveBeenCalled();
     expect(mockFinishPipeline).toHaveBeenCalledWith(9, 'done');
   });
 

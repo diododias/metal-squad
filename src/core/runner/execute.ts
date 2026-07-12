@@ -33,6 +33,7 @@ import {
   type PipelineStatus,
   type StageRequestRow,
 } from '../../db/repo.js';
+import { getCatalogFeature } from '../../db/backlogCatalog.js';
 import { dispatch } from '../notify/manager.js';
 import { startTelegramPoller, stopTelegramPoller } from '../notify/telegram-poller.js';
 import { loadConfig } from '../../config/index.js';
@@ -583,7 +584,24 @@ async function executeStagedFeature(
 ): Promise<RunResult> {
   const workflow = feature.workflow;
   const sessionPolicy = workflow.sessionPolicy;
-  const autoAdvance = (opts.autoAdvanceStages ?? workflow.approvals.autoAdvance) || config.workflow.autoAdvanceStages;
+  // Re-read `approvals.autoAdvance` from the catalog at each transition
+  // rather than caching it once — the web UI lets the user flip this
+  // checkbox while a run is already in flight, and that edit must take
+  // effect on the very next stage transition instead of only on future runs.
+  const resolveAutoAdvance = (): boolean => {
+    if (opts.autoAdvanceStages !== undefined) return opts.autoAdvanceStages;
+    let featureAutoAdvance = workflow.approvals.autoAdvance;
+    try {
+      const { repoId } = resolveRepo(opts.cwd);
+      const liveFeature = getCatalogFeature(repoId, feature.id);
+      if (liveFeature) featureAutoAdvance = liveFeature.workflow.approvals.autoAdvance;
+    } catch {
+      // catalog read failed (e.g. sandboxed harness DB) — fall back to the
+      // value captured when this run started rather than aborting a stage
+      // transition over a config re-check.
+    }
+    return featureAutoAdvance || config.workflow.autoAdvanceStages;
+  };
   const stages = workflow.stages;
   const persistedRequests = listStageRequestsForFeature(pipelineId, feature.id);
   const stageInputs = loadPersistedStageInputs(persistedRequests);
@@ -679,7 +697,7 @@ async function executeStagedFeature(
     msqEventBus.emit('stage:transition-decided', transitionDecision);
     nextStageSession = transitionPlan.session.mode === 'resume' ? transitionPlan.session : undefined;
 
-    if (autoAdvance) {
+    if (resolveAutoAdvance()) {
       createStageRequest(
         pipelineId,
         feature.id,

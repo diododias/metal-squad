@@ -119,6 +119,21 @@ export function listCatalogFeatures(repoId: string, epicId?: string): CatalogFea
     .all(repoId) as CatalogFeatureRow[];
 }
 
+/** Single-feature readonly lookup, parsed to `Feature`. Used to re-check
+ * config (e.g. `workflow.approvals.autoAdvance`) mid-run without the caller
+ * having to hold a stale copy of `data_json` from when the run started. */
+export function getCatalogFeature(repoId: string, featureId: string): Feature | undefined {
+  const db = getReadonlyDbOrNull();
+  if (!db) return undefined;
+  const row = db
+    .prepare(
+      `SELECT data_json FROM backlog_features WHERE feature_id = ? AND repo_id = ? AND archived_at IS NULL`,
+    )
+    .get(featureId, repoId) as { data_json: string } | undefined;
+  if (!row) return undefined;
+  return FeatureSchema.parse(JSON.parse(row.data_json));
+}
+
 export function listCatalogTasks(repoId: string, featureId?: string): CatalogTaskRow[] {
   const db = getReadonlyDbOrNull();
   if (!db) return [];
