@@ -103,10 +103,11 @@ para nao repetir o mesmo problema na nova UI de botoes.
       texto tem hoje. (`TelegramPoller` reconhece `input:<id>:<index>` e
       chama `resolveStageRequest` com o rotulo da opcao.)
 - [x] Pedidos de aprovacao de gate (nao-pergunta) continuam funcionando
-      como hoje, sem regressao — H19 deve estar resolvido antes de F47
-      entrar em execucao real. (branch `kind === 'approval'` inalterado;
+      como hoje, sem regressao. (branch `kind === 'approval'` inalterado;
       regex `input:<id>:<index>` nao colide com `GATE_CMD`/`STAGE_CMD`/
-      `input:<id> <texto>`.)
+      `input:<id> <texto>`.) H19 (deteccao pergunta vs aprovacao) resolvido
+      via heuristico de fallback em `parseControlSignal` — ver
+      `docs/hotfixes/H19-specify-questions-misrouted-as-approve.md`.
 - [x] Perguntas cujo texto ultrapassa o limite de mensagem do Telegram sao
       tratadas (split/truncamento controlado), nao apenas cortadas
       silenciosamente. (`TelegramChannel.send` fatia em fragmentos de
