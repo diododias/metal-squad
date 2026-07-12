@@ -72,6 +72,7 @@ export interface FeatureConfigPatch {
   model?: string;
   effort?: string;
   maxTokens?: number;
+  autoStart?: boolean;
   skills?: string[];
   workflow?: {
     mode?: string;

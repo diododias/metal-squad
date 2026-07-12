@@ -319,6 +319,20 @@ describe('FeaturePreview', () => {
     expect(lastFrame()).toContain('feat-earlier');
     expect(lastFrame()).toContain('alwaysIsolatedStages: specify, plan');
   });
+
+  it('shows autoStart false by default when the feature declares none', () => {
+    const { lastFrame } = renderWithTheme(
+      <FeatureConfigSection feature={previewFeature} settings={settings} width={60} />,
+    );
+    expect(lastFrame()).toContain('autoStart: false');
+  });
+
+  it('shows autoStart true when the feature opts in', () => {
+    const { lastFrame } = renderWithTheme(
+      <FeatureConfigSection feature={{ ...previewFeature, autoStart: true }} settings={settings} width={60} />,
+    );
+    expect(lastFrame()).toContain('autoStart: true');
+  });
 });
 
 // ---------------------------------------------------------------------------

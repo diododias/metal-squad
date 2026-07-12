@@ -30,11 +30,24 @@ export interface RunDoneEvent {
   result: RunResult;
 }
 
+export type RunFailedKind = 'execution' | 'aborted';
+
 export interface RunFailedEvent {
   runId: number;
   featureId: string;
   tool: Tool;
   error: string;
+  kind: RunFailedKind;
+}
+
+export type RunBlockedReason = 'needs_input' | 'gate' | 'budget' | 'token';
+
+export interface RunBlockedEvent {
+  runId: number;
+  featureId: string;
+  tool: Tool;
+  reason: RunBlockedReason;
+  summary: string;
 }
 
 export interface GateCreatedEvent {
@@ -109,11 +122,30 @@ export interface UiInfoEvent {
   message: string;
 }
 
+export type AutoPilotOutcomeKind =
+  | 'success'
+  | 'blocked-human'
+  | 'failed-execution'
+  | 'blocked-protective'
+  | 'aborted-manual';
+
+export type AutoPilotAction = 'start' | 'idle' | 'stop';
+
+export interface AutoPilotDecisionEvent {
+  triggerFeatureId: string;
+  triggerRunId: number;
+  triggerKind: AutoPilotOutcomeKind;
+  action: AutoPilotAction;
+  selectedFeatureId?: string;
+  reason: string;
+}
+
 export interface MsqEvents {
   'run:start': RunStartEvent;
   'run:output': RunOutputEvent;
   'run:done': RunDoneEvent;
   'run:failed': RunFailedEvent;
+  'run:blocked': RunBlockedEvent;
   'gate:created': GateCreatedEvent;
   'gate:resolved': GateResolvedEvent;
   'stage:request-created': StageRequestCreatedEvent;
@@ -127,4 +159,5 @@ export interface MsqEvents {
   'task:updated': TaskUpdatedEvent;
   'ui:info': UiInfoEvent;
   'ui:notice': UiNoticeEvent;
+  'autopilot:decision': AutoPilotDecisionEvent;
 }

@@ -156,6 +156,7 @@ const BROADCAST_EVENTS: (keyof MsqEvents)[] = [
   'run:start',
   'run:done',
   'run:failed',
+  'run:blocked',
   'run:output',
   'tokens:update',
   'gate:created',
@@ -167,6 +168,7 @@ const BROADCAST_EVENTS: (keyof MsqEvents)[] = [
   'ui:info',
   'ui:notice',
   'budget:alert',
+  'autopilot:decision',
 ];
 
 export interface RunningWebServer {
@@ -702,6 +704,7 @@ export function createWebServer(options: {
       ...(patch.model !== undefined ? { model: patch.model } : {}),
       ...(patch.effort !== undefined ? { effort: patch.effort as Feature['effort'] } : {}),
       ...(patch.maxTokens !== undefined ? { maxTokens: patch.maxTokens } : {}),
+      ...(patch.autoStart !== undefined ? { autoStart: patch.autoStart } : {}),
       ...(patch.skills !== undefined ? { skills: patch.skills } : {}),
       ...(patch.workflow !== undefined
         ? { workflow: patch.workflow as FeaturePatch['workflow'] }

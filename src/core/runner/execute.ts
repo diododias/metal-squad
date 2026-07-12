@@ -1,9 +1,19 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { resolve, dirname, join } from 'node:path';
+import { spawn } from 'node:child_process';
 import type { Backlog, Effort, Feature, OnFail, Tool } from '../backlog/schema.js';
 import type { RunFeatureOptions, RunResult } from '../adapters/types.js';
 import { topoOrder, selectFeaturePlan } from '../orchestrator/graph.js';
 import { schedule } from '../orchestrator/scheduler.js';
+import {
+  classifyBlockedOutcome,
+  classifyFailedOutcome,
+  classifySuccessOutcome,
+  buildAutoPilotDecision,
+  selectNextAutoStartCandidate,
+  shouldEvaluateNextCandidate,
+} from '../orchestrator/autoPilot.js';
+import type { AutoPilotOutcomeKind } from '../events/types.js';
 import { getAdapter } from '../adapters/index.js';
 import { resolveRepo } from '../repo.js';
 import {
@@ -20,6 +30,8 @@ import {
   getPipeline,
   getPipelineSnapshot,
   getStageRequest,
+  listCompletedFeatureIds,
+  listRunsForTui,
   listStageRequestsForFeature,
   pausePipeline,
   recordUsage,
@@ -84,6 +96,7 @@ export async function executeBacklog(
   cleanupStaleRuns(config.staleRunThresholdMinutes);
   const activeRunIds = new Set<number>();
   const activeControllers = new Map<string, AbortController>();
+  const lastRunIdByFeature = new Map<string, number>();
   const featureMaxTokens = new Map<string, number>();
   for (const epic of backlog.epics) {
     for (const feature of epic.features) {
@@ -100,6 +113,7 @@ export async function executeBacklog(
     saveState: saveBudgetState,
   }, featureMaxTokens);
   let budgetPauseTriggered = false;
+  let autoPilotProtectiveStop = false;
 
   const repoStageSkills = backlog.version === 2 ? backlog.defaults.stageSkills : {};
   const effectiveStageSkills = collectEffectiveStageSkills(repoStageSkills, config.stageSkills);
@@ -147,13 +161,22 @@ export async function executeBacklog(
   const detachNotifications = attachEventNotifications();
   startTelegramPoller();
 
-  const handleGlobalBudgetViolation = (violation: BudgetViolation, featureId: string): void => {
+  const handleGlobalBudgetViolation = (violation: BudgetViolation, feature: Feature): void => {
     if (budgetPauseTriggered) return;
     budgetPauseTriggered = true;
-    const gateRunId = createRun(repoId, featureId, 'budget', { pipelineId });
-    finishRun(gateRunId, 'blocked', formatBudgetViolation(violation));
-    createGate(gateRunId, featureId, repoId);
+    autoPilotProtectiveStop = true;
+    const gateRunId = createRun(repoId, feature.id, 'budget', { pipelineId });
+    const summary = formatBudgetViolation(violation);
+    finishRun(gateRunId, 'blocked', summary);
+    createGate(gateRunId, feature.id, repoId);
     pausePipeline(pipelineId);
+    msqEventBus.emit('run:blocked', {
+      runId: gateRunId,
+      featureId: feature.id,
+      tool: feature.tool,
+      reason: 'budget',
+      summary,
+    });
     msqEventBus.emit('budget:alert', {
       percent: 100,
       spent: Math.round(violation.spent * 100) / 100,
@@ -172,9 +195,17 @@ export async function executeBacklog(
     }
     for (const violation of violations) {
       if (violation.scope === 'global') {
-        handleGlobalBudgetViolation(violation, feature.id);
+        handleGlobalBudgetViolation(violation, feature);
       } else {
         createGate(runId, feature.id, repoId);
+        autoPilotProtectiveStop = true;
+        msqEventBus.emit('run:blocked', {
+          runId,
+          featureId: feature.id,
+          tool: feature.tool,
+          reason: 'token',
+          summary: formatBudgetViolation(violation),
+        });
       }
     }
   };
@@ -187,6 +218,7 @@ export async function executeBacklog(
     session?: RunFeatureOptions['session'],
   ): Promise<{ runId: number; res: RunResult }> => {
     const runId = createRun(repoId, feature.id, feature.tool, { pipelineId, stage });
+    lastRunIdByFeature.set(feature.id, runId);
     activeRunIds.add(runId);
     msqEventBus.emit('run:start', { runId, featureId: feature.id, tool: feature.tool, stage });
     if (stage) {
@@ -224,6 +256,13 @@ export async function executeBacklog(
             endedAt: new Date().toISOString(),
           });
         }
+        msqEventBus.emit('run:blocked', {
+          runId,
+          featureId: feature.id,
+          tool: feature.tool,
+          reason: 'needs_input',
+          summary: res.summary,
+        });
         activeRunIds.delete(runId);
         return { runId, res };
       }
@@ -245,6 +284,7 @@ export async function executeBacklog(
           featureId: feature.id,
           tool: feature.tool,
           error: res.summary,
+          kind: 'aborted',
         });
         activeRunIds.delete(runId);
         return { runId, res };
@@ -270,12 +310,21 @@ export async function executeBacklog(
           tool: feature.tool,
           result: res,
         });
+      } else if (status === 'blocked') {
+        msqEventBus.emit('run:blocked', {
+          runId,
+          featureId: feature.id,
+          tool: feature.tool,
+          reason: 'gate',
+          summary: res.summary,
+        });
       } else {
         msqEventBus.emit('run:failed', {
           runId,
           featureId: feature.id,
           tool: feature.tool,
           error: res.summary,
+          kind: 'execution',
         });
       }
       activeRunIds.delete(runId);
@@ -298,6 +347,7 @@ export async function executeBacklog(
         featureId: feature.id,
         tool: feature.tool,
         error: message,
+        kind: 'execution',
       });
       activeRunIds.delete(runId);
       throw err;
@@ -307,7 +357,7 @@ export async function executeBacklog(
   const execute = async (feature: Feature): Promise<RunResult> => {
     const violation = budget.globalViolation();
     if (violation) {
-      handleGlobalBudgetViolation(violation, feature.id);
+      handleGlobalBudgetViolation(violation, feature);
       return {
         ok: false,
         aborted: true,
@@ -356,6 +406,86 @@ export async function executeBacklog(
   process.once('SIGINT', handleSignal);
   process.once('SIGTERM', handleSignal);
 
+  // F45: after a feature that opted into `autoStart` reaches a qualifying
+  // outcome, spawn the next eligible autoStart feature as a new detached
+  // process — the same "fire and forget" idiom `src/web/server.ts` already
+  // uses to launch feature runs, since a running `msq run --feature` process
+  // has no in-process event channel to any other feature's run.
+  const dispatchNextAutoStartFeature = (featureId: string): void => {
+    const entrypoint = process.argv[1];
+    if (!entrypoint) {
+      msqEventBus.emit('ui:notice', {
+        message: `Auto-pilot could not start ${featureId}: CLI entrypoint was not resolved.`,
+      });
+      return;
+    }
+    const child = spawn(
+      process.execPath,
+      [...process.execArgv, entrypoint, 'run', '--feature', featureId],
+      { detached: true, stdio: 'ignore', cwd: opts.cwd },
+    );
+    child.once('error', (error) => {
+      msqEventBus.emit('ui:notice', { message: `Auto-pilot could not start ${featureId}: ${error.message}` });
+    });
+    child.unref();
+    msqEventBus.emit('ui:info', { message: `Auto-pilot starting ${featureId}...` });
+  };
+
+  const evaluateAutoPilot = (feature: Feature, result: RunResult): void => {
+    // Auto-pilot only spawns a *new* detached process for the next feature —
+    // when this run already covers the whole backlog in-process (bare `msq
+    // run`, no --feature), the scheduler above already dispatches every
+    // remaining feature itself, so spawning here would double-start work.
+    if (!opts.featureId) return;
+    const liveFeature = getCatalogFeature(repoId, feature.id) ?? feature;
+    if (!liveFeature.autoStart) return;
+
+    const triggerRunId = lastRunIdByFeature.get(feature.id) ?? 0;
+
+    let outcomeKind: AutoPilotOutcomeKind;
+    if (autoPilotProtectiveStop) {
+      outcomeKind = 'blocked-protective';
+    } else if (result.aborted) {
+      outcomeKind = classifyFailedOutcome('aborted');
+    } else if (result.ok) {
+      outcomeKind = classifySuccessOutcome();
+    } else if (result.control?.type === 'needs_input') {
+      outcomeKind = classifyBlockedOutcome('needs_input');
+    } else if (getOnFailPolicy(feature) === 'gate') {
+      outcomeKind = classifyBlockedOutcome('gate');
+    } else {
+      outcomeKind = classifyFailedOutcome('execution');
+    }
+
+    let selected: Feature | undefined;
+    if (shouldEvaluateNextCandidate(outcomeKind)) {
+      const doneFeatureIds = listCompletedFeatureIds(repoId);
+      const activeRuns = listRunsForTui(500, repoId);
+      const activeFeatureIds = new Set(
+        activeRuns
+          .filter((run) => run.status === 'running' || run.status === 'blocked')
+          .map((run) => run.featureId),
+      );
+      const fullOrder = topoOrder(backlog);
+      selected = selectNextAutoStartCandidate(fullOrder, doneFeatureIds, activeFeatureIds, {
+        getLiveFeature: (id) => getCatalogFeature(repoId, id),
+      });
+    }
+
+    const decision = buildAutoPilotDecision({
+      triggerFeatureId: feature.id,
+      triggerRunId,
+      triggerKind: outcomeKind,
+      selected,
+    });
+
+    msqEventBus.emit('autopilot:decision', decision);
+
+    if (decision.action === 'start' && decision.selectedFeatureId) {
+      dispatchNextAutoStartFeature(decision.selectedFeatureId);
+    }
+  };
+
   const scheduler = schedule(ordered, {
     concurrency: opts.concurrency,
     initialDone,
@@ -382,7 +512,10 @@ export async function executeBacklog(
     },
     onDone: (feature, result) => {
       const current = getPipeline(pipelineId);
-      if (!current) return;
+      if (!current) {
+        evaluateAutoPilot(feature, result);
+        return;
+      }
       const snapshot = getPipelineSnapshot(current);
       const withoutActive = snapshot.active.filter((item) => item !== feature.id);
       if (result.aborted) {
@@ -393,6 +526,10 @@ export async function executeBacklog(
           status: current.status === 'aborting' ? 'aborting' : 'paused',
           clearAbortRequest: true,
         });
+        // Evaluate after the snapshot write commits, so a DB-backed
+        // done/active lookup during selection reflects this feature's own
+        // just-finished outcome instead of stale pre-completion state.
+        evaluateAutoPilot(feature, result);
         return;
       }
       const shouldCountAsDone = result.ok || getOnFailPolicy(feature) === 'continue';
@@ -413,6 +550,7 @@ export async function executeBacklog(
       }, {
         clearAbortRequest: true,
       });
+      evaluateAutoPilot(feature, result);
     },
   });
 

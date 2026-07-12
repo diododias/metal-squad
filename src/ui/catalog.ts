@@ -33,6 +33,9 @@ export interface FeatureCatalogEntry {
   /** F36: per-feature config for `budget.perFeatureMaxTokens` — undefined
     * means the backlog-level default still applies. */
   maxTokens?: number;
+  /** F45: opt-in auto-pilot flag — when true, feature is eligible for automatic
+   * continuation after qualifying outcomes (success, blocked-human, failed-execution). */
+  autoStart?: boolean;
 }
 
 /** F31 section 5b: backlog-level settings shown alongside per-feature config
@@ -96,6 +99,7 @@ function loadCatalogAndSettings(cwd: string): void {
             specFile: feature.specFile,
             context: feature.context,
             maxTokens: feature.maxTokens,
+            autoStart: feature.autoStart,
           } satisfies FeatureCatalogEntry,
         ]),
       ),

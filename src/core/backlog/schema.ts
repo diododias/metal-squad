@@ -92,6 +92,7 @@ export const FeatureSchema = z.object({
   workflow: WorkflowSchema.default({}),
   retry: RetrySchema.optional(),
   maxTokens: z.number().int().positive().optional(),
+  autoStart: z.boolean().default(false),
 });
 
 export const EpicSchema = z.object({
