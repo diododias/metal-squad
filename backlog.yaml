@@ -16,27 +16,84 @@ defaults:
       - speckit-implement
       - dev-flow
     validate:
-      - reviewr
+      - review
 budget:
   maxTokens: 5000000
   maxCostUsd: 100
   perFeatureMaxTokens: 500000
 epics:
-  - id: e02-modern-tui
-    title: E02 — Modern TUI
+  - id: e08-notifications-interactive
+    title: E08 — Interactive Notifications
     features:
-      - id: feat-08
-        title: F08 — Navegacao por Sessoes/Runs
-        tool: claude
-        model: claude-sonnet-4-6
+      - id: feat-40
+        title: "F47 — Perguntas Interativas via Telegram (Botoes)"
+        spec: >
+          Problema: quando a IA levanta uma pergunta de esclarecimento durante
+          um step (ex. specify), a notificacao que chega no Telegram hoje
+          exige resposta livre por texto, em vez de oferecer botoes (inline
+          keyboard) com as opcoes que a propria IA apresentou. Este item
+          depende diretamente de H19: hoje o sistema as vezes trata uma
+          pergunta da IA como se fosse um pedido de aprovacao de gate
+          (avancar/nao avancar), em vez de rotear como pergunta genuina para o
+          Telegram — sem esse roteamento estar correto, nao ha "pergunta"
+          confiavel para transformar em botoes.
+
+
+          Objetivo: quando o sistema identificar corretamente que a IA fez
+          uma pergunta (apos H19 resolver a deteccao pergunta-vs-aprovacao), a
+          notificacao no Telegram deve apresentar as opcoes de resposta como
+          botoes, usando o mesmo conteudo de pergunta/opcoes que a IA gerou —
+          nao um "aprovar/rejeitar" generico. O usuario responde com um toque
+          no botao correspondente, e essa escolha e propagada de volta ao
+          step em execucao com o mesmo efeito que a resposta livre por texto
+          teria hoje.
+
+
+          Escopo esperado (mapeamento fino fica para specify/plan):
+          src/core/events/ (dispatch de notificacao Telegram, suporte a
+          inline keyboard e tratamento do callback do botao como resposta);
+          runner/orchestrator (ponto de deteccao "pergunta vs aprovacao",
+          owned por H19, e extracao das opcoes de resposta do output da IA);
+          skills/prompts do step specify (e outros stages que podem gerar
+          perguntas) para garantir formato de output parseavel. F47 assume
+          H19 resolvido antes de entrar em execucao real — implementar
+          botoes sobre deteccao errada de pergunta vs aprovacao propagaria o
+          bug com uma UI melhor. Avaliar tambem o problema secundario de H19
+          de mensagens truncadas no Telegram ao desenhar o texto da pergunta
+          antes dos botoes.
+
+
+          Validacao:
+
+          - Uma pergunta real da IA durante specify (ou outro stage que gere
+            pergunta) chega ao Telegram como mensagem com botoes
+            representando as opcoes reais apresentadas pela IA, nao um
+            "aprovar/rejeitar" generico.
+          - Escolher um botao propaga a resposta correspondente de volta ao
+            step em execucao, com o mesmo efeito observavel que a resposta
+            livre por texto tem hoje.
+          - Pedidos de aprovacao de gate (nao-pergunta) continuam
+            funcionando como hoje, sem regressao.
+          - Perguntas cujo texto ultrapassa o limite de mensagem do Telegram
+            sao tratadas (split/truncamento controlado).
+          - Testes cobrindo extracao de opcoes do output da IA e o dispatch
+            da notificacao com inline keyboard.
+          - `npm run build`, `npm test` e `npm run typecheck` passam.
+        tool: codex
+        model: gpt-5.4
         effort: high
         skills:
           - dev-flow
-        specFile: docs/features/F08-session-navigation.md
+        specFile: docs/features/F47-telegram-interactive-questions.md
         context:
+          - docs/features/F47-telegram-interactive-questions.md
+          - docs/features/F19-notifications-v2.md
+          - docs/features/F27-stage-sessions-telegram.md
           - docs/ROADMAP.md
+          - .claude/rules/architecture.md
+          - src/core/events/
+          - src/core/orchestrator/
         dependsOn: []
-        tasks: []
         retry:
           maxAttempts: 1
           backoffMs: 5000
@@ -48,581 +105,7 @@ epics:
             - plan
             - tasks
             - implement
-          approvals:
-            channel: telegram
-            autoAdvance: false
-          syncTasksToBacklog: true
-      - id: feat-09
-        title: F09 — Command Palette & Shortcuts
-        tool: claude
-        model: claude-sonnet-4-5
-        effort: high
-        skills:
-          - dev-flow
-        specFile: docs/features/F09-command-palette.md
-        context:
-          - docs/ROADMAP.md
-        dependsOn: []
-        tasks:
-          - id: T001
-            title: Create fuzzy matching utility in src/ui/utils/fuzzyMatch.ts
-            status: todo
-            dependsOn: []
-          - id: T002
-            title: Create command types contract from
-              specs/003-command-palette/contracts/types.ts to
-              src/ui/types/commands.ts
-            status: todo
-            dependsOn: []
-          - id: T003
-            title: "[P] Create keyboard shortcut types from contracts to
-              src/ui/types/shortcuts.ts"
-            status: todo
-            dependsOn: []
-          - id: T004
-            title: Create command registry structure in src/ui/commands/registry.ts
-            status: todo
-            dependsOn: []
-          - id: T005
-            title: Implement useKeyboardShortcuts hook in
-              src/ui/hooks/useKeyboardShortcuts.ts
-            status: todo
-            dependsOn: []
-          - id: T006
-            title: Implement useCommandPalette hook in src/ui/hooks/useCommandPalette.ts
-            status: todo
-            dependsOn: []
-          - id: T007
-            title: Integrate keyboard shortcut hook into App.tsx (refactor existing useInput
-              logic)
-            status: todo
-            dependsOn: []
-          - id: T008
-            title: Define initial command set in src/ui/commands/definitions.ts (run, pause,
-              resume, abort, stats, config, help)
-            status: todo
-            dependsOn: []
-          - id: T009
-            title: "[US1] Create CommandPalette component in
-              src/ui/components/CommandPalette.tsx"
-            status: todo
-            dependsOn: []
-          - id: T010
-            title: "[US1] Implement command filtering logic using fuzzyMatch utility in
-              CommandPalette component"
-            status: todo
-            dependsOn: []
-          - id: T011
-            title: "[US1] Add keyboard event handlers for palette (Ctrl+P, :, Esc, Enter,
-              arrows/j/k navigation)"
-            status: todo
-            dependsOn: []
-          - id: T012
-            title: "[US1] Integrate CommandPalette into App.tsx with state management"
-            status: todo
-            dependsOn: []
-          - id: T013
-            title: "[US1] Implement command availability filtering (hide unavailable
-              commands)"
-            status: todo
-            dependsOn: []
-          - id: T014
-            title: "[US1] Add command category grouping display in palette UI"
-            status: todo
-            dependsOn: []
-          - id: T015
-            title: "[US1] Test command palette opening, filtering, and command execution per
-              quickstart.md scenarios 1-2"
-            status: todo
-            dependsOn: []
-          - id: T016
-            title: "[P] [US2] Define gates panel shortcuts in
-              src/ui/commands/gatesShortcuts.ts (a, s, r)"
-            status: todo
-            dependsOn: []
-          - id: T017
-            title: "[P] [US2] Define run detail shortcuts in src/ui/commands/runShortcuts.ts
-              (p, x)"
-            status: todo
-            dependsOn: []
-          - id: T018
-            title: "[US2] Implement focus context tracking in App.tsx (gates, runs,
-              run-detail panels)"
-            status: todo
-            dependsOn: []
-          - id: T019
-            title: "[US2] Update useKeyboardShortcuts hook to filter active shortcuts by
-              current context"
-            status: todo
-            dependsOn: []
-          - id: T020
-            title: "[US2] Wire gate approval/skip/retry actions to shortcuts in GatePanel
-              component"
-            status: todo
-            dependsOn: []
-          - id: T021
-            title: "[US2] Wire pause/abort actions to shortcuts in run detail panel"
-            status: todo
-            dependsOn: []
-          - id: T022
-            title: "[US2] Test context-aware shortcuts per quickstart.md scenario 3"
-            status: todo
-            dependsOn: []
-          - id: T023
-            title: "[P] [US3] Define global navigation shortcuts in
-              src/ui/commands/globalShortcuts.ts (q, Tab, j/k, Enter, Esc)"
-            status: todo
-            dependsOn: []
-          - id: T024
-            title: "[P] [US3] Define global view shortcuts (Ctrl+L for log toggle, ? for
-              help, 1-5 for tabs)"
-            status: todo
-            dependsOn: []
-          - id: T025
-            title: "[US3] Implement quit shortcut (q) with cleanup logic in App.tsx"
-            status: todo
-            dependsOn: []
-          - id: T026
-            title: "[US3] Implement Tab focus cycling logic across panels in App.tsx"
-            status: todo
-            dependsOn: []
-          - id: T027
-            title: "[US3] Implement j/k list navigation in RunTable and GatePanel
-              components"
-            status: todo
-            dependsOn: []
-          - id: T028
-            title: "[US3] Implement Enter drill-down and Esc back navigation in App.tsx"
-            status: todo
-            dependsOn: []
-          - id: T029
-            title: "[US3] Implement Ctrl+L log toggle functionality"
-            status: todo
-            dependsOn: []
-          - id: T030
-            title: "[US3] Implement number key tab switching (1-5) if tabs exist"
-            status: todo
-            dependsOn: []
-          - id: T031
-            title: "[US3] Test global navigation shortcuts per quickstart.md scenario 4"
-            status: todo
-            dependsOn: []
-          - id: T032
-            title: "[US4] Create HelpOverlay component in src/ui/components/HelpOverlay.tsx"
-            status: todo
-            dependsOn: []
-          - id: T033
-            title: "[US4] Implement help overlay state management (isOpen, current context)"
-            status: todo
-            dependsOn: []
-          - id: T034
-            title: "[US4] Generate help content from keyboard shortcut registry (global vs
-              context-specific)"
-            status: todo
-            dependsOn: []
-          - id: T035
-            title: "[US4] Add context highlighting logic (highlight shortcuts relevant to
-              current focus)"
-            status: todo
-            dependsOn: []
-          - id: T036
-            title: "[US4] Integrate HelpOverlay into App.tsx with ? key binding"
-            status: todo
-            dependsOn: []
-          - id: T037
-            title: "[US4] Implement help overlay close on ? or Esc"
-            status: todo
-            dependsOn: []
-          - id: T038
-            title: "[US4] Test help overlay per quickstart.md scenario 5"
-            status: todo
-            dependsOn: []
-          - id: T039
-            title: "[US5] Update StatusBar component to accept dynamic shortcut hints prop"
-            status: todo
-            dependsOn: []
-          - id: T040
-            title: "[US5] Implement hint generation from active shortcuts for current
-              context"
-            status: todo
-            dependsOn: []
-          - id: T041
-            title: "[US5] Wire status bar hints to focus context in App.tsx"
-            status: todo
-            dependsOn: []
-          - id: T042
-            title: '[US5] Format hints compactly for status bar display (e.g., "a:approve
-              s:skip r:retry ?:help")'
-            status: todo
-            dependsOn: []
-          - id: T043
-            title: "[US5] Test status bar hints update per quickstart.md scenario 6"
-            status: todo
-            dependsOn: []
-          - id: T044
-            title: "[P] Test edge cases per quickstart.md (invalid commands, modal
-              conflicts, shortcuts when palette open)"
-            status: todo
-            dependsOn: []
-          - id: T045
-            title: "[P] Ensure command palette and help overlay prevent shortcut propagation
-              when open"
-            status: todo
-            dependsOn: []
-          - id: T046
-            title: Verify all shortcuts work without conflicts across contexts
-            status: todo
-            dependsOn: []
-          - id: T047
-            title: "Performance check: palette opens/closes instantly (<50ms), fuzzy search
-              feels real-time (<100ms)"
-            status: todo
-            dependsOn: []
-          - id: T048
-            title: Run full quickstart.md validation scenarios 1-6
-            status: todo
-            dependsOn: []
-          - id: T049
-            title: Verify no regressions in existing TUI functionality
-            status: todo
-            dependsOn: []
-          - id: T050
-            title: "Code cleanup: remove old inline keyboard handling from App.tsx after
-              hook refactor"
-            status: todo
-            dependsOn: []
-        retry:
-          maxAttempts: 1
-          backoffMs: 5000
-          onFail: stop
-        workflow:
-          mode: staged
-          stages:
-            - specify
-            - plan
-            - tasks
-            - implement
-          approvals:
-            channel: telegram
-            autoAdvance: false
-          syncTasksToBacklog: true
-      - id: feat-11
-        title: F11 — Fix TUI flicker on iTerm2
-        tool: opencode
-        model: anthropic/claude-sonnet-4-5
-        effort: medium
-        skills:
-          - implement
-        specFile: docs/features/F11-tui-flicker-fix.md
-        context:
-          - docs/ROADMAP.md
-        dependsOn: []
-        tasks:
-          - id: T001
-            title: Remove manual alternate screen escape sequences from src/commands/ui.ts
-            status: done
-          - id: T002
-            title: Implement adaptive output polling with 750ms minimum in useRunOutput.ts
-            status: done
-          - id: T003
-            title: Stop full-screen redraw by removing fixed height from App.tsx root Box
-            status: done
-          - id: T004
-            title: Memoize high-impact components (MainPanel, StatsBar, KanbanCard)
-            status: done
-          - id: T005
-            title: Build and verify msq ui no longer flickers in iTerm2
-            status: done
-        retry:
-          maxAttempts: 1
-          backoffMs: 5000
-          onFail: stop
-        workflow:
-          mode: staged
-          stages:
-            - specify
-            - plan
-            - tasks
-            - implement
-          approvals:
-            channel: telegram
-            autoAdvance: false
-          syncTasksToBacklog: true
-      - id: feat-10
-        title: F10 — Theme System
-        tool: claude
-        model: claude-sonnet-4-5
-        effort: high
-        skills:
-          - dev-flow
-        specFile: docs/features/F10-theme-system.md
-        context:
-          - docs/ROADMAP.md
-        dependsOn: []
-        tasks: []
-        retry:
-          maxAttempts: 1
-          backoffMs: 5000
-          onFail: stop
-        workflow:
-          mode: staged
-          stages:
-            - specify
-            - plan
-            - tasks
-            - implement
-          approvals:
-            channel: telegram
-            autoAdvance: false
-          syncTasksToBacklog: true
-  - id: e03-orchestration-v2
-    title: E03 — Orchestration v2
-    features:
-      - id: feat-13
-        title: F13 — Execution Graph Visualization
-        tool: claude
-        model: claude-sonnet-4-5
-        effort: high
-        skills:
-          - dev-flow
-        specFile: docs/features/F13-execution-graph.md
-        context:
-          - docs/ROADMAP.md
-        dependsOn: []
-        tasks: []
-        retry:
-          maxAttempts: 1
-          backoffMs: 5000
-          onFail: stop
-        workflow:
-          mode: staged
-          stages:
-            - specify
-            - plan
-            - tasks
-            - implement
-          approvals:
-            channel: telegram
-            autoAdvance: false
-          syncTasksToBacklog: true
-      - id: feat-15
-        title: F15 — Event System (pub/sub interno)
-        tool: claude
-        model: claude-sonnet-4-5
-        effort: high
-        skills:
-          - dev-flow
-        specFile: docs/features/F15-event-system.md
-        context:
-          - docs/ROADMAP.md
-        dependsOn: []
-        tasks: []
-        retry:
-          maxAttempts: 1
-          backoffMs: 5000
-          onFail: stop
-        workflow:
-          mode: staged
-          stages:
-            - specify
-            - plan
-            - tasks
-            - implement
-          approvals:
-            channel: telegram
-            autoAdvance: false
-          syncTasksToBacklog: true
-      - id: feat-26
-        title: F26 — Resume de pipeline a partir do estado persistido
-        tool: claude
-        model: claude-sonnet-4-5
-        effort: high
-        skills:
-          - dev-flow
-        specFile: docs/features/F26-resume-pipeline-from-state.md
-        context:
-          - docs/ROADMAP.md
-        dependsOn: []
-        tasks: []
-        retry:
-          maxAttempts: 1
-          backoffMs: 5000
-          onFail: stop
-        workflow:
-          mode: staged
-          stages:
-            - specify
-            - plan
-            - tasks
-            - implement
-          approvals:
-            channel: telegram
-            autoAdvance: false
-          syncTasksToBacklog: true
-  - id: e05-developer-experience
-    title: E05 — Developer Experience
-    features:
-      - id: feat-20
-        title: F20 — Plugin System para Adapters
-        tool: claude
-        model: claude-sonnet-4-5
-        effort: high
-        skills:
-          - dev-flow
-        specFile: docs/features/F20-plugin-adapters.md
-        context:
-          - docs/ROADMAP.md
-        dependsOn: []
-        tasks: []
-        retry:
-          maxAttempts: 1
-          backoffMs: 5000
-          onFail: stop
-        workflow:
-          mode: staged
-          stages:
-            - specify
-            - plan
-            - tasks
-            - implement
-          approvals:
-            channel: telegram
-            autoAdvance: false
-          syncTasksToBacklog: true
-      - id: feat-21
-        title: F21 — Interactive Setup Wizard
-        tool: claude
-        model: claude-sonnet-4-5
-        effort: high
-        skills:
-          - dev-flow
-        specFile: docs/features/F21-setup-wizard.md
-        context:
-          - docs/ROADMAP.md
-        dependsOn: []
-        tasks: []
-        retry:
-          maxAttempts: 1
-          backoffMs: 5000
-          onFail: stop
-        workflow:
-          mode: staged
-          stages:
-            - specify
-            - plan
-            - tasks
-            - implement
-          approvals:
-            channel: telegram
-            autoAdvance: false
-          syncTasksToBacklog: true
-      - id: feat-22
-        title: F22 — Per-Repo Config Overrides
-        tool: claude
-        model: claude-sonnet-4-5
-        effort: high
-        skills:
-          - dev-flow
-        specFile: docs/features/F22-per-repo-config.md
-        context:
-          - docs/ROADMAP.md
-        dependsOn: []
-        tasks: []
-        retry:
-          maxAttempts: 1
-          backoffMs: 5000
-          onFail: stop
-        workflow:
-          mode: staged
-          stages:
-            - specify
-            - plan
-            - tasks
-            - implement
-          approvals:
-            channel: telegram
-            autoAdvance: false
-          syncTasksToBacklog: true
-      - id: feat-23
-        title: F23 — CLAUDE.md / Agent Config Generation
-        tool: claude
-        model: claude-sonnet-4-5
-        effort: high
-        skills:
-          - dev-flow
-        specFile: docs/features/F23-agent-config-gen.md
-        context:
-          - docs/ROADMAP.md
-        dependsOn: []
-        tasks: []
-        retry:
-          maxAttempts: 1
-          backoffMs: 5000
-          onFail: stop
-        workflow:
-          mode: staged
-          stages:
-            - specify
-            - plan
-            - tasks
-            - implement
-          approvals:
-            channel: telegram
-            autoAdvance: false
-          syncTasksToBacklog: true
-      - id: feat-25
-        title: F25 — Hardening do fluxo msq-develop
-        tool: claude
-        model: claude-sonnet-4-5
-        effort: high
-        skills:
-          - dev-flow
-        specFile: docs/features/F25-msq-develop-harness-hardening.md
-        context:
-          - docs/ROADMAP.md
-        dependsOn: []
-        tasks: []
-        retry:
-          maxAttempts: 1
-          backoffMs: 5000
-          onFail: stop
-        workflow:
-          mode: staged
-          stages:
-            - specify
-            - plan
-            - tasks
-            - implement
-          approvals:
-            channel: telegram
-            autoAdvance: false
-          syncTasksToBacklog: true
-  - id: e06-web-version
-    title: E06 — Web Version
-    features:
-      - id: feat-32
-        title: F32 — Web Mode
-        tool: claude
-        model: claude-sonnet-4-5
-        effort: high
-        skills:
-          - dev-flow
-        specFile: docs/features/F32-web-mode.md
-        context:
-          - docs/ROADMAP.md
-        dependsOn: []
-        tasks: []
-        retry:
-          maxAttempts: 1
-          backoffMs: 5000
-          onFail: stop
-        workflow:
-          mode: staged
-          stages:
-            - specify
-            - plan
-            - tasks
-            - implement
+            - validate
           approvals:
             channel: telegram
             autoAdvance: false
