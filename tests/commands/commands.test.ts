@@ -167,7 +167,7 @@ describe('commands', () => {
       cwd: currentCwd,
       concurrency: 9,
       featureId: 'feat-1',
-      autoAdvanceStages: false,
+      autoAdvanceStages: undefined,
     });
   });
 
@@ -187,7 +187,7 @@ describe('commands', () => {
         cwd: currentCwd,
         concurrency: 3,
         featureId: undefined,
-        autoAdvanceStages: false,
+        autoAdvanceStages: undefined,
       },
     );
   });
@@ -340,7 +340,7 @@ describe('commands', () => {
       cwd: '/tmp/resume-repo',
       concurrency: 3,
       resumePipelineId: 9,
-      autoAdvanceStages: false,
+      autoAdvanceStages: undefined,
     });
   });
 
@@ -383,7 +383,7 @@ describe('commands', () => {
       cwd: '/tmp/resume-repo',
       concurrency: 3,
       resumePipelineId: 9,
-      autoAdvanceStages: false,
+      autoAdvanceStages: undefined,
       resumeOverride: { featureId: 'feat-12', tool: 'opencode', model: 'gpt-4o', effort: 'high' },
     });
     expect(log).toHaveBeenCalledWith(expect.stringContaining('Override pontual'));

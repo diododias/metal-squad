@@ -32,7 +32,12 @@ export function registerRun(program: Command): void {
           cwd,
           concurrency,
           featureId: opts.feature,
-          autoAdvanceStages: Boolean(opts.autoAdvanceStages),
+          // Leave `undefined` (not `Boolean(...)`) when the CLI flag is absent —
+          // `false` here would be read by `resolveAutoAdvance()` as an explicit
+          // override and permanently defeat the catalog checkbox for every
+          // run started without `--auto-advance-stages` (i.e. every web-triggered
+          // run, since the dashboard spawns `msq run` without that flag). See H20.
+          autoAdvanceStages: opts.autoAdvanceStages,
         });
       } catch (error) {
         if (error instanceof DbAccessError) {
