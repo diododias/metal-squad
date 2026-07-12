@@ -153,6 +153,7 @@ describe('backlog skill validation', () => {
               stages: ['specify', 'plan', 'tasks'],
               approvals: { channel: 'telegram', autoAdvance: false },
               syncTasksToBacklog: true,
+              sessionPolicy: { mode: 'isolated', alwaysIsolatedStages: [] },
             },
             tasks: [
               {
@@ -184,8 +185,9 @@ describe('backlog skill validation', () => {
       'plan',
       'review',
       'shipit',
-      'specify',
-      'tasks',
+      'speckit-plan',
+      'speckit-specify',
+      'speckit-tasks',
     ]);
   });
 

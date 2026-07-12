@@ -60,6 +60,7 @@ function todayString(): string {
 export function createBudgetTracker(
   limits: BudgetLimits,
   persistence?: BudgetTrackerPersistence,
+  featureMaxTokens?: Map<string, number>,
 ): BudgetTracker {
   let tokens = 0;
   const perFeatureTokens = new Map<string, number>();
@@ -123,9 +124,10 @@ export function createBudgetTracker(
       const violations: BudgetViolation[] = [];
       const global = globalViolation();
       if (global) violations.push(global);
+      const perFeatureLimit = featureMaxTokens?.get(featureId) ?? limits.perFeatureMaxTokens;
       if (
-        limits.perFeatureMaxTokens !== undefined
-        && featureTotal >= limits.perFeatureMaxTokens
+        perFeatureLimit !== undefined
+        && featureTotal >= perFeatureLimit
         && !featureViolationsReported.has(featureId)
       ) {
         featureViolationsReported.add(featureId);
@@ -134,7 +136,7 @@ export function createBudgetTracker(
           kind: 'tokens',
           featureId,
           spent: featureTotal,
-          limit: limits.perFeatureMaxTokens,
+          limit: perFeatureLimit,
         });
       }
 

@@ -48,6 +48,12 @@ describe('ui components', () => {
         pipelineStatus: null,
         pipelineCurrentStage: null,
         pipelineResumeSummary: null,
+        latestTransitionDecision: 'reuse' as const,
+        latestTransitionReason: 'low_usage_reuse' as const,
+        latestTransitionToStage: 'plan',
+        latestTransitionContextWindowPercent: 20,
+        latestTransitionPreviousSessionId: 'thread_1',
+        latestTransitionNextSessionId: 'thread_1',
         stage: null,
         pendingStageRequestKind: null,
       },
@@ -69,6 +75,13 @@ describe('ui components', () => {
       skills: ['implement', 'test'],
       tool: 'codex',
       effort: 'medium' as const,
+      workflow: {
+        mode: 'staged' as const,
+        stages: ['specify', 'plan'],
+        approvals: { channel: 'telegram' as const, autoAdvance: false },
+        syncTasksToBacklog: true,
+        sessionPolicy: { mode: 'adaptive' as const, alwaysIsolatedStages: ['specify'] },
+      },
     };
 
     const mainPanelFrame = renderWithTheme(
@@ -107,6 +120,8 @@ describe('ui components', () => {
     // D5: AI> and TOOL> prefixes are hidden from log output.
     expect(mainPanelFrame).not.toContain('AI>');
     expect(mainPanelFrame).toContain('Updating the TUI shell.');
+    expect(mainPanelFrame).toContain('transition reuse -> plan');
+    expect(mainPanelFrame).toContain('low usage reuse');
 
     expect(renderWithTheme(
       <StatusBar

@@ -3,12 +3,14 @@ import { beforeEach, describe, expect, it, vi, afterEach } from 'vitest';
 const mockGetSecret = vi.fn();
 const mockResolveGate = vi.fn();
 const mockResolveStageRequest = vi.fn();
+const mockGetStageRequest = vi.fn();
 const mockFetch = vi.fn();
 
 vi.mock('../../src/security/secrets.js', () => ({ getSecret: mockGetSecret }));
 vi.mock('../../src/db/repo.js', () => ({
   resolveGate: mockResolveGate,
   resolveStageRequest: mockResolveStageRequest,
+  getStageRequest: mockGetStageRequest,
 }));
 vi.stubGlobal('fetch', mockFetch);
 
@@ -29,6 +31,7 @@ beforeEach(() => {
   mockGetSecret.mockReset();
   mockResolveGate.mockReset();
   mockResolveStageRequest.mockReset();
+  mockGetStageRequest.mockReset();
   mockFetch.mockReset();
 });
 
@@ -328,6 +331,129 @@ describe('TelegramPoller', () => {
 
     // Should not throw — error is swallowed
     expect(mockResolveGate).toHaveBeenCalled();
+  });
+
+  it('resolves input:<id>:<index> callback by looking up options[index] and resolving with the label', async () => {
+    mockGetSecret.mockResolvedValue('TOKEN');
+    mockGetStageRequest.mockReturnValue({ id: 30, status: 'pending', options: ['Option A', 'Option B'] });
+    let fetchCount = 0;
+    mockFetch.mockImplementation((url: string) => {
+      if (url.includes('getUpdates') && ++fetchCount === 1) {
+        return Promise.resolve(makeUpdateResponse([
+          { update_id: 12, callback_query: { id: 'cb2', data: 'input:30:1' } },
+        ]));
+      }
+      if (url.includes('answerCallbackQuery')) return Promise.resolve({ ok: true });
+      return new Promise(() => {});
+    });
+
+    const { TelegramPoller } = await import('../../src/core/notify/telegram-poller.js');
+    const poller = new TelegramPoller();
+    poller.start();
+    await flushMicrotasks(40);
+
+    expect(mockGetStageRequest).toHaveBeenCalledWith(30);
+    expect(mockResolveStageRequest).toHaveBeenCalledWith(30, 'Option B');
+    poller.stop();
+  });
+
+  it('does not write and only answers the callback when the option index is out of range', async () => {
+    mockGetSecret.mockResolvedValue('TOKEN');
+    mockGetStageRequest.mockReturnValue({ id: 31, status: 'pending', options: ['Option A'] });
+    let fetchCount = 0;
+    let answeredCallback = false;
+    mockFetch.mockImplementation((url: string) => {
+      if (url.includes('getUpdates') && ++fetchCount === 1) {
+        return Promise.resolve(makeUpdateResponse([
+          { update_id: 13, callback_query: { id: 'cb3', data: 'input:31:5' } },
+        ]));
+      }
+      if (url.includes('answerCallbackQuery')) {
+        answeredCallback = true;
+        return Promise.resolve({ ok: true });
+      }
+      return new Promise(() => {});
+    });
+
+    const { TelegramPoller } = await import('../../src/core/notify/telegram-poller.js');
+    const poller = new TelegramPoller();
+    poller.start();
+    await flushMicrotasks(40);
+
+    expect(mockResolveStageRequest).not.toHaveBeenCalled();
+    expect(answeredCallback).toBe(true);
+    poller.stop();
+  });
+
+  it('does not write when the stage request is already resolved (late tap)', async () => {
+    mockGetSecret.mockResolvedValue('TOKEN');
+    mockGetStageRequest.mockReturnValue({ id: 32, status: 'resolved', options: ['Option A', 'Option B'] });
+    let fetchCount = 0;
+    mockFetch.mockImplementation((url: string) => {
+      if (url.includes('getUpdates') && ++fetchCount === 1) {
+        return Promise.resolve(makeUpdateResponse([
+          { update_id: 14, callback_query: { id: 'cb4', data: 'input:32:0' } },
+        ]));
+      }
+      if (url.includes('answerCallbackQuery')) return Promise.resolve({ ok: true });
+      return new Promise(() => {});
+    });
+
+    const { TelegramPoller } = await import('../../src/core/notify/telegram-poller.js');
+    const poller = new TelegramPoller();
+    poller.start();
+    await flushMicrotasks(40);
+
+    expect(mockResolveStageRequest).not.toHaveBeenCalled();
+    poller.stop();
+  });
+
+  it('does not throw when getStageRequest throws (DB unavailable) for an option tap', async () => {
+    mockGetSecret.mockResolvedValue('TOKEN');
+    mockGetStageRequest.mockImplementation(() => { throw new Error('DB error'); });
+    let fetchCount = 0;
+    mockFetch.mockImplementation((url: string) => {
+      if (url.includes('getUpdates') && ++fetchCount === 1) {
+        return Promise.resolve(makeUpdateResponse([
+          { update_id: 15, callback_query: { id: 'cb5', data: 'input:33:0' } },
+        ]));
+      }
+      if (url.includes('answerCallbackQuery')) return Promise.resolve({ ok: true });
+      return new Promise(() => {});
+    });
+
+    const { TelegramPoller } = await import('../../src/core/notify/telegram-poller.js');
+    const poller = new TelegramPoller();
+    poller.start();
+    await flushMicrotasks(40);
+    poller.stop();
+
+    expect(mockResolveStageRequest).not.toHaveBeenCalled();
+  });
+
+  it('regression (US2): "input:<id>:<index>" does not collide with GATE_CMD, STAGE_CMD, or "input:<id> <text>"', async () => {
+    mockGetSecret.mockResolvedValue('TOKEN');
+    mockGetStageRequest.mockReturnValue({ id: 40, status: 'pending', options: ['A', 'B'] });
+    let fetchCount = 0;
+    mockFetch.mockImplementation(() => {
+      if (++fetchCount === 1) return Promise.resolve(makeUpdateResponse([
+        { update_id: 16, message: { text: 'gate:40 approve' } },
+        { update_id: 17, message: { text: 'stage:40 advance' } },
+        { update_id: 18, message: { text: 'input:40 free text response' } },
+      ]));
+      return new Promise(() => {});
+    });
+
+    const { TelegramPoller } = await import('../../src/core/notify/telegram-poller.js');
+    const poller = new TelegramPoller();
+    poller.start();
+    await flushMicrotasks(30);
+
+    expect(mockResolveGate).toHaveBeenCalledWith(40, 'approved');
+    expect(mockResolveStageRequest).toHaveBeenCalledWith(40, 'advance');
+    expect(mockResolveStageRequest).toHaveBeenCalledWith(40, 'free text response');
+    expect(mockGetStageRequest).not.toHaveBeenCalled();
+    poller.stop();
   });
 });
 

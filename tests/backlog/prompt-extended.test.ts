@@ -2,10 +2,12 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 const mockExistsSync = vi.fn();
 const mockReadFileSync = vi.fn();
+const mockStatSync = vi.fn();
 
 vi.mock('node:fs', () => ({
   existsSync: mockExistsSync,
   readFileSync: mockReadFileSync,
+  statSync: mockStatSync,
 }));
 vi.mock('node:path', async (importOriginal) => {
   const actual = await importOriginal<typeof import('node:path')>();
@@ -16,6 +18,7 @@ beforeEach(() => {
   vi.resetModules();
   mockExistsSync.mockReset().mockReturnValue(false);
   mockReadFileSync.mockReset().mockReturnValue('');
+  mockStatSync.mockReset().mockReturnValue({ isFile: () => true, isDirectory: () => false });
 });
 
 function makeFeature(overrides: Record<string, unknown> = {}) {
@@ -232,5 +235,60 @@ describe('buildPrompt — string literals and conditionals', () => {
     const skill = makeSkill('Line 1\n\n\n\nLine 2');
     const result = buildPrompt(makeFeature() as never, [skill], '/cwd');
     expect(result).not.toMatch(/\n{3,}/);
+  });
+
+  it('renders step-guidance sections after base skills and deduplicates duplicate skill names', async () => {
+    const { buildPrompt } = await import('../../src/core/backlog/prompt.js');
+    const feature = makeFeature({
+      workflow: {
+        mode: 'staged',
+        stages: ['implement'],
+        approvals: { channel: 'telegram', autoAdvance: false },
+        syncTasksToBacklog: true,
+        sessionPolicy: { mode: 'isolated', alwaysIsolatedStages: [] },
+        stepGuidance: {
+          implement: {
+            prompt: 'Direct guidance',
+          },
+        },
+      },
+    });
+    const result = buildPrompt(
+      feature as never,
+      [{ ...makeSkill('Base prompt'), name: 'dev-flow' }],
+      '/cwd',
+      {
+        activeStage: 'implement',
+        stepGuidanceSkills: [
+          { ...makeSkill('Duplicate base prompt'), name: 'dev-flow' },
+          { ...makeSkill('Step-only prompt'), name: 'repo-implement-guardrails' },
+        ],
+      },
+    );
+
+    expect(result).toBe('Base prompt\n\n---\n\nStep-only prompt\n\n---\n\nDirect guidance');
+  });
+
+  it('ignores whitespace-only direct step guidance prompt blocks', async () => {
+    const { buildPrompt } = await import('../../src/core/backlog/prompt.js');
+    const feature = makeFeature({
+      workflow: {
+        mode: 'staged',
+        stages: ['implement'],
+        approvals: { channel: 'telegram', autoAdvance: false },
+        syncTasksToBacklog: true,
+        sessionPolicy: { mode: 'isolated', alwaysIsolatedStages: [] },
+        stepGuidance: {
+          implement: {
+            prompt: '   \n\t  ',
+          },
+        },
+      },
+    });
+    const result = buildPrompt(feature as never, [makeSkill('Base prompt')], '/cwd', {
+      activeStage: 'implement',
+    });
+
+    expect(result).toBe('Base prompt');
   });
 });

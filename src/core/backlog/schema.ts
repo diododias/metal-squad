@@ -5,10 +5,18 @@ export const EffortSchema = z.enum(['low', 'medium', 'high']);
 export const WorkflowModeSchema = z.enum(['single', 'staged']);
 export const WorkflowApprovalChannelSchema = z.enum(['telegram']);
 export const OnFailSchema = z.enum(['stop', 'continue', 'gate']);
+export const SessionPolicyModeSchema = z.enum(['isolated', 'adaptive']);
+export const FallbackAlternativeSchema = z.object({
+  tool: ToolSchema,
+  model: z.string().optional(),
+  effort: EffortSchema.optional(),
+  maxAttempts: z.number().int().min(1).max(10).default(1),
+});
 export const RetrySchema = z.object({
   maxAttempts: z.number().int().min(1).max(10).default(1),
   backoffMs: z.number().int().min(0).default(5000),
   onFail: OnFailSchema.default('stop'),
+  fallback: z.array(FallbackAlternativeSchema).default([]),
 });
 
 export const BudgetSchema = z.object({
@@ -18,6 +26,7 @@ export const BudgetSchema = z.object({
 
 export const DefaultsSchema = z.object({
   tool: ToolSchema.default('claude'),
+  model: z.string().trim().min(1).optional(),
   effort: EffortSchema.default('medium'),
   skills: z.array(z.string()).default([]),
   stageSkills: z.record(z.string(), z.array(z.string())).default({}),
@@ -37,11 +46,55 @@ export const WorkflowApprovalsSchema = z.object({
   autoAdvance: z.boolean().default(false),
 });
 
+export const WorkflowSessionPolicySchema = z.object({
+  mode: SessionPolicyModeSchema.default('isolated'),
+  alwaysIsolatedStages: z.array(z.string().min(1)).default([]),
+});
+
+export const StepGuidanceSchema = z.object({
+  skills: z.array(z.string()).optional(),
+  prompt: z.string().optional(),
+});
+
 export const WorkflowSchema = z.object({
   mode: WorkflowModeSchema.default('staged'),
   stages: z.array(z.string()).min(1).default(['specify', 'plan', 'tasks', 'implement', 'validate']),
   approvals: WorkflowApprovalsSchema.default({}),
   syncTasksToBacklog: z.boolean().default(true),
+  sessionPolicy: WorkflowSessionPolicySchema.default({}),
+  stepGuidance: z.record(z.string(), StepGuidanceSchema).default({}),
+}).superRefine((workflow, ctx) => {
+  const seen = new Set<string>();
+  for (const [index, stage] of workflow.sessionPolicy.alwaysIsolatedStages.entries()) {
+    if (!workflow.stages.includes(stage)) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['sessionPolicy', 'alwaysIsolatedStages', index],
+        message: `Stage "${stage}" must exist in workflow.stages.`,
+      });
+    }
+    if (seen.has(stage)) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['sessionPolicy', 'alwaysIsolatedStages', index],
+        message: `Stage "${stage}" is duplicated in sessionPolicy.alwaysIsolatedStages.`,
+      });
+    }
+    seen.add(stage);
+  }
+
+  for (const [stage, guidance] of Object.entries(workflow.stepGuidance)) {
+    if (!workflow.stages.includes(stage)) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['stepGuidance', stage],
+        message: `Stage "${stage}" must exist in workflow.stages.`,
+      });
+    }
+    if ((guidance.skills?.length ?? 0) === 0 && guidance.prompt === undefined) {
+      continue;
+    }
+  }
 });
 
 export const FeatureSchema = z.object({
@@ -58,6 +111,8 @@ export const FeatureSchema = z.object({
   context: z.array(z.string()).optional(),
   workflow: WorkflowSchema.default({}),
   retry: RetrySchema.optional(),
+  maxTokens: z.number().int().positive().optional(),
+  autoStart: z.boolean().default(false),
 });
 
 export const EpicSchema = z.object({
@@ -86,11 +141,15 @@ export const BacklogSchema = z.union([BacklogV1Schema, BacklogV2Schema]);
 export type Tool = z.infer<typeof ToolSchema>;
 export type Effort = z.infer<typeof EffortSchema>;
 export type OnFail = z.infer<typeof OnFailSchema>;
+export type SessionPolicyMode = z.infer<typeof SessionPolicyModeSchema>;
 export type Budget = z.infer<typeof BudgetSchema>;
 export type Retry = z.infer<typeof RetrySchema>;
+export type FallbackAlternative = z.infer<typeof FallbackAlternativeSchema>;
 export type Defaults = z.infer<typeof DefaultsSchema>;
 export type Task = z.infer<typeof TaskSchema>;
 export type WorkflowApprovals = z.infer<typeof WorkflowApprovalsSchema>;
+export type WorkflowSessionPolicy = z.infer<typeof WorkflowSessionPolicySchema>;
+export type StepGuidance = z.infer<typeof StepGuidanceSchema>;
 export type Workflow = z.infer<typeof WorkflowSchema>;
 export type Feature = z.infer<typeof FeatureSchema>;
 export type Epic = z.infer<typeof EpicSchema>;

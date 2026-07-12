@@ -60,7 +60,9 @@ export interface SpawnOptions {
   logLabel?: string;
   heartbeatSuffix?: () => string | undefined;
   onHeartbeat?: (message: string) => void;
+  onStdoutChunk?: (chunk: string) => void;
   onStdoutLine?: (line: string) => void;
+  onStderrChunk?: (chunk: string) => void;
   onStderrLine?: (line: string) => void;
 }
 
@@ -147,12 +149,14 @@ export async function runCli(
     child.stdout.on('data', (d: Buffer) => {
       const chunk = d.toString();
       stdout += chunk;
+      opts.onStdoutChunk?.(chunk);
       stdoutPending = drainLines(chunk, stdoutPending, opts.onStdoutLine);
       lastOutputAt = Date.now();
     });
     child.stderr.on('data', (d: Buffer) => {
       const chunk = d.toString();
       stderr += chunk;
+      opts.onStderrChunk?.(chunk);
       stderrPending = drainLines(chunk, stderrPending, opts.onStderrLine);
       lastOutputAt = Date.now();
     });

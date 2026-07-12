@@ -22,8 +22,8 @@ describe('ui hooks', () => {
 
     vi.doMock('../../src/db/repo.js', () => ({
       listRunsForTui: vi.fn()
-        .mockReturnValueOnce([{ runId: 1 }])
-        .mockReturnValueOnce([{ runId: 2 }]),
+        .mockReturnValueOnce([{ runId: 1, latestTransitionReason: 'adaptive_disabled' }])
+        .mockReturnValueOnce([{ runId: 2, latestTransitionReason: 'low_usage_reuse' }]),
     }));
 
     vi.doMock('../../src/core/events/index.js', () => ({
@@ -40,10 +40,10 @@ describe('ui hooks', () => {
     const { useRuns } = await import('../../src/ui/hooks/useRuns.js');
     const runs = useRuns(1234);
 
-    expect(runs).toEqual([{ runId: 1 }]);
+    expect(runs).toEqual([{ runId: 1, latestTransitionReason: 'adaptive_disabled' }]);
     expect(setIntervalSpy).toHaveBeenCalledWith(expect.any(Function), 1234);
     listeners.get('run:start')?.[0]?.();
-    expect(setRuns).toHaveBeenCalledWith([{ runId: 2 }]);
+    expect(setRuns).toHaveBeenCalledWith([{ runId: 2, latestTransitionReason: 'low_usage_reuse' }]);
   });
 
   it('useRuns keeps stale data when db refresh throws', async () => {

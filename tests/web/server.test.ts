@@ -7,10 +7,12 @@ import WebSocket from 'ws';
 const mocks = vi.hoisted(() => ({
   resolveRepo: vi.fn(),
   listRunsForTui: vi.fn(),
+  listRunHistoryForFeature: vi.fn(),
   openGates: vi.fn(),
   listPendingStageRequests: vi.fn(),
   listRunningTaskRuns: vi.fn(),
   listRunsForStats: vi.fn(),
+  getHistoricalTokenStatsForFeatureProfile: vi.fn(),
   resolveGate: vi.fn(),
   listRunOutput: vi.fn(),
   listTaskRunsForRun: vi.fn(),
@@ -25,18 +27,56 @@ const mocks = vi.hoisted(() => ({
   resolveStageRequest: vi.fn(),
   getPendingFeatures: vi.fn(() => []),
   computeRunBreakdown: vi.fn(),
+  assertWritableDbPath: vi.fn(),
+  updateCatalogFeature: vi.fn(),
+  updateCatalogTask: vi.fn(),
+  loadBacklogFromCatalog: vi.fn(),
+  validateBacklogSkills: vi.fn(),
+  resolveRuntimeConfig: vi.fn(),
+  spawn: vi.fn(),
 }));
 
 vi.mock('../../src/core/repo.js', () => ({
   resolveRepo: mocks.resolveRepo,
 }));
 
+vi.mock('../../src/db/index.js', () => ({
+  assertWritableDbPath: mocks.assertWritableDbPath,
+}));
+
+vi.mock('../../src/db/backlogCatalog.js', () => ({
+  updateCatalogFeature: mocks.updateCatalogFeature,
+  updateCatalogTask: mocks.updateCatalogTask,
+}));
+
+vi.mock('../../src/core/backlog/load.js', () => ({
+  loadBacklogFromCatalog: mocks.loadBacklogFromCatalog,
+}));
+
+vi.mock('../../src/core/skills/index.js', () => ({
+  validateBacklogSkills: mocks.validateBacklogSkills,
+}));
+
+vi.mock('../../src/config/index.js', () => ({
+  resolveRuntimeConfig: mocks.resolveRuntimeConfig,
+}));
+
+vi.mock('node:child_process', async () => {
+  const actual = await vi.importActual<typeof import('node:child_process')>('node:child_process');
+  return {
+    ...actual,
+    spawn: mocks.spawn,
+  };
+});
+
 vi.mock('../../src/db/repo.js', () => ({
   listRunsForTui: mocks.listRunsForTui,
+  listRunHistoryForFeature: mocks.listRunHistoryForFeature,
   openGates: mocks.openGates,
   listPendingStageRequests: mocks.listPendingStageRequests,
   listRunningTaskRuns: mocks.listRunningTaskRuns,
   listRunsForStats: mocks.listRunsForStats,
+  getHistoricalTokenStatsForFeatureProfile: mocks.getHistoricalTokenStatsForFeatureProfile,
   listRunOutput: mocks.listRunOutput,
   listTaskRunsForRun: mocks.listTaskRunsForRun,
   listRunEvents: mocks.listRunEvents,
@@ -108,6 +148,29 @@ async function waitForMessageType(socket: WebSocket, expectedType: string, timeo
   });
 }
 
+async function waitForMatchingMessage(
+  socket: WebSocket,
+  matcher: (message: Record<string, unknown>) => boolean,
+  timeoutMs = 2000,
+): Promise<Record<string, unknown>> {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error('Timeout waiting for matching WebSocket message')), timeoutMs);
+    const handler = (data: WebSocket.RawData): void => {
+      try {
+        const message = JSON.parse(data.toString('utf8')) as Record<string, unknown>;
+        if (matcher(message)) {
+          clearTimeout(timer);
+          socket.off('message', handler);
+          resolve(message);
+        }
+      } catch {
+        // ignore invalid JSON
+      }
+    };
+    socket.on('message', handler);
+  });
+}
+
 describe('web server', () => {
   const previousCwd = process.cwd();
   let cwd = '';
@@ -126,6 +189,12 @@ describe('web server', () => {
     mocks.listRunOutput.mockReturnValue([]);
     mocks.listTaskRunsForRun.mockReturnValue([]);
     mocks.listRunEvents.mockReturnValue([]);
+    mocks.listRunHistoryForFeature.mockReturnValue([]);
+    mocks.getHistoricalTokenStatsForFeatureProfile.mockReturnValue({
+      sampleSize: 0,
+      avgTotalTokens: null,
+      medianTotalTokens: null,
+    });
     mocks.computeRunBreakdown.mockReturnValue({
       wallMs: 1000,
       gateWaitMs: 0,
@@ -135,6 +204,24 @@ describe('web server', () => {
     });
     mocks.getFeatureCatalog.mockReturnValue({});
     mocks.getBacklogSettings.mockReturnValue({ stageSkills: {} });
+    mocks.loadBacklogFromCatalog.mockReturnValue({ epics: [] });
+    mocks.validateBacklogSkills.mockReturnValue(undefined);
+    mocks.resolveRuntimeConfig.mockReturnValue({
+      concurrency: 3,
+      staleRunThresholdMinutes: 120,
+      toolTimeoutMs: 600_000,
+      promptContextCharLimit: 20_000,
+      theme: undefined,
+      stageSkills: {},
+      notifications: { channels: [], events: [] },
+      workflow: { autoAdvanceStages: false, pollIntervalMs: 2_000 },
+      budget: { alertAtPercent: 80 },
+      web: { host: '127.0.0.1', port: 8743, auth: 'token' },
+    });
+    mocks.spawn.mockReturnValue({
+      once: vi.fn(),
+      unref: vi.fn(),
+    });
   });
 
   afterEach(async () => {
@@ -238,6 +325,62 @@ describe('web server', () => {
     socket.close();
   });
 
+  it('broadcasts run:blocked events to authenticated clients', async () => {
+    const { createWebServer } = await import('../../src/web/server.js');
+    const { msqEventBus } = await import('../../src/core/events/index.js');
+    server = createWebServer({ host: '127.0.0.1', port: 0, auth: 'token', token: 'secret' });
+    await new Promise<void>((resolve) => server!.server.listen(0, '127.0.0.1', resolve));
+    const address = server!.server.address() as { port: number };
+    const wsUrl = `ws://127.0.0.1:${address.port}/ws`;
+
+    const socket = new WebSocket(wsUrl);
+    await waitForOpen(socket);
+    socket.send(JSON.stringify({ type: 'auth', token: 'secret' }));
+    await waitForSocketMessage(socket); // state:full
+
+    msqEventBus.emit('run:blocked', {
+      runId: 7,
+      featureId: 'feat-1',
+      tool: 'claude',
+      reason: 'gate',
+      summary: 'aguardando decisão humana',
+    });
+    const message = await waitForSocketMessage(socket);
+    expect((message as { type: string }).type).toBe('run:blocked');
+    expect((message as { payload: { reason: string } }).payload.reason).toBe('gate');
+    socket.close();
+  });
+
+  it('broadcasts autopilot:decision events to authenticated clients', async () => {
+    const { createWebServer } = await import('../../src/web/server.js');
+    const { msqEventBus } = await import('../../src/core/events/index.js');
+    server = createWebServer({ host: '127.0.0.1', port: 0, auth: 'token', token: 'secret' });
+    await new Promise<void>((resolve) => server!.server.listen(0, '127.0.0.1', resolve));
+    const address = server!.server.address() as { port: number };
+    const wsUrl = `ws://127.0.0.1:${address.port}/ws`;
+
+    const socket = new WebSocket(wsUrl);
+    await waitForOpen(socket);
+    socket.send(JSON.stringify({ type: 'auth', token: 'secret' }));
+    await waitForSocketMessage(socket); // state:full
+
+    msqEventBus.emit('autopilot:decision', {
+      triggerFeatureId: 'feat-1',
+      triggerRunId: 7,
+      triggerKind: 'success',
+      action: 'start',
+      selectedFeatureId: 'feat-2',
+      reason: 'Starting next eligible autoStart feature: feat-2.',
+    });
+    const message = await waitForSocketMessage(socket);
+    expect((message as { type: string }).type).toBe('autopilot:decision');
+    expect((message as { payload: { action: string; selectedFeatureId: string } }).payload).toMatchObject({
+      action: 'start',
+      selectedFeatureId: 'feat-2',
+    });
+    socket.close();
+  });
+
   it('executes resolveGate action received via WebSocket', async () => {
     const { createWebServer } = await import('../../src/web/server.js');
     server = createWebServer({ host: '127.0.0.1', port: 0, auth: 'token', token: 'secret' });
@@ -262,7 +405,7 @@ describe('web server', () => {
   it('includes featureCatalog and backlogSettings in full state', async () => {
     const { createWebServer } = await import('../../src/web/server.js');
     mocks.getFeatureCatalog.mockReturnValue({
-      feat1: { id: 'feat1', title: 'Feature One', tool: 'claude', effort: 'M', skills: [], dependsOn: [], workflow: { mode: 'staged', stages: ['specify'], approvals: { channel: 'telegram', autoAdvance: false }, syncTasksToBacklog: true } },
+      feat1: { id: 'feat1', title: 'Feature One', tool: 'claude', effort: 'M', skills: [], dependsOn: [], workflow: { mode: 'staged', stages: ['specify'], approvals: { channel: 'telegram', autoAdvance: false }, syncTasksToBacklog: true, sessionPolicy: { mode: 'isolated', alwaysIsolatedStages: [] } } },
     });
     mocks.getBacklogSettings.mockReturnValue({ stageSkills: { specify: ['speckit-specify'] } });
 
@@ -347,6 +490,635 @@ describe('web server', () => {
     clearTimeout(failTimer);
     socket.off('message', handler);
     expect(extraMessage).toBe(false);
+
+    socket.close();
+  });
+
+  // F34 item 1/2: run history subscription
+  it('sends run:history immediately on subscribe:runHistory', async () => {
+    const { createWebServer } = await import('../../src/web/server.js');
+    mocks.listRunHistoryForFeature.mockReturnValue([
+      { runId: 1, repoId: 'repo-1', featureId: 'feat-1', tool: 'claude', stage: 'implement', status: 'failed', startedAt: '2026-07-06T10:00:00', endedAt: '2026-07-06T10:05:00', totalTokens: 500, pipelineResumeSummary: null },
+    ]);
+
+    server = createWebServer({ host: '127.0.0.1', port: 0, auth: 'token', token: 'secret' });
+    await new Promise<void>((resolve) => server!.server.listen(0, '127.0.0.1', resolve));
+    const address = server!.server.address() as { port: number };
+    const wsUrl = `ws://127.0.0.1:${address.port}/ws`;
+
+    const socket = new WebSocket(wsUrl);
+    await waitForOpen(socket);
+    socket.send(JSON.stringify({ type: 'auth', token: 'secret' }));
+    await waitForSocketMessage(socket); // state:full
+
+    socket.send(JSON.stringify({ type: 'subscribe:runHistory', featureId: 'feat-1' }));
+    const message = await waitForMessageType(socket, 'run:history');
+    const payload = (message as { payload: { featureId: string; runs: unknown[] } }).payload;
+    expect(payload.featureId).toBe('feat-1');
+    expect(payload.runs).toHaveLength(1);
+    expect(mocks.listRunHistoryForFeature).toHaveBeenCalledWith('repo-1', 'feat-1');
+
+    socket.close();
+  });
+
+  // F34 item 2: run changes over WebSocket and HTTP, with git-unavailable fallback.
+  // These pass `cwd` explicitly instead of relying on the ambient
+  // process.cwd() set by beforeEach's process.chdir() — that global mutates
+  // process-wide state, which races against other test files under
+  // vitest's threaded pool and can point computeRunChanges' `git` calls at
+  // the real project repo instead of the empty tmp dir.
+  it('reports no git repository for a run:changes subscription outside a git repo', async () => {
+    const { createWebServer } = await import('../../src/web/server.js');
+
+    server = createWebServer({ host: '127.0.0.1', port: 0, auth: 'token', token: 'secret', cwd });
+    await new Promise<void>((resolve) => server!.server.listen(0, '127.0.0.1', resolve));
+    const address = server!.server.address() as { port: number };
+    const wsUrl = `ws://127.0.0.1:${address.port}/ws`;
+
+    const socket = new WebSocket(wsUrl);
+    await waitForOpen(socket);
+    socket.send(JSON.stringify({ type: 'auth', token: 'secret' }));
+    await waitForSocketMessage(socket); // state:full
+
+    socket.send(JSON.stringify({ type: 'subscribe:runChanges', runId: 42 }));
+    const message = await waitForMessageType(socket, 'run:changes');
+    const payload = (message as { payload: { runId: number; files: unknown[]; notApplicableReason: string | null } }).payload;
+    expect(payload.runId).toBe(42);
+    expect(payload.files).toEqual([]);
+    expect(payload.notApplicableReason).toBe("No git repository detected for this run's working directory.");
+
+    socket.close();
+  });
+
+  it('serves /api/runs/:runId/changes over HTTP with the same git fallback', async () => {
+    const { createWebServer } = await import('../../src/web/server.js');
+    server = createWebServer({ host: '127.0.0.1', port: 0, auth: 'token', token: 'secret', cwd });
+    await new Promise<void>((resolve) => server!.server.listen(0, '127.0.0.1', resolve));
+    const address = server!.server.address() as { port: number };
+    const base = `http://127.0.0.1:${address.port}`;
+
+    const res = await fetch(`${base}/api/runs/42/changes`, { headers: { Authorization: 'Bearer secret' } });
+    expect(res.status).toBe(200);
+    const json = (await res.json()) as { runId: number; notApplicableReason: string | null };
+    expect(json.runId).toBe(42);
+    expect(json.notApplicableReason).toBe("No git repository detected for this run's working directory.");
+  });
+
+  it('rejects /api/runs/:runId/changes without a token', async () => {
+    const { createWebServer } = await import('../../src/web/server.js');
+    server = createWebServer({ host: '127.0.0.1', port: 0, auth: 'token', token: 'secret' });
+    await new Promise<void>((resolve) => server!.server.listen(0, '127.0.0.1', resolve));
+    const address = server!.server.address() as { port: number };
+    const base = `http://127.0.0.1:${address.port}`;
+
+    const res = await fetch(`${base}/api/runs/42/changes`);
+    expect(res.status).toBe(401);
+  });
+
+  // F34 item 6: theme snapshot in full state
+  it('includes a theme snapshot with a default fallback in full state', async () => {
+    const { createWebServer } = await import('../../src/web/server.js');
+    server = createWebServer({ host: '127.0.0.1', port: 0, auth: 'token', token: 'secret' });
+    await new Promise<void>((resolve) => server!.server.listen(0, '127.0.0.1', resolve));
+    const address = server!.server.address() as { port: number };
+    const base = `http://127.0.0.1:${address.port}`;
+
+    const res = await fetch(`${base}/api/state`, { headers: { Authorization: 'Bearer secret' } });
+    const json = (await res.json()) as { theme: { name: string; roles: Record<string, string> } };
+    expect(json.theme.name).toBe('default');
+    expect(json.theme.roles.text).toBeTruthy();
+    expect(json.theme.roles.error).toBeTruthy();
+  });
+
+  it('persists a feature config patch and broadcasts state:full on success', async () => {
+    const { createWebServer } = await import('../../src/web/server.js');
+    mocks.updateCatalogFeature.mockReturnValue({ id: 'feat1', effort: 'high' });
+
+    server = createWebServer({ host: '127.0.0.1', port: 0, auth: 'token', token: 'secret' });
+    await new Promise<void>((resolve) => server!.server.listen(0, '127.0.0.1', resolve));
+    const address = server!.server.address() as { port: number };
+    const wsUrl = `ws://127.0.0.1:${address.port}/ws`;
+
+    const socket = new WebSocket(wsUrl);
+    await waitForOpen(socket);
+    socket.send(JSON.stringify({ type: 'auth', token: 'secret' }));
+    await waitForSocketMessage(socket); // state:full
+
+    socket.send(JSON.stringify({
+      type: 'action:updateFeatureConfig',
+      featureId: 'feat1',
+      patch: { effort: 'high', maxTokens: 5000 },
+    }));
+
+    const stateMessage = await waitForMessageType(socket, 'state:full');
+    expect(mocks.updateCatalogFeature).toHaveBeenCalledWith(
+      'repo-1',
+      'feat1',
+      expect.objectContaining({ effort: 'high', maxTokens: 5000 }),
+    );
+    expect((stateMessage as { type: string }).type).toBe('state:full');
+
+    socket.close();
+  });
+
+  it('persists an autoStart patch through action:updateFeatureConfig', async () => {
+    const { createWebServer } = await import('../../src/web/server.js');
+    mocks.updateCatalogFeature.mockReturnValue({ id: 'feat1', autoStart: true });
+
+    server = createWebServer({ host: '127.0.0.1', port: 0, auth: 'token', token: 'secret' });
+    await new Promise<void>((resolve) => server!.server.listen(0, '127.0.0.1', resolve));
+    const address = server!.server.address() as { port: number };
+    const wsUrl = `ws://127.0.0.1:${address.port}/ws`;
+
+    const socket = new WebSocket(wsUrl);
+    await waitForOpen(socket);
+    socket.send(JSON.stringify({ type: 'auth', token: 'secret' }));
+    await waitForSocketMessage(socket); // state:full
+
+    socket.send(JSON.stringify({
+      type: 'action:updateFeatureConfig',
+      featureId: 'feat1',
+      patch: { autoStart: true },
+    }));
+
+    await waitForMessageType(socket, 'state:full');
+    expect(mocks.updateCatalogFeature).toHaveBeenCalledWith(
+      'repo-1',
+      'feat1',
+      expect.objectContaining({ autoStart: true }),
+    );
+
+    socket.close();
+  });
+
+  it('emits ui:notice without throwing when the feature config patch fails', async () => {
+    const { createWebServer } = await import('../../src/web/server.js');
+    mocks.updateCatalogFeature.mockImplementation(() => {
+      throw new Error('Feature "nope" not found (or archived) for repo "repo-1".');
+    });
+
+    server = createWebServer({ host: '127.0.0.1', port: 0, auth: 'token', token: 'secret' });
+    await new Promise<void>((resolve) => server!.server.listen(0, '127.0.0.1', resolve));
+    const address = server!.server.address() as { port: number };
+    const wsUrl = `ws://127.0.0.1:${address.port}/ws`;
+
+    const socket = new WebSocket(wsUrl);
+    await waitForOpen(socket);
+    socket.send(JSON.stringify({ type: 'auth', token: 'secret' }));
+    await waitForSocketMessage(socket); // state:full
+
+    socket.send(JSON.stringify({
+      type: 'action:updateFeatureConfig',
+      featureId: 'nope',
+      patch: { effort: 'high' },
+    }));
+
+    const notice = await waitForMessageType(socket, 'ui:notice');
+    expect((notice as { payload: { message: string } }).payload.message).toContain('nope');
+
+    socket.close();
+  });
+
+  it('persists a task config patch and broadcasts state:full on success', async () => {
+    const { createWebServer } = await import('../../src/web/server.js');
+    mocks.updateCatalogTask.mockReturnValue({ id: 'task-1', status: 'done' });
+
+    server = createWebServer({ host: '127.0.0.1', port: 0, auth: 'token', token: 'secret' });
+    await new Promise<void>((resolve) => server!.server.listen(0, '127.0.0.1', resolve));
+    const address = server!.server.address() as { port: number };
+    const wsUrl = `ws://127.0.0.1:${address.port}/ws`;
+
+    const socket = new WebSocket(wsUrl);
+    await waitForOpen(socket);
+    socket.send(JSON.stringify({ type: 'auth', token: 'secret' }));
+    await waitForSocketMessage(socket); // state:full
+
+    socket.send(JSON.stringify({
+      type: 'action:updateTaskConfig',
+      featureId: 'feat1',
+      taskId: 'task-1',
+      patch: { status: 'done' },
+    }));
+
+    const stateMessage = await waitForMessageType(socket, 'state:full');
+    expect(mocks.updateCatalogTask).toHaveBeenCalledWith('feat1', 'task-1', { status: 'done' });
+    expect((stateMessage as { type: string }).type).toBe('state:full');
+
+    socket.close();
+  });
+
+  it('emits ui:notice without throwing when the task config patch fails', async () => {
+    const { createWebServer } = await import('../../src/web/server.js');
+    mocks.updateCatalogTask.mockImplementation(() => {
+      throw new Error('Task "nope" not found (or archived) for feature "feat1".');
+    });
+
+    server = createWebServer({ host: '127.0.0.1', port: 0, auth: 'token', token: 'secret' });
+    await new Promise<void>((resolve) => server!.server.listen(0, '127.0.0.1', resolve));
+    const address = server!.server.address() as { port: number };
+    const wsUrl = `ws://127.0.0.1:${address.port}/ws`;
+
+    const socket = new WebSocket(wsUrl);
+    await waitForOpen(socket);
+    socket.send(JSON.stringify({ type: 'auth', token: 'secret' }));
+    await waitForSocketMessage(socket); // state:full
+
+    socket.send(JSON.stringify({
+      type: 'action:updateTaskConfig',
+      featureId: 'feat1',
+      taskId: 'nope',
+      patch: { status: 'done' },
+    }));
+
+    const notice = await waitForMessageType(socket, 'ui:notice');
+    expect((notice as { payload: { message: string } }).payload.message).toContain('nope');
+
+    socket.close();
+  });
+
+  it('rebroadcasts refreshed state:full and run:detail after run-control actions', async () => {
+    const { createWebServer } = await import('../../src/web/server.js');
+
+    let currentRun = {
+      runId: 42,
+      repoId: 'repo-1',
+      featureId: 'feat-1',
+      tool: 'codex',
+      pipelineId: 99,
+      stage: 'implement',
+      rawStatus: 'running',
+      status: 'running',
+      startedAt: '2026-07-11T10:00:00.000Z',
+      endedAt: null,
+      totalTokens: 100,
+      inputTokens: 50,
+      outputTokens: 50,
+      gateId: null,
+      gateDecision: null,
+      pipelineStatus: 'running',
+      pipelineCurrentStage: 'implement',
+      pipelineResumeSummary: null,
+      pendingStageRequestId: null,
+      pendingStageRequestKind: null,
+      pendingStageRequestPrompt: null,
+      pendingStageRequestCreatedAt: null,
+    };
+    let taskStatus = 'running';
+    mocks.listRunsForTui.mockImplementation(() => [currentRun]);
+    mocks.listTaskRunsForRun.mockImplementation(() => [
+      { id: 1, runId: 42, taskId: 'task-1', title: 'Task one', status: taskStatus, stage: 'implement', startedAt: null, endedAt: null },
+    ]);
+
+    server = createWebServer({ host: '127.0.0.1', port: 0, auth: 'token', token: 'secret' });
+    await new Promise<void>((resolve) => server!.server.listen(0, '127.0.0.1', resolve));
+    const address = server!.server.address() as { port: number };
+    const wsUrl = `ws://127.0.0.1:${address.port}/ws`;
+
+    const socket = new WebSocket(wsUrl);
+    await waitForOpen(socket);
+    socket.send(JSON.stringify({ type: 'auth', token: 'secret' }));
+    await waitForSocketMessage(socket); // state:full
+
+    socket.send(JSON.stringify({ type: 'subscribe:runDetail', runId: 42 }));
+    await waitForMessageType(socket, 'run:detail');
+
+    currentRun = { ...currentRun, status: 'blocked', pipelineStatus: 'paused' };
+    taskStatus = 'blocked';
+    const pausedStatePromise = waitForMatchingMessage(
+      socket,
+      (message) => message.type === 'state:full' && Array.isArray((message.payload as { runs?: unknown[] }).runs)
+        && ((message.payload as { runs: Array<{ status: string }> }).runs[0]?.status === 'blocked'),
+    );
+    const pausedDetailPromise = waitForMessageType(socket, 'run:detail');
+    socket.send(JSON.stringify({ type: 'action:pausePipeline', pipelineId: 99 }));
+    await vi.waitFor(() => expect(mocks.pausePipeline).toHaveBeenCalledWith(99));
+    const pausedState = await pausedStatePromise;
+    expect((pausedState.payload as { runs: Array<{ pipelineStatus: string }> }).runs[0]?.pipelineStatus).toBe('paused');
+    const pausedDetail = await pausedDetailPromise;
+    expect((pausedDetail as { payload: { taskRuns: Array<{ status: string }> } }).payload.taskRuns[0]?.status).toBe('blocked');
+
+    currentRun = { ...currentRun, status: 'running', pipelineStatus: 'running' };
+    taskStatus = 'running';
+    const resumedStatePromise = waitForMatchingMessage(
+      socket,
+      (message) => message.type === 'state:full'
+        && ((message.payload as { runs: Array<{ status: string }> }).runs[0]?.status === 'running'),
+    );
+    const resumedDetailPromise = waitForMessageType(socket, 'run:detail');
+    socket.send(JSON.stringify({ type: 'action:resumePipeline', pipelineId: 99 }));
+    await vi.waitFor(() => expect(mocks.resumePipeline).toHaveBeenCalledWith(99));
+    const resumedState = await resumedStatePromise;
+    expect((resumedState.payload as { runs: Array<{ pipelineStatus: string }> }).runs[0]?.pipelineStatus).toBe('running');
+    const resumedDetail = await resumedDetailPromise;
+    expect((resumedDetail as { payload: { taskRuns: Array<{ status: string }> } }).payload.taskRuns[0]?.status).toBe('running');
+
+    currentRun = { ...currentRun, status: 'aborted', pipelineStatus: 'aborting' };
+    taskStatus = 'failed';
+    const abortedStatePromise = waitForMatchingMessage(
+      socket,
+      (message) => message.type === 'state:full'
+        && ((message.payload as { runs: Array<{ status: string }> }).runs[0]?.status === 'aborted'),
+    );
+    const abortedDetailPromise = waitForMessageType(socket, 'run:detail');
+    socket.send(JSON.stringify({ type: 'action:abortPipeline', pipelineId: 99 }));
+    await vi.waitFor(() => expect(mocks.abortPipeline).toHaveBeenCalledWith(99));
+    const abortedState = await abortedStatePromise;
+    expect((abortedState.payload as { runs: Array<{ pipelineStatus: string }> }).runs[0]?.pipelineStatus).toBe('aborting');
+    const abortedDetail = await abortedDetailPromise;
+    expect((abortedDetail as { payload: { taskRuns: Array<{ status: string }> } }).payload.taskRuns[0]?.status).toBe('failed');
+
+    currentRun = { ...currentRun, status: 'blocked', pipelineStatus: 'paused' };
+    taskStatus = 'blocked';
+    const requestedAbortStatePromise = waitForMatchingMessage(
+      socket,
+      (message) => message.type === 'state:full'
+        && ((message.payload as { runs: Array<{ pipelineStatus: string }> }).runs[0]?.pipelineStatus === 'paused'),
+    );
+    const requestedAbortDetailPromise = waitForMessageType(socket, 'run:detail');
+    socket.send(JSON.stringify({ type: 'action:requestFeatureAbort', pipelineId: 99, featureId: 'feat-1' }));
+    await vi.waitFor(() => expect(mocks.requestFeatureAbort).toHaveBeenCalledWith(99, 'feat-1'));
+    const requestedAbortState = await requestedAbortStatePromise;
+    expect((requestedAbortState.payload as { runs: Array<{ status: string }> }).runs[0]?.status).toBe('blocked');
+    const requestedAbortDetail = await requestedAbortDetailPromise;
+    expect((requestedAbortDetail as { payload: { taskRuns: Array<{ status: string }> } }).payload.taskRuns[0]?.status).toBe('blocked');
+
+    socket.close();
+  });
+
+  it('refreshes state, history, and changes subscriptions after blocker resolution', async () => {
+    const { createWebServer } = await import('../../src/web/server.js');
+    const { execFileSync } = await import('node:child_process');
+    const { writeFileSync } = await import('node:fs');
+
+    // Strip GIT_* env vars (GIT_DIR/GIT_WORK_TREE/GIT_INDEX_FILE/...) so this
+    // fixture repo isn't hijacked by an ancestor git process — e.g. when this
+    // suite runs under the repo's own pre-commit hook, git sets these to
+    // point at the *outer* repo, and without stripping them, every git call
+    // below would silently operate on it instead of `cwd`. See src/web/server.ts
+    // GIT_ENV_OVERRIDE for the same workaround in production code.
+    const gitEnv = Object.fromEntries(
+      Object.entries(process.env).filter(([key]) => !key.startsWith('GIT_')),
+    );
+    execFileSync('git', ['init'], { cwd, stdio: 'ignore', env: gitEnv });
+    execFileSync('git', ['config', 'user.email', 'test@example.com'], { cwd, stdio: 'ignore', env: gitEnv });
+    execFileSync('git', ['config', 'user.name', 'Test User'], { cwd, stdio: 'ignore', env: gitEnv });
+    writeFileSync(join(cwd, 'tracked.txt'), 'base\n');
+    execFileSync('git', ['add', 'tracked.txt'], { cwd, stdio: 'ignore', env: gitEnv });
+    execFileSync('git', ['commit', '-m', 'init'], { cwd, stdio: 'ignore', env: gitEnv });
+
+    let currentRun = {
+      runId: 42,
+      repoId: 'repo-1',
+      featureId: 'feat-1',
+      tool: 'codex',
+      pipelineId: 99,
+      stage: 'implement',
+      rawStatus: 'blocked',
+      status: 'blocked',
+      startedAt: '2026-07-11T10:00:00.000Z',
+      endedAt: null,
+      totalTokens: 100,
+      inputTokens: 50,
+      outputTokens: 50,
+      gateId: 7,
+      gateDecision: null,
+      pipelineStatus: 'blocked',
+      pipelineCurrentStage: 'implement',
+      pipelineResumeSummary: null,
+      pendingStageRequestId: null,
+      pendingStageRequestKind: null,
+      pendingStageRequestPrompt: null,
+      pendingStageRequestCreatedAt: null,
+    };
+    let history = [
+      { runId: 42, repoId: 'repo-1', featureId: 'feat-1', tool: 'codex', stage: 'implement', status: 'blocked', startedAt: '2026-07-11T10:00:00.000Z', endedAt: null, totalTokens: 100, pipelineResumeSummary: null },
+    ];
+    mocks.listRunsForTui.mockImplementation(() => [currentRun]);
+    mocks.listRunHistoryForFeature.mockImplementation(() => history);
+
+    server = createWebServer({ host: '127.0.0.1', port: 0, auth: 'token', token: 'secret', cwd });
+    await new Promise<void>((resolve) => server!.server.listen(0, '127.0.0.1', resolve));
+    const address = server!.server.address() as { port: number };
+    const wsUrl = `ws://127.0.0.1:${address.port}/ws`;
+
+    const socket = new WebSocket(wsUrl);
+    await waitForOpen(socket);
+    socket.send(JSON.stringify({ type: 'auth', token: 'secret' }));
+    await waitForSocketMessage(socket); // state:full
+
+    socket.send(JSON.stringify({ type: 'subscribe:runHistory', featureId: 'feat-1' }));
+    await waitForMessageType(socket, 'run:history');
+    socket.send(JSON.stringify({ type: 'subscribe:runChanges', runId: 42 }));
+    await waitForMessageType(socket, 'run:changes');
+
+    writeFileSync(join(cwd, 'tracked.txt'), 'base\nchanged\n');
+    currentRun = { ...currentRun, status: 'running', gateId: null, pipelineStatus: 'running' };
+    history = [
+      { runId: 42, repoId: 'repo-1', featureId: 'feat-1', tool: 'codex', stage: 'implement', status: 'running', startedAt: '2026-07-11T10:00:00.000Z', endedAt: null, totalTokens: 100, pipelineResumeSummary: null },
+    ];
+
+    const stateMessagePromise = waitForMatchingMessage(
+      socket,
+      (message) => message.type === 'state:full'
+        && ((message.payload as { runs: Array<{ gateId: number | null }> }).runs[0]?.gateId === null),
+    );
+    const historyMessagePromise = waitForMessageType(socket, 'run:history');
+    const changesMessagePromise = waitForMessageType(socket, 'run:changes');
+    socket.send(JSON.stringify({ type: 'action:forceResolveGate', gateId: 7 }));
+    await vi.waitFor(() => expect(mocks.forceResolveGate).toHaveBeenCalledWith(7));
+    const stateMessage = await stateMessagePromise;
+    expect((stateMessage.payload as { runs: Array<{ status: string }> }).runs[0]?.status).toBe('running');
+    const historyMessage = await historyMessagePromise;
+    expect((historyMessage as { payload: { runs: Array<{ status: string }> } }).payload.runs[0]?.status).toBe('running');
+    const changesMessage = await changesMessagePromise;
+    expect((changesMessage as { payload: { files: Array<{ path: string }> } }).payload.files).toEqual(
+      expect.arrayContaining([expect.objectContaining({ path: 'tracked.txt' })]),
+    );
+
+    socket.close();
+  });
+
+  it('rebroadcasts refreshed state:full after resolveGate actions', async () => {
+    const { createWebServer } = await import('../../src/web/server.js');
+
+    let currentRun = {
+      runId: 42,
+      repoId: 'repo-1',
+      featureId: 'feat-1',
+      tool: 'codex',
+      pipelineId: 99,
+      stage: 'implement',
+      rawStatus: 'blocked',
+      status: 'blocked',
+      startedAt: '2026-07-11T10:00:00.000Z',
+      endedAt: null,
+      totalTokens: 100,
+      inputTokens: 50,
+      outputTokens: 50,
+      gateId: 7,
+      gateDecision: null,
+      pipelineStatus: 'blocked',
+      pipelineCurrentStage: 'implement',
+      pipelineResumeSummary: null,
+      pendingStageRequestId: null,
+      pendingStageRequestKind: null,
+      pendingStageRequestPrompt: null,
+      pendingStageRequestCreatedAt: null,
+    };
+    mocks.listRunsForTui.mockImplementation(() => [currentRun]);
+
+    server = createWebServer({ host: '127.0.0.1', port: 0, auth: 'token', token: 'secret' });
+    await new Promise<void>((resolve) => server!.server.listen(0, '127.0.0.1', resolve));
+    const address = server!.server.address() as { port: number };
+    const wsUrl = `ws://127.0.0.1:${address.port}/ws`;
+
+    const socket = new WebSocket(wsUrl);
+    await waitForOpen(socket);
+    socket.send(JSON.stringify({ type: 'auth', token: 'secret' }));
+    await waitForSocketMessage(socket); // state:full
+
+    currentRun = { ...currentRun, status: 'running', gateId: null, pipelineStatus: 'running' };
+    const resolvedGateStatePromise = waitForMatchingMessage(
+      socket,
+      (message) => message.type === 'state:full'
+        && ((message.payload as { runs: Array<{ gateId: number | null }> }).runs[0]?.gateId === null),
+    );
+    socket.send(JSON.stringify({ type: 'action:resolveGate', gateId: 7, decision: 'approved' }));
+    await vi.waitFor(() => expect(mocks.resolveGate).toHaveBeenCalledWith(7, 'approved'));
+    const resolvedGateState = await resolvedGateStatePromise;
+    expect((resolvedGateState.payload as { runs: Array<{ status: string }> }).runs[0]?.status).toBe('running');
+
+    socket.close();
+  });
+
+  it('rebroadcasts refreshed state:full after resolveStageRequest actions', async () => {
+    const { createWebServer } = await import('../../src/web/server.js');
+
+    let currentRun = {
+      runId: 42,
+      repoId: 'repo-1',
+      featureId: 'feat-1',
+      tool: 'codex',
+      pipelineId: 99,
+      stage: 'implement',
+      rawStatus: 'blocked',
+      status: 'blocked',
+      startedAt: '2026-07-11T10:00:00.000Z',
+      endedAt: null,
+      totalTokens: 100,
+      inputTokens: 50,
+      outputTokens: 50,
+      gateId: null,
+      gateDecision: null,
+      pipelineStatus: 'blocked',
+      pipelineCurrentStage: 'implement',
+      pipelineResumeSummary: null,
+      pendingStageRequestId: 11,
+      pendingStageRequestKind: 'approval',
+      pendingStageRequestPrompt: 'Need approval',
+      pendingStageRequestCreatedAt: '2026-07-11T10:05:00.000Z',
+    };
+    mocks.listRunsForTui.mockImplementation(() => [currentRun]);
+
+    server = createWebServer({ host: '127.0.0.1', port: 0, auth: 'token', token: 'secret' });
+    await new Promise<void>((resolve) => server!.server.listen(0, '127.0.0.1', resolve));
+    const address = server!.server.address() as { port: number };
+    const wsUrl = `ws://127.0.0.1:${address.port}/ws`;
+
+    const socket = new WebSocket(wsUrl);
+    await waitForOpen(socket);
+    socket.send(JSON.stringify({ type: 'auth', token: 'secret' }));
+    await waitForSocketMessage(socket); // state:full
+
+    currentRun = {
+      ...currentRun,
+      status: 'running',
+      pipelineStatus: 'running',
+      pendingStageRequestId: null,
+      pendingStageRequestKind: null,
+      pendingStageRequestPrompt: null,
+      pendingStageRequestCreatedAt: null,
+    };
+    const resolvedStageRequestStatePromise = waitForMatchingMessage(
+      socket,
+      (message) => message.type === 'state:full'
+        && ((message.payload as { runs: Array<{ pendingStageRequestId: number | null }> }).runs[0]?.pendingStageRequestId === null)
+        && ((message.payload as { runs: Array<{ status: string }> }).runs[0]?.status === 'running'),
+    );
+    socket.send(JSON.stringify({ type: 'action:resolveStageRequest', requestId: 11, response: 'advance' }));
+    await vi.waitFor(() => expect(mocks.resolveStageRequest).toHaveBeenCalledWith(11, 'advance'));
+    await resolvedStageRequestStatePromise;
+
+    socket.close();
+  });
+
+  it('reconciles detached startFeature mutations on the poll loop without duplicate pending visibility', async () => {
+    const { createWebServer } = await import('../../src/web/server.js');
+
+    const featureEntry = {
+      id: 'feat-1',
+      title: 'Feature One',
+      tool: 'codex',
+      effort: 'medium',
+      skills: [],
+      dependsOn: [],
+      workflow: { mode: 'staged', stages: ['specify'], approvals: { channel: 'telegram', autoAdvance: false }, syncTasksToBacklog: true, sessionPolicy: { mode: 'isolated', alwaysIsolatedStages: [] } },
+    };
+    let runs: Array<Record<string, unknown>> = [];
+    mocks.getFeatureCatalog.mockReturnValue({ 'feat-1': featureEntry });
+    mocks.getPendingFeatures.mockImplementation((catalog: Record<string, typeof featureEntry>, doneFeatureIds: Set<string>, activeFeatureIds: Set<string>) =>
+      Object.values(catalog).filter((feature) => !doneFeatureIds.has(feature.id) && !activeFeatureIds.has(feature.id)));
+    mocks.listRunsForTui.mockImplementation(() => runs);
+
+    server = createWebServer({ host: '127.0.0.1', port: 0, auth: 'token', token: 'secret' });
+    await new Promise<void>((resolve) => server!.server.listen(0, '127.0.0.1', resolve));
+    const address = server!.server.address() as { port: number };
+    const wsUrl = `ws://127.0.0.1:${address.port}/ws`;
+
+    const socket = new WebSocket(wsUrl);
+    await waitForOpen(socket);
+    socket.send(JSON.stringify({ type: 'auth', token: 'secret' }));
+    const initialState = await waitForSocketMessage(socket);
+    expect((initialState as { payload: { pendingFeatures: Array<{ id: string }> } }).payload.pendingFeatures).toEqual(
+      expect.arrayContaining([expect.objectContaining({ id: 'feat-1' })]),
+    );
+
+    socket.send(JSON.stringify({ type: 'action:startFeature', featureId: 'feat-1' }));
+    await vi.waitFor(() => expect(mocks.spawn).toHaveBeenCalled());
+
+    runs = [{
+      runId: 42,
+      repoId: 'repo-1',
+      featureId: 'feat-1',
+      tool: 'codex',
+      pipelineId: 99,
+      stage: 'implement',
+      rawStatus: 'running',
+      status: 'running',
+      startedAt: '2026-07-11T10:00:00.000Z',
+      endedAt: null,
+      totalTokens: 100,
+      inputTokens: 50,
+      outputTokens: 50,
+      gateId: null,
+      gateDecision: null,
+      pipelineStatus: 'running',
+      pipelineCurrentStage: 'implement',
+      pipelineResumeSummary: null,
+      pendingStageRequestId: null,
+      pendingStageRequestKind: null,
+      pendingStageRequestPrompt: null,
+      pendingStageRequestCreatedAt: null,
+    }];
+
+    const reconciledState = await waitForMatchingMessage(
+      socket,
+      (message) => message.type === 'state:full'
+        && ((message.payload as { runs: unknown[] }).runs.length === 1)
+        && ((message.payload as { pendingFeatures: unknown[] }).pendingFeatures.length === 0),
+      3000,
+    );
+    expect((reconciledState.payload as { runs: Array<{ featureId: string }> }).runs[0]?.featureId).toBe('feat-1');
 
     socket.close();
   });

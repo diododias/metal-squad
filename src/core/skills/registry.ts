@@ -83,9 +83,13 @@ function discoverSpecKitSkills(cwd: string): Skill[] {
   if (existsSync(agentsRoot)) {
     for (const entry of readdirSync(agentsRoot, { withFileTypes: true })) {
       if (!entry.isDirectory() || !entry.name.startsWith('speckit-')) continue;
-      const name = entry.name.replace(/^speckit-/, '');
-      const skill = loadFileSkill(join(agentsRoot, entry.name), 'external', name);
-      if (skill) skills.set(skill.name, skill);
+      const dir = join(agentsRoot, entry.name);
+      const canonicalSkill = loadFileSkill(dir, 'external', entry.name);
+      if (canonicalSkill) skills.set(canonicalSkill.name, canonicalSkill);
+
+      const aliasName = entry.name.replace(/^speckit-/, '');
+      const aliasSkill = loadFileSkill(dir, 'external', aliasName);
+      if (aliasSkill) skills.set(aliasSkill.name, aliasSkill);
     }
   }
 

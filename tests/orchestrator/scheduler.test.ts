@@ -60,6 +60,40 @@ describe('schedule', () => {
     expect(executed).toEqual(['feat-01', 'feat-02']);
   });
 
+  it('pauses instead of finishing when a failed feature uses onFail gate, resuming re-attempts it', async () => {
+    const executed: string[] = [];
+    let feat01Attempts = 0;
+
+    const controller = schedule(
+      [
+        { ...feature('feat-01'), retry: { maxAttempts: 1, backoffMs: 0, onFail: 'gate' } },
+        feature('feat-02', ['feat-01']),
+      ],
+      {
+        concurrency: 1,
+        execute: async (item) => {
+          executed.push(item.id);
+          if (item.id === 'feat-01') {
+            feat01Attempts += 1;
+            if (feat01Attempts === 1) return { ok: false, summary: 'gate decision needed' };
+            return { ok: true, summary: 'resolved after gate' };
+          }
+          return { ok: true, summary: item.id };
+        },
+      },
+    );
+
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(controller.getState()).toBe('paused');
+    expect(executed).toEqual(['feat-01']);
+
+    controller.resume();
+    await controller.result;
+
+    expect(executed).toEqual(['feat-01', 'feat-01', 'feat-02']);
+  });
+
   it('pauses new dispatches while letting the active feature finish, then resumes', async () => {
     let releaseFirst!: () => void;
     const executed: string[] = [];

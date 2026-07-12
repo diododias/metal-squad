@@ -10,14 +10,28 @@ export interface TokenUsage {
 export interface RunControlNeedsInput {
   type: 'needs_input';
   prompt: string;
+  options?: string[];
 }
 
 export type RunControl = RunControlNeedsInput;
+
+export interface SessionHandle {
+  tool: Tool;
+  sessionId: string;
+  capturedFromRunId: number;
+  capturedAt: string;
+}
+
+export type SessionReuseMode = 'new' | 'resume';
 
 export interface RunFeatureOptions {
   cwd: string;
   runId: number;
   signal?: AbortSignal;
+  session?: {
+    mode: SessionReuseMode;
+    handle?: SessionHandle;
+  };
 }
 
 export interface RunResult {
@@ -26,6 +40,7 @@ export interface RunResult {
   usage?: TokenUsage;
   control?: RunControl;
   aborted?: boolean;
+  session?: SessionHandle | null;
 }
 
 export interface ToolAdapter {
@@ -36,4 +51,6 @@ export interface ToolAdapter {
   runFeature(feature: Feature, prompt: string, opts: RunFeatureOptions): Promise<RunResult>;
   /** Extrai uso de tokens do transcript, se disponível. */
   parseUsage?(transcript: string): TokenUsage | null;
+  /** Verifica de forma rápida e síncrona se o binário desta ferramenta está disponível no ambiente atual. */
+  isAvailable?(): boolean;
 }

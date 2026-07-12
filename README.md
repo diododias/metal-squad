@@ -320,6 +320,8 @@ Top level:
 - `context`
 - `workflow`
 - `retry`
+- `autoStart`: opt-in auto-pilot flag (default `false`) — see
+  [Auto-Pilot](#auto-pilot) below
 
 `workflow`:
 
@@ -349,6 +351,29 @@ Top level:
 See [backlog.yaml](./backlog.yaml) for the current repo configuration and
 [backlog.example.yaml](./backlog.example.yaml) for a complete example covering
 all schema options.
+
+### Auto-Pilot
+
+Set `autoStart: true` on a feature to opt it into automatic continuation
+(default is `false`, manual-only). When a feature with `autoStart: true`
+reaches a qualifying outcome, `msq` automatically starts the next eligible
+`autoStart` feature — same dependency-respecting order the scheduler already
+uses, without a fresh manual command:
+
+- **success** — the finished feature stays `done`; the next eligible feature
+  starts.
+- **blocked** (waiting on human input or gate approval) — the feature stays
+  blocked for manual recovery; the next eligible feature starts anyway.
+- **ordinary execution failure** — the feature stays failed for manual
+  recovery; the next eligible feature starts anyway.
+- **budget/token protective stop** — auto-pilot halts; no further feature
+  starts until an operator resolves the block manually. This preserves the
+  budget cap guarantees from F14.
+- **manual abort** — auto-pilot does not continue; recovery is manual.
+
+Manual starts (`msq run --feature <id>`, or the web/TUI "start" action) work
+the same as before for any feature, whether or not it has `autoStart: true`.
+Only the *automatic* continuation is opt-in.
 
 ### Defaults and Inheritance
 

@@ -129,11 +129,19 @@ function stageStatusLabel(stage: WorkflowStageSummary): string {
   return 'pending';
 }
 
+function formatTransitionReason(reason: string | null | undefined): string | null {
+  return reason ? reason.replace(/_/g, ' ') : null;
+}
+
+function formatTransitionDecision(decision: string | null | undefined): string {
+  return decision ? decision.replace(/_/g, ' ') : 'new session';
+}
+
 const COLUMN_EMPTY_LABEL: Record<DashboardGroupId, string> = {
-  execution: 'nenhuma em execução',
-  todo: 'backlog vazio',
-  done: 'nenhuma concluída',
-  canceled: 'sem falhas',
+  execution: 'none running',
+  todo: 'backlog empty',
+  done: 'none completed',
+  canceled: 'no failures',
 };
 
 function MainPanelComponent({
@@ -630,6 +638,23 @@ function renderDetailSection(sectionId: DetailSectionId, ctx: DetailSectionConte
       const ctxLabel = selectedRun.contextWindowTokens
         ? `${formatPercent(selectedRun.contextWindowPercent)} ctx`
         : '— ctx';
+      const transitionSummary = selectedRun.latestTransitionReason
+        ? [
+            `transition ${formatTransitionDecision(selectedRun.latestTransitionDecision)} -> ${selectedRun.latestTransitionToStage ?? 'next stage'}`,
+            formatTransitionReason(selectedRun.latestTransitionReason),
+            selectedRun.latestTransitionContextWindowPercent !== null && selectedRun.latestTransitionContextWindowPercent !== undefined
+              ? `${formatPercent(selectedRun.latestTransitionContextWindowPercent)} ctx`
+              : null,
+          ].filter(Boolean).join(' · ')
+        : null;
+      const handoffSummary = selectedRun.latestTransitionPreviousSessionId || selectedRun.latestTransitionNextSessionId
+        ? [
+            'session handoff',
+            selectedRun.latestTransitionPreviousSessionId ?? 'new',
+            '->',
+            selectedRun.latestTransitionNextSessionId ?? 'new',
+          ].join(' ')
+        : null;
       const head: string = [
         `${statusGlyph} ${selectedRun.status}`,
         `tool ${selectedRun.tool}`,
@@ -638,12 +663,34 @@ function renderDetailSection(sectionId: DetailSectionId, ctx: DetailSectionConte
         `${elapsed} elapsed`,
         ctxLabel,
       ].join(' | ');
+      // F39: 'paused' is resumable live via the 'r' hotkey (a poller in the still-running
+      // `msq run` process picks up the DB flip). 'failed'/'blocked'/'aborted' mean that
+      // process already exited, so there's nothing left in-app to flip — the only way to
+      // continue is a new process via `msq resume`, which the UI must not spawn itself
+      // (src/ui/ never spawns processes). Surface that command here instead of a dead hotkey.
+      const resumeCliHint = selectedRun.pipelineId
+        && (selectedRun.pipelineStatus === 'failed' || selectedRun.pipelineStatus === 'blocked' || selectedRun.pipelineStatus === 'aborted')
+        ? `resume: msq resume ${String(selectedRun.pipelineId)} --tool <tool> --model <model>`
+        : null;
       return (
         <DetailSection theme={theme} title={DETAIL_SECTION_LABEL.summary} width={width}>
           <Text {...theme.role('text')}>{truncateText(head, Math.max(24, width - 4))}</Text>
+          {resumeCliHint && (
+            <Text {...theme.role('muted')}>{truncateText(resumeCliHint, Math.max(24, width - 4))}</Text>
+          )}
           {selectedRun.pendingStageRequestPrompt && (
             <Text {...theme.role('muted')}>
               wait {truncateText(selectedRun.pendingStageRequestPrompt, Math.max(22, width - 6))}
+            </Text>
+          )}
+          {transitionSummary && (
+            <Text {...theme.role('muted')}>
+              {truncateText(transitionSummary, Math.max(22, width - 4))}
+            </Text>
+          )}
+          {handoffSummary && (
+            <Text {...theme.role('muted')}>
+              {truncateText(handoffSummary, Math.max(22, width - 4))}
             </Text>
           )}
           {breakdown?.wallMs != null && (

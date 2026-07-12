@@ -101,9 +101,9 @@ describe('StatsBar', () => {
     );
     expect(lastFrame()).toContain('3 done');
     expect(lastFrame()).toContain('5 todo');
-    expect(lastFrame()).toContain('2 execução');
-    expect(lastFrame()).toContain('1 falha');
-    expect(lastFrame()).toContain('4 aprovações');
+    expect(lastFrame()).toContain('2 execution');
+    expect(lastFrame()).toContain('1 failure');
+    expect(lastFrame()).toContain('4 approvals');
     expect(lastFrame()).toContain('tokens (7d) 1.5k');
   });
 
@@ -152,7 +152,7 @@ describe('StatsBar', () => {
     );
     const frame = lastFrame();
     expect(frame).toContain('3 done');
-    expect(frame).toContain('4 aprovações');
+    expect(frame).toContain('4 approvals');
     expect(frame).not.toContain('tokens (7d)');
   });
 });
@@ -289,6 +289,7 @@ describe('FeaturePreview', () => {
       stages: ['specify', 'plan', 'tasks', 'implement', 'validate'],
       approvals: { channel: 'telegram' as const, autoAdvance: false },
       syncTasksToBacklog: true,
+      sessionPolicy: { mode: 'adaptive' as const, alwaysIsolatedStages: ['specify', 'plan'] },
     },
     retry: undefined,
     specFile: undefined,
@@ -316,6 +317,21 @@ describe('FeaturePreview', () => {
     expect(lastFrame()).toContain('maxAttempts: 1');
     expect(lastFrame()).toContain('onFail: stop');
     expect(lastFrame()).toContain('feat-earlier');
+    expect(lastFrame()).toContain('alwaysIsolatedStages: specify, plan');
+  });
+
+  it('shows autoStart false by default when the feature declares none', () => {
+    const { lastFrame } = renderWithTheme(
+      <FeatureConfigSection feature={previewFeature} settings={settings} width={60} />,
+    );
+    expect(lastFrame()).toContain('autoStart: false');
+  });
+
+  it('shows autoStart true when the feature opts in', () => {
+    const { lastFrame } = renderWithTheme(
+      <FeatureConfigSection feature={{ ...previewFeature, autoStart: true }} settings={settings} width={60} />,
+    );
+    expect(lastFrame()).toContain('autoStart: true');
   });
 });
 
@@ -532,6 +548,7 @@ describe('MainPanel vertical budget', () => {
         stages: ['specify', 'plan', 'tasks', 'implement', 'validate'],
         approvals: { channel: 'telegram' as const, autoAdvance: false },
         syncTasksToBacklog: true,
+        sessionPolicy: { mode: 'isolated' as const, alwaysIsolatedStages: [] },
       },
     };
   }

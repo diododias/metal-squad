@@ -220,10 +220,73 @@ function migrate(d: Database.Database): void {
       resolved_at TEXT
     );
 
+    CREATE TABLE IF NOT EXISTS stage_transition_decisions (
+      id          INTEGER PRIMARY KEY AUTOINCREMENT,
+      pipeline_id INTEGER NOT NULL REFERENCES pipelines(id),
+      feature_id  TEXT NOT NULL,
+      from_run_id INTEGER NOT NULL REFERENCES runs(id),
+      from_stage  TEXT NOT NULL,
+      to_stage    TEXT NOT NULL,
+      policy_mode TEXT NOT NULL,
+      decision    TEXT NOT NULL,
+      reason      TEXT NOT NULL,
+      context_window_percent REAL,
+      previous_session_id TEXT,
+      next_session_id TEXT,
+      created_at  TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_stage_transition_decisions_pipeline_feature
+      ON stage_transition_decisions(pipeline_id, feature_id, id DESC);
+
     CREATE TABLE IF NOT EXISTS budget_state (
       key TEXT PRIMARY KEY,
       tokens INTEGER NOT NULL DEFAULT 0,
       updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+
+    CREATE TABLE IF NOT EXISTS backlog_catalog_meta (
+      repo_id       TEXT PRIMARY KEY REFERENCES repos(repo_id),
+      repo          TEXT NOT NULL,
+      version       INTEGER NOT NULL,
+      defaults_json TEXT NOT NULL,
+      budget_json   TEXT,
+      updated_at    TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+
+    CREATE TABLE IF NOT EXISTS backlog_epics (
+      epic_id     TEXT PRIMARY KEY,
+      repo_id     TEXT NOT NULL REFERENCES repos(repo_id),
+      title       TEXT NOT NULL,
+      position    INTEGER NOT NULL,
+      data_json   TEXT NOT NULL,
+      archived_at TEXT,
+      updated_at  TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+
+    CREATE TABLE IF NOT EXISTS backlog_features (
+      feature_id  TEXT PRIMARY KEY,
+      epic_id     TEXT NOT NULL REFERENCES backlog_epics(epic_id),
+      repo_id     TEXT NOT NULL REFERENCES repos(repo_id),
+      title       TEXT NOT NULL,
+      depends_on  TEXT NOT NULL DEFAULT '[]',
+      spec_file   TEXT,
+      position    INTEGER NOT NULL,
+      data_json   TEXT NOT NULL,
+      archived_at TEXT,
+      updated_at  TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+
+    CREATE TABLE IF NOT EXISTS backlog_tasks (
+      task_id     TEXT NOT NULL,
+      feature_id  TEXT NOT NULL REFERENCES backlog_features(feature_id),
+      title       TEXT NOT NULL,
+      status      TEXT NOT NULL DEFAULT 'todo',
+      position    INTEGER NOT NULL,
+      data_json   TEXT NOT NULL,
+      archived_at TEXT,
+      updated_at  TEXT NOT NULL DEFAULT (datetime('now')),
+      PRIMARY KEY (task_id, feature_id)
     );
   `);
 
@@ -308,6 +371,27 @@ function migrate(d: Database.Database): void {
   ensurePipelineColumn('requested_abort_feature_id', `ALTER TABLE pipelines ADD COLUMN requested_abort_feature_id TEXT`);
   ensurePipelineColumn('resume_count', `ALTER TABLE pipelines ADD COLUMN resume_count INTEGER NOT NULL DEFAULT 0`);
   ensurePipelineColumn('resume_summary', `ALTER TABLE pipelines ADD COLUMN resume_summary TEXT`);
+
+  const retryHistoryColumns = d
+    .prepare(`PRAGMA table_info(retry_history)`)
+    .all() as { name?: string }[];
+  const ensureRetryHistoryColumn = (name: string, sql: string): void => {
+    if (!retryHistoryColumns.some((column) => column.name === name)) {
+      d.exec(sql);
+    }
+  };
+  ensureRetryHistoryColumn('tool', `ALTER TABLE retry_history ADD COLUMN tool TEXT`);
+  ensureRetryHistoryColumn('model', `ALTER TABLE retry_history ADD COLUMN model TEXT`);
+
+  const stageRequestColumns = d
+    .prepare(`PRAGMA table_info(stage_requests)`)
+    .all() as { name?: string }[];
+  const ensureStageRequestColumn = (name: string, sql: string): void => {
+    if (!stageRequestColumns.some((column) => column.name === name)) {
+      d.exec(sql);
+    }
+  };
+  ensureStageRequestColumn('options', `ALTER TABLE stage_requests ADD COLUMN options TEXT`);
 }
 
 function toDbAccessError(error: unknown, dbPath: string): Error {

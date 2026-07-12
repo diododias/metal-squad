@@ -1,19 +1,30 @@
 import { readFileSync, existsSync } from 'node:fs';
 import { resolve, dirname, isAbsolute } from 'node:path';
 import { parse } from 'yaml';
+import { loadRepoConfig, mergeStageSkills } from '../../config/index.js';
 import {
   BacklogSchema,
+  BacklogV2Schema,
   type BacklogV1,
   type BacklogV2,
   type Defaults,
+  type Epic,
+  type Feature,
 } from './schema.js';
+import { getCatalogMeta, listCatalogEpics, listCatalogFeatures } from '../../db/backlogCatalog.js';
 
 export const BACKLOG_FILE = 'backlog.yaml';
 
 type RawYamlMap = Record<string, unknown>;
 
-function normalizeV1(backlog: BacklogV1): BacklogV2 {
-  const defaults: Defaults = { tool: 'claude', effort: 'medium', skills: [], stageSkills: {} };
+function normalizeV1(backlog: BacklogV1, repoDefaults: ReturnType<typeof loadRepoConfig>['defaults'] = {}): BacklogV2 {
+  const defaults: Defaults = {
+    tool: repoDefaults.tool ?? 'claude',
+    ...(repoDefaults.model ? { model: repoDefaults.model } : {}),
+    effort: repoDefaults.effort ?? 'medium',
+    skills: repoDefaults.skills ?? [],
+    stageSkills: repoDefaults.stageSkills ?? {},
+  };
   return {
     version: 2,
     repo: backlog.repo,
@@ -33,10 +44,18 @@ function normalizeV1(backlog: BacklogV1): BacklogV2 {
   };
 }
 
-function propagateDefaults(backlog: BacklogV2): BacklogV2 {
-  const { defaults } = backlog;
+function propagateDefaults(backlog: BacklogV2, repoDefaults: ReturnType<typeof loadRepoConfig>['defaults'] = {}): BacklogV2 {
+  const defaults: Defaults = {
+    ...backlog.defaults,
+    tool: backlog.defaults.tool,
+    model: backlog.defaults.model ?? repoDefaults.model,
+    effort: backlog.defaults.effort,
+    skills: backlog.defaults.skills,
+    stageSkills: mergeStageSkills(repoDefaults.stageSkills, backlog.defaults.stageSkills),
+  };
   return {
     ...backlog,
+    defaults,
     epics: backlog.epics.map((epic) => ({
       ...epic,
       features: epic.features.map((feature) => ({
@@ -72,17 +91,29 @@ function validateFiles(backlog: BacklogV2, root: string): void {
   }
 }
 
-function applyDefaultsBeforeParse(raw: unknown): unknown {
+function applyDefaultsBeforeParse(
+  raw: unknown,
+  repoDefaults: ReturnType<typeof loadRepoConfig>['defaults'] = {},
+): unknown {
   if (!isRecord(raw) || raw.version !== 2) return raw;
 
   const defaults = isRecord(raw.defaults) ? raw.defaults : {};
-  const defaultTool = typeof defaults.tool === 'string' ? defaults.tool : undefined;
-  const defaultEffort = typeof defaults.effort === 'string' ? defaults.effort : undefined;
-  const defaultSkills: unknown[] | undefined = Array.isArray(defaults.skills) ? defaults.skills : undefined;
+  const defaultTool = typeof defaults.tool === 'string' ? defaults.tool : repoDefaults.tool;
+  const defaultModel = typeof defaults.model === 'string' ? defaults.model : repoDefaults.model;
+  const defaultEffort = typeof defaults.effort === 'string' ? defaults.effort : repoDefaults.effort;
+  const defaultSkills: unknown[] | undefined = Array.isArray(defaults.skills) ? defaults.skills : repoDefaults.skills;
+  const defaultStageSkills = isRecord(defaults.stageSkills)
+    ? defaults.stageSkills
+    : repoDefaults.stageSkills;
   const epics = Array.isArray(raw.epics) ? raw.epics : [];
 
   return {
     ...raw,
+    defaults: {
+      ...repoDefaults,
+      ...defaults,
+      ...(defaultStageSkills ? { stageSkills: { ...defaultStageSkills, ...(isRecord(defaults.stageSkills) ? defaults.stageSkills : {}) } } : {}),
+    },
     epics: epics.map((epic): unknown => {
       if (!isRecord(epic)) return epic;
       const features: unknown[] = Array.isArray(epic.features) ? epic.features : [];
@@ -94,6 +125,7 @@ function applyDefaultsBeforeParse(raw: unknown): unknown {
           return {
             ...feature,
             ...(feature.tool === undefined && defaultTool ? { tool: defaultTool } : {}),
+            ...(feature.model === undefined && defaultModel ? { model: defaultModel } : {}),
             ...(feature.effort === undefined && defaultEffort ? { effort: defaultEffort } : {}),
             ...(feature.skills === undefined && defaultSkills ? { skills: [...defaultSkills] } : {}),
             tasks: tasks.map((task) => {
@@ -118,16 +150,57 @@ export function loadBacklog(path = BACKLOG_FILE, cwd = process.cwd()): BacklogV2
   const absPath = isAbsolute(path) ? path : resolve(cwd, path);
   const root = dirname(absPath);
   const raw = readFileSync(absPath, 'utf8');
-  const parsed = BacklogSchema.parse(applyDefaultsBeforeParse(parse(raw)));
+  const repoDefaults = loadRepoConfig(cwd).defaults;
+  const parsed = BacklogSchema.parse(applyDefaultsBeforeParse(parse(raw), repoDefaults));
 
   let v2: BacklogV2;
   if (parsed.version === 1) {
     console.warn('[msq] backlog.yaml is in v1 format — consider upgrading to version: 2');
-    v2 = normalizeV1(parsed);
+    v2 = normalizeV1(parsed, repoDefaults);
   } else {
-    v2 = propagateDefaults(parsed);
+    v2 = propagateDefaults(parsed, repoDefaults);
   }
 
   validateFiles(v2, root);
   return v2;
+}
+
+/**
+ * Reconstructs a fully-validated Backlog from the DB catalog tables
+ * (populated by `msq backlog load`), instead of reading backlog.yaml.
+ * This is the runtime source of truth after F35 — see docs/features/F35-backlog-catalog-import.md.
+ */
+export function loadBacklogFromCatalog(repoId: string, cwd = process.cwd()): BacklogV2 {
+  const meta = getCatalogMeta(repoId);
+  const epicRows = listCatalogEpics(repoId);
+
+  if (!meta || epicRows.length === 0) {
+    throw new Error(
+      `Catalogo vazio para este repo — rode "msq backlog load" primeiro.`,
+    );
+  }
+
+  const featureRows = listCatalogFeatures(repoId);
+  const featuresByEpic = new Map<string, Feature[]>();
+  for (const row of featureRows) {
+    const feature = JSON.parse(row.data_json) as Feature;
+    const bucket = featuresByEpic.get(row.epic_id) ?? [];
+    bucket.push(feature);
+    featuresByEpic.set(row.epic_id, bucket);
+  }
+
+  const epics: Epic[] = epicRows.map((row) => {
+    const epic = JSON.parse(row.data_json) as Epic;
+    return { ...epic, features: featuresByEpic.get(row.epic_id) ?? [] };
+  });
+
+  const raw = {
+    version: 2 as const,
+    repo: meta.repo,
+    defaults: JSON.parse(meta.defaults_json) as Defaults,
+    ...(meta.budget_json ? { budget: JSON.parse(meta.budget_json) as unknown } : {}),
+    epics,
+  };
+
+  return propagateDefaults(BacklogV2Schema.parse(raw), loadRepoConfig(cwd).defaults);
 }

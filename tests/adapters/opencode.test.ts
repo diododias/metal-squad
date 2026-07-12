@@ -125,6 +125,16 @@ describe('opencodeAdapter.runFeature', () => {
     expect(args).toContain('anthropic/claude-opus-4');
   });
 
+  it('enables thinking output for parity with claude/codex live output', async () => {
+    mockRunCli.mockResolvedValue({ code: 0, stdout: JSON.stringify({ response: 'done' }), stderr: '' });
+
+    const { opencodeAdapter } = await import('../../src/core/adapters/opencode.js');
+    await opencodeAdapter.runFeature(MOCK_FEATURE as never, 'prompt', MOCK_OPTS);
+
+    const [, args] = mockRunCli.mock.calls[0]!;
+    expect(args).toContain('--thinking');
+  });
+
   it('does not include model flag when feature.model is not set', async () => {
     mockRunCli.mockResolvedValue({ code: 0, stdout: JSON.stringify({ response: 'done' }), stderr: '' });
 
@@ -133,6 +143,28 @@ describe('opencodeAdapter.runFeature', () => {
 
     const [, args] = mockRunCli.mock.calls[0]!;
     expect(args).not.toContain('--model');
+  });
+
+  it('uses --session when resuming a prior opencode session', async () => {
+    mockRunCli.mockResolvedValue({ code: 0, stdout: JSON.stringify({ response: 'done' }), stderr: '' });
+
+    const { opencodeAdapter } = await import('../../src/core/adapters/opencode.js');
+    await opencodeAdapter.runFeature(MOCK_FEATURE as never, 'prompt', {
+      ...MOCK_OPTS,
+      session: {
+        mode: 'resume',
+        handle: {
+          tool: 'opencode',
+          sessionId: 'ses_123',
+          capturedFromRunId: 1,
+          capturedAt: '2026-07-11T00:00:00Z',
+        },
+      },
+    });
+
+    const [, args] = mockRunCli.mock.calls[0]!;
+    expect(args).toContain('--session');
+    expect(args).toContain('ses_123');
   });
 
   it('returns ok=false with stderr when exit code != 0', async () => {
@@ -164,10 +196,8 @@ describe('opencodeAdapter.runFeature', () => {
   });
 
   it('emits run:output for stdout JSON with response field', async () => {
-    let capturedOnStdoutLine: ((line: string) => void) | undefined;
-    mockRunCli.mockImplementation(async (_tool, _args, { onStdoutLine }) => {
-      capturedOnStdoutLine = onStdoutLine;
-      onStdoutLine?.(JSON.stringify({ response: 'agent output here' }));
+    mockRunCli.mockImplementation(async (_tool, _args, { onStdoutChunk }) => {
+      onStdoutChunk?.(JSON.stringify({ response: 'agent output here' }));
       return { code: 0, stdout: JSON.stringify({ response: 'done' }), stderr: '' };
     });
 
@@ -182,8 +212,8 @@ describe('opencodeAdapter.runFeature', () => {
   });
 
   it('emits run:output for tool lines', async () => {
-    mockRunCli.mockImplementation(async (_tool, _args, { onStdoutLine }) => {
-      onStdoutLine?.(JSON.stringify({ tool: 'bash', input: { command: 'ls' } }));
+    mockRunCli.mockImplementation(async (_tool, _args, { onStdoutChunk }) => {
+      onStdoutChunk?.(JSON.stringify({ tool: 'bash', input: { command: 'ls' } }));
       return { code: 0, stdout: JSON.stringify({ response: 'done' }), stderr: '' };
     });
 
@@ -197,8 +227,8 @@ describe('opencodeAdapter.runFeature', () => {
   });
 
   it('emits run:output for raw (non-JSON) stdout lines', async () => {
-    mockRunCli.mockImplementation(async (_tool, _args, { onStdoutLine }) => {
-      onStdoutLine?.('plain text output');
+    mockRunCli.mockImplementation(async (_tool, _args, { onStdoutChunk }) => {
+      onStdoutChunk?.('plain text output');
       return { code: 0, stdout: JSON.stringify({ response: 'done' }), stderr: '' };
     });
 
@@ -240,9 +270,24 @@ describe('opencodeAdapter.runFeature', () => {
     expect(stderrEmits).toHaveLength(0);
   });
 
+  it('emits heartbeat output while opencode is still running', async () => {
+    mockRunCli.mockImplementation(async (_tool, _args, { onHeartbeat, onStdoutChunk }) => {
+      onStdoutChunk?.(JSON.stringify({ type: 'tool_use', part: { type: 'tool', tool: 'read', input: { path: '/a.txt' } } }));
+      onHeartbeat?.('[msq] opencode feat-1 running for 30s');
+      return { code: 0, stdout: JSON.stringify({ response: 'done' }), stderr: '' };
+    });
+
+    const { opencodeAdapter } = await import('../../src/core/adapters/opencode.js');
+    await opencodeAdapter.runFeature(MOCK_FEATURE as never, 'prompt', MOCK_OPTS);
+
+    const heartbeatOutput = mockEmit.mock.calls.find(([, p]) => (p as Record<string, unknown>).source === 'heartbeat');
+    expect(heartbeatOutput).toBeDefined();
+    expect(String((heartbeatOutput?.[1] as Record<string, unknown>).line)).toContain('opencode feat-1');
+  });
+
   it('emits tokens:update when usage found in stdout JSON line', async () => {
-    mockRunCli.mockImplementation(async (_tool, _args, { onStdoutLine }) => {
-      onStdoutLine?.(JSON.stringify({ usage: { input: 100, output: 50 } }));
+    mockRunCli.mockImplementation(async (_tool, _args, { onStdoutChunk }) => {
+      onStdoutChunk?.(JSON.stringify({ usage: { input: 100, output: 50 } }));
       return { code: 0, stdout: JSON.stringify({ response: 'done' }), stderr: '' };
     });
 
@@ -286,5 +331,125 @@ describe('opencodeAdapter.runFeature', () => {
 
     expect(result.ok).toBe(false);
     expect(result.summary).toContain('exit 2');
+  });
+});
+
+describe('opencodeAdapter.runFeature — streaming event parsing', () => {
+  function streamAdapter(lines: string[]): Promise<unknown> {
+    mockRunCli.mockImplementation(async (_tool, _args, { onStdoutChunk }) => {
+      for (const line of lines) onStdoutChunk?.(line);
+      return { code: 0, stdout: JSON.stringify({ response: 'done' }), stderr: '' };
+    });
+    return import('../../src/core/adapters/opencode.js').then(({ opencodeAdapter }) =>
+      opencodeAdapter.runFeature(MOCK_FEATURE as never, 'prompt', MOCK_OPTS),
+    );
+  }
+
+  function streamAdapterChunks(chunks: string[]): Promise<unknown> {
+    mockRunCli.mockImplementation(async (_tool, _args, { onStdoutChunk }) => {
+      for (const chunk of chunks) onStdoutChunk?.(chunk);
+      return { code: 0, stdout: chunks.join(''), stderr: '' };
+    });
+    return import('../../src/core/adapters/opencode.js').then(({ opencodeAdapter }) =>
+      opencodeAdapter.runFeature(MOCK_FEATURE as never, 'prompt', MOCK_OPTS),
+    );
+  }
+
+  function runOutputCalls() {
+    return mockEmit.mock.calls.filter(([event]) => event === 'run:output');
+  }
+
+  it('parses tool_use streaming events into tool source output', async () => {
+    await streamAdapter([
+      JSON.stringify({ type: 'tool_use', part: { type: 'tool', tool: 'read', callID: 'c1', input: { path: '/a.txt' } } }),
+    ]);
+    const toolOutputs = runOutputCalls().filter(([, p]) => (p as Record<string, unknown>).source === 'tool');
+    expect(toolOutputs.length).toBe(1);
+    expect((toolOutputs[0]?.[1] as Record<string, unknown>).line).toContain('read');
+  });
+
+  it('parses text streaming events as agent output', async () => {
+    await streamAdapter([
+      JSON.stringify({ type: 'text', part: { type: 'text', text: 'Hello from the agent' } }),
+    ]);
+    const agentOutputs = runOutputCalls().filter(([, p]) => (p as Record<string, unknown>).source === 'agent');
+    expect(agentOutputs.length).toBe(1);
+    expect((agentOutputs[0]?.[1] as Record<string, unknown>).line).toContain('Hello from the agent');
+  });
+
+  it('formats thinking parts with [thinking] prefix', async () => {
+    await streamAdapter([
+      JSON.stringify({ type: 'thinking', part: { type: 'thinking', reasoning: 'considering options' } }),
+    ]);
+    const agentOutputs = runOutputCalls().filter(([, p]) => (p as Record<string, unknown>).source === 'agent');
+    expect(agentOutputs.length).toBe(1);
+    expect((agentOutputs[0]?.[1] as Record<string, unknown>).line).toContain('[thinking]');
+    expect((agentOutputs[0]?.[1] as Record<string, unknown>).line).toContain('considering options');
+  });
+
+  it('silently skips step_start and step_finish boundary events', async () => {
+    await streamAdapter([
+      JSON.stringify({ type: 'step_start', part: { id: 'p1', messageID: 'm1' } }),
+      JSON.stringify({ type: 'step_finish', part: { id: 'p2', reason: 'tool-calls' } }),
+    ]);
+    expect(runOutputCalls().length).toBe(0);
+  });
+
+  it('does NOT emit raw JSON for unrecognized streaming event types', async () => {
+    const unknownEvent = JSON.stringify({ type: 'future_event', part: { type: 'mystery' } });
+    await streamAdapter([unknownEvent]);
+    const outputs = runOutputCalls();
+    expect(outputs.length).toBe(0);
+    for (const [, p] of outputs) {
+      const line = (p as Record<string, unknown>).line;
+      expect(line).not.toContain('future_event');
+      expect(line).not.toContain('mystery');
+    }
+  });
+
+  it('does NOT emit raw JSON for events without a recognizable part type', async () => {
+    await streamAdapter([JSON.stringify({ type: 'noop', sessionID: 'ses_1' })]);
+    expect(runOutputCalls().length).toBe(0);
+  });
+
+  it('ignores structured message objects instead of stringifying them into live output', async () => {
+    await expect(streamAdapter([
+      JSON.stringify({ type: 'text', message: { nested: 'value' } }),
+      JSON.stringify({ type: 'result', response: { nested: 'value' } }),
+    ])).resolves.toBeDefined();
+    expect(runOutputCalls().length).toBe(0);
+  });
+
+  it('parses errors from streaming events with structured error payload', async () => {
+    await streamAdapter([
+      JSON.stringify({ type: 'error', sessionID: 'ses_1', error: { name: 'UnknownError', data: { message: 'Unexpected server error' } } }),
+    ]);
+    const stdoutOutputs = runOutputCalls().filter(([, p]) => (p as Record<string, unknown>).source === 'stdout');
+    expect(stdoutOutputs.length).toBe(1);
+    expect((stdoutOutputs[0]?.[1] as Record<string, unknown>).line).toContain('UnknownError');
+    expect((stdoutOutputs[0]?.[1] as Record<string, unknown>).line).toContain('Unexpected server error');
+  });
+
+  it('still recognizes flat legacy tool shape (top-level tool/input)', async () => {
+    await streamAdapter([
+      JSON.stringify({ tool: 'bash', input: { command: 'ls' } }),
+    ]);
+    const toolOutputs = runOutputCalls().filter(([, p]) => (p as Record<string, unknown>).source === 'tool');
+    expect(toolOutputs.length).toBe(1);
+    expect((toolOutputs[0]?.[1] as Record<string, unknown>).line).toContain('bash');
+    expect((toolOutputs[0]?.[1] as Record<string, unknown>).line).toContain('ls');
+  });
+
+  it('parses complete JSON events even when stdout chunks split them mid-object', async () => {
+    const eventA = JSON.stringify({ type: 'tool_use', part: { type: 'tool', tool: 'read', input: { path: '/a.txt' } } });
+    const eventB = JSON.stringify({ type: 'text', part: { type: 'text', text: 'done' } });
+    await streamAdapterChunks([
+      eventA.slice(0, 27),
+      eventA.slice(27) + eventB.slice(0, 19),
+      eventB.slice(19),
+    ]);
+    const outputs = runOutputCalls();
+    expect(outputs.some(([, p]) => String((p as Record<string, unknown>).line).includes('tool read'))).toBe(true);
+    expect(outputs.some(([, p]) => String((p as Record<string, unknown>).line).includes('done'))).toBe(true);
   });
 });
