@@ -180,6 +180,7 @@ function FeatureConfigForm({ feature, settings, onSaveConfig }) {
 
   const set = (key) => (value) => setForm((current) => ({ ...current, [key]: value }));
   const stageSkillEntries = Object.entries(settings.stageSkills ?? {});
+  const workflow = feature.workflow ?? DEFAULT_WORKFLOW;
 
   const handleSave = () => {
     const patch = buildFeatureConfigPatch(form, feature);

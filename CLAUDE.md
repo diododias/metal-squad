@@ -38,4 +38,12 @@ rtk npm run build
 rtk npm test
 rtk npm run typecheck
 rtk npm run lint   # quando tocar TypeScript relevante em src/
+npm run clean:db
+```
+
+## Comandos MSQ
+```bash
+msq backlog load
+msq web
+msq ui
 ```
