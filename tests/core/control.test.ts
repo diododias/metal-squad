@@ -117,6 +117,45 @@ describe('parseControlSignal', () => {
     });
   });
 
+  describe('H19 — unmarked clarification question fallback', () => {
+    it('detects a trailing clarification question without the marker', () => {
+      const text = 'I reviewed the spec.\n\nShould I proceed with approach A or approach B?';
+      const result = parseControlSignal(text);
+      expect(result).toEqual({
+        type: 'needs_input',
+        prompt: 'Should I proceed with approach A or approach B?',
+      });
+    });
+
+    it('detects "could you" clarification phrasing', () => {
+      const text = 'Could you clarify which module owns this validation?';
+      const result = parseControlSignal(text);
+      expect(result?.type).toBe('needs_input');
+      expect(result?.prompt).toBe(text);
+    });
+
+    it('does not trigger on a rhetorical question in a completed summary', () => {
+      const text = 'All tests pass and the feature is complete. Should this be revisited later?';
+      expect(parseControlSignal(text)).toBeUndefined();
+    });
+
+    it('does not trigger when the trailing paragraph does not end in "?"', () => {
+      const text = 'Should I proceed with approach A or approach B.';
+      expect(parseControlSignal(text)).toBeUndefined();
+    });
+
+    it('does not trigger when the question paragraph exceeds the length cap', () => {
+      const question = `Should I proceed with ${'x'.repeat(300)}?`;
+      expect(parseControlSignal(question)).toBeUndefined();
+    });
+
+    it('prefers the exact MSQ_INPUT_REQUIRED marker over the fallback heuristic', () => {
+      const text = 'Should I proceed with approach A?\n\nMSQ_INPUT_REQUIRED: Pick a cache strategy';
+      const result = parseControlSignal(text);
+      expect(result?.prompt).toBe('Pick a cache strategy');
+    });
+  });
+
   describe('OPTIONS: block — invalid falls back to free text', () => {
     it('falls back when there is no "-" line after OPTIONS:', () => {
       const text = 'MSQ_INPUT_REQUIRED: pick one\nOPTIONS:\nnothing here';
