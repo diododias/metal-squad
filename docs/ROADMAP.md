@@ -201,6 +201,46 @@ F15 (event system) ✅
  ├→ F14 (budget caps) ✅
  └→ F19 (notifications v2)
 
+## Backlog de feedback (triagem 2026-07-11)
+
+Triagem de um lote de feedback de uso real, separado em novas funcionalidades
+e melhorias/bugs. Todos os itens abaixo estao com **status "Pendente —
+triagem"**: os docs linkados descrevem o relato do usuario e o escopo
+provavel, mas ainda precisam de investigacao de codigo antes de virar
+trabalho executavel (ver "Proximo passo" em cada doc).
+
+### Novas funcionalidades
+
+| Item | Area | Prioridade sugerida |
+|------|------|----------------------|
+| [F40 — Visualizacao por Step + Workflow por Projeto](features/F40-workflow-step-view-per-project.md) | Stages / Workflow | Alta |
+| [F41 — Reaproveitamento Adaptativo de Sessao entre Steps](features/F41-adaptive-session-reuse.md) | Controle de sessao | Alta |
+| [F42 — Tela de Detalhe de Runs / Analytics](features/F42-runs-analytics-detail-screen.md) | Analytics | Media |
+| [F43 — Editar Tool/Effort por Step + Resume com Outro Agente (UI)](features/F43-per-step-config-and-resume-agent-switch.md) | Configuracoes | Media |
+| [F44 — Central de Configuracoes do Projeto (multi-projeto/multi-repo)](features/F44-project-settings-hub.md) | Projeto / Configuracoes | Alta |
+| [F45 — Piloto Automatico](features/F45-piloto-automatico.md) | Modo Automatico | Alta |
+| [F46 — Prompt/Skill Customizado por Step](features/F46-custom-prompt-per-step.md) | Skills | Media |
+| [F47 — Perguntas Interativas via Telegram (Botoes)](features/F47-telegram-interactive-questions.md) | Notificacoes | Alta |
+| [F48 — Card de Demanda Enriquecido](features/F48-enhanced-feature-card.md) | Tela principal | Media |
+
+### Melhorias / Bugs
+
+| Item | Area | Prioridade sugerida |
+|------|------|----------------------|
+| [H13 — Live Output / Tool Execution: hierarquia visual e auto scroll (TUI + Web)](hotfixes/H13-tui-live-output-visual-hierarchy.md) | Tela de detalhe / Live Output | Media |
+| [H14 — Etapa atual nao fica visivel](hotfixes/H14-current-stage-not-visible.md) | Stages | Alta |
+| [H15 — Contagem de tokens confusa e aparentemente errada](hotfixes/H15-token-accounting-confusion-and-bug.md) | Controle de sessao | Alta |
+| [H16 — Gate continua aparecendo apos avancado](hotfixes/H16-gate-persists-after-resolved.md) | Gates | Alta |
+| [H17 — Toast nao some depois de aparecer](hotfixes/H17-toast-not-dismissing.md) | UI | Baixa |
+| [H18 — Mapeamento de tasks incorreto (duplicada/fora de ordem/nao carrega)](hotfixes/H18-task-mapping-incorrect.md) | Tasks | Critica |
+| [H19 — Perguntas do specify tratadas como aprovacao + Telegram truncado](hotfixes/H19-specify-questions-misrouted-as-approve.md) | Specify / Telegram | Critica |
+
+**Sugestao de ordem de ataque**: H18 e H19 primeiro (risco de corromper o
+pipeline ou perder input do usuario), depois H15/H16 (confiabilidade de
+dados exibidos), depois o restante dos bugs pequenos (H13/H14/H17) e por
+fim as novas funcionalidades — F44 e F45 sao as maiores em escopo e
+provavelmente merecem quebra em sub-itens antes de entrar em execucao.
+
 F05 (layout multi-panel)
  ├→ F06 (log streaming)
  ├→ F07 (status bar)
