@@ -2,7 +2,6 @@ import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
 import { networkInterfaces } from 'node:os';
 
 export const SESSION_COOKIE_NAME = 'msq_session';
-export const LOGIN_TICKET_TTL_MS = 10 * 60 * 1000;
 export const SESSION_COOKIE_MAX_AGE_SECONDS = 7 * 24 * 60 * 60;
 const MAX_SESSIONS = 100;
 
@@ -103,10 +102,6 @@ export function isAllowedOrigin(originHeader: string | undefined, boundHost: str
 }
 
 export interface WebAuth {
-  /** Mints a single-use login ticket for the /auth URL. */
-  issueLoginTicket: (ttlMs?: number) => string;
-  /** Consumes a ticket; returns false if unknown, already used, or expired. */
-  redeemLoginTicket: (ticket: string) => boolean;
   /** Creates a session and returns its id (the cookie value). */
   createSession: () => string;
   /** True when the Cookie header carries a live session id. */
@@ -116,33 +111,9 @@ export interface WebAuth {
 }
 
 export function createWebAuth(now: () => number = Date.now): WebAuth {
-  const tickets = new Map<string, number>();
   const sessions = new Map<string, number>();
 
-  function sweepTickets(): void {
-    const current = now();
-    for (const [ticket, expiresAt] of tickets) {
-      if (expiresAt <= current) tickets.delete(ticket);
-    }
-  }
-
   return {
-    issueLoginTicket(ttlMs = LOGIN_TICKET_TTL_MS): string {
-      sweepTickets();
-      const ticket = randomBytes(32).toString('hex');
-      tickets.set(ticket, now() + ttlMs);
-      return ticket;
-    },
-    redeemLoginTicket(ticket: string): boolean {
-      sweepTickets();
-      for (const [stored, expiresAt] of tickets) {
-        if (timingSafeEqualStrings(stored, ticket)) {
-          tickets.delete(stored);
-          return expiresAt > now();
-        }
-      }
-      return false;
-    },
     createSession(): string {
       const sessionId = randomBytes(32).toString('hex');
       sessions.set(sessionId, now());

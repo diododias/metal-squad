@@ -1,4 +1,4 @@
-# F51 — Web auth hardening (cookie session + login ticket + origin/host guard)
+# F51 — Web auth hardening (cookie session + password login + origin/host guard)
 
 ## Problema
 
@@ -14,24 +14,41 @@ O `msq web` autenticava o browser passando o token persistente na URL
 - o header `Host` nao era validado (DNS rebinding);
 - a comparacao de token usava `===` (timing oracle).
 
+Uma primeira iteracao trocou o token persistente na URL por um *login
+ticket* de uso unico (`?ticket=<hex>`, TTL de 10 minutos): o ticket nao vale
+para sempre, mas ainda era uma credencial na URL — visivel em historico de
+browser, screenshot ou log de terminal durante a janela em que era valido.
+
 ## Solucao
 
-### Login por ticket de uso unico + cookie de sessao
+### Login por senha (form POST) + cookie de sessao
 
-1. `msq web` imprime `http://host:port/auth?ticket=<hex>` — um *login ticket*
-   aleatorio, de uso unico, com TTL de 10 minutos.
-2. `GET /auth` valida o ticket (ou, como fallback documentado, o token
-   persistente via `?token=`), cria uma sessao em memoria, seta cookie
-   `msq_session` (`HttpOnly; SameSite=Strict; Path=/; Max-Age=7d`) e responde
-   302 para `/` — a credencial some da URL imediatamente.
-3. O upgrade do WebSocket e autenticado pelo cookie: o JS do cliente nunca
-   toca em token nem session id. O `window.prompt` e o `?token=` do cliente
-   foram removidos.
-4. Sessoes vivem em memoria: reiniciar o servidor invalida todas (o proximo
-   `msq web` imprime um ticket novo).
+1. `msq web` imprime apenas `http://host:port` — nenhuma credencial na URL.
+2. `GET /auth` serve um formulario HTML simples com um campo de senha. O
+   `POST /auth` recebe a senha no corpo da requisicao (`application/
+   x-www-form-urlencoded`), nunca em querystring.
+3. A senha e resolvida em `resolveWebPassword()` (`src/web/token.ts`), nesta
+   ordem:
+   - `MSQ_WEB_PASSWORD` (env var) — definida manualmente pelo operador, nunca
+     persistida pelo `msq`; tem prioridade e permite trocar a senha so
+     mudando o valor no ambiente/sessao;
+   - fallback: o token auto-gerado e persistido (keychain, com fallback para
+     `~/.config/metal-squad/config.json`) — mesmo mecanismo de antes, para
+     quem ainda nao definiu uma senha explicita.
+4. Senha correta: cria sessao em memoria, seta cookie `msq_session`
+   (`HttpOnly; SameSite=Strict; Path=/; Max-Age=7d`) e responde 302 para `/`.
+   Senha incorreta: 401 com o mesmo formulario e uma mensagem de erro (sem
+   redirect, sem nada sensivel na URL).
+5. `GET /auth` com uma sessao ja valida (cookie) redireciona direto para `/`,
+   sem reexibir o formulario.
+6. O upgrade do WebSocket e autenticado pelo cookie: o JS do cliente nunca
+   toca em senha, token nem session id.
+7. Sessoes vivem em memoria: reiniciar o servidor invalida todas.
 
-A autenticacao legada por mensagem WS `{type:'auth', token}` continua aceita
-para clientes programaticos e testes.
+A autenticacao legada por mensagem WS `{type:'auth', token}` e por header
+`Authorization: Bearer <token>` continua aceita para clientes programaticos e
+testes — comparando contra o mesmo segredo resolvido por
+`resolveWebPassword()`.
 
 ### Guards de request
 
@@ -40,22 +57,35 @@ para clientes programaticos e testes.
 - **Origin**: upgrade de WS com header `Origin` de outra origem e fechado com
   1008 (CSWSH). `Origin` ausente (clientes nao-browser) continua aceito, pois
   a autenticacao ainda e exigida.
-- **timingSafeEqual**: comparacoes de token/ticket/sessao usam
+- **timingSafeEqual**: comparacoes de senha/token/sessao usam
   `crypto.timingSafeEqual` com hash de comprimento fixo.
+- o corpo de `POST /auth` e lido com um limite de 8KB (`MAX_AUTH_BODY_BYTES`)
+  para nao bufferizar payload arbitrario de um cliente nao autenticado.
 
-### Rotacao de token
+### Rotacao
 
-`msq web --rotate-token` gera e persiste um token novo (keychain com fallback
-para `config.json`) antes de subir o servidor, invalidando o anterior.
+`msq web --rotate-token` gera e persiste uma senha nova (keychain com
+fallback para `config.json`) antes de subir o servidor, invalidando a
+anterior. E ignorado (com aviso no console) quando `MSQ_WEB_PASSWORD` esta
+definida — nesse caso a rotacao e trocar a env var.
+
+## Sem rate limiting (decisao deliberada)
+
+Nao ha lockout/delay progressivo em `POST /auth`. O bind default e
+`127.0.0.1` e a superficie de ataque de forca bruta local e considerada
+aceitavel para este caso de uso; reavaliar se `msq web` passar a expor por
+padrao para alem do loopback.
 
 ## Arquivos
 
-- `src/web/auth.ts` — tickets, sessoes, cookies, validadores de host/origin
-- `src/web/server.ts` — endpoint `/auth`, guards, auth por cookie no WS
-- `src/web/token.ts` — `rotateWebToken()`
-- `src/commands/web.ts` — URL de login por ticket, `--rotate-token`
-- `src/web/client/App.tsx`, `src/web/client/hooks/useWebSocket.ts` — remocao
-  do token no cliente; erro de auth exibido na tela de conexao
+- `src/web/auth.ts` — sessoes, cookies, validadores de host/origin
+- `src/web/server.ts` — endpoint `/auth` (GET formulario, POST login),
+  leitura de body com limite, guards, auth por cookie no WS
+- `src/web/token.ts` — `resolveWebPassword()`, `getOrCreateWebToken()`,
+  `rotateWebToken()`
+- `src/commands/web.ts` — URL sem credencial, `--rotate-token`
+- `src/web/client/App.tsx`, `src/web/client/hooks/useWebSocket.ts` — cliente
+  nunca toca em senha/token; erro de auth exibido na tela de conexao
 - `tests/web/auth.test.ts`, `tests/web/server.test.ts` — cobertura
 
 ## Fora de escopo
@@ -63,6 +93,7 @@ para `config.json`) antes de subir o servidor, invalidando o anterior.
 - HTTPS/TLS local (o bind default segue `127.0.0.1`)
 - Persistencia de sessao entre restarts do servidor
 - Multi-usuario/roles
+- Rate limiting / lockout em `POST /auth` (ver secao acima)
 
 ## Hotfixes relacionados
 

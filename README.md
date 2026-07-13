@@ -231,12 +231,20 @@ Options:
 
 - `--host <host>`: bind address (default `127.0.0.1`)
 - `--port <port>`: port number (default `8743`)
-- `--no-auth`: disable token authentication
+- `--no-auth`: disable password authentication
+- `--rotate-token`: generate a fresh auto-generated password before starting,
+  invalidating the previous one (ignored when `MSQ_WEB_PASSWORD` is set)
 
-The first run generates a token stored in the OS keychain (fallback to
-`~/.config/metal-squad/config.json` under `webToken`). The token is appended to
-the printed URL; clients can also authenticate with `Authorization: Bearer <token>`
-or by sending `{ type: 'auth', token: '...' }` over WebSocket.
+No credential is ever put in the printed URL. Open it, then log in through the
+password form at `/auth` (a plain HTML form, submitted via `POST`, never a
+query param). The password is resolved in this order:
+
+1. `MSQ_WEB_PASSWORD` env var — set your own, never persisted by `msq`.
+2. a fallback token auto-generated on first run and stored in the OS keychain
+   (fallback to `~/.config/metal-squad/config.json` under `webToken`).
+
+Programmatic clients can still authenticate with `Authorization: Bearer
+<password>` or by sending `{ type: 'auth', token: '...' }` over WebSocket.
 
 ### `msq daemon`
 

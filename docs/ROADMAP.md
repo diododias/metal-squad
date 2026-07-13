@@ -224,7 +224,7 @@ trabalho executavel (ver "Proximo passo" em cada doc).
 | [F48 — Card de Demanda Enriquecido](features/F48-enhanced-feature-card.md) | Tela principal | Media |
 | [F49 — Continuidade de Sessao ao Responder Pergunta da IA](features/F49-question-answer-session-continuity.md) | Controle de sessao | Alta |
 | [F50 — Web v2 Redesign (React/JSX, multi-pagina)](features/F50-web-v2-redesign.md) | Web | Alta |
-| [F51 — Web auth hardening (cookie session + ticket + origin guard)](features/F51-web-auth-hardening.md) | Web | Alta |
+| [F51 — Web auth hardening (cookie session + password login + origin guard)](features/F51-web-auth-hardening.md) | Web | Alta |
 
 ### Melhorias / Bugs
 

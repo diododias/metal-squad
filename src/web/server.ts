@@ -75,6 +75,55 @@ const GIT_ENV_OVERRIDE = Object.fromEntries(
   Object.entries(process.env).filter(([key]) => !key.startsWith('GIT_')),
 );
 
+const MAX_AUTH_BODY_BYTES = 8192;
+
+/** Reads a request body up to a size cap, rejecting oversized payloads
+ * instead of buffering unbounded attacker-controlled input. */
+async function readRequestBody(req: IncomingMessage, maxBytes = MAX_AUTH_BODY_BYTES): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const chunks: Buffer[] = [];
+    let size = 0;
+    req.on('data', (chunk: Buffer) => {
+      size += chunk.length;
+      if (size > maxBytes) {
+        req.destroy();
+        reject(new Error('Payload too large'));
+        return;
+      }
+      chunks.push(chunk);
+    });
+    req.on('end', () => { resolve(Buffer.concat(chunks).toString('utf8')); });
+    req.on('error', reject);
+  });
+}
+
+function renderLoginPage(error: boolean): string {
+  return `<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>msq web login</title>
+<style>
+  body { font-family: system-ui, sans-serif; display: flex; align-items: center; justify-content: center; height: 100vh; margin: 0; background: #111; color: #eee; }
+  form { background: #1c1c1c; padding: 2rem; border-radius: 8px; min-width: 280px; }
+  h1 { font-size: 1.1rem; margin: 0 0 1rem; }
+  input { width: 100%; padding: 0.5rem; margin: 0.5rem 0 1rem; box-sizing: border-box; border-radius: 4px; border: 1px solid #333; background: #0d0d0d; color: #eee; }
+  button { width: 100%; padding: 0.5rem; cursor: pointer; border-radius: 4px; border: none; background: #4a7dff; color: #fff; }
+  .error { color: #f66; margin: 0 0 0.75rem; font-size: 0.9rem; }
+</style>
+</head>
+<body>
+<form method="post" action="/auth">
+  <h1>msq web</h1>
+  ${error ? '<p class="error">Incorrect password.</p>' : ''}
+  <input type="password" name="password" placeholder="Password" autofocus required autocomplete="current-password" />
+  <button type="submit">Log in</button>
+</form>
+</body>
+</html>`;
+}
+
 function runGit(args: string[], cwd: string): string {
   return execFileSync('git', args, {
     cwd,
@@ -176,8 +225,6 @@ export interface RunningWebServer {
   server: Server;
   wss: WebSocketServer;
   url: string;
-  /** Mints a single-use login ticket for `${url}/auth?ticket=...`. */
-  issueLoginTicket: () => string;
   close: () => Promise<void>;
 }
 
@@ -376,6 +423,10 @@ export function createWebServer(options: {
   }
 
   const httpServer = createServer((req, res) => {
+    void handleRequest(req, res);
+  });
+
+  async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise<void> {
     const url = new URL(req.url ?? '/', `http://${req.headers.host ?? 'localhost'}`);
     const pathname = url.pathname;
 
@@ -387,22 +438,41 @@ export function createWebServer(options: {
       }
 
       if (pathname === '/auth') {
-        if (options.auth === 'none') {
+        if (options.auth === 'none' || webAuth.hasValidSession(req.headers.cookie)) {
           res.writeHead(302, { Location: '/' });
           res.end();
           return;
         }
-        const ticket = url.searchParams.get('ticket');
-        const token = url.searchParams.get('token');
-        const granted = ticket !== null ? webAuth.redeemLoginTicket(ticket) : isValidToken(token);
-        if (!granted) {
-          res.writeHead(403, { 'Content-Type': 'text/plain' });
-          res.end('Invalid or expired login ticket. Restart `msq web` to print a fresh login URL.');
+
+        if (req.method === 'GET') {
+          res.writeHead(200, { 'Content-Type': 'text/html' });
+          res.end(renderLoginPage(false));
           return;
         }
-        const sessionId = webAuth.createSession();
-        res.writeHead(302, { Location: '/', 'Set-Cookie': webAuth.sessionCookie(sessionId) });
-        res.end();
+
+        if (req.method === 'POST') {
+          let body: string;
+          try {
+            body = await readRequestBody(req);
+          } catch {
+            res.writeHead(413, { 'Content-Type': 'text/plain' });
+            res.end('Payload too large');
+            return;
+          }
+          const password = new URLSearchParams(body).get('password') ?? '';
+          if (!isValidToken(password)) {
+            res.writeHead(401, { 'Content-Type': 'text/html' });
+            res.end(renderLoginPage(true));
+            return;
+          }
+          const sessionId = webAuth.createSession();
+          res.writeHead(302, { Location: '/', 'Set-Cookie': webAuth.sessionCookie(sessionId) });
+          res.end();
+          return;
+        }
+
+        res.writeHead(405, { 'Content-Type': 'text/plain', Allow: 'GET, POST' });
+        res.end('Method not allowed');
         return;
       }
 
@@ -453,7 +523,7 @@ export function createWebServer(options: {
       res.writeHead(500, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({ error: error instanceof Error ? error.message : String(error) }));
     }
-  });
+  }
 
   const wss = new WebSocketServer({ server: httpServer, path: '/ws' });
 
@@ -839,7 +909,6 @@ export function createWebServer(options: {
     server: httpServer,
     wss,
     url: `http://${options.host}:${String(options.port)}`,
-    issueLoginTicket: () => webAuth.issueLoginTicket(),
     close: async (): Promise<void> => {
       clearInterval(outputPollInterval);
       clearInterval(reconcilePollInterval);

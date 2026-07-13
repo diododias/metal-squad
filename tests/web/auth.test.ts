@@ -104,22 +104,6 @@ describe('isAllowedOrigin', () => {
 });
 
 describe('createWebAuth', () => {
-  it('redeems a ticket exactly once', () => {
-    const auth = createWebAuth();
-    const ticket = auth.issueLoginTicket();
-    expect(auth.redeemLoginTicket(ticket)).toBe(true);
-    expect(auth.redeemLoginTicket(ticket)).toBe(false);
-    expect(auth.redeemLoginTicket('unknown')).toBe(false);
-  });
-
-  it('expires tickets after their TTL', () => {
-    let now = 1_000;
-    const auth = createWebAuth(() => now);
-    const ticket = auth.issueLoginTicket(60_000);
-    now += 61_000;
-    expect(auth.redeemLoginTicket(ticket)).toBe(false);
-  });
-
   it('validates sessions from the cookie header', () => {
     const auth = createWebAuth();
     const sessionId = auth.createSession();

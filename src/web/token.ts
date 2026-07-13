@@ -104,6 +104,26 @@ export function resolveWebConfig(overrides: { host?: string; port?: number; auth
   };
 }
 
+/**
+ * Resolves the secret used to log into `msq web`, in priority order:
+ *  1. `MSQ_WEB_PASSWORD` env var — set manually by the operator, never
+ *     persisted by msq. Takes precedence so the operator can rotate it
+ *     just by changing their shell/session env, no `--rotate-token` needed.
+ *  2. the auto-generated, persisted token (keychain/config.json fallback),
+ *     kept for operators who haven't set an explicit password yet.
+ */
+export async function resolveWebPassword(options: { rotate?: boolean } = {}): Promise<{
+  password: string;
+  source: 'env' | 'generated';
+}> {
+  const envPassword = process.env.MSQ_WEB_PASSWORD;
+  if (envPassword !== undefined && envPassword.length > 0) {
+    return { password: envPassword, source: 'env' };
+  }
+  const password = options.rotate === true ? await rotateWebToken() : await getOrCreateWebToken();
+  return { password, source: 'generated' };
+}
+
 export function persistWebConfig(overrides: { host?: string; port?: number; auth?: 'token' | 'none' }): void {
   const cfg = loadConfig();
   cfg.web = {

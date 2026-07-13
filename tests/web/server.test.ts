@@ -1123,41 +1123,76 @@ describe('web server', () => {
     socket.close();
   });
 
-  it('grants a session via /auth with a single-use ticket', async () => {
+  it('serves a login form on GET /auth and never puts the password in the URL', async () => {
     const { createWebServer } = await import('../../src/web/server.js');
     server = createWebServer({ host: '127.0.0.1', port: 0, auth: 'token', token: 'secret' });
     await new Promise<void>((resolve) => server!.server.listen(0, '127.0.0.1', resolve));
     const address = server!.server.address() as { port: number };
     const base = `http://127.0.0.1:${address.port}`;
 
-    const ticket = server!.issueLoginTicket();
-    const res = await fetch(`${base}/auth?ticket=${ticket}`, { redirect: 'manual' });
-    expect(res.status).toBe(302);
-    expect(res.headers.get('location')).toBe('/');
-    const setCookie = res.headers.get('set-cookie') ?? '';
+    const res = await fetch(`${base}/auth`, { redirect: 'manual' });
+    expect(res.status).toBe(200);
+    const body = await res.text();
+    expect(body).toContain('<form method="post" action="/auth">');
+    expect(body).toContain('name="password"');
+  });
+
+  it('grants a session via POST /auth with the correct password and rejects bad credentials', async () => {
+    const { createWebServer } = await import('../../src/web/server.js');
+    server = createWebServer({ host: '127.0.0.1', port: 0, auth: 'token', token: 'secret' });
+    await new Promise<void>((resolve) => server!.server.listen(0, '127.0.0.1', resolve));
+    const address = server!.server.address() as { port: number };
+    const base = `http://127.0.0.1:${address.port}`;
+
+    const good = await fetch(`${base}/auth`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({ password: 'secret' }),
+      redirect: 'manual',
+    });
+    expect(good.status).toBe(302);
+    expect(good.headers.get('location')).toBe('/');
+    const setCookie = good.headers.get('set-cookie') ?? '';
     expect(setCookie).toContain('msq_session=');
     expect(setCookie).toContain('HttpOnly');
     expect(setCookie).toContain('SameSite=Strict');
 
-    const replay = await fetch(`${base}/auth?ticket=${ticket}`, { redirect: 'manual' });
-    expect(replay.status).toBe(403);
+    const bad = await fetch(`${base}/auth`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({ password: 'wrong' }),
+      redirect: 'manual',
+    });
+    expect(bad.status).toBe(401);
+    expect(bad.headers.get('set-cookie')).toBeNull();
+
+    const empty = await fetch(`${base}/auth`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams(),
+      redirect: 'manual',
+    });
+    expect(empty.status).toBe(401);
   });
 
-  it('accepts the persistent token on /auth as fallback and rejects bad credentials', async () => {
+  it('redirects GET /auth straight through when already carrying a valid session', async () => {
     const { createWebServer } = await import('../../src/web/server.js');
     server = createWebServer({ host: '127.0.0.1', port: 0, auth: 'token', token: 'secret' });
     await new Promise<void>((resolve) => server!.server.listen(0, '127.0.0.1', resolve));
     const address = server!.server.address() as { port: number };
     const base = `http://127.0.0.1:${address.port}`;
 
-    const good = await fetch(`${base}/auth?token=secret`, { redirect: 'manual' });
-    expect(good.status).toBe(302);
-    expect(good.headers.get('set-cookie')).toContain('msq_session=');
+    const login = await fetch(`${base}/auth`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({ password: 'secret' }),
+      redirect: 'manual',
+    });
+    const cookie = (login.headers.get('set-cookie') ?? '').split(';')[0] ?? '';
 
-    const bad = await fetch(`${base}/auth?token=wrong`, { redirect: 'manual' });
-    expect(bad.status).toBe(403);
-    const empty = await fetch(`${base}/auth`, { redirect: 'manual' });
-    expect(empty.status).toBe(403);
+    const res = await fetch(`${base}/auth`, { headers: { Cookie: cookie }, redirect: 'manual' });
+    expect(res.status).toBe(302);
+    expect(res.headers.get('location')).toBe('/');
   });
 
   it('authenticates the WebSocket by session cookie without an auth message', async () => {
@@ -1167,7 +1202,12 @@ describe('web server', () => {
     const address = server!.server.address() as { port: number };
     const base = `http://127.0.0.1:${address.port}`;
 
-    const login = await fetch(`${base}/auth?ticket=${server!.issueLoginTicket()}`, { redirect: 'manual' });
+    const login = await fetch(`${base}/auth`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({ password: 'secret' }),
+      redirect: 'manual',
+    });
     const cookie = (login.headers.get('set-cookie') ?? '').split(';')[0] ?? '';
     expect(cookie).toContain('msq_session=');
 
