@@ -1,3 +1,4 @@
+import { networkInterfaces } from 'node:os';
 import { describe, expect, it } from 'vitest';
 import {
   createWebAuth,
@@ -7,6 +8,15 @@ import {
   timingSafeEqualStrings,
   SESSION_COOKIE_NAME,
 } from '../../src/web/auth.js';
+
+function firstLanAddress(): string | null {
+  for (const addresses of Object.values(networkInterfaces())) {
+    for (const addr of addresses ?? []) {
+      if (!addr.internal && addr.family === 'IPv4') return addr.address;
+    }
+  }
+  return null;
+}
 
 describe('timingSafeEqualStrings', () => {
   it('compares strings of any length without throwing', () => {
@@ -42,6 +52,21 @@ describe('isAllowedHostHeader', () => {
     expect(isAllowedHostHeader('evil.example', '127.0.0.1')).toBe(false);
     expect(isAllowedHostHeader(undefined, '127.0.0.1')).toBe(false);
   });
+
+  it('accepts this machine\'s LAN addresses when bound to a wildcard host (H22)', () => {
+    const lanAddress = firstLanAddress();
+    if (!lanAddress) return; // no non-loopback interface in this environment
+    expect(isAllowedHostHeader(`${lanAddress}:8743`, '0.0.0.0')).toBe(true);
+    expect(isAllowedHostHeader(`${lanAddress}:8743`, '::')).toBe(true);
+  });
+
+  it('still rejects foreign hosts when bound to a wildcard host', () => {
+    expect(isAllowedHostHeader('evil.example:8743', '0.0.0.0')).toBe(false);
+  });
+
+  it('does not treat the literal wildcard string as a match when bound to a specific host', () => {
+    expect(isAllowedHostHeader('0.0.0.0:8743', '127.0.0.1')).toBe(false);
+  });
 });
 
 describe('isAllowedOrigin', () => {
@@ -59,6 +84,12 @@ describe('isAllowedOrigin', () => {
     expect(isAllowedOrigin('https://evil.example:8743', '127.0.0.1')).toBe(false);
     expect(isAllowedOrigin('file://', '127.0.0.1')).toBe(false);
     expect(isAllowedOrigin('null', '127.0.0.1')).toBe(false);
+  });
+
+  it('accepts this machine\'s LAN addresses as Origin when bound to a wildcard host (H22)', () => {
+    const lanAddress = firstLanAddress();
+    if (!lanAddress) return;
+    expect(isAllowedOrigin(`http://${lanAddress}:8743`, '0.0.0.0')).toBe(true);
   });
 });
 

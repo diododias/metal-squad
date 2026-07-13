@@ -1,4 +1,5 @@
 import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
+import { networkInterfaces } from 'node:os';
 
 export const SESSION_COOKIE_NAME = 'msq_session';
 export const LOGIN_TICKET_TTL_MS = 10 * 60 * 1000;
@@ -31,10 +32,40 @@ function normalizeHostname(hostname: string): string {
 }
 
 const LOCAL_HOSTNAMES = new Set(['127.0.0.1', 'localhost', '::1']);
+const WILDCARD_HOSTS = new Set(['0.0.0.0', '::', '[::]']);
+
+/** True when `boundHost` tells the HTTP server to listen on every interface —
+ * the operator has already opted into LAN exposure, so the Host/Origin guard
+ * must accept the machine's real LAN addresses instead of the literal
+ * wildcard string (which a client can never send as its Host header). */
+function isWildcardBindHost(boundHost: string): boolean {
+  return WILDCARD_HOSTS.has(normalizeHostname(boundHost));
+}
+
+/** Hostnames (IPv4/IPv6, normalized) of every non-internal network interface
+ * on this machine — computed lazily since interfaces don't change mid-run. */
+function localInterfaceHostnames(): Set<string> {
+  const hostnames = new Set<string>();
+  for (const addresses of Object.values(networkInterfaces())) {
+    for (const addr of addresses ?? []) {
+      if (addr.internal) continue;
+      hostnames.add(normalizeHostname(addr.address));
+    }
+  }
+  return hostnames;
+}
+
+function isAllowedHostname(hostname: string, boundHost: string): boolean {
+  const normalized = normalizeHostname(hostname);
+  if (LOCAL_HOSTNAMES.has(normalized) || normalized === normalizeHostname(boundHost)) return true;
+  return isWildcardBindHost(boundHost) && localInterfaceHostnames().has(normalized);
+}
 
 /** Rejects requests whose Host header points at a hostname other than the
- * loopback names or the configured bind host — a DNS-rebinding page resolves
- * an attacker domain to 127.0.0.1, so the Host header betrays it. */
+ * loopback names, the configured bind host, or — when bound to a wildcard
+ * address (0.0.0.0/::) for LAN access — one of this machine's own interface
+ * addresses. A DNS-rebinding page resolves an attacker domain to 127.0.0.1
+ * (or a LAN IP), so the Host header betrays it. */
 export function isAllowedHostHeader(hostHeader: string | undefined, boundHost: string): boolean {
   if (!hostHeader) return false;
   let hostname: string;
@@ -43,8 +74,7 @@ export function isAllowedHostHeader(hostHeader: string | undefined, boundHost: s
   } catch {
     return false;
   }
-  const normalized = normalizeHostname(hostname);
-  return LOCAL_HOSTNAMES.has(normalized) || normalized === normalizeHostname(boundHost);
+  return isAllowedHostname(hostname, boundHost);
 }
 
 /** Browser-sent Origin must match one of the allowed hostnames; an absent
@@ -58,8 +88,7 @@ export function isAllowedOrigin(originHeader: string | undefined, boundHost: str
     return false;
   }
   if (url.protocol !== 'http:' && url.protocol !== 'https:') return false;
-  const normalized = normalizeHostname(url.hostname);
-  return LOCAL_HOSTNAMES.has(normalized) || normalized === normalizeHostname(boundHost);
+  return isAllowedHostname(url.hostname, boundHost);
 }
 
 export interface WebAuth {

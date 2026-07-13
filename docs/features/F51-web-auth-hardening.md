@@ -63,3 +63,10 @@ para `config.json`) antes de subir o servidor, invalidando o anterior.
 - HTTPS/TLS local (o bind default segue `127.0.0.1`)
 - Persistencia de sessao entre restarts do servidor
 - Multi-usuario/roles
+
+## Hotfixes relacionados
+
+- [`H22`](../hotfixes/H22-web-host-guard-blocks-lan-access.md) — os guards de
+  Host/Origin acima bloqueavam acesso legitimo quando o operador sobe o
+  servidor com `--host 0.0.0.0`/`::` para expor na LAN (ou via Tailscale);
+  corrigido aceitando qualquer interface de rede real da maquina nesse modo.
