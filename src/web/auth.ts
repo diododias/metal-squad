@@ -34,10 +34,17 @@ function normalizeHostname(hostname: string): string {
 const LOCAL_HOSTNAMES = new Set(['127.0.0.1', 'localhost', '::1']);
 const WILDCARD_HOSTS = new Set(['0.0.0.0', '::', '[::]']);
 
+/** Hostname suffixes known to resolve only to addresses under the operator's
+ * own control, never to an arbitrary attacker-registered domain: Tailscale's
+ * MagicDNS (`*.ts.net`) and mDNS (`*.local`). Allowlisted only when bound to
+ * a wildcard address, alongside the machine's own interface IPs — a request
+ * still has to reach the process to matter, and these suffixes are the two
+ * common non-IP ways a LAN/VPN client addresses this machine. */
+const ALLOWED_WILDCARD_SUFFIXES = ['.ts.net', '.local'];
+
 /** True when `boundHost` tells the HTTP server to listen on every interface —
- * the operator has already opted into LAN exposure, so the Host/Origin guard
- * must accept the machine's real LAN addresses instead of the literal
- * wildcard string (which a client can never send as its Host header). */
+ * the operator has opted into exposure beyond loopback (LAN, a VPN overlay
+ * like Tailscale, etc). */
 function isWildcardBindHost(boundHost: string): boolean {
   return WILDCARD_HOSTS.has(normalizeHostname(boundHost));
 }
@@ -58,14 +65,18 @@ function localInterfaceHostnames(): Set<string> {
 function isAllowedHostname(hostname: string, boundHost: string): boolean {
   const normalized = normalizeHostname(hostname);
   if (LOCAL_HOSTNAMES.has(normalized) || normalized === normalizeHostname(boundHost)) return true;
-  return isWildcardBindHost(boundHost) && localInterfaceHostnames().has(normalized);
+  if (!isWildcardBindHost(boundHost)) return false;
+  if (localInterfaceHostnames().has(normalized)) return true;
+  return ALLOWED_WILDCARD_SUFFIXES.some((suffix) => normalized.endsWith(suffix));
 }
 
 /** Rejects requests whose Host header points at a hostname other than the
  * loopback names, the configured bind host, or — when bound to a wildcard
- * address (0.0.0.0/::) for LAN access — one of this machine's own interface
- * addresses. A DNS-rebinding page resolves an attacker domain to 127.0.0.1
- * (or a LAN IP), so the Host header betrays it. */
+ * address (0.0.0.0/::) — one of this machine's own interface addresses or a
+ * Tailscale/mDNS name for it. A DNS-rebinding page resolves an attacker
+ * domain to 127.0.0.1 (or a LAN IP), so the Host header betrays it; an
+ * arbitrary domain never matches an interface IP nor the `.ts.net`/`.local`
+ * suffixes, so it's still rejected even on a wildcard bind. */
 export function isAllowedHostHeader(hostHeader: string | undefined, boundHost: string): boolean {
   if (!hostHeader) return false;
   let hostname: string;

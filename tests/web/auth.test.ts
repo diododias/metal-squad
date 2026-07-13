@@ -60,7 +60,12 @@ describe('isAllowedHostHeader', () => {
     expect(isAllowedHostHeader(`${lanAddress}:8743`, '::')).toBe(true);
   });
 
-  it('still rejects foreign hosts when bound to a wildcard host', () => {
+  it('accepts mDNS and Tailscale MagicDNS suffixes when bound to a wildcard host (H22)', () => {
+    expect(isAllowedHostHeader('my-mac.local:8743', '0.0.0.0')).toBe(true);
+    expect(isAllowedHostHeader('my-mac.tailabc123.ts.net:8743', '0.0.0.0')).toBe(true);
+  });
+
+  it('still rejects foreign hosts (DNS rebinding) when bound to a wildcard host', () => {
     expect(isAllowedHostHeader('evil.example:8743', '0.0.0.0')).toBe(false);
   });
 
@@ -86,10 +91,15 @@ describe('isAllowedOrigin', () => {
     expect(isAllowedOrigin('null', '127.0.0.1')).toBe(false);
   });
 
-  it('accepts this machine\'s LAN addresses as Origin when bound to a wildcard host (H22)', () => {
+  it('accepts LAN/mDNS/Tailscale MagicDNS Origins when bound to a wildcard host (H22)', () => {
     const lanAddress = firstLanAddress();
-    if (!lanAddress) return;
-    expect(isAllowedOrigin(`http://${lanAddress}:8743`, '0.0.0.0')).toBe(true);
+    if (lanAddress) expect(isAllowedOrigin(`http://${lanAddress}:8743`, '0.0.0.0')).toBe(true);
+    expect(isAllowedOrigin('http://my-mac.tailabc123.ts.net:8743', '0.0.0.0')).toBe(true);
+  });
+
+  it('still rejects foreign and non-http origins when bound to a wildcard host', () => {
+    expect(isAllowedOrigin('http://evil.example', '0.0.0.0')).toBe(false);
+    expect(isAllowedOrigin('file://', '0.0.0.0')).toBe(false);
   });
 });
 

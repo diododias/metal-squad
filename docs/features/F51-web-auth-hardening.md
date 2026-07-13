@@ -68,5 +68,7 @@ para `config.json`) antes de subir o servidor, invalidando o anterior.
 
 - [`H22`](../hotfixes/H22-web-host-guard-blocks-lan-access.md) — os guards de
   Host/Origin acima bloqueavam acesso legitimo quando o operador sobe o
-  servidor com `--host 0.0.0.0`/`::` para expor na LAN (ou via Tailscale);
-  corrigido aceitando qualquer interface de rede real da maquina nesse modo.
+  servidor com `--host 0.0.0.0`/`::` para expor alem do loopback (LAN, mDNS,
+  Tailscale MagicDNS); corrigido estendendo o allowlist, em bind wildcard,
+  para IPs de interface real da maquina e os sufixos `.local`/`.ts.net`,
+  mantendo o guard de DNS-rebinding ativo para dominios arbitrarios.
