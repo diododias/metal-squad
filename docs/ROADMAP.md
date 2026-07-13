@@ -223,6 +223,7 @@ trabalho executavel (ver "Proximo passo" em cada doc).
 | [F47 — Perguntas Interativas via Telegram (Botoes)](features/F47-telegram-interactive-questions.md) | Notificacoes | Alta |
 | [F48 — Card de Demanda Enriquecido](features/F48-enhanced-feature-card.md) | Tela principal | Media |
 | [F49 — Continuidade de Sessao ao Responder Pergunta da IA](features/F49-question-answer-session-continuity.md) | Controle de sessao | Alta |
+| [F50 — Web v2 Redesign (React/JSX, multi-pagina)](features/F50-web-v2-redesign.md) | Web | Alta |
 
 ### Melhorias / Bugs
 

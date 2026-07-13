@@ -1,0 +1,25 @@
+/* Metal Squad — spacing, radius, layout tokens. */
+
+:root {
+  --space-1: 4px;
+  --space-2: 6px;
+  --space-3: 8px;
+  --space-4: 10px;
+  --space-5: 12px;
+  --space-6: 16px;
+  --space-7: 20px;
+  --space-8: 24px;
+  --space-9: 32px;
+  --space-10: 40px;
+
+  /* corner radii — small and utilitarian, never pill-shaped except badges/pills */
+  --radius-sm: 4px;
+  --radius-md: 6px;
+  --radius-lg: 8px;
+  --radius-pill: 999px;
+
+  /* layout constants */
+  --sidebar-width: 220px;
+  --header-height: 56px;
+  --border-width: 1px;
+}

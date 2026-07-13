@@ -4,6 +4,8 @@ import type { PendingApproval } from '../ui/hooks/useGates.js';
 import type { FeatureCatalogEntry, BacklogSettings } from '../ui/catalog.js';
 import type { RunBreakdown } from '../core/stats.js';
 import type { ThemeRoleName } from '../ui/theme/types.js';
+import type { Config } from '../config/index.js';
+import type { Skill } from '../core/skills/types.js';
 
 export interface TokenStats {
   status: 'loading' | 'ready' | 'error';
@@ -47,6 +49,13 @@ export interface MsqWebState {
   };
   notifications: UiNotification[];
   theme: ThemeSnapshot;
+  /** Config page (Runtime/Notifications/Budget sub-tabs) — read-only
+   * resolved runtime config; no secrets (channel webhook URLs are user-owned
+   * local config, not credentials issued by msq). */
+  runtimeConfig: Config;
+  /** Config page (Skills sub-tab) — discovered skills with precedence
+   * already applied (repo > global > external > builtin), read-only. */
+  skillsCatalog: Skill[];
 }
 
 export interface RunChangedFile {
@@ -79,6 +88,7 @@ export interface FeatureConfigPatch {
     stages?: string[];
     syncTasksToBacklog?: boolean;
     approvals?: { autoAdvance?: boolean };
+    stepGuidance?: Record<string, { skills?: string[]; prompt?: string }>;
   };
   retry?: { maxAttempts?: number; backoffMs?: number; onFail?: string };
 }

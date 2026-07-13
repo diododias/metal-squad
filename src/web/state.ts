@@ -14,9 +14,11 @@ import {
 import { resolveRepo } from '../core/repo.js';
 import { getFeatureCatalog, getBacklogSettings, getPendingFeatures, type FeatureCatalogEntry } from '../ui/catalog.js';
 import { getRunGroup, sortRunsByGroup } from '../ui/dashboardGroups.js';
-import { resolveRuntimeConfig } from '../config/index.js';
+import { resolveRuntimeConfig, ConfigSchema, type Config } from '../config/index.js';
 import { resolveThemePreference } from '../ui/theme/resolve.js';
 import type { ThemeRoleName } from '../ui/theme/types.js';
+import { createSkillRegistry } from '../core/skills/registry.js';
+import type { Skill } from '../core/skills/types.js';
 import type { MsqWebState, ThemeSnapshot, TokenStats, UiNotification } from './types.js';
 
 const DASHBOARD_PERIODS: { label: string; days: number | null }[] = [
@@ -138,6 +140,22 @@ function buildThemeSnapshot(): ThemeSnapshot {
   }
 }
 
+function collectRuntimeConfig(): Config {
+  try {
+    return resolveRuntimeConfig(process.cwd());
+  } catch {
+    return ConfigSchema.parse({});
+  }
+}
+
+function collectSkillsCatalog(): Skill[] {
+  try {
+    return createSkillRegistry().discover(process.cwd());
+  } catch {
+    return [];
+  }
+}
+
 export function buildMsqWebState(): MsqWebState {
   const repoLabel = basename(resolveRepo().path);
   const runs = collectRuns();
@@ -171,6 +189,8 @@ export function buildMsqWebState(): MsqWebState {
     },
     notifications: [],
     theme: buildThemeSnapshot(),
+    runtimeConfig: collectRuntimeConfig(),
+    skillsCatalog: collectSkillsCatalog(),
   };
 }
 

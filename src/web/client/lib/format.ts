@@ -1,39 +1,33 @@
-export const STATUS_ICON = {
-  running: '⟳',
-  done: '✓',
-  failed: '✗',
-  blocked: '⊘',
-  aborted: '■',
-};
+import type { RunSummary } from '../../../db/repo.js';
 
-export function formatElapsed(startedAt, endedAt) {
+export function formatElapsed(startedAt: string, endedAt: string | null): string {
   const start = parseTimestampMs(startedAt);
   if (start === null) return '—';
   const end = endedAt ? parseTimestampMs(endedAt) : Date.now();
   const secs = Math.max(0, Math.floor(((end ?? Date.now()) - start) / 1000));
-  if (secs < 60) return `${secs}s`;
+  if (secs < 60) return `${String(secs)}s`;
   const mins = Math.floor(secs / 60);
-  return `${mins}m${secs % 60}s`;
+  return `${String(mins)}m${String(secs % 60)}s`;
 }
 
-export function formatDurationMs(ms) {
+export function formatDurationMs(ms: number | null | undefined): string {
   if (ms === null || ms === undefined) return '—';
   const secs = Math.max(0, Math.round(ms / 1000));
-  if (secs < 60) return `${secs}s`;
+  if (secs < 60) return `${String(secs)}s`;
   const mins = Math.floor(secs / 60);
-  if (mins < 60) return `${mins}m${secs % 60}s`;
+  if (mins < 60) return `${String(mins)}m${String(secs % 60)}s`;
   const hours = Math.floor(mins / 60);
-  return `${hours}h${mins % 60}m`;
+  return `${String(hours)}h${String(mins % 60)}m`;
 }
 
-export function getRunStatusLabel(run) {
+export function getRunStatusLabel(run: RunSummary): string {
   if (run.pendingStageRequestKind === 'approval') return 'awaiting approval';
   if (run.pendingStageRequestKind === 'input') return 'awaiting input';
   if (run.pipelineStatus === 'running' && run.rawStatus === 'done') return 'advancing';
   return run.status;
 }
 
-export function getRunStageLabel(run) {
+export function getRunStageLabel(run: RunSummary): string | null {
   const stage = run.pipelineCurrentStage ?? run.stage;
   if (!stage) return null;
   if (run.pendingStageRequestKind === 'approval') return `${stage} -> approval`;
@@ -43,34 +37,35 @@ export function getRunStageLabel(run) {
   return stage;
 }
 
-export function formatTokens(total) {
+export function formatTokens(total: number | null | undefined): string {
   if (total === null || total === undefined) return '—';
   if (total >= 1000) return `${(total / 1000).toFixed(1)}k`;
   return String(total);
 }
 
-export function formatPercent(value) {
+export function formatPercent(value: number | null | undefined): string {
   if (value === null || value === undefined || !Number.isFinite(value)) return '—';
   const rounded = Math.round(value * 10) / 10;
-  return Number.isInteger(rounded) ? `${rounded}%` : `${rounded.toFixed(1)}%`;
+  return Number.isInteger(rounded) ? `${String(rounded)}%` : `${rounded.toFixed(1)}%`;
 }
 
-export function truncateText(value, max) {
+export function truncateText(value: string, max: number): string {
   if (value.length <= max) return value;
   if (max <= 3) return value.slice(0, max);
   return `${value.slice(0, max - 3)}...`;
 }
 
-const HEARTBEAT_PATTERN = /^\[msq\]\s+(.+?)\s+running for\s+(\d+)s\s+\(stdout\s+\d+B\s+stderr\s+\d+B\s+idle\s+(\d+)s\)\s*(.*)$/;
+const HEARTBEAT_PATTERN =
+  /^\[msq\]\s+(.+?)\s+running for\s+(\d+)s\s+\(stdout\s+\d+B\s+stderr\s+\d+B\s+idle\s+(\d+)s\)\s*(.*)$/;
 
-export function formatHeartbeatLine(line, maxWidth) {
+export function formatHeartbeatLine(line: string, maxWidth: number): string {
   const match = HEARTBEAT_PATTERN.exec(line.trim());
   if (!match) return truncateText(line, maxWidth);
   const suffix = (match[4] ?? '').trim();
   return truncateText(suffix || 'thinking...', maxWidth);
 }
 
-function parseTimestampMs(value) {
+function parseTimestampMs(value: string | null | undefined): number | null {
   if (!value) return null;
   const trimmed = value.trim();
   const normalized = /^\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}:\d{2}(?:\.\d+)?$/.test(trimmed)

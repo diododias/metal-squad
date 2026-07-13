@@ -1,6 +1,8 @@
+import type { TaskRun } from '../../../db/repo.js';
+
 const STAGE_ORDER = ['specify', 'plan', 'tasks', 'implement', 'validate'];
 
-const TASK_STATUS_ORDER = {
+const TASK_STATUS_ORDER: Record<TaskRun['status'], number> = {
   running: 0,
   blocked: 1,
   failed: 2,
@@ -9,18 +11,31 @@ const TASK_STATUS_ORDER = {
   skipped: 5,
 };
 
-function stageOrder(stage, stages) {
-  if (!stage) return stages.length + 1;
+export interface StageGroup {
+  stage: string;
+  tasks: TaskRun[];
+  total: number;
+  totalTokens: number;
+  maxContextPercent: number | null;
+  done: number;
+  running: number;
+  failed: number;
+  blocked: number;
+  pending: number;
+  skipped: number;
+}
+
+function stageOrder(stage: string, stages: string[]): number {
   const index = stages.indexOf(stage);
   return index === -1 ? stages.length : index;
 }
 
-function taskOrder(status) {
-  return TASK_STATUS_ORDER[status] ?? 6;
+function taskOrder(status: TaskRun['status']): number {
+  return TASK_STATUS_ORDER[status];
 }
 
-export function summarizeTaskRuns(taskRuns, stages = STAGE_ORDER) {
-  const groups = new Map();
+export function summarizeTaskRuns(taskRuns: TaskRun[], stages: string[] = STAGE_ORDER): StageGroup[] {
+  const groups = new Map<string, TaskRun[]>();
 
   for (const task of taskRuns) {
     const key = task.stage ?? 'ungrouped';
@@ -30,8 +45,7 @@ export function summarizeTaskRuns(taskRuns, stages = STAGE_ORDER) {
   }
 
   return [...groups.entries()]
-    .sort(([left, _leftTasks], [right, _rightTasks]) =>
-      stageOrder(left, stages) - stageOrder(right, stages) || left.localeCompare(right))
+    .sort(([left], [right]) => stageOrder(left, stages) - stageOrder(right, stages) || left.localeCompare(right))
     .map(([stage, tasks]) => {
       const orderedTasks = [...tasks].sort(
         (left, right) =>
@@ -46,7 +60,7 @@ export function summarizeTaskRuns(taskRuns, stages = STAGE_ORDER) {
         tasks: orderedTasks,
         total: orderedTasks.length,
         totalTokens: orderedTasks.reduce((sum, task) => sum + (task.totalTokens ?? 0), 0),
-        maxContextPercent: orderedTasks.reduce((max, task) => {
+        maxContextPercent: orderedTasks.reduce<number | null>((max, task) => {
           const value = task.contextWindowPercent ?? null;
           if (value === null) return max;
           return max === null ? value : Math.max(max, value);
