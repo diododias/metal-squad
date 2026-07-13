@@ -16,8 +16,8 @@ repositories, and can ask for human approval or input through Telegram.
 - Supports staged workflows with pause/resume/abort and approval gates
 - Persists runs, token usage, output, retry history, gates, and pipelines in SQLite
 - Streams notifications to Telegram, Slack, Discord, webhook, or desktop
-- Exposes a TUI for monitoring runs, gates, output, and costs
-- Exposes a web dashboard for remote monitoring and control
+- Keeps a legacy TUI for monitoring runs, gates, output, and costs
+- Exposes the official web dashboard for remote monitoring and control
 - Lets you customize prompts via builtin, global, repo, and Spec Kit skills
 
 ## Requirements
@@ -211,7 +211,7 @@ Options:
 
 ### `msq ui`
 
-Starts the interactive TUI.
+Starts the legacy interactive TUI. New UI work targets `msq web`.
 
 ```bash
 msq ui
@@ -719,13 +719,16 @@ The poller reads Telegram updates and resolves:
 - stage approvals
 - stage input requests
 
-## TUI Usage
+## Legacy TUI Usage
 
 Start it with:
 
 ```bash
 msq ui
 ```
+
+The TUI remains available for compatibility, but new features, improvements, and
+hotfixes target the web dashboard.
 
 The optional `theme` config changes the built-in TUI palette on the next
 startup. If the configured value is unknown, `msq ui` falls back to `default`
@@ -775,7 +778,7 @@ The SQLite DB persists:
 - run events
 - stage requests
 
-`msq status`, `msq stats`, and the TUI all read from this DB.
+`msq status`, `msq stats`, the web dashboard, and the legacy TUI all read from this DB.
 
 ## Troubleshooting
 

@@ -22,7 +22,7 @@
     "test:mutation": "stryker run",
     "prepare": "husky",
     "clean:db": "rm -f ~/.local/share/metal-squad/app.db && rm -rf .metal-squad",
-    "web": "npm run build && msq web --host 0.0.0.0"
+    "web": "npm run build && export MSQ_WEB_PASSWORD=diodex && msq web --host 0.0.0.0"
   },
   "engines": {
     "node": ">=20.17.0"

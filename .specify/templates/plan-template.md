@@ -40,7 +40,19 @@
 
 *GATE: Must pass before Phase 0 research. Re-check after Phase 1 design.*
 
-[Gates determined based on constitution file]
+- Source of truth: the plan identifies the affected backlog, feature, hotfix,
+  skill, or rules artifact and keeps it synchronized with observable behavior.
+- Layer ownership: the design assigns work to the owning command, core, adapter,
+  database, UI, or test layer without duplicating responsibilities.
+- Validation: code changes include the applicable build, test, typecheck, and
+  lint gates; changed behavior has automated coverage or a documented rationale.
+- Runtime evidence: live `msq` validation, when required, includes at least two
+  concrete signals: persisted state, useful output/heartbeat, or a produced diff,
+  commit, or artifact.
+- Harness safety: executor validation uses `msq-develop`, rebuilds first, and does
+  not manually implement the target feature or launch a nested runner.
+- UI scope: new UI work targets the web dashboard; TUI-only work is not expanded.
+- Any violation is resolved or justified in Complexity Tracking.
 
 ## Project Structure
 

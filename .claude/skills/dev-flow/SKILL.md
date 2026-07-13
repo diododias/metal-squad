@@ -42,11 +42,13 @@ Leia somente o necessario, priorizando estas fontes:
 
 Nao trate `docs/ARCHITECTURE.md` como fonte de verdade hoje; ele esta placeholder.
 
-### 3. Isolar o trabalho
+### 3. Preparar o checkout
 
-- Para feature, hotfix ou refactor de medio/alto risco, prefira worktree isolada.
-- Para ajuste pequeno de docs/skill/regra no checkout ja preparado pelo usuario, trabalhar no checkout atual e aceitavel.
-- Nunca crie worktree de dentro do fluxo `msq-develop`.
+- Trabalhe sempre no checkout atual deste repositorio.
+- Nao crie worktree, nao use `EnterWorktree` e nao mova a tarefa para outro
+  checkout durante o fluxo do agente.
+- Se isolamento for necessario, a ferramenta ou processo externo responsavel deve
+  preparar o checkout antes de iniciar o fluxo do agente.
 
 ### 4. Planejar de forma curta
 

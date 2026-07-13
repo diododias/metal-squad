@@ -2,20 +2,16 @@
 
 ## Regra base
 
-Para feature, hotfix e refactor com risco real, prefira worktree isolada antes de editar.
+Para feature, hotfix e refactor com risco real, mantenha a mudanca no checkout atual
+e valide antes de commitar.
 
-## Quando usar worktree
+## Checkout e isolamento
 
-Use worktree por padrao quando:
-
-- a tarefa toca `src/` ou `tests/`
-- a entrega pode virar commit/PR
-- ha chance de o usuario querer continuar outras tarefas no checkout principal
-
-Pode trabalhar no checkout atual quando:
-
-- o usuario ja preparou este checkout especificamente para a tarefa
-- a mudanca e pequena e localizada em docs/skills/regras
+- Trabalhe sempre no checkout atual deste repositorio.
+- Nao crie worktrees, nao use `EnterWorktree` e nao mova a tarefa para outro
+  checkout durante o fluxo do agente.
+- Se isolamento for necessario, a ferramenta ou processo externo responsavel deve
+  preparar o checkout antes de iniciar o fluxo do agente.
 
 ## Naming sugerido
 
