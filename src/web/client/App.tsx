@@ -41,11 +41,6 @@ export function App(): React.JSX.Element {
   const gKeyRef = useRef(false);
   const hasReceivedStateRef = useRef(false);
 
-  const [token] = useState(() => {
-    const params = new URLSearchParams(window.location.search);
-    return params.get('token') ?? window.prompt('Enter msq web token:') ?? '';
-  });
-
   useEffect(() => {
     function onHashChange(): void {
       setRoute(parseHash(window.location.hash));
@@ -79,7 +74,7 @@ export function App(): React.JSX.Element {
     [append],
   );
 
-  const { send } = useWebSocket(token, onMessage);
+  const { send, error: connectionError } = useWebSocket(onMessage);
 
   useEffect(() => {
     function onKeyDown(e: KeyboardEvent): void {
@@ -253,8 +248,8 @@ export function App(): React.JSX.Element {
       )}
       <div style={{ flex: 1, minWidth: 0, minHeight: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
         {page ?? (
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', color: 'var(--text-dim)', fontFamily: 'var(--font-mono)' }}>
-            connecting…
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', color: connectionError ? 'var(--accent-warn)' : 'var(--text-dim)', fontFamily: 'var(--font-mono)', padding: 24, textAlign: 'center' }}>
+            {connectionError ?? 'connecting…'}
           </div>
         )}
       </div>

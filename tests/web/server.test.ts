@@ -1122,4 +1122,125 @@ describe('web server', () => {
 
     socket.close();
   });
+
+  it('grants a session via /auth with a single-use ticket', async () => {
+    const { createWebServer } = await import('../../src/web/server.js');
+    server = createWebServer({ host: '127.0.0.1', port: 0, auth: 'token', token: 'secret' });
+    await new Promise<void>((resolve) => server!.server.listen(0, '127.0.0.1', resolve));
+    const address = server!.server.address() as { port: number };
+    const base = `http://127.0.0.1:${address.port}`;
+
+    const ticket = server!.issueLoginTicket();
+    const res = await fetch(`${base}/auth?ticket=${ticket}`, { redirect: 'manual' });
+    expect(res.status).toBe(302);
+    expect(res.headers.get('location')).toBe('/');
+    const setCookie = res.headers.get('set-cookie') ?? '';
+    expect(setCookie).toContain('msq_session=');
+    expect(setCookie).toContain('HttpOnly');
+    expect(setCookie).toContain('SameSite=Strict');
+
+    const replay = await fetch(`${base}/auth?ticket=${ticket}`, { redirect: 'manual' });
+    expect(replay.status).toBe(403);
+  });
+
+  it('accepts the persistent token on /auth as fallback and rejects bad credentials', async () => {
+    const { createWebServer } = await import('../../src/web/server.js');
+    server = createWebServer({ host: '127.0.0.1', port: 0, auth: 'token', token: 'secret' });
+    await new Promise<void>((resolve) => server!.server.listen(0, '127.0.0.1', resolve));
+    const address = server!.server.address() as { port: number };
+    const base = `http://127.0.0.1:${address.port}`;
+
+    const good = await fetch(`${base}/auth?token=secret`, { redirect: 'manual' });
+    expect(good.status).toBe(302);
+    expect(good.headers.get('set-cookie')).toContain('msq_session=');
+
+    const bad = await fetch(`${base}/auth?token=wrong`, { redirect: 'manual' });
+    expect(bad.status).toBe(403);
+    const empty = await fetch(`${base}/auth`, { redirect: 'manual' });
+    expect(empty.status).toBe(403);
+  });
+
+  it('authenticates the WebSocket by session cookie without an auth message', async () => {
+    const { createWebServer } = await import('../../src/web/server.js');
+    server = createWebServer({ host: '127.0.0.1', port: 0, auth: 'token', token: 'secret' });
+    await new Promise<void>((resolve) => server!.server.listen(0, '127.0.0.1', resolve));
+    const address = server!.server.address() as { port: number };
+    const base = `http://127.0.0.1:${address.port}`;
+
+    const login = await fetch(`${base}/auth?ticket=${server!.issueLoginTicket()}`, { redirect: 'manual' });
+    const cookie = (login.headers.get('set-cookie') ?? '').split(';')[0] ?? '';
+    expect(cookie).toContain('msq_session=');
+
+    const socket = new WebSocket(`ws://127.0.0.1:${address.port}/ws`, { headers: { Cookie: cookie } });
+    const message = await waitForMessageType(socket, 'state:full');
+    expect((message as { type: string }).type).toBe('state:full');
+    socket.close();
+  });
+
+  it('does not authenticate the WebSocket with a forged session cookie', async () => {
+    const { createWebServer } = await import('../../src/web/server.js');
+    server = createWebServer({ host: '127.0.0.1', port: 0, auth: 'token', token: 'secret' });
+    await new Promise<void>((resolve) => server!.server.listen(0, '127.0.0.1', resolve));
+    const address = server!.server.address() as { port: number };
+
+    const socket = new WebSocket(`ws://127.0.0.1:${address.port}/ws`, {
+      headers: { Cookie: 'msq_session=forged' },
+    });
+    await waitForOpen(socket);
+    socket.send(JSON.stringify({ type: 'subscribe:output', runId: 1 }));
+    await waitForClose(socket);
+    expect(socket.readyState).toBe(WebSocket.CLOSED);
+  });
+
+  it('closes WebSocket upgrades from a foreign Origin', async () => {
+    const { createWebServer } = await import('../../src/web/server.js');
+    server = createWebServer({ host: '127.0.0.1', port: 0, auth: 'token', token: 'secret' });
+    await new Promise<void>((resolve) => server!.server.listen(0, '127.0.0.1', resolve));
+    const address = server!.server.address() as { port: number };
+
+    const socket = new WebSocket(`ws://127.0.0.1:${address.port}/ws`, { origin: 'http://evil.example' });
+    const closeCode = await new Promise<number>((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error('close timeout')), 2000);
+      socket.once('close', (code) => {
+        clearTimeout(timer);
+        resolve(code);
+      });
+      socket.once('error', () => undefined);
+    });
+    expect(closeCode).toBe(1008);
+  });
+
+  it('allows WebSocket upgrades from the local browser origin', async () => {
+    const { createWebServer } = await import('../../src/web/server.js');
+    server = createWebServer({ host: '127.0.0.1', port: 0, auth: 'token', token: 'secret' });
+    await new Promise<void>((resolve) => server!.server.listen(0, '127.0.0.1', resolve));
+    const address = server!.server.address() as { port: number };
+
+    const socket = new WebSocket(`ws://127.0.0.1:${address.port}/ws`, {
+      origin: `http://127.0.0.1:${address.port}`,
+    });
+    await waitForOpen(socket);
+    socket.send(JSON.stringify({ type: 'auth', token: 'secret' }));
+    const message = await waitForSocketMessage(socket);
+    expect((message as { type: string }).type).toBe('state:full');
+    socket.close();
+  });
+
+  it('rejects HTTP requests with a foreign Host header', async () => {
+    const { createWebServer } = await import('../../src/web/server.js');
+    server = createWebServer({ host: '127.0.0.1', port: 0, auth: 'token', token: 'secret' });
+    await new Promise<void>((resolve) => server!.server.listen(0, '127.0.0.1', resolve));
+    const address = server!.server.address() as { port: number };
+    const http = await import('node:http');
+
+    const status = await new Promise<number>((resolve, reject) => {
+      const req = http.request(
+        { host: '127.0.0.1', port: address.port, path: '/api/health', headers: { Host: 'evil.example' } },
+        (res) => { resolve(res.statusCode ?? 0); res.resume(); },
+      );
+      req.on('error', reject);
+      req.end();
+    });
+    expect(status).toBe(403);
+  });
 });

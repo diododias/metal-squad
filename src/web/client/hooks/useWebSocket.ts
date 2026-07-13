@@ -24,14 +24,14 @@ export function subscriptionKey(message: WebSocketClientMessage): string | null 
   return `${match[1] ?? ''}:${String(id)}`;
 }
 
-/** The socket reaches OPEN before the server confirms auth (state:full is the
- * actual auth ack) — sending a subscribe:* message in that window is silently
- * dropped, or on auth='token' setups can get the socket closed by the server.
- * Queue sends until authenticatedRef flips true, then flush. Active
- * subscriptions are tracked separately and replayed on every auth ack so a
- * reconnect restores them (the server-side subscription set dies with the
- * old connection). */
-export function useWebSocket(token: string, onMessage: (message: WebSocketServerMessage) => void): UseWebSocketResult {
+/** Authentication happens at the WebSocket upgrade via the msq_session
+ * cookie set by GET /auth (F51) — the client never holds a credential. The
+ * server's state:full is still the auth ack: sending a subscribe:* message
+ * before it is silently dropped. Queue sends until authenticatedRef flips
+ * true, then flush. Active subscriptions are tracked separately and replayed
+ * on every auth ack so a reconnect restores them (the server-side
+ * subscription set dies with the old connection). */
+export function useWebSocket(onMessage: (message: WebSocketServerMessage) => void): UseWebSocketResult {
   const wsRef = useRef<WebSocket | null>(null);
   const authenticatedRef = useRef(false);
   const pendingRef = useRef<WebSocketClientMessage[]>([]);
@@ -69,10 +69,6 @@ export function useWebSocket(token: string, onMessage: (message: WebSocketServer
         }
       }
 
-      ws.addEventListener('open', () => {
-        ws.send(JSON.stringify({ type: 'auth', token } satisfies WebSocketClientMessage));
-      });
-
       ws.addEventListener('message', (event: MessageEvent<string>) => {
         try {
           const message = JSON.parse(event.data) as WebSocketServerMessage;
@@ -107,7 +103,7 @@ export function useWebSocket(token: string, onMessage: (message: WebSocketServer
         heartbeatTimer = undefined;
         if (event.code === 1008) {
           shouldReconnectRef.current = false;
-          setError(`WebSocket closed: ${event.reason || 'authentication failed'}`);
+          setError(`${event.reason || 'authentication failed'} — open the login URL printed by \`msq web\``);
           setConnectionState('disconnected');
           setConnectionSince(Date.now());
           return;
@@ -143,7 +139,8 @@ export function useWebSocket(token: string, onMessage: (message: WebSocketServer
       clearInterval(heartbeatTimer);
       wsRef.current?.close(1000);
     };
-  }, [token]);
+    // The socket carries no client-side credential; connect once per mount.
+  }, []);
 
   const send = useMemo(
     () => (message: WebSocketClientMessage): void => {

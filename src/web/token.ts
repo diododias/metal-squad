@@ -70,6 +70,24 @@ export async function getOrCreateWebToken(): Promise<string> {
 }
 
 /**
+ * Generates and persists a fresh web token, invalidating the previous one.
+ * Same storage preference as getOrCreateWebToken: keychain first, falling
+ * back to the `webToken` field in `~/.config/metal-squad/config.json`.
+ */
+export async function rotateWebToken(): Promise<string> {
+  const token = generateToken();
+  try {
+    await setSecret(TOKEN_ACCOUNT, token);
+  } catch {
+    writeFallbackToken(token);
+    return token;
+  }
+  // Keep the fallback file in sync when it already holds a (now stale) token.
+  if (readFallbackToken() !== null) writeFallbackToken(token);
+  return token;
+}
+
+/**
  * Reads the current config (creating defaults if needed) and merges any CLI/web
  * overrides. Ensures the data directory exists.
  */

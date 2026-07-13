@@ -29,6 +29,7 @@ import { resolveRuntimeConfig } from '../config/index.js';
 import { updateCatalogFeature, updateCatalogTask, type FeaturePatch } from '../db/backlogCatalog.js';
 import type { Feature, Task } from '../core/backlog/schema.js';
 import { buildMsqWebState, appendNotification } from './state.js';
+import { createWebAuth, isAllowedHostHeader, isAllowedOrigin, timingSafeEqualStrings } from './auth.js';
 import type {
   FeatureConfigPatch,
   RunChangesPayload,
@@ -175,6 +176,8 @@ export interface RunningWebServer {
   server: Server;
   wss: WebSocketServer;
   url: string;
+  /** Mints a single-use login ticket for `${url}/auth?ticket=...`. */
+  issueLoginTicket: () => string;
   close: () => Promise<void>;
 }
 
@@ -187,6 +190,7 @@ export function createWebServer(options: {
 }): RunningWebServer {
   const clients = new Map<HeartbeatWebSocket, Client>();
   const cwd = options.cwd ?? process.cwd();
+  const webAuth = createWebAuth();
   let latestState = buildMsqWebState();
   let latestStateSignature = JSON.stringify(latestState);
 
@@ -333,10 +337,14 @@ export function createWebServer(options: {
     return null;
   }
 
+  function isValidToken(token: string | null): boolean {
+    return token !== null && options.token.length > 0 && timingSafeEqualStrings(token, options.token);
+  }
+
   function isAuthenticated(req: IncomingMessage): boolean {
     if (options.auth === 'none') return true;
-    const token = extractToken(req);
-    return token === options.token;
+    if (webAuth.hasValidSession(req.headers.cookie)) return true;
+    return isValidToken(extractToken(req));
   }
 
   function readStaticBody(urlPath: string): { body: Buffer; contentType: string } | null {
@@ -372,6 +380,32 @@ export function createWebServer(options: {
     const pathname = url.pathname;
 
     try {
+      if (!isAllowedHostHeader(req.headers.host, options.host)) {
+        res.writeHead(403, { 'Content-Type': 'text/plain' });
+        res.end('Forbidden host');
+        return;
+      }
+
+      if (pathname === '/auth') {
+        if (options.auth === 'none') {
+          res.writeHead(302, { Location: '/' });
+          res.end();
+          return;
+        }
+        const ticket = url.searchParams.get('ticket');
+        const token = url.searchParams.get('token');
+        const granted = ticket !== null ? webAuth.redeemLoginTicket(ticket) : isValidToken(token);
+        if (!granted) {
+          res.writeHead(403, { 'Content-Type': 'text/plain' });
+          res.end('Invalid or expired login ticket. Restart `msq web` to print a fresh login URL.');
+          return;
+        }
+        const sessionId = webAuth.createSession();
+        res.writeHead(302, { Location: '/', 'Set-Cookie': webAuth.sessionCookie(sessionId) });
+        res.end();
+        return;
+      }
+
       if (pathname === '/api/health') {
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ status: 'ok' }));
@@ -423,8 +457,15 @@ export function createWebServer(options: {
 
   const wss = new WebSocketServer({ server: httpServer, path: '/ws' });
 
-  wss.on('connection', (rawSocket) => {
+  wss.on('connection', (rawSocket, req: IncomingMessage) => {
     const socket = rawSocket as HeartbeatWebSocket;
+    // A page on any site can open a WebSocket to 127.0.0.1 (CSWSH) and a
+    // DNS-rebinding page reaches here with a foreign Host — reject both
+    // before any state or auth handling.
+    if (!isAllowedOrigin(req.headers.origin, options.host) || !isAllowedHostHeader(req.headers.host, options.host)) {
+      socket.close(1008, 'Forbidden origin');
+      return;
+    }
     socket.isAlive = true;
     socket.on('pong', () => { socket.isAlive = true; });
 
@@ -441,7 +482,7 @@ export function createWebServer(options: {
 
     const client: Client = {
       socket,
-      authenticated: options.auth === 'none',
+      authenticated: options.auth === 'none' || webAuth.hasValidSession(req.headers.cookie),
       outputSubscriptions: new Set(),
       outputLastIdByRun: new Map(),
       detailSubscriptions: new Set(),
@@ -475,12 +516,11 @@ export function createWebServer(options: {
       }
 
       if (message.type === 'auth') {
-        if (options.auth === 'none') {
-          client.authenticated = true;
-          // state:full was already sent on connection for auth=none
+        if (client.authenticated) {
+          // state:full was already sent on connection (auth=none or session cookie)
           return;
         }
-        if (message.token === options.token) {
+        if (isValidToken(message.token)) {
           client.authenticated = true;
           refreshState();
           sendTo(client, { type: 'state:full', payload: latestState });
@@ -512,8 +552,8 @@ export function createWebServer(options: {
       clients.delete(socket);
     });
 
-    // If auth is disabled, send full state immediately
-    if (options.auth === 'none') {
+    // Cookie-authenticated browsers and auth=none get full state immediately
+    if (client.authenticated) {
       refreshState();
       sendTo(client, { type: 'state:full', payload: latestState });
     } else {
@@ -799,6 +839,7 @@ export function createWebServer(options: {
     server: httpServer,
     wss,
     url: `http://${options.host}:${String(options.port)}`,
+    issueLoginTicket: () => webAuth.issueLoginTicket(),
     close: async (): Promise<void> => {
       clearInterval(outputPollInterval);
       clearInterval(reconcilePollInterval);
