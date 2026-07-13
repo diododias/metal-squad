@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Sidebar, type SidebarNavItem } from './components/navigation/Sidebar.js';
 import { Modal } from './components/feedback/Modal.js';
 import { NotificationList, type NotificationListItem } from './components/feedback/NotificationList.js';
@@ -59,10 +59,10 @@ export function App(): React.JSX.Element {
   const { linesByRun, append, clear } = useLocalOutput();
   const gKeyRef = useRef(false);
 
-  const token = useMemo(() => {
+  const [token] = useState(() => {
     const params = new URLSearchParams(window.location.search);
     return params.get('token') ?? window.prompt('Enter msq web token:') ?? '';
-  }, []);
+  });
 
   useEffect(() => {
     function onHashChange(): void {

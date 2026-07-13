@@ -62,11 +62,12 @@ export function RunDetailPage({
   const [activeTab, setActiveTab] = useState('summary');
   const run = state.runs.find((r) => r.featureId === featureId);
   const feature = state.featureCatalog[featureId];
+  const runId = run?.runId;
 
   useEffect(() => {
-    if (run) return onSubscribeRun(run.runId);
-    return undefined;
-  }, [run, onSubscribeRun]);
+    if (runId == null) return undefined;
+    return onSubscribeRun(runId);
+  }, [runId, onSubscribeRun]);
 
   useEffect(() => onSubscribeHistory(featureId), [featureId, onSubscribeHistory]);
   void runHistories;
