@@ -1,5 +1,31 @@
 # metal-squad — Roadmap
 
+## Decisao de produto: TUI aposentado (2026-07-13)
+
+A partir desta data, a **TUI (Ink) para de receber evolucao nova**. O `msq
+web` passa a ser a interface oficial para toda demanda futura de UI/UX.
+
+- **O que NAO muda agora**: o codigo do TUI (`src/ui/`) continua no repo e
+  funcional — `msq ui` nao esta sendo removido nesta rodada.
+- **O que muda a partir de agora**: nenhuma feature nova, melhoria de UX ou
+  hotfix deve ser direcionado ao TUI. Trabalho ja entregue no TUI continua
+  registrado neste roadmap, mas com carater **historico** (Fase 2 —
+  "TUI moderna" — passa a ser tratada como congelada).
+- **Itens pendentes que eram exclusivos do TUI foram cancelados como
+  trabalho ativo**: F05, F06, F07, F08, F24 (Fase 2) e F13 (execution
+  graph, Fase 4). Ver status "Cancelado (TUI aposentado)" nas tabelas
+  abaixo.
+- **Regra pratica para proximas demandas**: se uma tarefa tocar algo que so
+  existe no TUI, o padrao passa a ser **remover** esse trecho em vez de
+  mante-lo ou evolui-lo, exceto quando explicitamente decidido o contrario.
+- **Migracao seletiva**: antes de qualquer remocao definitiva do TUI, foi
+  feito um levantamento do que ele tem e o web ainda nao tem — ver secao
+  [TUI → Web: gaps para avaliar migracao](#tui--web-gaps-para-avaliar-migracao-2026-07-13)
+  mais abaixo. Esses itens **nao viram feature automaticamente** — precisam
+  de triagem/priorizacao antes de ganhar um Fxx novo.
+
+---
+
 ## Estado atual (v0.0.1)
 
 O que ja funciona:
@@ -37,11 +63,13 @@ O que ja funciona:
 
 O que ainda falta:
 - Acoplado ao spec-kit (prompt hardcoded) → F01/F02/F03
-- TUI ainda precisa de mais capacidade estrutural em streaming e navegacao → F05/F06/F08
-- TUI nao tem a mesma hierarquia visual/auto-scroll do Live Output que o web ja tem (F38) → H13
 - Adapters hardcoded (3 tools fixos) → F20
-- Sem streaming de output em tempo real na TUI → F06
+- Live Output do web ainda nao tem auto-scroll (a parte TUI de H13 foi cancelada, ver decisao acima) → H13
 - Sem arquivos associados a features/tasks → F01
+- Web ainda nao tem command palette, breakdown de custo por repo/tool+status,
+  visualizacao de grafo de dependencias nem StatsBar persistente — capacidades
+  que so existiam no TUI e ficaram para tras com o congelamento da Fase 2 →
+  ver [gaps de migracao](#tui--web-gaps-para-avaliar-migracao-2026-07-13)
 - Telemetria de tokens ainda tem pontos de confusao reportados pelo usuario → H15
 - Catalogo de epics/features/tasks so existe no `backlog.yaml`, runtime nao le do banco → F35
 - Visualizacao por step e workflow customizavel por projeto → F40
@@ -56,17 +84,17 @@ O que ainda falta:
 
 ## Progresso por fase
 
-| Fase | Total | Entregues | Pendentes |
-|------|-------|-----------|-----------|
-| Fase 1 — Fundacao | 5 | 1 | 4 |
-| Fase 2 — TUI moderna | 7 | 3 | 4 |
-| Fase 3 — Orquestracao robusta | 5 | 5 | 0 |
-| Fase 4 — Observability & DX | 7 | 5 | 2 |
-| Fase 5 — Extensibilidade | 4 | 0 | 4 |
-| Fase 6 — Web & Remote Control | 5 | 5 | 0 |
-| Backlog operacional (harness/hardening) | 8 | 8 | 0 |
-| Backlog de feedback — novas funcionalidades | 12 | 6 | 6 |
-| Backlog de feedback — melhorias/bugs | 10 | 4 | 6 |
+| Fase | Total | Entregues | Pendentes | Cancelados (TUI aposentado) |
+|------|-------|-----------|-----------|------------------------------|
+| Fase 1 — Fundacao | 5 | 1 | 4 | 0 |
+| Fase 2 — TUI moderna (historico/congelada) | 8 | 3 | 0 | 5 |
+| Fase 3 — Orquestracao robusta | 5 | 5 | 0 | 0 |
+| Fase 4 — Observability & DX | 7 | 5 | 1 | 1 |
+| Fase 5 — Extensibilidade | 4 | 0 | 4 | 0 |
+| Fase 6 — Web & Remote Control | 5 | 5 | 0 | 0 |
+| Backlog operacional (harness/hardening) | 8 | 8 | 0 | 0 |
+| Backlog de feedback — novas funcionalidades | 12 | 6 | 6 | 0 |
+| Backlog de feedback — melhorias/bugs | 10 | 4 | 6 | 0 |
 
 ---
 
@@ -86,24 +114,32 @@ O que ainda falta:
 
 ---
 
-## Fase 2 — TUI moderna
+## Fase 2 — TUI moderna (HISTORICO — TUI aposentado em 2026-07-13)
 
-**Objetivo**: interface de controle equivalente a opencode/claude-code
+**Objetivo original**: interface de controle equivalente a opencode/claude-code.
+
+> Esta fase esta congelada. O que foi entregue (F09, F29, F31) fica
+> registrado como historico — o TUI continua existindo e funcionando, so
+> nao recebe mais evolucao. O que estava pendente (F05, F06, F07, F08,
+> F24) foi **cancelado** como trabalho ativo; nao serao construidos no
+> TUI. Ver [decisao no topo do doc](#decisao-de-produto-tui-aposentado-2026-07-13)
+> e a secao de [gaps para avaliar migracao pro web](#tui--web-gaps-para-avaliar-migracao-2026-07-13).
 
 | Feature | Esforco | Prioridade | Status |
 |---------|---------|------------|--------|
-| [F05 — Layout Multi-Painel](features/F05-layout-multi-panel.md) | High | Critica | Pendente |
-| [F06 — Log Streaming](features/F06-log-streaming.md) | High | Alta | Pendente |
-| [F07 — Status Bar](features/F07-status-bar.md) | Low | Alta | Pendente |
-| [F08 — Session Navigation](features/F08-session-navigation.md) | Medium | Media | Pendente |
-| [F09 — Command Palette](features/F09-command-palette.md) | Medium | Media | Entregue |
-| [F24 — Task & Stage Progress](features/F24-task-stage-progress.md) | Medium | Alta | Em progresso |
-| [F29 — TUI Shell Polish](features/F29-tui-shell-polish.md) | Medium | Alta | Entregue |
-| [F31 — Dashboard Kanban Overview](features/F31-dashboard-kanban-overview.md) | High | Alta | Entregue |
+| [F05 — Layout Multi-Painel](features/F05-layout-multi-panel.md) | High | Critica | Cancelado (TUI aposentado) |
+| [F06 — Log Streaming](features/F06-log-streaming.md) | High | Alta | Cancelado (TUI aposentado) |
+| [F07 — Status Bar](features/F07-status-bar.md) | Low | Alta | Cancelado (TUI aposentado) |
+| [F08 — Session Navigation](features/F08-session-navigation.md) | Medium | Media | Cancelado (TUI aposentado) |
+| [F09 — Command Palette](features/F09-command-palette.md) | Medium | Media | Entregue (historico — TUI) |
+| [F24 — Task & Stage Progress](features/F24-task-stage-progress.md) | Medium | Alta | Cancelado (TUI aposentado) |
+| [F29 — TUI Shell Polish](features/F29-tui-shell-polish.md) | Medium | Alta | Entregue (historico — TUI) |
+| [F31 — Dashboard Kanban Overview](features/F31-dashboard-kanban-overview.md) | High | Alta | Entregue (historico — TUI, kanban ja migrou pro web em F32/F50) |
 
-**Entrega**: TUI multi-painel com streaming, status bar, navegacao rica,
-progresso granular por task/stage, casca operacional mais polida e overview
-em colunas kanban com modelo de foco unificado.
+**Entrega (historico)**: TUI multi-painel com streaming, status bar, navegacao
+rica, progresso granular por task/stage, casca operacional mais polida e
+overview em colunas kanban com modelo de foco unificado. Esse escopo nao
+avanca mais — o kanban ja tem equivalente vivo no web (F31→F32→F50).
 
 ---
 
@@ -133,12 +169,14 @@ em colunas kanban com modelo de foco unificado.
 | [F17 — Analytics CLI](features/F17-analytics-cli.md) | Low | Media | Entregue |
 | [F18 — Duration Tracking](features/F18-duration-tracking.md) | Low | Media | Entregue |
 | [F19 — Notifications v2](features/F19-notifications-v2.md) | Medium | Media | Pendente |
-| [F13 — Execution Graph](features/F13-execution-graph.md) | Medium | Media | Pendente |
-| [F10 — Theme System](features/F10-theme-system.md) | Low | Baixa | Entregue |
+| [F13 — Execution Graph](features/F13-execution-graph.md) | Medium | Media | Cancelado (TUI/CLI aposentado — candidato a migracao, ver gaps) |
+| [F10 — Theme System](features/F10-theme-system.md) | Low | Baixa | Entregue (historico — TUI; web usa token set fixo, sem troca de tema) |
 | [F30 — Token & Context Telemetry Refinement](features/F30-token-context-telemetry.md) | Medium | Alta | Entregue |
 
 **Entrega**: analytics de tokens/duracao, notificacoes multi-canal e leitura de
-contexto por sessao/step.
+contexto por sessao/step. F13 (grafo de dependencias em ASCII) era TUI/CLI e
+foi cancelado como trabalho ativo — se a visualizacao de grafo continuar
+relevante, vira feature nova no web (ver gaps de migracao).
 
 ---
 
@@ -194,9 +232,32 @@ por ticket-na-URL por sessao via cookie + senha, com guard de Host/Origin
 | [F28 — Task Context Blocks (packing + token analytics)](features/F28-task-context-blocks.md) | Feature | Alta | Em progresso |
 | [F33 — Production Hardening (budget persistence, ws heartbeat, telegram resume)](features/F33-production-hardening.md) | Feature | Alta | Entregue |
 | [F37 — Remove OVERRIDE PONTUAL](features/F37-remove-override-pontual.md) | Feature | Media | Entregue |
-| [F38 — Live Output: hierarquia visual (web)](features/F38-live-output-visual-hierarchy.md) | Feature | Media | Entregue (TUI/auto-scroll pendentes, ver H13) |
+| [F38 — Live Output: hierarquia visual (web)](features/F38-live-output-visual-hierarchy.md) | Feature | Media | Entregue (falta so auto-scroll no web, ver H13; parte TUI cancelada) |
 | [F39 — Fallback de tool/model em retry + resume no step que falhou](features/F39-adapter-fallback-resume.md) | Feature | Alta | Entregue |
 | [F41 — Reaproveitamento Adaptativo de Sessao entre Steps](features/F41-adaptive-session-reuse.md) | Feature | Alta | Entregue |
+
+---
+
+## TUI → Web: gaps para avaliar migracao (2026-07-13)
+
+Levantamento (2026-07-13) do que o TUI (`src/ui/`) tem e o web
+(`src/web/client/`) ainda nao tem ou tem mais fraco, feito antes de decidir
+o que vale a pena portar. Nenhum destes itens vira feature automaticamente —
+precisam de triagem/priorizacao para ganhar um Fxx.
+
+| Capacidade so no TUI | O que falta no web hoje | Prioridade sugerida de migracao |
+|---|---|---|
+| Command Palette (`CommandPalette.tsx`) — busca fuzzy, execucao de comandos (run/gate/view/system) | Web so tem navegacao `g`+letra e um `?` de ajuda estatico; nenhuma execucao de comando via teclado | Alta |
+| Cost breakdown por repo+tool e por status (`CostDashboard.tsx`) | `AnalyticsPage.tsx` tem trend ao longo do tempo, mas nao as tabelas por repo/tool e por status que o TUI tinha | Media |
+| Grafo de execucao/dependencias (F13, `msq graph`) | Nenhuma visualizacao de grafo de dependencias no web (BoardPage e kanban, nao grafo) | Media |
+| StatsBar — barra persistente com done/todo/running/failed/gates/tokens(7d) sempre visivel | Web tem `MetricCard` dentro da AnalyticsPage, mas nao uma barra global sempre visivel em qualquer pagina | Media |
+| Theme system (F10) — 4 temas selecionaveis e persistidos | Web usa um unico token set fixo (`src/web/static/tokens/*.css`), sem troca de tema | Baixa |
+
+Capacidades do TUI que **ja tem equivalente vivo no web** (nao precisam de
+migracao): notificacoes/toasts (`NotificationsFeed`/`useToasts` → `NotificationList`/`Toast`,
+mesmo event bus), navegacao basica por teclado (`g`+letra + `?`), e a
+hierarquia visual do Live Output (F38, ja entregue so pro web — TUI ficou pra
+tras e foi cancelado, ver H13).
 
 ---
 
@@ -238,21 +299,21 @@ F15 (event system) ✅
  ├→ F14 (budget caps) ✅
  └→ F19 (notifications v2)
 
-F05 (layout multi-panel)
- ├→ F06 (log streaming)
- ├→ F07 (status bar)
- ├→ F08 (session nav)
- ├→ F09 (command palette) ✅
- ├→ F13 (execution graph)
+F05 (layout multi-panel) ✗ cancelado (TUI aposentado)
+ ├→ F06 (log streaming) ✗ cancelado (TUI aposentado)
+ ├→ F07 (status bar) ✗ cancelado (TUI aposentado)
+ ├→ F08 (session nav) ✗ cancelado (TUI aposentado)
+ ├→ F09 (command palette) ✅ (historico — TUI; web nao tem equivalente, ver gaps)
+ ├→ F13 (execution graph) ✗ cancelado (TUI/CLI aposentado — candidato a migracao)
  ├→ F16 (cost dashboard) ✅
- ├→ F24 (task & stage progress)
- └→ F29 (tui shell polish) ✅
+ ├→ F24 (task & stage progress) ✗ cancelado (TUI aposentado — ver F40 pro sucessor web)
+ └→ F29 (tui shell polish) ✅ (historico — TUI)
 
-F07 (status bar)
+F07 (status bar) ✗ cancelado (TUI aposentado)
  └→ F16 (cost dashboard) ✅
 
-F24 (task & stage progress)
- └→ F30 (token/context telemetry) ✅
+F24 (task & stage progress) ✗ cancelado (TUI aposentado)
+ └→ F30 (token/context telemetry) ✅ (ja entregue independente do cancelamento)
 
 F28 (task context blocks)
  └→ F30 (token/context telemetry) ✅
@@ -285,7 +346,7 @@ F02 (skill registry)
  └→ F46 (custom prompt/skill per step) ✅
 
 F34 (web run detail) ✅
- └→ F38 (live output visual hierarchy) ✅ → H13 (estender p/ TUI + auto-scroll, pendente)
+ └→ F38 (live output visual hierarchy) ✅ → H13 (falta so auto-scroll no web, pendente; extensao pro TUI cancelada)
 
 F40 (workflow step view per project) — pendente
  └→ F49 (question-answer session continuity) — pendente
@@ -330,8 +391,8 @@ trabalho executavel (ver "Proximo passo" em cada doc).
 
 | Item | Area | Status | Prioridade sugerida |
 |------|------|--------|----------------------|
-| [H13 — Live Output / Tool Execution: hierarquia visual e auto scroll (TUI + Web)](hotfixes/H13-tui-live-output-visual-hierarchy.md) | Tela de detalhe / Live Output | Pendente — web feito via F38, falta TUI + auto-scroll | Media |
-| [H14 — Etapa atual nao fica visivel](hotfixes/H14-current-stage-not-visible.md) | Stages | Pendente — triagem | Alta |
+| [H13 — Live Output / Tool Execution: hierarquia visual e auto scroll (TUI + Web)](hotfixes/H13-tui-live-output-visual-hierarchy.md) | Tela de detalhe / Live Output | Pendente — so falta auto-scroll no web; parte TUI cancelada (aposentado) | Media |
+| [H14 — Etapa atual nao fica visivel](hotfixes/H14-current-stage-not-visible.md) | Stages | Pendente — reclassificado para F40 (web); nao depende mais de F24 (TUI, cancelado) | Alta |
 | [H15 — Contagem de tokens confusa e aparentemente errada](hotfixes/H15-token-accounting-confusion-and-bug.md) | Controle de sessao | Pendente — triagem | Alta |
 | [H16 — Gate continua aparecendo apos avancado](hotfixes/H16-gate-persists-after-resolved.md) | Gates | Pendente — triagem | Alta |
 | [H17 — Toast nao some depois de aparecer](hotfixes/H17-toast-not-dismissing.md) | UI | Pendente — triagem | Baixa |
