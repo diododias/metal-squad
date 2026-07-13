@@ -34,7 +34,6 @@ export function App(): React.JSX.Element {
   const [notificationsOpen, setNotificationsOpen] = useState(false);
   const [state, setState] = useState<MsqWebState | null>(null);
   const [unread, setUnread] = useState(0);
-  const [scanlines, setScanlines] = useState(true);
   const [runDetails, setRunDetails] = useState<Record<number, RunDetailData>>({});
   const [runHistories, setRunHistories] = useState<Record<string, RunHistoryEntry[]>>({});
   const { linesByRun, append, clear } = useLocalOutput();
@@ -215,7 +214,6 @@ export function App(): React.JSX.Element {
 
   return (
     <div
-      data-scanlines={scanlines ? true : undefined}
       style={{ display: 'flex', flexDirection: isMobile ? 'column' : 'row', height: '100vh', width: '100vw', overflow: 'hidden', background: 'var(--bg-base)' }}
     >
       {!isMobile && (
@@ -237,8 +235,6 @@ export function App(): React.JSX.Element {
         <MobileTopBar
           live={runningCount > 0}
           notificationCount={unread}
-          scanlines={scanlines}
-          onToggleScanlines={() => { setScanlines((s) => !s); }}
           onHelp={() => { setHelpOpen(true); }}
           onNotifications={() => {
             setNotificationsOpen(true);
@@ -262,29 +258,6 @@ export function App(): React.JSX.Element {
           <NotificationList notifications={notifications} />
         </div>
       </Modal>
-      {!isMobile && (
-        <button
-          onClick={() => { setScanlines((s) => !s); }}
-          title="Toggle scanline texture (on by default)"
-          style={{
-            position: 'fixed',
-            bottom: 62,
-            left: 14,
-            width: 'calc(var(--sidebar-width) - 28px)',
-            zIndex: 300,
-            background: 'var(--bg-panel)',
-            border: '1px solid var(--border-strong)',
-            color: 'var(--text-dim)',
-            fontFamily: 'var(--font-mono)',
-            fontSize: 11,
-            padding: '5px 9px',
-            borderRadius: 'var(--radius-sm)',
-            cursor: 'pointer',
-          }}
-        >
-          scanlines: {scanlines ? 'on' : 'off'}
-        </button>
-      )}
     </div>
   );
 }

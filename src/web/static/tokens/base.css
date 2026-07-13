@@ -25,20 +25,3 @@ html, body {
 
 a { color: var(--accent-info); text-decoration: none; }
 a:hover { color: var(--gray-7); text-decoration: underline; }
-
-/* optional CRT scanline texture — on by default, toggled via [data-scanlines] on a container. */
-[data-scanlines] { position: relative; }
-[data-scanlines]::after {
-  content: '';
-  position: absolute;
-  inset: 0;
-  pointer-events: none;
-  background: repeating-linear-gradient(
-    to bottom,
-    rgb(255 255 255 / 0.06) 0px,
-    rgb(255 255 255 / 0.06) 2px,
-    transparent 2px,
-    transparent 4px
-  );
-  z-index: 999;
-}

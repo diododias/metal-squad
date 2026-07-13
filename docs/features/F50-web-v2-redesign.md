@@ -46,7 +46,6 @@ Portados do design kit para TSX tipado (JSX classico, `import React from 'react'
 - Roteamento por hash: `#/board`, `#/runs`, `#/runs/:featureId`, `#/backlog/:featureId`, `#/gates`, `#/analytics`, `#/config`.
 - Atalhos `g` + letra para navegacao, overlay de ajuda (`?`), `Esc` fecha overlays.
 - `Sidebar` persistente (desktop) / `MobileTopBar` + `MobileTabBar` (`useIsMobile`, breakpoint 860px; `?mobile=1` forca o shell mobile para teste).
-- Toggle de scanlines (`[data-scanlines]`), estado em memoria (nao persistido).
 - WebSocket real via `hooks/useWebSocket.ts` (handshake de auth, reconexao, fila de mensagens pendentes) e `hooks/useLocalOutput.ts` (normalizacao de payload legado do opencode) — portas tipadas do `app.js` anterior contra `WebSocketClientMessage`/`WebSocketServerMessage`/`MsqWebState` (`src/web/types.ts`), sem alterar o contrato de F32.
 
 ### 5. Paginas — `src/web/client/pages/`

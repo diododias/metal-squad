@@ -117,8 +117,6 @@ export function MobileTabBar({ items, activePath, onNavigate }: MobileTabBarProp
 export interface MobileTopBarProps {
   live: boolean;
   notificationCount: number;
-  scanlines: boolean;
-  onToggleScanlines: () => void;
   onHelp: () => void;
   onNotifications: () => void;
 }
@@ -141,7 +139,6 @@ const ICON_BTN_STYLE: React.CSSProperties = {
 export function MobileTopBar({
   live,
   notificationCount,
-  onToggleScanlines,
   onHelp,
   onNotifications,
 }: MobileTopBarProps): React.JSX.Element {
@@ -175,9 +172,6 @@ export function MobileTopBar({
         />
       </div>
       <div style={{ display: 'flex', gap: 6, flexShrink: 0 }}>
-        <button onClick={onToggleScanlines} title="Toggle scanlines" style={{ ...ICON_BTN_STYLE, fontSize: 11 }}>
-          ▦
-        </button>
         <button onClick={onNotifications} title="Notifications" style={ICON_BTN_STYLE}>
           <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth={1.4} strokeLinecap="round" strokeLinejoin="round">
             <path d="M4 6.5a4 4 0 0 1 8 0c0 3 1 4.5 1 4.5H3s1-1.5 1-4.5Z" />
