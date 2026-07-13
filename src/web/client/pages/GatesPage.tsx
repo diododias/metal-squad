@@ -5,11 +5,10 @@ import type { MsqWebState, WebSocketClientMessage } from '../../types.js';
 
 export interface GatesPageProps {
   state: MsqWebState;
-  onOpenRun: (featureId: string) => void;
   send: (message: WebSocketClientMessage) => void;
 }
 
-export function GatesPage({ state, onOpenRun, send }: GatesPageProps): React.JSX.Element {
+export function GatesPage({ state, send }: GatesPageProps): React.JSX.Element {
   function resolve(gateId: number, kind: 'gate' | 'stage', response: 'advance' | 'hold' | 'retry'): void {
     if (kind === 'gate') {
       const decision = response === 'advance' ? 'approved' : response === 'retry' ? 'retried' : 'skipped';
@@ -29,9 +28,9 @@ export function GatesPage({ state, onOpenRun, send }: GatesPageProps): React.JSX
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12, flexWrap: 'wrap' }}>
               <div style={{ minWidth: 200 }}>
                 <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 6, flexWrap: 'wrap' }}>
-                  <span onClick={() => { onOpenRun(g.featureId); }} style={{ fontWeight: 600, color: 'var(--accent-info)', cursor: 'pointer', fontSize: 'var(--text-sm)' }}>
+                  <a href={`#/runs/${g.featureId}`} style={{ fontWeight: 600, color: 'var(--accent-info)', cursor: 'pointer', fontSize: 'var(--text-sm)', textDecoration: 'none' }}>
                     {g.featureId}
-                  </span>
+                  </a>
                   <span style={{ fontSize: 'var(--text-2xs)', color: 'var(--text-faint)', textTransform: 'uppercase', letterSpacing: 'var(--tracking-wide)' }}>{g.kind}</span>
                 </div>
                 <div style={{ fontSize: 'var(--text-sm)', color: 'var(--text-dim)' }}>{g.prompt || 'Awaiting approval to advance.'}</div>

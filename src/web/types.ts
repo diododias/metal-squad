@@ -4,7 +4,7 @@ import type { PendingApproval } from '../ui/hooks/useGates.js';
 import type { FeatureCatalogEntry, BacklogSettings } from '../ui/catalog.js';
 import type { RunBreakdown } from '../core/stats.js';
 import type { ThemeRoleName } from '../ui/theme/types.js';
-import type { Config } from '../config/index.js';
+import type { Config, NotificationChannelConfig } from '../config/index.js';
 import type { Skill } from '../core/skills/types.js';
 
 export interface TokenStats {
@@ -28,6 +28,17 @@ export interface ThemeSnapshot {
   roles: Record<ThemeRoleName, string>;
 }
 
+export interface WebNotificationChannel {
+  type: NotificationChannelConfig['type'];
+}
+
+export type WebRuntimeConfig = Omit<Config, 'notifications' | 'telegramChatId'> & {
+  notifications: {
+    channels: WebNotificationChannel[];
+    events: Config['notifications']['events'];
+  };
+};
+
 export interface MsqWebState {
   repoLabel: string;
   runs: RunSummary[];
@@ -50,9 +61,11 @@ export interface MsqWebState {
   notifications: UiNotification[];
   theme: ThemeSnapshot;
   /** Config page (Runtime/Notifications/Budget sub-tabs) — read-only
-   * resolved runtime config; no secrets (channel webhook URLs are user-owned
-   * local config, not credentials issued by msq). */
-  runtimeConfig: Config;
+   * resolved runtime config. Notification channels are reduced to their type:
+   * Slack/Discord/webhook URLs and the Telegram chat id are bearer-style
+   * credentials and must not reach WebSocket clients (with auth 'none' any
+   * local process could read them). */
+  runtimeConfig: WebRuntimeConfig;
   /** Config page (Skills sub-tab) — discovered skills with precedence
    * already applied (repo > global > external > builtin), read-only. */
   skillsCatalog: Skill[];

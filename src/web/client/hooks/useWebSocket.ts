@@ -13,14 +13,29 @@ export interface UseWebSocketResult {
   send: (message: WebSocketClientMessage) => void;
 }
 
+/** Server subscriptions are per-connection state: a reconnect gets a fresh
+ * client on the server with no subscriptions, but mounted pages only send
+ * subscribe:* on mount — so replay must live here. Keyed by kind+id so an
+ * unsubscribe cancels its matching subscribe even while disconnected. */
+export function subscriptionKey(message: WebSocketClientMessage): string | null {
+  const match = /^(?:un)?subscribe:(.+)$/.exec(message.type);
+  if (!match) return null;
+  const id = 'runId' in message ? message.runId : 'featureId' in message ? message.featureId : '';
+  return `${match[1] ?? ''}:${String(id)}`;
+}
+
 /** The socket reaches OPEN before the server confirms auth (state:full is the
  * actual auth ack) — sending a subscribe:* message in that window is silently
  * dropped, or on auth='token' setups can get the socket closed by the server.
- * Queue sends until authenticatedRef flips true, then flush. */
+ * Queue sends until authenticatedRef flips true, then flush. Active
+ * subscriptions are tracked separately and replayed on every auth ack so a
+ * reconnect restores them (the server-side subscription set dies with the
+ * old connection). */
 export function useWebSocket(token: string, onMessage: (message: WebSocketServerMessage) => void): UseWebSocketResult {
   const wsRef = useRef<WebSocket | null>(null);
   const authenticatedRef = useRef(false);
   const pendingRef = useRef<WebSocketClientMessage[]>([]);
+  const subscriptionsRef = useRef(new Map<string, WebSocketClientMessage>());
   const [connected, setConnected] = useState(false);
   const [connectionState, setConnectionState] = useState<ConnectionState>('never-connected');
   const [connectionSince, setConnectionSince] = useState<number | null>(null);
@@ -65,11 +80,17 @@ export function useWebSocket(token: string, onMessage: (message: WebSocketServer
             clearTimeout(connectedTimeoutRef.current);
             connectedTimeoutRef.current = setTimeout(() => { setConnected(true); }, 500);
             hasEverConnectedRef.current = true;
+            const isAuthAck = !authenticatedRef.current;
             authenticatedRef.current = true;
             setConnectionState('live');
             setConnectionSince(Date.now());
             setError(null);
-            flushPending();
+            if (isAuthAck) {
+              flushPending();
+              for (const subscription of subscriptionsRef.current.values()) {
+                if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(subscription));
+              }
+            }
           }
           onMessageRef.current(message);
         } catch {
@@ -126,10 +147,18 @@ export function useWebSocket(token: string, onMessage: (message: WebSocketServer
 
   const send = useMemo(
     () => (message: WebSocketClientMessage): void => {
+      const key = subscriptionKey(message);
+      if (key) {
+        // Subscriptions are replayed from the map on auth, so they never go
+        // through the pending queue; an unsubscribe while disconnected just
+        // cancels the replay (the dead server connection has no state to undo).
+        if (message.type.startsWith('subscribe:')) subscriptionsRef.current.set(key, message);
+        else subscriptionsRef.current.delete(key);
+      }
       const ws = wsRef.current;
       if (ws?.readyState === WebSocket.OPEN && authenticatedRef.current) {
         ws.send(JSON.stringify(message));
-      } else if (ws && ws.readyState !== WebSocket.CLOSED && ws.readyState !== WebSocket.CLOSING) {
+      } else if (!key && ws && ws.readyState !== WebSocket.CLOSED && ws.readyState !== WebSocket.CLOSING) {
         pendingRef.current.push(message);
       }
     },

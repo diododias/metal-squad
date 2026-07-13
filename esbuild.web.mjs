@@ -7,6 +7,7 @@ await build({
   format: 'esm',
   target: 'es2022',
   jsx: 'transform',
+  minify: true,
   sourcemap: true,
   logLevel: 'info',
 });

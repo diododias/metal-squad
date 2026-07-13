@@ -36,8 +36,9 @@ vi.mock('../../src/config/index.js', () => ({
 }));
 
 describe('buildMsqWebState pendingFeatures projection', () => {
-  beforeEach(() => {
+  beforeEach(async () => {
     vi.clearAllMocks();
+    (await import('../../src/web/state.js')).resetWebStateCaches();
     mocks.resolveRepo.mockReturnValue({ repoId: 'repo-1', path: '/tmp/metal-squad' });
     mocks.openGates.mockReturnValue([]);
     mocks.listPendingStageRequests.mockReturnValue([]);
@@ -258,5 +259,56 @@ describe('buildMsqWebState pendingFeatures projection', () => {
 
     const state = buildMsqWebState();
     expect(state.pendingFeatures[0]?.autoStart).toBe(true);
+  });
+
+  it('strips notification credentials from runtimeConfig before broadcast', async () => {
+    const { buildMsqWebState } = await import('../../src/web/state.js');
+    mocks.listRunsForTui.mockReturnValue([]);
+    mocks.resolveRuntimeConfig.mockReturnValue({
+      theme: undefined,
+      concurrency: 3,
+      staleRunThresholdMinutes: 120,
+      toolTimeoutMs: 600_000,
+      promptContextCharLimit: 20_000,
+      stageSkills: {},
+      telegramChatId: '123456',
+      notifications: {
+        channels: [
+          { type: 'slack', webhookUrl: 'https://hooks.slack.com/services/T00/B00/secret' },
+          { type: 'telegram', chatId: '123456' },
+          { type: 'desktop' },
+        ],
+        events: ['run:start', 'run:done'],
+      },
+      workflow: { autoAdvanceStages: false, pollIntervalMs: 2_000 },
+      budget: { alertAtPercent: 80 },
+      web: { host: '127.0.0.1', port: 8743, auth: 'token' },
+    });
+
+    const state = buildMsqWebState();
+
+    expect(state.runtimeConfig.notifications.channels).toEqual([
+      { type: 'slack' },
+      { type: 'telegram' },
+      { type: 'desktop' },
+    ]);
+    expect(state.runtimeConfig.notifications.events).toEqual(['run:start', 'run:done']);
+    expect(JSON.stringify(state.runtimeConfig)).not.toContain('secret');
+    expect(JSON.stringify(state.runtimeConfig)).not.toContain('123456');
+    expect(state.runtimeConfig).not.toHaveProperty('telegramChatId');
+  });
+
+  it('caches runtime config between builds until the caches are reset', async () => {
+    const { buildMsqWebState, resetWebStateCaches } = await import('../../src/web/state.js');
+    mocks.listRunsForTui.mockReturnValue([]);
+
+    expect(buildMsqWebState().runtimeConfig.concurrency).toBe(3);
+
+    const changed = { ...mocks.resolveRuntimeConfig(), concurrency: 9 };
+    mocks.resolveRuntimeConfig.mockReturnValue(changed);
+    expect(buildMsqWebState().runtimeConfig.concurrency).toBe(3);
+
+    resetWebStateCaches();
+    expect(buildMsqWebState().runtimeConfig.concurrency).toBe(9);
   });
 });

@@ -19,7 +19,7 @@ import { resolveThemePreference } from '../ui/theme/resolve.js';
 import type { ThemeRoleName } from '../ui/theme/types.js';
 import { createSkillRegistry } from '../core/skills/registry.js';
 import type { Skill } from '../core/skills/types.js';
-import type { MsqWebState, ThemeSnapshot, TokenStats, UiNotification } from './types.js';
+import type { MsqWebState, ThemeSnapshot, TokenStats, UiNotification, WebRuntimeConfig } from './types.js';
 
 const DASHBOARD_PERIODS: { label: string; days: number | null }[] = [
   { label: 'today', days: 1 },
@@ -140,20 +140,58 @@ function buildThemeSnapshot(): ThemeSnapshot {
   }
 }
 
-function collectRuntimeConfig(): Config {
+/** Strips notification credentials (Slack/Discord/webhook URLs, Telegram chat
+ * id) before the config crosses the WebSocket boundary — with auth 'none' any
+ * local process can read the state broadcast. */
+export function sanitizeRuntimeConfig(config: Config): WebRuntimeConfig {
+  const { telegramChatId: _telegramChatId, notifications, ...rest } = config;
+  return {
+    ...rest,
+    notifications: {
+      channels: notifications.channels.map((channel) => ({ type: channel.type })),
+      events: notifications.events,
+    },
+  };
+}
+
+// Config resolution re-reads config files and skill discovery walks the
+// filesystem; the web server rebuilds state every second while a client is
+// connected, so both are cached with a TTL instead of recomputed per tick.
+const CONFIG_CACHE_TTL_MS = 30_000;
+let runtimeConfigCache: { value: WebRuntimeConfig; expiresAt: number } | null = null;
+let skillsCatalogCache: { value: Skill[]; expiresAt: number } | null = null;
+
+/** Test hook: drop the runtime-config/skills caches. */
+export function resetWebStateCaches(): void {
+  runtimeConfigCache = null;
+  skillsCatalogCache = null;
+}
+
+function collectRuntimeConfig(): WebRuntimeConfig {
+  const now = Date.now();
+  if (runtimeConfigCache && runtimeConfigCache.expiresAt > now) return runtimeConfigCache.value;
+  let config: Config;
   try {
-    return resolveRuntimeConfig(process.cwd());
+    config = resolveRuntimeConfig(process.cwd());
   } catch {
-    return ConfigSchema.parse({});
+    config = ConfigSchema.parse({});
   }
+  const value = sanitizeRuntimeConfig(config);
+  runtimeConfigCache = { value, expiresAt: now + CONFIG_CACHE_TTL_MS };
+  return value;
 }
 
 function collectSkillsCatalog(): Skill[] {
+  const now = Date.now();
+  if (skillsCatalogCache && skillsCatalogCache.expiresAt > now) return skillsCatalogCache.value;
+  let value: Skill[];
   try {
-    return createSkillRegistry().discover(process.cwd());
+    value = createSkillRegistry().discover(process.cwd());
   } catch {
-    return [];
+    value = [];
   }
+  skillsCatalogCache = { value, expiresAt: now + CONFIG_CACHE_TTL_MS };
+  return value;
 }
 
 export function buildMsqWebState(): MsqWebState {

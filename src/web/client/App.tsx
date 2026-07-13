@@ -6,6 +6,7 @@ import { HelpOverlay } from './HelpOverlay.js';
 import { useIsMobile, MobileTopBar, MobileTabBar } from './Responsive.js';
 import { useWebSocket } from './hooks/useWebSocket.js';
 import { useLocalOutput, type OutputLine } from './hooks/useLocalOutput.js';
+import { parseHash, type Route } from './lib/routes.js';
 import { BoardPage } from './pages/BoardPage.js';
 import { RunDetailPage } from './pages/RunDetailPage.js';
 import { BacklogItemDetail } from './pages/BacklogItemDetail.js';
@@ -16,26 +17,6 @@ import { ConfigPage } from './pages/ConfigPage.js';
 import type { MsqWebState, WebSocketServerMessage, FeatureConfigPatch, TaskConfigPatch } from '../types.js';
 import type { RunHistoryEntry, TaskRun } from '../../db/repo.js';
 import type { RunBreakdown } from '../../core/stats.js';
-
-type Route =
-  | { page: 'board' }
-  | { page: 'run-detail'; featureId: string }
-  | { page: 'backlog-detail'; featureId: string }
-  | { page: 'runs' }
-  | { page: 'gates' }
-  | { page: 'analytics' }
-  | { page: 'config' };
-
-function parseHash(): Route {
-  const h = window.location.hash.replace(/^#/, '') || '/board';
-  if (h.startsWith('/runs/')) return { page: 'run-detail', featureId: h.slice('/runs/'.length) };
-  if (h.startsWith('/backlog/')) return { page: 'backlog-detail', featureId: h.slice('/backlog/'.length) };
-  if (h === '/runs') return { page: 'runs' };
-  if (h === '/gates') return { page: 'gates' };
-  if (h === '/config') return { page: 'config' };
-  if (h === '/analytics') return { page: 'analytics' };
-  return { page: 'board' };
-}
 
 interface RunDetailData {
   taskRuns: TaskRun[];
@@ -48,7 +29,7 @@ function notificationTone(type: 'info' | 'notice'): NotificationListItem['tone']
 
 export function App(): React.JSX.Element {
   const isMobile = useIsMobile(860);
-  const [route, setRoute] = useState<Route>(parseHash());
+  const [route, setRoute] = useState<Route>(parseHash(window.location.hash));
   const [helpOpen, setHelpOpen] = useState(false);
   const [notificationsOpen, setNotificationsOpen] = useState(false);
   const [state, setState] = useState<MsqWebState | null>(null);
@@ -58,6 +39,7 @@ export function App(): React.JSX.Element {
   const [runHistories, setRunHistories] = useState<Record<string, RunHistoryEntry[]>>({});
   const { linesByRun, append, clear } = useLocalOutput();
   const gKeyRef = useRef(false);
+  const hasReceivedStateRef = useRef(false);
 
   const [token] = useState(() => {
     const params = new URLSearchParams(window.location.search);
@@ -66,7 +48,7 @@ export function App(): React.JSX.Element {
 
   useEffect(() => {
     function onHashChange(): void {
-      setRoute(parseHash());
+      setRoute(parseHash(window.location.hash));
     }
     window.addEventListener('hashchange', onHashChange);
     return (): void => {
@@ -77,10 +59,11 @@ export function App(): React.JSX.Element {
   const onMessage = useCallback(
     (message: WebSocketServerMessage) => {
       if (message.type === 'state:full') {
-        setState((current) => {
-          if (current == null) setUnread(message.payload.notifications.length);
-          return message.payload;
-        });
+        if (!hasReceivedStateRef.current) {
+          hasReceivedStateRef.current = true;
+          setUnread(message.payload.notifications.length);
+        }
+        setState(message.payload);
       } else if (message.type === 'run:output') {
         const payload = message.payload as OutputLine & { runId: number };
         append(payload.runId, payload);
@@ -96,8 +79,7 @@ export function App(): React.JSX.Element {
     [append],
   );
 
-  const { connected, send } = useWebSocket(token, onMessage);
-  void connected;
+  const { send } = useWebSocket(token, onMessage);
 
   useEffect(() => {
     function onKeyDown(e: KeyboardEvent): void {
@@ -109,6 +91,7 @@ export function App(): React.JSX.Element {
       }
       if (e.key === 'Escape') {
         setHelpOpen(false);
+        setNotificationsOpen(false);
         return;
       }
       if (e.key === 'g') {
@@ -202,10 +185,8 @@ export function App(): React.JSX.Element {
         state={state}
         featureId={route.featureId}
         runDetails={runDetails}
-        runHistories={runHistories}
         linesByRun={linesByRun}
         onSubscribeRun={requestRunSubscriptions}
-        onSubscribeHistory={requestHistorySubscription}
         onBack={() => { navigate('/runs'); }}
         send={send}
       />
@@ -230,7 +211,7 @@ export function App(): React.JSX.Element {
       />
     );
   } else if (route.page === 'gates') {
-    page = state && <GatesPage state={state} onOpenRun={openRun} send={send} />;
+    page = state && <GatesPage state={state} send={send} />;
   } else if (route.page === 'analytics') {
     page = state && <AnalyticsPage state={state} />;
   } else {

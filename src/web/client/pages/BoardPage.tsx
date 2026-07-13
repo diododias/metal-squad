@@ -15,6 +15,22 @@ export interface BoardPageProps {
   onOpenBacklogItem: (featureId: string) => void;
 }
 
+function cardInteraction(
+  onActivate: () => void,
+): Pick<React.HTMLAttributes<HTMLDivElement>, 'role' | 'tabIndex' | 'onClick' | 'onKeyDown'> {
+  return {
+    role: 'button',
+    tabIndex: 0,
+    onClick: onActivate,
+    onKeyDown: (e): void => {
+      if (e.key === 'Enter' || e.key === ' ') {
+        e.preventDefault();
+        onActivate();
+      }
+    },
+  };
+}
+
 interface Column {
   key: string;
   label: string;
@@ -31,19 +47,21 @@ export function BoardPage({ state, isMobile, onOpenRun, onOpenBacklogItem }: Boa
   const matches = (title: string | null | undefined, id: string): boolean =>
     !q || (title ?? '').toLowerCase().includes(q) || id.toLowerCase().includes(q);
   const byTool = (r: RunSummary): boolean => toolFilter === 'all' || r.tool === toolFilter;
+  const matchesRun = (r: RunSummary): boolean =>
+    matches(state.featureCatalog[r.featureId]?.title, r.featureId) && byTool(r);
 
   const todo = state.pendingFeatures.filter((f) => matches(f.title, f.id) && (toolFilter === 'all' || f.tool === toolFilter));
 
   let columns: Column[];
   if (viewMode === 'status') {
     columns = [
-      { key: 'progress', label: 'IN PROGRESS / BLOCKED', items: state.runs.filter((r) => (r.status === 'running' || r.status === 'blocked') && matches(r.featureId, r.featureId) && byTool(r)), empty: 'No active runs' },
-      { key: 'done', label: 'DONE', items: state.runs.filter((r) => r.status === 'done' && matches(r.featureId, r.featureId) && byTool(r)), empty: 'No completed runs' },
-      { key: 'failed', label: 'FALHA / CANCELED', items: state.runs.filter((r) => (r.status === 'failed' || r.status === 'aborted') && matches(r.featureId, r.featureId) && byTool(r)), empty: 'No failed runs' },
+      { key: 'progress', label: 'IN PROGRESS / BLOCKED', items: state.runs.filter((r) => (r.status === 'running' || r.status === 'blocked') && matchesRun(r)), empty: 'No active runs' },
+      { key: 'done', label: 'DONE', items: state.runs.filter((r) => r.status === 'done' && matchesRun(r)), empty: 'No completed runs' },
+      { key: 'failed', label: 'FALHA / CANCELED', items: state.runs.filter((r) => (r.status === 'failed' || r.status === 'aborted') && matchesRun(r)), empty: 'No failed runs' },
     ];
   } else {
-    const active = state.runs.filter((r) => r.status !== 'done' && matches(r.featureId, r.featureId) && byTool(r));
-    const done = state.runs.filter((r) => r.status === 'done' && matches(r.featureId, r.featureId) && byTool(r));
+    const active = state.runs.filter((r) => r.status !== 'done' && matchesRun(r));
+    const done = state.runs.filter((r) => r.status === 'done' && matchesRun(r));
     columns = [
       ...WORKFLOW_STAGES.map((stage) => ({
         key: stage,
@@ -153,7 +171,7 @@ export function BoardPage({ state, isMobile, onOpenRun, onOpenBacklogItem }: Boa
             <div style={{ flex: 1, overflowY: 'auto', padding: 8, display: 'flex', flexDirection: 'column', gap: 8 }}>
               {todo.length === 0 && <div style={{ color: 'var(--text-faint)', fontSize: 'var(--text-xs)', textAlign: 'center', padding: 20 }}>No pending features</div>}
               {todo.map((f) => (
-                <div key={f.id} onClick={() => { onOpenBacklogItem(f.id); }} style={{ cursor: 'pointer' }}>
+                <div key={f.id} {...cardInteraction(() => { onOpenBacklogItem(f.id); })} style={{ cursor: 'pointer' }}>
                   <Card>
                     <div style={{ fontWeight: 600, fontSize: 'var(--text-sm)', marginBottom: 4 }}>{f.id}</div>
                     <div style={{ fontSize: 'var(--text-xs)', color: 'var(--text-dim)', marginBottom: 6 }}>{f.title}</div>
@@ -199,7 +217,7 @@ export function BoardPage({ state, isMobile, onOpenRun, onOpenBacklogItem }: Boa
               <div style={{ flex: 1, overflowY: 'auto', padding: 8, display: 'flex', flexDirection: 'column', gap: 8 }}>
                 {col.items.length === 0 && <div style={{ color: 'var(--text-faint)', fontSize: 'var(--text-xs)', textAlign: 'center', padding: 20 }}>{col.empty}</div>}
                 {col.items.map((r) => (
-                  <div key={r.runId} onClick={() => { onOpenRun(r.featureId); }}>
+                  <div key={r.runId} {...cardInteraction(() => { onOpenRun(r.featureId); })} style={{ cursor: 'pointer' }}>
                     <KanbanCard
                       run={{
                         featureId: r.featureId,

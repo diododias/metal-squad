@@ -10,7 +10,7 @@ import { PageHeader } from '../PageHeader.js';
 import { formatElapsed, formatPercent, formatTokens, getRunStatusLabel } from '../lib/format.js';
 import { summarizeTaskRuns } from '../lib/workflow.js';
 import type { MsqWebState, FeatureConfigPatch, WebSocketClientMessage } from '../../types.js';
-import type { RunHistoryEntry, TaskRun } from '../../../db/repo.js';
+import type { TaskRun } from '../../../db/repo.js';
 import type { RunBreakdown } from '../../../core/stats.js';
 import type { OutputLine } from '../hooks/useLocalOutput.js';
 
@@ -18,10 +18,8 @@ export interface RunDetailPageProps {
   state: MsqWebState;
   featureId: string;
   runDetails: Record<number, { taskRuns: TaskRun[]; breakdown: RunBreakdown | null }>;
-  runHistories: Record<string, RunHistoryEntry[]>;
   linesByRun: Record<number, OutputLine[]>;
   onSubscribeRun: (runId: number) => () => void;
-  onSubscribeHistory: (featureId: string) => () => void;
   onBack: () => void;
   send: (message: WebSocketClientMessage) => void;
 }
@@ -52,10 +50,8 @@ export function RunDetailPage({
   state,
   featureId,
   runDetails,
-  runHistories,
   linesByRun,
   onSubscribeRun,
-  onSubscribeHistory,
   onBack,
   send,
 }: RunDetailPageProps): React.JSX.Element {
@@ -68,9 +64,6 @@ export function RunDetailPage({
     if (runId == null) return undefined;
     return onSubscribeRun(runId);
   }, [runId, onSubscribeRun]);
-
-  useEffect(() => onSubscribeHistory(featureId), [featureId, onSubscribeHistory]);
-  void runHistories;
 
   const detail = run ? runDetails[run.runId] : undefined;
   const stageGroups = useMemo(() => summarizeTaskRuns(detail?.taskRuns ?? [], feature?.workflow.stages), [detail, feature]);

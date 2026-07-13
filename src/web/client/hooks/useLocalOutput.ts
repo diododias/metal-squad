@@ -9,7 +9,7 @@ export interface OutputLine {
   [key: string]: unknown;
 }
 
-function normalizeLegacyOpencodePayload(payload: OutputLine): OutputLine | null {
+export function normalizeLegacyOpencodePayload(payload: OutputLine): OutputLine | null {
   if (payload.tool !== 'opencode' || typeof payload.line !== 'string') return payload;
   const line = payload.line.trim();
   if (!line.startsWith('{"type":')) return payload;
