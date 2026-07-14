@@ -55,12 +55,11 @@ ponta a ponta (nesse caso, use `/msq-develop`, que dispara `msq run`).
 ### 3. Substituir o backlog.yaml
 
 1. Remova **todas** as features atualmente presentes em `backlog.yaml`
-   (epics/features antigos saem do arquivo — o `msq backlog load` e
-   nao-destrutivo no catalogo: features removidas do YAML sao **arquivadas**,
-   nunca deletadas do banco, ver `printDiff`/`upsertBacklogCatalog` em
-   `src/db/backlogCatalog.ts`).
+   (epics/features antigos saem do arquivo — o `msq backlog load` consome
+   apenas os itens presentes na fila; o catalogo SQLite mantém os itens ja
+   publicados como fonte operacional.)
 2. Adicione **uma unica** feature nova representando a spec do passo 2:
-   - `id`: proximo `feat-XX` livre
+   - nao informe `id`: o `msq backlog load` sempre gera o ID canonico da plataforma
    - `title`: `FXX — Titulo`
    - `spec`: resumo inline do problema/objetivo/escopo/validacao (formato do
      `spec: >` ja usado no arquivo), ou `specFile` apontando pro doc criado
@@ -77,7 +76,7 @@ ponta a ponta (nesse caso, use `/msq-develop`, que dispara `msq run`).
 3. Mantenha `version`, `repo`, `defaults` e `budget` do topo do arquivo como
    estavam, a menos que o pedido explicitamente peça mudar esses defaults.
 
-### 4. Publicar no catalogo (sem rodar o msq)
+### 4. Publicar no catalogo e consumir a fila (sem rodar o msq)
 
 1. Garanta build atualizado: `npm run build` (ou `npm run dev -- backlog load`
    via `tsx` se preferir nao buildar).
@@ -94,8 +93,8 @@ ponta a ponta (nesse caso, use `/msq-develop`, que dispara `msq run`).
    skill — o objetivo aqui e só preparar/catalogar o backlog (ver
    `.claude/rules/harness.md`, secao "Anti-recursao").
 4. Confirme o output do `backlog load`:
-   - features novas listadas corretamente
-   - features antigas aparecem como "arquivadas" (esperado, nao e erro)
+   - features novas listadas corretamente com IDs `F-<8>`
+   - os itens publicados desaparecem do `backlog.yaml`
    - nenhuma referencia de `dependsOn` quebrada
 
 ### 5. Validar sem executar
@@ -114,8 +113,8 @@ ponta a ponta (nesse caso, use `/msq-develop`, que dispara `msq run`).
 
 ### 6. Reportar ao usuario
 
-1. Informe: doc de spec criado, feature(s) removida(s)/arquivada(s) do
-   backlog, feature nova adicionada, resultado do `backlog load`.
+1. Informe: doc de spec criado, feature(s) consumida(s) do backlog, feature
+   nova adicionada, resultado do `backlog load`.
 2. Deixe claro que nenhuma execucao (`msq run`) ocorreu — apenas
    spec + catalogo foram atualizados, prontos para um fluxo de
    desenvolvimento (`/msq-develop` ou staged workflow) rodar depois.
@@ -126,6 +125,8 @@ ponta a ponta (nesse caso, use `/msq-develop`, que dispara `msq run`).
   necessario, quem chama a skill prepara o checkout antes.
 - Esta skill nunca executa `msq run`/`node dist/index.js run` — apenas
   `msq backlog load` (ou seu `--dry-run`).
+- `backlog.yaml` funciona como fila de entrada: um item publicado com sucesso e
+  removido do arquivo; o catalogo SQLite permanece como fonte operacional.
 - `backlog.yaml` nao tem campo `status` de feature — "Ready to start" e
   derivado em tempo de leitura a partir de `pipelines.done_json` no SQLite,
   populado pelo scheduler ao final de um pipeline real, nao por esta skill.

@@ -12,6 +12,8 @@ import {
   type Task,
   type Workflow,
 } from '../core/backlog/schema.js';
+import type { FeatureRegistrationResult } from '../core/backlog/featureId.js';
+import { allocateFeatureId, isCanonicalFeatureId } from '../core/backlog/featureId.js';
 
 export class BacklogCatalogNotFoundError extends Error {
   public constructor(message: string) {
@@ -184,7 +186,6 @@ export function diffBacklogCatalog(backlog: BacklogV2, repoId: string): BacklogC
     listCatalogFeatures(repoId).map((row) => [row.feature_id, row.data_json]),
   );
   const incoming = flattenFeatures(backlog);
-  const incomingIds = new Set(incoming.map(({ feature }) => feature.id));
 
   const diff: BacklogCatalogDiff = {
     addedFeatures: [],
@@ -201,21 +202,185 @@ export function diffBacklogCatalog(backlog: BacklogV2, repoId: string): BacklogC
     else diff.unchangedFeatures.push(feature.id);
   }
 
-  for (const featureId of existingFeatures.keys()) {
-    if (!incomingIds.has(featureId)) diff.archivedFeatures.push(featureId);
-  }
-
   return diff;
 }
 
+interface StoredFeatureRow {
+  feature_id: string;
+  epic_id: string;
+  repo_id: string;
+  title: string;
+  depends_on: string;
+  spec_file: string | null;
+  position: number;
+  data_json: string;
+  archived_at: string | null;
+}
+
+function replaceFeatureReferences(db: Database.Database, oldId: string, newId: string): void {
+  for (const table of [
+    'runs',
+    'gates',
+    'run_output',
+    'context_queries',
+    'pipelines',
+    'stage_requests',
+    'stage_transition_decisions',
+    'backlog_tasks',
+  ]) {
+    db.prepare(`UPDATE ${table} SET feature_id = ? WHERE feature_id = ?`).run(newId, oldId);
+  }
+  db.prepare(
+    `UPDATE pipelines SET requested_abort_feature_id = ? WHERE requested_abort_feature_id = ?`,
+  ).run(newId, oldId);
+
+  const pipelineRows = db.prepare(
+    `SELECT id, plan_json, done_json, pending_json, active_json, aborted_json FROM pipelines
+     WHERE plan_json LIKE ? OR done_json LIKE ? OR pending_json LIKE ? OR active_json LIKE ? OR aborted_json LIKE ?`,
+  ).all(...Array.from({ length: 5 }, () => `%${oldId}%`)) as {
+    id: number;
+    plan_json: string;
+    done_json: string;
+    pending_json: string;
+    active_json: string;
+    aborted_json: string;
+  }[];
+  const updatePipeline = db.prepare(
+    `UPDATE pipelines SET plan_json = ?, done_json = ?, pending_json = ?, active_json = ?, aborted_json = ?, updated_at = datetime('now') WHERE id = ?`,
+  );
+  const replaceArrayValue = (json: string): string => {
+    const value: unknown = JSON.parse(json);
+    if (!Array.isArray(value)) return JSON.stringify(value);
+    const values = value as unknown[];
+    return JSON.stringify(values.map((item: unknown) => item === oldId ? newId : item));
+  };
+  for (const row of pipelineRows) {
+    updatePipeline.run(
+      replaceArrayValue(row.plan_json),
+      replaceArrayValue(row.done_json),
+      replaceArrayValue(row.pending_json),
+      replaceArrayValue(row.active_json),
+      replaceArrayValue(row.aborted_json),
+      row.id,
+    );
+  }
+}
+
+function replaceDependencyReferences(db: Database.Database, repoId: string, oldId: string, newId: string): void {
+  const rows = db.prepare(
+    `SELECT feature_id, data_json FROM backlog_features WHERE repo_id = ? AND archived_at IS NULL`,
+  ).all(repoId) as { feature_id: string; data_json: string }[];
+  const update = db.prepare(
+    `UPDATE backlog_features SET depends_on = ?, data_json = ?, updated_at = datetime('now') WHERE feature_id = ?`,
+  );
+  for (const row of rows) {
+    const feature = FeatureSchema.parse(JSON.parse(row.data_json));
+    if (!feature.dependsOn.includes(oldId)) continue;
+    const updated = FeatureSchema.parse({
+      ...feature,
+      dependsOn: feature.dependsOn.map((dependency) => dependency === oldId ? newId : dependency),
+    });
+    update.run(JSON.stringify(updated.dependsOn), JSON.stringify(updated), row.feature_id);
+  }
+}
+
+function rekeyCatalogFeature(
+  db: Database.Database,
+  repoId: string,
+  oldId: string,
+  newId: string,
+): boolean {
+  if (oldId === newId) return false;
+  const oldRow = db.prepare(
+    `SELECT feature_id, epic_id, repo_id, title, depends_on, spec_file, position, data_json, archived_at
+     FROM backlog_features WHERE feature_id = ? AND repo_id = ?`,
+  ).get(oldId, repoId) as StoredFeatureRow | undefined;
+  if (!oldRow) return false;
+  const existingNew = db.prepare(`SELECT feature_id FROM backlog_features WHERE feature_id = ?`).get(newId) as { feature_id: string } | undefined;
+  if (existingNew) {
+    throw new Error(`Generated feature ID "${newId}" is already present in the catalog; publication was rolled back.`);
+  }
+  const oldFeature = FeatureSchema.parse(JSON.parse(oldRow.data_json));
+  const rekeyedFeature = FeatureSchema.parse({ ...oldFeature, id: newId });
+
+  db.prepare(
+    `INSERT INTO backlog_features (feature_id, epic_id, repo_id, title, depends_on, spec_file, position, data_json, archived_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))`,
+  ).run(
+    newId,
+    oldRow.epic_id,
+    oldRow.repo_id,
+    oldRow.title,
+    JSON.stringify(rekeyedFeature.dependsOn),
+    oldRow.spec_file,
+    oldRow.position,
+    JSON.stringify(rekeyedFeature),
+    oldRow.archived_at,
+  );
+  replaceFeatureReferences(db, oldId, newId);
+  replaceDependencyReferences(db, repoId, oldId, newId);
+  db.prepare(`DELETE FROM backlog_features WHERE feature_id = ?`).run(oldId);
+  return true;
+}
+
+function rekeyCatalogFeatures(
+  db: Database.Database,
+  backlog: BacklogV2,
+  repoId: string,
+  registrations: readonly FeatureRegistrationResult[],
+): void {
+  const incoming = flattenFeatures(backlog);
+  const usedOldIds = new Set<string>();
+  const incomingIds = new Set(incoming.map(({ feature }) => feature.id));
+
+  incoming.forEach(({ epic, feature }, index) => {
+    const registration = registrations[index];
+    let oldId = registration?.previousId;
+    if (oldId && (usedOldIds.has(oldId) || incomingIds.has(oldId))) oldId = undefined;
+
+    if (!oldId) {
+      const candidates = db.prepare(
+        `SELECT feature_id FROM backlog_features
+         WHERE repo_id = ? AND epic_id = ? AND title = ? AND spec_file IS ? AND archived_at IS NULL
+         AND feature_id NOT IN (${[...incomingIds].map(() => '?').join(',') || "''"})`,
+      ).all(repoId, epic.id, feature.title, feature.specFile ?? null, ...incomingIds) as { feature_id: string }[];
+      const candidate = candidates[0];
+      if (candidates.length === 1 && candidate && !usedOldIds.has(candidate.feature_id)) oldId = candidate.feature_id;
+    }
+
+    if (oldId && rekeyCatalogFeature(db, repoId, oldId, feature.id)) usedOldIds.add(oldId);
+  });
+}
+
+function migrateRemainingFeatureIds(db: Database.Database, repoId: string): void {
+  const occupied = new Set(
+    (db.prepare(`SELECT feature_id FROM backlog_features`).all() as { feature_id: string }[])
+      .map((row) => row.feature_id),
+  );
+  const rows = db.prepare(
+    `SELECT feature_id FROM backlog_features WHERE repo_id = ? ORDER BY feature_id`,
+  ).all(repoId) as { feature_id: string }[];
+  for (const row of rows) {
+    if (isCanonicalFeatureId(row.feature_id)) continue;
+    const generatedId = allocateFeatureId(occupied);
+    occupied.add(generatedId);
+    rekeyCatalogFeature(db, repoId, row.feature_id, generatedId);
+  }
+}
+
 /**
- * Upserts epics/features/tasks for `repoId` from `backlog`, in a single
- * transaction. Never DELETEs — anything no longer present in `backlog` is
- * archived (archived_at set), preserving FKs from historical runs/gates.
+ * Adds or updates epics/features/tasks for `repoId` from the backlog queue in
+ * a single transaction. Features absent from the queue are retained because
+ * successful loads remove them from YAML after publication.
  */
-export function upsertBacklogCatalog(backlog: BacklogV2, repoId: string): BacklogCatalogDiff {
+export function upsertBacklogCatalog(
+  backlog: BacklogV2,
+  repoId: string,
+  registrations?: readonly FeatureRegistrationResult[],
+): BacklogCatalogDiff {
   const db = getDb('readwrite');
-  const diff = diffBacklogCatalog(backlog, repoId);
+  const enforceGeneratedIds = registrations !== undefined;
+  let diff: BacklogCatalogDiff | undefined;
 
   const upsertMeta = db.prepare(
     `INSERT INTO backlog_catalog_meta (repo_id, repo, version, defaults_json, budget_json, updated_at)
@@ -272,24 +437,14 @@ export function upsertBacklogCatalog(backlog: BacklogV2, repoId: string): Backlo
         OR backlog_tasks.archived_at IS NOT NULL`,
   );
 
-  const archiveEpic = db.prepare(
-    `UPDATE backlog_epics SET archived_at = datetime('now'), updated_at = datetime('now')
-     WHERE epic_id = ? AND archived_at IS NULL`,
-  );
-  const archiveFeature = db.prepare(
-    `UPDATE backlog_features SET archived_at = datetime('now'), updated_at = datetime('now')
-     WHERE feature_id = ? AND archived_at IS NULL`,
-  );
-  const archiveTasksForFeature = db.prepare(
-    `UPDATE backlog_tasks SET archived_at = datetime('now'), updated_at = datetime('now')
-     WHERE feature_id = ? AND archived_at IS NULL`,
-  );
   const archiveTaskById = db.prepare(
     `UPDATE backlog_tasks SET archived_at = datetime('now'), updated_at = datetime('now')
      WHERE task_id = ? AND feature_id = ? AND archived_at IS NULL`,
   );
 
   const run = db.transaction(() => {
+    diff = diffBacklogCatalog(backlog, repoId);
+    rekeyCatalogFeatures(db, backlog, repoId, registrations ?? []);
     const ownershipRows = db
       .prepare(`SELECT feature_id, repo_id FROM backlog_features WHERE feature_id IN (${flattenFeatures(backlog).map(() => '?').join(',') || "''"})`)
       .all(...flattenFeatures(backlog).map(({ feature }) => feature.id)) as { feature_id: string; repo_id: string }[];
@@ -311,15 +466,10 @@ export function upsertBacklogCatalog(backlog: BacklogV2, repoId: string): Backlo
       backlog.budget ? JSON.stringify(backlog.budget) : null,
     );
 
-    const incomingEpicIds = new Set<string>();
-    const incomingFeatureIds = new Set<string>();
-
     backlog.epics.forEach((epic, epicIndex) => {
-      incomingEpicIds.add(epic.id);
       upsertEpic.run(epic.id, repoId, epic.title, epicIndex, JSON.stringify(epic));
 
       epic.features.forEach((feature, featureIndex) => {
-        incomingFeatureIds.add(feature.id);
         upsertFeature.run(
           feature.id,
           epic.id,
@@ -343,18 +493,12 @@ export function upsertBacklogCatalog(backlog: BacklogV2, repoId: string): Backlo
       });
     });
 
-    for (const row of listCatalogFeatures(repoId)) {
-      if (!incomingFeatureIds.has(row.feature_id)) {
-        archiveFeature.run(row.feature_id);
-        archiveTasksForFeature.run(row.feature_id);
-      }
-    }
-    for (const row of listCatalogEpics(repoId)) {
-      if (!incomingEpicIds.has(row.epic_id)) archiveEpic.run(row.epic_id);
-    }
+    if (enforceGeneratedIds) migrateRemainingFeatureIds(db, repoId);
+
   });
 
   run();
+  if (!diff) throw new Error('Catalog publication did not produce a diff.');
   return diff;
 }
 

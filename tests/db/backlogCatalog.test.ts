@@ -90,6 +90,39 @@ describe('backlogCatalog upsert/diff/load', () => {
     ]);
   });
 
+  it('rekeys catalog rows and runtime references to the generated ID', async () => {
+    const { db, upsertBacklogCatalog } = await setup();
+    const { registerBacklogFeatures } = await import('../../src/core/backlog/featureId.js');
+    const original = makeBacklog();
+    upsertBacklogCatalog(original, 'repo-1');
+    const run = db.prepare(
+      `INSERT INTO runs (repo_id, feature_id, tool, status, started_at) VALUES ('repo-1', 'feat-1', 'claude', 'done', datetime('now'))`,
+    ).run();
+
+    const registration = registerBacklogFeatures(original, new Set(['feat-1']), () => 0);
+    const generatedId = registration.backlog.epics[0]!.features[0]!.id;
+    upsertBacklogCatalog(registration.backlog, 'repo-1', registration.registrations);
+
+    expect(db.prepare(`SELECT feature_id FROM backlog_features WHERE feature_id = 'feat-1'`).get()).toBeUndefined();
+    expect(db.prepare(`SELECT feature_id FROM backlog_tasks WHERE task_id = 'task-1'`).get()).toEqual({ feature_id: generatedId });
+    expect(db.prepare(`SELECT feature_id FROM runs WHERE id = ?`).get(run.lastInsertRowid)).toEqual({ feature_id: generatedId });
+    expect(db.prepare(`SELECT feature_id FROM backlog_features WHERE feature_id = ?`).get(generatedId)).toEqual({ feature_id: generatedId });
+  });
+
+  it('migrates remaining database rows when the authoritative loader runs', async () => {
+    const { db, upsertBacklogCatalog } = await setup();
+    upsertBacklogCatalog(makeBacklog(), 'repo-1');
+
+    upsertBacklogCatalog(makeBacklog({ epics: [] }), 'repo-1', []);
+
+    const row = db.prepare(`SELECT feature_id, data_json FROM backlog_features WHERE repo_id = 'repo-1'`).get() as {
+      feature_id: string;
+      data_json: string;
+    };
+    expect(row.feature_id).toMatch(/^F-[23456789ABCDEFGHJKMNPQRSTVWXYZ]{8}$/);
+    expect(JSON.parse(row.data_json)).toMatchObject({ id: row.feature_id });
+  });
+
   it('is a true no-op the second time the same backlog is loaded', async () => {
     const { db, upsertBacklogCatalog } = await setup();
     const backlog = makeBacklog();
@@ -110,19 +143,19 @@ describe('backlogCatalog upsert/diff/load', () => {
     expect(after.updated_at).toBe(before.updated_at);
   });
 
-  it('archives a feature removed from the YAML instead of deleting it', async () => {
+  it('retains a feature after it is consumed from the YAML queue', async () => {
     const { db, upsertBacklogCatalog } = await setup();
     upsertBacklogCatalog(makeBacklog(), 'repo-1');
 
     const shrunk = makeBacklog({ epics: [{ id: 'epic-1', title: 'Epic One', features: [] }] });
     const diff = upsertBacklogCatalog(shrunk, 'repo-1');
-    expect(diff.archivedFeatures).toEqual(['feat-1']);
+    expect(diff.archivedFeatures).toEqual([]);
 
     const row = db
       .prepare(`SELECT feature_id, archived_at FROM backlog_features WHERE feature_id = 'feat-1'`)
       .get() as { feature_id: string; archived_at: string | null };
     expect(row.feature_id).toBe('feat-1');
-    expect(row.archived_at).toBeTruthy();
+    expect(row.archived_at).toBeNull();
   });
 
   it('never writes to run/gate/token/pipeline tables', async () => {
@@ -274,11 +307,11 @@ describe('backlogCatalog upsert/diff/load', () => {
       expect(() => updateCatalogFeature('repo-1', 'nope', { effort: 'high' })).toThrow(/not found/);
     });
 
-    it('throws BacklogCatalogNotFoundError for an archived feature', async () => {
+    it('keeps a consumed feature available for runtime updates', async () => {
       const { upsertBacklogCatalog, updateCatalogFeature } = await setup();
       upsertBacklogCatalog(makeBacklog(), 'repo-1');
       upsertBacklogCatalog(makeBacklog({ epics: [{ id: 'epic-1', title: 'Epic One', features: [] }] }), 'repo-1');
-      expect(() => updateCatalogFeature('repo-1', 'feat-1', { effort: 'high' })).toThrow(/not found/);
+      expect(updateCatalogFeature('repo-1', 'feat-1', { effort: 'high' }).effort).toBe('high');
     });
   });
 

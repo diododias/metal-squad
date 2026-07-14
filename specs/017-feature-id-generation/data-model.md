@@ -2,9 +2,8 @@
 
 ## Entity: FeatureIdInput
 
-**Description**: The authoring-time identity field for a feature before batch
-registration. It may be absent, but if present it is validated before any
-catalog write.
+**Description**: An optional source alias in the queue entry. It is never the
+authoritative identity persisted by the platform.
 
 **Fields**:
 
@@ -17,13 +16,8 @@ catalog write.
 
 **Validation rules**:
 
-- Omitted `id` requests allocation.
-- Empty strings, whitespace, and control characters are invalid.
-- `F-` is reserved: an explicit value beginning with `F-` is valid only when it
-  matches `F-[23456789ABCDEFGHJKMNPQRSTVWXYZ]{8}` exactly.
-- Existing legacy `feat-N` and other manual IDs that satisfy the non-empty,
-  no-whitespace/control rule are preserved byte-for-byte; no case or prefix
-  normalization is applied.
+- Every source value, including empty, malformed, duplicate, or legacy-looking
+  values, is ignored for authoritative identity generation.
 
 ## Entity: FeatureId
 
@@ -33,13 +27,12 @@ catalog, runs, dependencies, notifications, and board routes.
 **Fields**:
 
 - `value: string`
-- `kind: 'generated' | 'legacy' | 'manual'`
+- `kind: 'generated'`
 - `persisted: boolean`
 
 **Validation rules**:
 
 - Generated values have exactly the canonical `F-<8>` format and alphabet.
-- Legacy/manual values are opaque strings accepted by `FeatureIdInput`.
 - A value is unique across all feature rows in the shared catalog, not merely
   within one repository.
 
@@ -51,16 +44,15 @@ registration boundary for batch and future online callers.
 **Fields**:
 
 - `feature: Feature` with required `feature.id`
-- `assigned: boolean`
+- `assigned: true`
 - `previousId?: string`
 - `source: 'backlog-yaml' | 'online'`
 
 **Validation rules**:
 
-- `assigned` is true only when the input omitted an ID and a new value was
-  allocated.
-- `previousId` is present only for preserved explicit IDs, if the caller needs
-  audit detail; it is not a second identity key.
+- `assigned` is always true for a loaded feature.
+- `previousId` is an optional source alias used only to reconcile an existing
+  catalog row; it is not a second identity key.
 - The returned feature is safe for existing `Feature` consumers because
   `id` is always present.
 
@@ -88,8 +80,7 @@ feature and its denormalized lookup fields.
   registration error, not an upsert/move.
 - `data_json.id`, `feature_id`, and all references in `depends_on` must agree
   with the normalized feature.
-- Archiving preserves rows needed by historical runs and does not release an
-  ID for reuse.
+- Consuming an entry from YAML does not archive or delete its catalog row.
 
 ## Entity: BacklogIdentityPublication
 
@@ -105,10 +96,10 @@ feature and its denormalized lookup fields.
 
 **State transitions**:
 
-1. `staged`: YAML has been parsed, IDs validated/allocated, and a temporary
-   materialized representation is ready; no catalog consumer has seen it.
-2. `committed`: materialized YAML and the catalog contain the same normalized
-   IDs; the CLI may report the diff and runtime may load the catalog.
+1. `staged`: YAML has been parsed, IDs allocated/reconciled, and a temporary
+   removal representation is ready; no catalog consumer has seen it.
+2. `committed`: consumed YAML entries are removed and the catalog contains the
+   normalized generated IDs; the CLI may report the diff and runtime may load it.
 3. `rolled-back`: validation, file replacement, or DB publication failed; the
    catalog transaction is rolled back and the original YAML is restored when
    possible. No partial alternate ID may be published.
@@ -127,4 +118,4 @@ feature and its denormalized lookup fields.
 
 - `EpicSchema.id` and `backlog_epics.epic_id` generation/migration.
 - A complete online feature-creation UI or permissions model (F57).
-- Mandatory conversion of legacy/manual IDs to canonical IDs.
+- Source YAML cleanup after successful publication.

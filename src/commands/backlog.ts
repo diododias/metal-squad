@@ -1,5 +1,5 @@
 import type { Command } from 'commander';
-import { loadBacklog, stageBacklogFile } from '../core/backlog/load.js';
+import { loadBacklogWithRegistration, stageBacklogFile } from '../core/backlog/load.js';
 import { resolveRepo } from '../core/repo.js';
 import { assertWritableDbPath, DbAccessError } from '../db/index.js';
 import { registerRepo } from '../db/repo.js';
@@ -8,7 +8,7 @@ import { diffBacklogCatalog, upsertBacklogCatalog, type BacklogCatalogDiff } fro
 function printDiff(diff: BacklogCatalogDiff): void {
   console.log(`Features novas:     ${diff.addedFeatures.join(', ') || '-'}`);
   console.log(`Features alteradas: ${diff.changedFeatures.join(', ') || '-'}`);
-  console.log(`Features removidas: ${diff.archivedFeatures.join(', ') || '-'} (arquivadas, nao deletadas)`);
+  console.log(`Features arquivadas: ${diff.archivedFeatures.join(', ') || '-'}`);
   console.log(`Features sem mudanca: ${String(diff.unchangedFeatures.length)}`);
 }
 
@@ -17,13 +17,14 @@ export function registerBacklog(program: Command): void {
 
   backlog
     .command('load')
-    .description('Valida backlog.yaml e publica o catalogo no banco (nao destrutivo)')
+    .description('Consome backlog.yaml e publica os itens no catalogo do banco')
     .option('--file <path>', 'caminho do arquivo de backlog', undefined)
     .option('--dry-run', 'mostra o diff sem gravar no banco')
     .action(async (opts: { file?: string; dryRun?: boolean }) => { // eslint-disable-line @typescript-eslint/require-await
       try {
         const cwd = process.cwd();
-        const parsed = loadBacklog(opts.file, cwd);
+        const loaded = loadBacklogWithRegistration(opts.file, cwd);
+        const parsed = loaded.backlog;
         const { repoId, path } = resolveRepo(cwd);
 
         if (opts.dryRun) {
@@ -37,7 +38,7 @@ export function registerBacklog(program: Command): void {
         registerRepo(repoId, path);
         const staged = stageBacklogFile(opts.file, cwd, parsed);
         try {
-          const diff = upsertBacklogCatalog(parsed, repoId);
+          const diff = upsertBacklogCatalog(parsed, repoId, loaded.registrations);
           staged.commit();
           printDiff(diff);
           console.log(
