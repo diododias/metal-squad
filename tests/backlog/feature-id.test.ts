@@ -68,19 +68,28 @@ describe('feature ID domain', () => {
     expect(() => validateExplicitFeatureId(' feat-52')).toThrow('whitespace');
   });
 
-  it('normalizes omitted IDs and rejects duplicate explicit IDs before allocation', () => {
+  it('always replaces supplied IDs with distinct generated IDs', () => {
+    let calls = 0;
     const result = registerBacklogFeatures(
-      makeBacklog([{ title: 'Generated' }, { id: 'feat-52', title: 'Legacy' }]),
+      makeBacklog([{ title: 'First' }, { id: 'feat-52', title: 'Second' }]),
       new Set(),
-      () => 0,
+      () => (calls++ < 8 ? 0 : 1),
     );
-    expect(result.registrations.map((entry) => [entry.feature.id, entry.assigned, entry.idKind])).toEqual([
-      [`F-${FEATURE_ID_ALPHABET[0]?.repeat(8)}`, true, 'generated'],
-      ['feat-52', false, 'legacy'],
+    expect(result.registrations.map((entry) => [entry.feature.id, entry.assigned, entry.idKind, entry.previousId])).toEqual([
+      [`F-${FEATURE_ID_ALPHABET[0]?.repeat(8)}`, true, 'generated', undefined],
+      [`F-${FEATURE_ID_ALPHABET[1]?.repeat(8)}`, true, 'generated', 'feat-52'],
     ]);
-    expect(() => registerBacklogFeatures(makeBacklog([
+
+    const duplicateSourceIds = registerBacklogFeatures(makeBacklog([
       { id: 'duplicate', title: 'A' },
       { id: 'duplicate', title: 'B' },
-    ]), new Set())).toThrow('Duplicate feature ID');
+    ]), new Set(), (() => {
+      let duplicateCalls = 0;
+      return () => (duplicateCalls++ < 8 ? 0 : 1);
+    })());
+    expect(duplicateSourceIds.registrations.map((entry) => entry.feature.id)).toEqual([
+      `F-${FEATURE_ID_ALPHABET[0]?.repeat(8)}`,
+      `F-${FEATURE_ID_ALPHABET[1]?.repeat(8)}`,
+    ]);
   });
 });

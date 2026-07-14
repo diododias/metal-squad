@@ -2,6 +2,7 @@ import React from 'react';
 import { Card } from '../core/Card.js';
 import { StatusPill, type PillStatus } from '../core/StatusPill.js';
 import { Tag } from '../core/Tag.js';
+import { FeatureIdentity } from './FeatureIdentity.js';
 
 /** Deterministic 8-hex-digit short id from a feature id string, so the same
  * feature always renders the same F-XXXXXXXX badge without a backend. */
@@ -42,33 +43,15 @@ export function KanbanCard({ run, selected, onClick }: KanbanCardProps): React.J
   return (
     <Card selected={selected} onClick={onClick}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 8, marginBottom: 6 }}>
-        <div
-          style={{
-            fontWeight: 600,
-            fontSize: 'var(--text-sm)',
-            color: 'var(--text-primary)',
-            lineHeight: 1.3,
-            display: '-webkit-box',
-            WebkitLineClamp: 2,
-            WebkitBoxOrient: 'vertical',
-            overflow: 'hidden',
-            flex: '1 1 0%',
-            minWidth: 0,
-          }}
-        >
-          {run.title ?? run.featureId}
+        <div style={{ flex: '1 1 0%', minWidth: 0, fontSize: 'var(--text-sm)' }}>
+          <FeatureIdentity title={run.title} id={run.persistedId ?? toShortFeatureId(run.featureId)} />
         </div>
         <div style={{ flexShrink: 0 }}>
           <StatusPill status={run.status} />
         </div>
       </div>
 
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
-        <span style={{ fontSize: 'var(--text-2xs)', color: 'var(--text-faint)', fontFamily: 'var(--font-mono)' }}>
-          {run.persistedId ?? toShortFeatureId(run.featureId)}
-        </span>
-        {run.stage && <span style={{ fontSize: 'var(--text-2xs)', color: 'var(--accent-info)' }}>→ {run.stage}</span>}
-      </div>
+      {run.stage && <div style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', marginBottom: 8 }}><span style={{ fontSize: 'var(--text-2xs)', color: 'var(--accent-info)' }}>→ {run.stage}</span></div>}
 
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginBottom: 8 }}>
         {run.tool && <Tag>{run.tool}</Tag>}

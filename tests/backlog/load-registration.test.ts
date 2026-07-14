@@ -41,7 +41,7 @@ describe('backlog feature registration', () => {
     return path;
   }
 
-  it('assigns a stable ID and materializes it without reordering YAML', () => {
+  it('assigns a generated ID and consumes the feature from YAML', () => {
     const path = setup();
     const first = loadBacklog(path, root);
     const id = first.epics[0]?.features[0]?.id;
@@ -49,11 +49,11 @@ describe('backlog feature registration', () => {
 
     const staged = stageBacklogFile(path, root, first);
     staged.commit();
-    const materialized = parse(readFileSync(path, 'utf8')) as { epics: Array<{ features: Array<{ id: string; customValue: string }> }> };
-    expect(materialized.epics[0]?.features[0]).toMatchObject({ id, customValue: 'keep-me' });
+    const materialized = parse(readFileSync(path, 'utf8')) as { epics: Array<{ features: Array<{ id?: string; customValue?: string }> }> };
+    expect(materialized.epics[0]?.features).toEqual([]);
 
     const second = loadBacklog(path, root);
-    expect(second.epics[0]?.features[0]?.id).toBe(id);
+    expect(second.epics[0]?.features).toEqual([]);
     expect(stageBacklogFile(path, root, second)).toBeDefined();
   });
 
@@ -67,11 +67,8 @@ describe('backlog feature registration', () => {
     expect(readFileSync(path, 'utf8')).toBe(original);
   });
 
-  it('keeps the assigned ID when mutable feature metadata changes', () => {
+  it('ignores an ID supplied by the YAML source', () => {
     const path = setup();
-    const first = loadBacklog(path, root);
-    const id = first.epics[0]?.features[0]?.id;
-    writeFileSync(join(root, 'spec.md'), '# Spec', 'utf8');
     writeFileSync(path, [
       'version: 2',
       'repo: demo',
@@ -84,14 +81,14 @@ describe('backlog feature registration', () => {
       '  - id: epic-1',
       '    title: Epic',
       '    features:',
-      `      - id: ${String(id)}`,
-      '        title: Renamed feature',
-      '        specFile: spec.md',
+      '      - id: feat-legacy',
+      '        title: Source ID is ignored',
       '        dependsOn: []',
       '        tasks: []',
     ].join('\n'), 'utf8');
 
     const second = loadBacklog(path, root);
-    expect(second.epics[0]?.features[0]).toMatchObject({ id, title: 'Renamed feature', specFile: 'spec.md' });
+    expect(second.epics[0]?.features[0]?.id).toMatch(CANONICAL_FEATURE_ID_RE);
+    expect(second.epics[0]?.features[0]?.id).not.toBe('feat-legacy');
   });
 });

@@ -12,6 +12,7 @@ import {
   type Epic,
   type Feature,
 } from './schema.js';
+import type { FeatureRegistrationResult } from './featureId.js';
 import { getCatalogMeta, listCatalogEpics, listCatalogFeatures, listOccupiedFeatureIds } from '../../db/backlogCatalog.js';
 import { registerBacklogFeatures } from './featureId.js';
 
@@ -160,7 +161,12 @@ function occupiedFeatureIds(): Set<string> {
   }
 }
 
-export function loadBacklog(path = BACKLOG_FILE, cwd = process.cwd()): BacklogV2 {
+export interface LoadedBacklog {
+  backlog: BacklogV2;
+  registrations: FeatureRegistrationResult[];
+}
+
+export function loadBacklogWithRegistration(path = BACKLOG_FILE, cwd = process.cwd()): LoadedBacklog {
   const absPath = isAbsolute(path) ? path : resolve(cwd, path);
   const root = dirname(absPath);
   const raw = readFileSync(absPath, 'utf8');
@@ -175,10 +181,15 @@ export function loadBacklog(path = BACKLOG_FILE, cwd = process.cwd()): BacklogV2
     v2Input = propagateDefaults(parsed, repoDefaults);
   }
 
-  const { backlog: v2 } = registerBacklogFeatures(v2Input, occupiedFeatureIds());
+  const registration = registerBacklogFeatures(v2Input, occupiedFeatureIds());
+  const { backlog: v2 } = registration;
   const normalized = BacklogV2Schema.parse(v2);
   validateFiles(normalized, root);
-  return normalized;
+  return { backlog: normalized, registrations: registration.registrations };
+}
+
+export function loadBacklog(path = BACKLOG_FILE, cwd = process.cwd()): BacklogV2 {
+  return loadBacklogWithRegistration(path, cwd).backlog;
 }
 
 export interface StagedBacklogFile {
@@ -187,8 +198,9 @@ export interface StagedBacklogFile {
 }
 
 /**
- * Stages generated IDs into the source YAML. The original file remains
- * recoverable until the caller commits its catalog transaction.
+ * Stages removal of successfully parsed features from the source YAML. The
+ * original file remains recoverable until the caller commits its catalog
+ * transaction.
  */
 export function stageBacklogFile(path = BACKLOG_FILE, cwd = process.cwd(), backlog: BacklogV2): StagedBacklogFile {
   const absPath = isAbsolute(path) ? path : resolve(cwd, path);
@@ -196,22 +208,18 @@ export function stageBacklogFile(path = BACKLOG_FILE, cwd = process.cwd(), backl
   if (!isRecord(parsedRaw)) throw new Error(`Backlog YAML must contain a mapping: ${absPath}`);
   const raw = parsedRaw;
   const rawEpics: unknown[] = Array.isArray(raw.epics) ? raw.epics as unknown[] : [];
-  let assignments = 0;
+  let removedFeatures = 0;
   backlog.epics.forEach((epic, epicIndex) => {
     const rawEpic = rawEpics[epicIndex];
     if (!isRecord(rawEpic)) return;
     const rawFeatures: unknown[] = Array.isArray(rawEpic.features) ? rawEpic.features as unknown[] : [];
-    epic.features.forEach((feature, featureIndex) => {
-      const rawFeature = rawFeatures[featureIndex];
-      if (!isRecord(rawFeature)) return;
-      if (rawFeature.id !== feature.id) {
-        rawFeature.id = feature.id;
-        assignments += 1;
-      }
-    });
+    const consumedIndexes = new Set(epic.features.map((_feature, featureIndex) => featureIndex));
+    const remainingFeatures = rawFeatures.filter((_feature, featureIndex) => !consumedIndexes.has(featureIndex));
+    removedFeatures += rawFeatures.length - remainingFeatures.length;
+    rawEpic.features = remainingFeatures;
   });
 
-  if (assignments === 0) {
+  if (removedFeatures === 0) {
     return {
       commit: (): void => undefined,
       rollback: (): void => undefined,

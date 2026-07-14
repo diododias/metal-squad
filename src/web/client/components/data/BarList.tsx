@@ -2,7 +2,7 @@ import React from 'react';
 
 export interface BarListItem {
   id?: string | number;
-  label: string;
+  label: React.ReactNode;
   value: number;
   color?: string;
 }
@@ -21,9 +21,9 @@ export function BarList({ items, valueFormatter }: BarListProps): React.JSX.Elem
       {items.map((item, i) => (
         <div key={item.id ?? i}>
           <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 'var(--text-xs)', marginBottom: 4, gap: 8 }}>
-            <span style={{ color: 'var(--text-primary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+            <div style={{ color: 'var(--text-primary)', overflow: 'hidden', minWidth: 0 }}>
               {item.label}
-            </span>
+            </div>
             <span style={{ color: 'var(--text-dim)', flexShrink: 0 }}>{fmt(item.value)}</span>
           </div>
           <div style={{ height: 6, borderRadius: 'var(--radius-pill)', background: 'var(--bg-panel-alt)', overflow: 'hidden' }}>

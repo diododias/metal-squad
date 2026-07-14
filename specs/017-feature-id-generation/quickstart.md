@@ -16,9 +16,9 @@ export MSQ_DB_PATH="$(pwd)/.metal-squad/feature-id-validation.db"
 rtk npm run build
 ```
 
-## Scenario 1: New features receive stable IDs
+## Scenario 1: Loaded features receive authoritative IDs and leave the queue
 
-1. Create a temporary backlog with at least two features that omit `id`.
+1. Create a temporary backlog with at least two features, including arbitrary `id` values.
 2. Run:
 
 ```bash
@@ -26,27 +26,26 @@ rtk node dist/index.js backlog load --file /absolute/path/to/backlog.yaml
 ```
 
 3. Confirm that the command succeeds and reports two `F-` IDs.
-4. Inspect the YAML and catalog, then run the same command again:
+4. Inspect the YAML and catalog:
 
 ```bash
-rtk rg -n "id: F-" /absolute/path/to/backlog.yaml
-rtk node dist/index.js backlog load --file /absolute/path/to/backlog.yaml
+rtk rg -n "features:|id: F-" /absolute/path/to/backlog.yaml
 ```
 
 Expected result: every generated ID has exactly eight characters from the
-canonical alphabet, the second diff reports no feature ID changes, and the
-SQLite `backlog_features` rows match the materialized YAML.
+canonical alphabet, the loaded feature entries disappear from the YAML, and
+the SQLite `backlog_features` rows contain the generated IDs.
 
 ## Scenario 2: Batch uniqueness and collision retry
 
-1. Prepare a backlog with at least 200 ID-less features.
+1. Prepare a backlog with at least 200 features, with or without source IDs.
 2. Run `backlog load` against the isolated DB.
-3. Compare the 200 YAML IDs and catalog `feature_id` values.
+3. Compare the 200 generated catalog `feature_id` values.
 
-Expected result: all IDs match, all are distinct, and a forced generator
+Expected result: all IDs are distinct, and a forced generator
 collision in the focused unit test is retried without persisting the candidate.
 
-## Scenario 3: Legacy/manual compatibility and validation
+## Scenario 3: Source IDs are ignored
 
 Prepare one backlog containing:
 
@@ -55,22 +54,22 @@ Prepare one backlog containing:
 - one ID-less feature.
 
 Run `backlog load` and then query the catalog through the existing runtime
-loader. Expected result: the first two values are preserved exactly, the third
-gets `F-<8>`, and dependencies/history resolve by exact string value.
+loader. Expected result: all three receive new `F-<8>` IDs and all three source
+entries are removed from YAML. The source values are never persisted as
+feature IDs.
 
 Repeat with duplicate, whitespace-containing, and malformed reserved `F-`
-values. Expected result: the command fails with an actionable field/value
-error, and neither YAML nor catalog contains a partial reassignment.
+values. Expected result: every source value is ignored and the generated IDs
+remain valid and distinct.
 
 ## Scenario 4: Board uses persisted identity
 
-1. Load a backlog containing a canonical generated ID and a legacy ID.
+1. Load a backlog containing arbitrary source IDs.
 2. Start the web state or the focused board test with matching catalog entries.
 3. Inspect the Board cards.
 
-Expected result: the cards display the exact persisted IDs; the old short hash
-is used only for a run payload whose catalog entry is unavailable and is never
-used for lookup or persistence.
+Expected result: the cards display the exact generated IDs stored in the
+catalog and source IDs never become authoritative identity.
 
 ## Scenario 5: Concurrent publication
 

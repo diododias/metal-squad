@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { Table, type TableColumn } from '../components/data/Table.js';
+import { FeatureIdentity } from '../components/data/FeatureIdentity.js';
 import { StatusPill } from '../components/core/StatusPill.js';
 import { Tag } from '../components/core/Tag.js';
 import { PageHeader } from '../PageHeader.js';
@@ -33,7 +34,7 @@ export function RunsPage({ state, onOpenRun }: RunsPageProps): React.JSX.Element
   }
 
   const columns: TableColumn<RunSummary>[] = [
-    { key: 'featureId', label: 'Feature', render: (r) => state.featureCatalog[r.featureId]?.title ?? r.featureId },
+    { key: 'featureId', label: 'Feature', render: (r) => <FeatureIdentity title={state.featureCatalog[r.featureId]?.title} id={r.featureId} /> },
     { key: 'status', label: 'Status', render: (r) => <StatusPill status={r.status} /> },
     { key: 'tool', label: 'Tool', render: (r) => <Tag>{r.tool}</Tag> },
     { key: 'model', label: 'Model', render: (r) => state.featureCatalog[r.featureId]?.model ?? '—' },

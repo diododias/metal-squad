@@ -10,7 +10,7 @@ export type FeatureRegistrationSource = 'backlog-yaml' | 'online';
 
 export interface FeatureRegistrationResult {
   feature: Feature;
-  assigned: boolean;
+  assigned: true;
   idKind: FeatureIdKind;
   previousId?: string;
   source?: FeatureRegistrationSource;
@@ -80,34 +80,35 @@ export function registerBacklogFeatures(
   nextRandomIndex: RandomIndex = randomInt,
   source: FeatureRegistrationSource = 'backlog-yaml',
 ): FeatureRegistrationBatch {
-  const seen = new Set<string>();
-  for (const [epicIndex, epic] of backlog.epics.entries()) {
-    for (const [featureIndex, feature] of epic.features.entries()) {
-      if (feature.id === undefined) continue;
-      const location = featureLocation(epicIndex, featureIndex, feature);
-      validateExplicitFeatureId(feature.id, `${location}.id`);
-      if (seen.has(feature.id)) {
-        throw new Error(`Duplicate feature ID "${feature.id}" at ${location}; IDs must be unique within one backlog.`);
-      }
-      seen.add(feature.id);
+  const reserved = new Set(occupiedIds);
+  const allocated = backlog.epics.map((epic) => epic.features.map((input) => {
+    const id = allocateFeatureId(reserved, nextRandomIndex);
+    reserved.add(id);
+    return { input, id };
+  }));
+  const aliases = new Map<string, string>();
+  for (const epic of allocated) {
+    for (const { input, id } of epic) {
+      if (input.id !== undefined && !aliases.has(input.id)) aliases.set(input.id, id);
     }
   }
 
-  const reserved = new Set(occupiedIds);
   const registrations: FeatureRegistrationResult[] = [];
-  const epics = backlog.epics.map((epic, _epicIndex) => ({
+  const epics = backlog.epics.map((epic, epicIndex) => ({
     ...epic,
-    features: epic.features.map((input, _featureIndex) => {
-      const assigned = input.id === undefined;
-      const id = input.id ?? allocateFeatureId(reserved, nextRandomIndex);
-      reserved.add(id);
-      const idKind = assigned ? 'generated' : classifyFeatureId(id);
-      const feature: Feature = { ...input, id };
+    features: epic.features.map((input, featureIndex) => {
+      const id = allocated[epicIndex]?.[featureIndex]?.id;
+      if (!id) throw new Error(`Unable to allocate a feature ID at ${featureLocation(epicIndex, featureIndex, input)}.`);
+      const feature: Feature = {
+        ...input,
+        id,
+        dependsOn: input.dependsOn.map((dependency) => aliases.get(dependency) ?? dependency),
+      };
       registrations.push({
         feature,
-        assigned,
-        idKind,
-        ...(assigned ? {} : { previousId: id }),
+        assigned: true,
+        idKind: 'generated',
+        ...(input.id !== undefined ? { previousId: input.id } : {}),
         source,
       });
       return feature;

@@ -3,7 +3,7 @@ import { Command } from 'commander';
 
 const mockResolveRepo = vi.fn();
 const mockRegisterRepo = vi.fn();
-const mockLoadBacklog = vi.fn();
+const mockLoadBacklogWithRegistration = vi.fn();
 const mockStageBacklogFile = vi.fn();
 const mockAssertWritableDbPath = vi.fn();
 const mockDiffBacklogCatalog = vi.fn();
@@ -17,7 +17,7 @@ vi.mock('../../src/core/backlog/load.js', async () => {
   const actual = await vi.importActual<typeof import('../../src/core/backlog/load.js')>('../../src/core/backlog/load.js');
   return {
     ...actual,
-    loadBacklog: mockLoadBacklog,
+    loadBacklogWithRegistration: mockLoadBacklogWithRegistration,
     stageBacklogFile: mockStageBacklogFile,
   };
 });
@@ -49,12 +49,13 @@ describe('backlog load command', () => {
     defaults: { tool: 'claude', effort: 'medium', skills: [], stageSkills: {} },
     epics: [{ id: 'epic-1', title: 'Epic', features: [{ id: 'feat-1' }] }],
   };
+  const loaded = { backlog, registrations: [] };
   const diff = { addedFeatures: ['feat-1'], changedFeatures: [], archivedFeatures: [], unchangedFeatures: [] };
 
   beforeEach(() => {
     vi.clearAllMocks();
     mockResolveRepo.mockReturnValue({ repoId: 'repo-1', path: '/repo' });
-    mockLoadBacklog.mockReturnValue(backlog);
+    mockLoadBacklogWithRegistration.mockReturnValue(loaded);
     mockStageBacklogFile.mockReturnValue({ commit: vi.fn(), rollback: vi.fn() });
     mockAssertWritableDbPath.mockReturnValue(undefined);
     mockDiffBacklogCatalog.mockReturnValue(diff);
@@ -72,7 +73,7 @@ describe('backlog load command', () => {
 
     await program.parseAsync(['node', 'msq', 'backlog', 'load', '--dry-run']);
 
-    expect(mockLoadBacklog).toHaveBeenCalledWith(undefined, process.cwd());
+    expect(mockLoadBacklogWithRegistration).toHaveBeenCalledWith(undefined, process.cwd());
     expect(mockDiffBacklogCatalog).toHaveBeenCalledWith(backlog, 'repo-1');
     expect(mockAssertWritableDbPath).not.toHaveBeenCalled();
     expect(mockRegisterRepo).not.toHaveBeenCalled();
@@ -89,7 +90,7 @@ describe('backlog load command', () => {
 
     expect(mockAssertWritableDbPath).toHaveBeenCalled();
     expect(mockRegisterRepo).toHaveBeenCalledWith('repo-1', '/repo');
-    expect(mockUpsertBacklogCatalog).toHaveBeenCalledWith(backlog, 'repo-1');
+    expect(mockUpsertBacklogCatalog).toHaveBeenCalledWith(backlog, 'repo-1', []);
     expect(log).toHaveBeenCalledWith(expect.stringContaining('Catalogo atualizado'));
   });
 
@@ -100,7 +101,7 @@ describe('backlog load command', () => {
 
     await program.parseAsync(['node', 'msq', 'backlog', 'load', '--file', 'other.yaml']);
 
-    expect(mockLoadBacklog).toHaveBeenCalledWith('other.yaml', process.cwd());
+    expect(mockLoadBacklogWithRegistration).toHaveBeenCalledWith('other.yaml', process.cwd());
   });
 
   it('surfaces a db access error without swallowing it silently', async () => {
@@ -120,7 +121,7 @@ describe('backlog load command', () => {
   });
 
   it('propagates YAML validation errors as-is', async () => {
-    mockLoadBacklog.mockImplementation(() => {
+    mockLoadBacklogWithRegistration.mockImplementation(() => {
       throw new Error('specFile not found: docs/missing.md');
     });
 

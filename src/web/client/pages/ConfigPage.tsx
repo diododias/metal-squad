@@ -2,6 +2,7 @@ import React, { useMemo, useState } from 'react';
 import { Tabs } from '../components/navigation/Tabs.js';
 import { Tag } from '../components/core/Tag.js';
 import { FeatureConfigDetail } from '../components/FeatureConfigDetail.js';
+import { FeatureIdentity } from '../components/data/FeatureIdentity.js';
 import { PageHeader } from '../PageHeader.js';
 import type { MsqWebState, WebSocketClientMessage } from '../../types.js';
 
@@ -145,7 +146,7 @@ function FeaturesPromptsTab({ state, send }: { state: MsqWebState; send: (m: Web
                 cursor: 'pointer',
               }}
             >
-              {f.id}
+              <FeatureIdentity title={f.title} id={f.id} />
             </button>
           ))}
         </div>

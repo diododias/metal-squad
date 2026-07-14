@@ -6,14 +6,12 @@
 
 ## Summary
 
-Introduce a single Feature ID domain module that validates explicit IDs and
-generates collision-resistant `F-<8>` IDs with the required Crockford-style
-alphabet. The batch registration path will parse features with an optional ID,
-resolve and persist missing IDs in `backlog.yaml`, then publish the normalized
-backlog to the global SQLite catalog in one guarded transaction. Existing
-legacy/manual IDs remain opaque and stable. The web board will render the
-persisted catalog ID and retain the current client hash only for an unknown
-legacy payload that has no persisted ID.
+Introduce a single Feature ID domain module that generates collision-resistant
+`F-<8>` IDs with the required Crockford-style alphabet. The batch registration
+path ignores source IDs, reconciles existing catalog references, publishes the
+normalized backlog to the global SQLite catalog, and removes consumed entries
+from `backlog.yaml` only after the guarded transaction succeeds. The catalog is
+the operational source of truth after consumption.
 
 ## Technical Context
 
@@ -21,7 +19,7 @@ legacy payload that has no persisted ID.
 
 **Primary Dependencies**: `zod` for schema validation, `yaml` for backlog parsing/materialization, `better-sqlite3` for transactional catalog persistence, Node `crypto` for unbiased random index selection, `commander` for `msq backlog load`, and React for the web board
 
-**Storage**: Versioned `backlog.yaml` as the checked-in batch source plus the global SQLite catalog (`backlog_catalog_meta`, `backlog_epics`, `backlog_features`, and `backlog_tasks`) and existing run/gate/pipeline tables that already store opaque `feature_id` values
+**Storage**: Versioned `backlog.yaml` as a queue source plus the global SQLite catalog (`backlog_catalog_meta`, `backlog_epics`, `backlog_features`, and `backlog_tasks`) and existing run/gate/pipeline tables that store generated `feature_id` values
 
 **Testing**: Vitest unit/integration suites, with `npm run build`, `npm test`, `npm run typecheck`, and `npm run lint` as the implementation baseline; focused backlog/catalog/web suites for iteration
 
@@ -31,7 +29,7 @@ legacy payload that has no persisted ID.
 
 **Performance Goals**: Resolve a batch of at least 200 new features in one local load without network access, with bounded collision retries and one catalog publication transaction; repeated loads of an unchanged backlog must be a no-op for IDs
 
-**Constraints**: IDs must be globally unique across registered catalogs, explicit legacy/manual IDs must be preserved, canonical `F-` IDs must use exactly eight uppercase characters from `23456789ABCDEFGHJKMNPQRSTVWXYZ`, YAML and catalog must not expose divergent IDs after a successful load, SQLite writes must remain atomic under concurrent loaders, `EpicSchema.id` is out of scope, and new UI work targets the web dashboard rather than the retired TUI
+**Constraints**: IDs must be globally unique across registered catalogs, source IDs are ignored, canonical `F-` IDs must use exactly eight uppercase characters from `23456789ABCDEFGHJKMNPQRSTVWXYZ`, consumed YAML and catalog publication must be atomic, existing catalog references must be rekeyed, `EpicSchema.id` is out of scope, and new UI work targets the web dashboard rather than the retired TUI
 
 **Scale/Scope**: One repository backlog per command, with uniqueness checked against all non-archived and historical catalog feature IDs in the shared SQLite database; covers batch registration and the reusable registration contract for a future online channel, not the F57 online UI
 

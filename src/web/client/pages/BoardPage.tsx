@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { Card } from '../components/core/Card.js';
 import { Tag } from '../components/core/Tag.js';
+import { FeatureIdentity } from '../components/data/FeatureIdentity.js';
 import { KanbanCard } from '../components/data/KanbanCard.js';
 import { PageHeader } from '../PageHeader.js';
 import type { MsqWebState } from '../../types.js';
@@ -173,8 +174,7 @@ export function BoardPage({ state, isMobile, onOpenRun, onOpenBacklogItem }: Boa
               {todo.map((f) => (
                 <div key={f.id} {...cardInteraction(() => { onOpenBacklogItem(f.id); })} style={{ cursor: 'pointer' }}>
                   <Card>
-                    <div style={{ fontWeight: 600, fontSize: 'var(--text-sm)', marginBottom: 4 }}>{f.id}</div>
-                    <div style={{ fontSize: 'var(--text-xs)', color: 'var(--text-dim)', marginBottom: 6 }}>{f.title}</div>
+                    <div style={{ marginBottom: 6, fontSize: 'var(--text-sm)' }}><FeatureIdentity title={f.title} id={f.id} /></div>
                     <div style={{ display: 'flex', gap: 6 }}>
                       <Tag>{f.tool}</Tag>
                       <Tag>{f.effort}</Tag>

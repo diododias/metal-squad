@@ -1,5 +1,13 @@
 # Tasks: F52 - Registro de Features com ID Gerado Automaticamente
 
+## Revisao de contrato (2026-07-14)
+
+O fluxo revisado substitui o comportamento de compatibilidade: todo item
+carregado recebe um novo ID `F-<8>`, qualquer `id` de origem e ignorado, as
+referencias existentes do catalogo sao rekeyeadas e o item e removido do
+`backlog.yaml` somente apos a publicacao bem-sucedida. O catalogo nao arquiva
+itens apenas porque eles sairam da fila.
+
 **Input**: Design documents from `/specs/017-feature-id-generation/`
 
 **Prerequisites**: `plan.md`, `spec.md`, `research.md`, `data-model.md`, `contracts/feature-id-registration-contract.md`, and `quickstart.md`

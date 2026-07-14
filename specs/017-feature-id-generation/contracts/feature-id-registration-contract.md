@@ -14,13 +14,9 @@ type FeatureRegistrationInput = Omit<Feature, 'id'> & {
 };
 ```
 
-The input may omit `id`. When present:
-
-- `F-[23456789ABCDEFGHJKMNPQRSTVWXYZ]{8}` is canonical and is preserved.
-- `feat-N` and other non-empty manual IDs without whitespace/control characters
-  are preserved exactly.
-- Empty, whitespace/control-containing, or malformed reserved `F-` values are
-  rejected before persistence.
+The input may contain any `id`. The value is an opaque source alias only and is
+never used as the persisted feature identity. Empty, whitespace/control-
+containing, duplicate, and malformed values are ignored for ID generation.
 
 The allocator receives the occupied global ID set from the catalog boundary;
 callers must not claim uniqueness from a local list alone.
@@ -30,8 +26,9 @@ callers must not claim uniqueness from a local list alone.
 ```ts
 interface FeatureRegistrationResult {
   feature: Feature;       // always has a required, normalized id
-  assigned: boolean;      // true only when input omitted id
-  idKind: 'generated' | 'legacy' | 'manual';
+  assigned: true;         // every loaded feature receives a new ID
+  idKind: 'generated';
+  previousId?: string;    // source alias used for reconciliation only
 }
 ```
 
@@ -45,11 +42,11 @@ same batch.
 `msq backlog load` MUST:
 
 1. Parse and validate the input backlog.
-2. Reject duplicate or malformed explicit feature IDs before writing.
-3. Allocate IDs for omitted fields against the global catalog and current batch.
-4. Stage the same normalized IDs into `backlog.yaml`.
+2. Allocate a new ID for every feature against the global catalog and batch.
+3. Rekey matching catalog references to the generated IDs.
+4. Stage removal of the consumed entries from `backlog.yaml`.
 5. Publish the normalized backlog to the SQLite catalog in one transaction.
-6. Report the IDs in the catalog diff only after publication succeeds.
+6. Commit the YAML removal and report generated IDs only after publication succeeds.
 
 `--dry-run` MUST perform steps 1-3 and show the prospective diff, but MUST NOT
 modify `backlog.yaml` or SQLite.
@@ -59,14 +56,10 @@ not replace the original YAML with a different ID set.
 
 ## Persistence and compatibility
 
-- A second load of the same materialized YAML returns the same IDs and reports
-  unchanged features.
-- Reordering a feature, changing its title, or changing its `specFile` does not
-  change its explicit persisted ID.
-- Removed features are archived according to the existing catalog behavior; an
-  archived ID is not reused for a new feature.
-- Dependencies, runs, gates, pipelines, notifications, and history compare IDs
-  as opaque strings and support canonical, legacy, and manual values equally.
+- A successful load removes the consumed feature entries from `backlog.yaml`.
+- A later empty load retains the published catalog rows.
+- Existing catalog rows and their dependencies, runs, gates, pipelines,
+  notifications, and history are rekeyed to the generated ID when matched.
 
 ## Board display contract
 
@@ -79,7 +72,6 @@ MUST NOT be sent to the server as a feature identity or persisted in the catalog
 
 Errors MUST be actionable and identify:
 
-- the feature location/title when the ID is missing or malformed;
-- the invalid value and rule violated for explicit IDs;
+- the feature location/title when generation or reconciliation fails;
 - the conflicting ID and owning repository for a global collision; and
 - that no catalog update was committed when publication is rolled back.

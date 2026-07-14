@@ -10,6 +10,11 @@ const run = {
 };
 
 describe('KanbanCard persisted identity', () => {
+  it('shows the feature description before the generated ID', () => {
+    const html = renderToStaticMarkup(<KanbanCard run={{ ...run, persistedId: 'F-23456789' }} />);
+    expect(html.indexOf('Legacy feature')).toBeLessThan(html.indexOf('F-23456789'));
+  });
+
   it('renders the persisted catalog ID when available', () => {
     const html = renderToStaticMarkup(<KanbanCard run={{ ...run, persistedId: 'F-23456789' }} />);
     expect(html).toContain('F-23456789');
