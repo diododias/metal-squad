@@ -505,7 +505,7 @@ describe('createCodexProgress — onStderrLine', () => {
   });
 });
 
-describe('createCodexProgress — heartbeatSuffix', () => {
+describe('createCodexProgress — compatibility suffix (not emitted as heartbeat text)', () => {
   it('returns undefined when no events processed', async () => {
     let capturedSuffix: (() => string | undefined) | undefined;
     mockRunCli.mockImplementation(async (_bin, _args, opts) => {

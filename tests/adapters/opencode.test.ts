@@ -270,10 +270,10 @@ describe('opencodeAdapter.runFeature', () => {
     expect(stderrEmits).toHaveLength(0);
   });
 
-  it('emits heartbeat output while opencode is still running', async () => {
-    mockRunCli.mockImplementation(async (_tool, _args, { onHeartbeat, onStdoutChunk }) => {
+  it('emits structured status instead of heartbeat output while opencode is running', async () => {
+    mockRunCli.mockImplementation(async (_tool, _args, { onStatus, onStdoutChunk }) => {
       onStdoutChunk?.(JSON.stringify({ type: 'tool_use', part: { type: 'tool', tool: 'read', input: { path: '/a.txt' } } }));
-      onHeartbeat?.('[msq] opencode feat-1 running for 30s');
+      onStatus?.({ runId: 1, featureId: 'feat-1', tool: 'opencode', status: 'idle', startedAt: new Date().toISOString(), updatedAt: new Date().toISOString(), elapsedMs: 30_000, lastOutputAt: null, idleMs: 30_000, reason: null, terminal: false });
       return { code: 0, stdout: JSON.stringify({ response: 'done' }), stderr: '' };
     });
 
@@ -281,8 +281,8 @@ describe('opencodeAdapter.runFeature', () => {
     await opencodeAdapter.runFeature(MOCK_FEATURE as never, 'prompt', MOCK_OPTS);
 
     const heartbeatOutput = mockEmit.mock.calls.find(([, p]) => (p as Record<string, unknown>).source === 'heartbeat');
-    expect(heartbeatOutput).toBeDefined();
-    expect(String((heartbeatOutput?.[1] as Record<string, unknown>).line)).toContain('opencode feat-1');
+    expect(heartbeatOutput).toBeUndefined();
+    expect(mockEmit).toHaveBeenCalledWith('run:status', expect.objectContaining({ status: 'idle', runId: 1 }));
   });
 
   it('emits tokens:update when usage found in stdout JSON line', async () => {

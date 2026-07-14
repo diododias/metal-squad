@@ -1,6 +1,6 @@
 import { existsSync } from 'node:fs';
 import { getDb, withTransaction } from './index.js';
-import type { TokenUsage } from '../core/adapters/types.js';
+import { sanitizeToolCallRecord, type SessionStatusSnapshot, type TokenUsage, type ToolCallRecord } from '../core/adapters/types.js';
 import { resolveDbPath } from '../config/index.js';
 import { msqEventBus } from '../core/events/index.js';
 import type {
@@ -201,6 +201,113 @@ export function finishRun(
     .prepare(`UPDATE runs SET status = ?, summary = ?, ended_at = datetime('now') WHERE id = ?`)
     .run(status, summary ?? null, runId);
   recordRunEvent(runId, status, summary ? { summary } : undefined);
+}
+
+export function upsertRunSessionStatus(snapshot: SessionStatusSnapshot): void {
+  const database = getDb('readwrite');
+  const legacyStatus = snapshot.status === 'completed'
+    ? 'done'
+    : snapshot.status === 'interrupted'
+      ? 'aborted'
+      : snapshot.status === 'failed' || snapshot.status === 'timed_out'
+        ? 'failed'
+        : null;
+  database.prepare(
+    `UPDATE runs
+       SET session_status = ?,
+           session_started_at = ?,
+           session_updated_at = ?,
+           session_elapsed_ms = ?,
+           session_last_output_at = ?,
+           session_idle_ms = ?,
+           session_reason = ?,
+           session_terminal = ?,
+           status = CASE WHEN ? IS NULL THEN status WHEN status IN ('running', 'done', 'failed', 'aborted') THEN ? ELSE status END,
+           ended_at = CASE WHEN ? = 1 AND ended_at IS NULL THEN ? ELSE ended_at END
+     WHERE id = ? AND (session_terminal = 0 OR ? = 1)`,
+  ).run(
+    snapshot.status,
+    snapshot.startedAt,
+    snapshot.updatedAt,
+    snapshot.elapsedMs,
+    snapshot.lastOutputAt,
+    snapshot.idleMs,
+    snapshot.reason,
+    snapshot.terminal ? 1 : 0,
+    legacyStatus,
+    legacyStatus,
+    snapshot.terminal ? 1 : 0,
+    snapshot.updatedAt,
+    snapshot.runId,
+    snapshot.terminal ? 1 : 0,
+  );
+  recordRunEvent(snapshot.runId, `status:${snapshot.status}`, snapshot as unknown as Record<string, unknown>);
+}
+
+export type RunToolCallRow = ToolCallRecord;
+
+export function upsertRunToolCall(record: ToolCallRecord): void {
+  record = sanitizeToolCallRecord(record);
+  const args = record.arguments == null ? null : JSON.stringify(record.arguments).slice(0, 20_000);
+  getDb('readwrite').prepare(
+    `INSERT INTO run_tool_calls (
+       run_id, id, feature_id, tool, sequence, phase, name, arguments_json, output, step,
+       started_at, completed_at, error
+     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+     ON CONFLICT(run_id, id) DO UPDATE SET
+       phase = CASE WHEN run_tool_calls.phase IN ('completed', 'failed') THEN run_tool_calls.phase ELSE excluded.phase END,
+       sequence = MIN(run_tool_calls.sequence, excluded.sequence),
+       arguments_json = COALESCE(excluded.arguments_json, run_tool_calls.arguments_json),
+       output = COALESCE(excluded.output, run_tool_calls.output),
+       step = COALESCE(excluded.step, run_tool_calls.step),
+       completed_at = COALESCE(excluded.completed_at, run_tool_calls.completed_at),
+       error = COALESCE(excluded.error, run_tool_calls.error)`,
+  ).run(
+    record.runId,
+    record.id.slice(0, 200),
+    record.featureId,
+    record.tool,
+    record.sequence,
+    record.phase,
+    record.name.slice(0, 200),
+    args,
+    record.output?.slice(0, 20_000) ?? null,
+    record.step?.slice(0, 200) ?? null,
+    record.startedAt,
+    record.completedAt,
+    record.error?.slice(0, 500) ?? null,
+  );
+}
+
+export function listRunToolCalls(runId: number, limit = 200): RunToolCallRow[] {
+  if (!hasDbFile()) return [];
+  type RawToolCallRow = Omit<RunToolCallRow, 'arguments'> & { argumentsJson: string | null };
+  const rows = getDb('readonly').prepare(
+    `SELECT run_id AS runId, id, feature_id AS featureId, tool, sequence, phase, name,
+            arguments_json AS argumentsJson, output, step, started_at AS startedAt,
+            completed_at AS completedAt, error
+       FROM run_tool_calls WHERE run_id = ? ORDER BY sequence ASC, started_at ASC LIMIT ?`,
+  ).all(runId, limit) as RawToolCallRow[];
+  return rows.map(({ argumentsJson, ...row }) => ({
+    ...row,
+    arguments: argumentsJson ? parseJsonValue(argumentsJson) : null,
+  }));
+}
+
+export function getRunSessionStatus(runId: number): SessionStatusSnapshot | null {
+  if (!hasDbFile()) return null;
+  const row = getDb('readonly').prepare(
+    `SELECT run_id AS runId, feature_id AS featureId, tool, session_status AS status,
+            session_started_at AS startedAt, session_updated_at AS updatedAt,
+            session_elapsed_ms AS elapsedMs, session_last_output_at AS lastOutputAt,
+            session_idle_ms AS idleMs, session_reason AS reason, session_terminal AS terminal
+       FROM runs WHERE id = ? AND session_status IS NOT NULL`,
+  ).get(runId) as (Omit<SessionStatusSnapshot, 'terminal'> & { terminal: number }) | undefined;
+  return row ? { ...row, terminal: Boolean(row.terminal) } : null;
+}
+
+function parseJsonValue(value: string): unknown {
+  try { return JSON.parse(value) as unknown; } catch { return null; }
 }
 
 export function cleanupStaleRuns(olderThanMinutes: number): number {
@@ -498,6 +605,14 @@ export interface RunSummary {
   pendingStageRequestKind: StageRequestKind | null;
   pendingStageRequestPrompt: string | null;
   pendingStageRequestCreatedAt: string | null;
+  sessionStatus?: SessionStatusSnapshot['status'] | null;
+  sessionStartedAt?: string | null;
+  sessionUpdatedAt?: string | null;
+  sessionElapsedMs?: number | null;
+  sessionLastOutputAt?: string | null;
+  sessionIdleMs?: number | null;
+  sessionReason?: string | null;
+  sessionTerminal?: boolean;
   latestTransitionDecision?: 'reuse' | 'new_session' | null;
   latestTransitionReason?: TransitionDecisionReason | null;
   latestTransitionToStage?: string | null;
@@ -596,6 +711,14 @@ export function listRunsForTui(limit = 50, repoId?: string): RunSummary[] {
          psr.kind AS pendingStageRequestKind,
          psr.prompt AS pendingStageRequestPrompt,
          psr.created_at AS pendingStageRequestCreatedAt,
+         r.session_status AS sessionStatus,
+         r.session_started_at AS sessionStartedAt,
+         r.session_updated_at AS sessionUpdatedAt,
+         r.session_elapsed_ms AS sessionElapsedMs,
+         r.session_last_output_at AS sessionLastOutputAt,
+         r.session_idle_ms AS sessionIdleMs,
+         r.session_reason AS sessionReason,
+         r.session_terminal AS sessionTerminal,
          ltd.decision AS latestTransitionDecision,
          ltd.reason AS latestTransitionReason,
          ltd.to_stage AS latestTransitionToStage,

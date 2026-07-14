@@ -252,6 +252,29 @@ describe('runCli', () => {
     expect(heartbeats[0]).toContain('[msq]');
   });
 
+  it('emits structured running, idle, resumed, and completed statuses independently of heartbeat text', async () => {
+    const child = makeMockChild();
+    mockSpawn.mockReturnValue(child);
+    const statuses: string[] = [];
+    const { runCli } = await import('../../src/core/adapters/spawn.js');
+    const promise = runCli('cmd', [], {
+      cwd: '/cwd',
+      runId: 4,
+      featureId: 'feat-4',
+      tool: 'codex',
+      idleThresholdMs: 1_000,
+      onStatus: (status) => statuses.push(status.status),
+    });
+
+    vi.advanceTimersByTime(1_800);
+    child.stdout.emit('data', Buffer.from('progress\n'));
+    vi.advanceTimersByTime(1_800);
+    child.emit('close', 0, null);
+    await promise;
+
+    expect(statuses).toEqual(['running', 'idle', 'running', 'idle', 'completed']);
+  });
+
   it('includes logLabel in heartbeat when provided', async () => {
     const child = makeMockChild();
     mockSpawn.mockReturnValue(child);
