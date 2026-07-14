@@ -1,6 +1,6 @@
 import { existsSync } from 'node:fs';
 import { getDb, withTransaction } from './index.js';
-import { sanitizeToolCallRecord, type SessionStatusSnapshot, type TokenUsage, type ToolCallRecord } from '../core/adapters/types.js';
+import { sanitizeToolCallRecord, type PublishEvidence, type SessionStatusSnapshot, type TokenUsage, type ToolCallRecord } from '../core/adapters/types.js';
 import { resolveDbPath } from '../config/index.js';
 import { msqEventBus } from '../core/events/index.js';
 import type {
@@ -165,6 +165,12 @@ export interface CreateRunOptions {
 }
 
 export type RunStatus = 'running' | 'done' | 'failed' | 'blocked' | 'aborted';
+
+export interface RunPublishState {
+  verified: boolean;
+  error: string | null;
+  evidence: PublishEvidence;
+}
 export type PipelineStatus = 'running' | 'paused' | 'aborting' | 'aborted' | 'done' | 'failed' | 'blocked';
 
 export interface PipelineSnapshot {
@@ -201,6 +207,33 @@ export function finishRun(
     .prepare(`UPDATE runs SET status = ?, summary = ?, ended_at = datetime('now') WHERE id = ?`)
     .run(status, summary ?? null, runId);
   recordRunEvent(runId, status, summary ? { summary } : undefined);
+}
+
+export function updateRunPublishState(runId: number, publish: RunPublishState): void {
+  getDb('readwrite')
+    .prepare(
+      `UPDATE runs
+       SET publish_verified = ?,
+           publish_error = ?,
+           branch_name = ?,
+           base_branch = ?,
+           commit_sha = ?,
+           remote_branch = ?,
+           pr_number = ?,
+           pr_url = ?
+       WHERE id = ?`,
+    )
+    .run(
+      publish.verified ? 1 : 0,
+      publish.error,
+      publish.evidence.branch,
+      publish.evidence.baseBranch,
+      publish.evidence.commitSha,
+      publish.evidence.remoteBranch,
+      publish.evidence.prNumber,
+      publish.evidence.prUrl,
+      runId,
+    );
 }
 
 export function upsertRunSessionStatus(snapshot: SessionStatusSnapshot): void {
@@ -619,6 +652,24 @@ export interface RunSummary {
   latestTransitionContextWindowPercent?: number | null;
   latestTransitionPreviousSessionId?: string | null;
   latestTransitionNextSessionId?: string | null;
+  publishVerified?: boolean | null;
+  publishError?: string | null;
+  branchName?: string | null;
+  baseBranch?: string | null;
+  commitSha?: string | null;
+  remoteBranch?: string | null;
+  prNumber?: number | null;
+  prUrl?: string | null;
+}
+
+function getRunColumnProjection(
+  availableColumns: Set<string>,
+  columnName: string,
+  alias: string,
+): string {
+  return availableColumns.has(columnName)
+    ? `r.${columnName} AS ${alias}`
+    : `NULL AS ${alias}`;
 }
 
 // T003: listRunsForTui — most recent run per feature per repo (US2 deduplication via CTE)
@@ -626,7 +677,14 @@ export function listRunsForTui(limit = 50, repoId?: string): RunSummary[] {
   if (!hasDbFile()) return [];
   const repoFilter = repoId ? 'WHERE repo_id = ?' : '';
   const params = repoId ? [repoId, limit] : [limit];
-  return getDb('readonly')
+  const db = getDb('readonly');
+  const runColumns = new Set(
+    (db.prepare(`PRAGMA table_info(runs)`).all() as { name?: string }[])
+      .map((column) => column.name)
+      .filter((name): name is string => typeof name === 'string'),
+  );
+
+  return db
     .prepare(
       `WITH latest AS (
          SELECT MAX(id) AS id
@@ -724,7 +782,15 @@ export function listRunsForTui(limit = 50, repoId?: string): RunSummary[] {
          ltd.to_stage AS latestTransitionToStage,
          ltd.context_window_percent AS latestTransitionContextWindowPercent,
          ltd.previous_session_id AS latestTransitionPreviousSessionId,
-         ltd.next_session_id AS latestTransitionNextSessionId
+         ltd.next_session_id AS latestTransitionNextSessionId,
+         ${getRunColumnProjection(runColumns, 'publish_verified', 'publishVerified')},
+         ${getRunColumnProjection(runColumns, 'publish_error', 'publishError')},
+         ${getRunColumnProjection(runColumns, 'branch_name', 'branchName')},
+         ${getRunColumnProjection(runColumns, 'base_branch', 'baseBranch')},
+         ${getRunColumnProjection(runColumns, 'commit_sha', 'commitSha')},
+         ${getRunColumnProjection(runColumns, 'remote_branch', 'remoteBranch')},
+         ${getRunColumnProjection(runColumns, 'pr_number', 'prNumber')},
+         ${getRunColumnProjection(runColumns, 'pr_url', 'prUrl')}
        FROM runs r
        JOIN latest ON latest.id = r.id
        LEFT JOIN latest_usage lu ON lu.runId = r.id

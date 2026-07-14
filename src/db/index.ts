@@ -125,6 +125,14 @@ function migrate(d: Database.Database): void {
       total_tokens INTEGER,
       context_window_tokens INTEGER,
       context_window_percent REAL,
+      publish_verified INTEGER,
+      publish_error TEXT,
+      branch_name TEXT,
+      base_branch TEXT,
+      commit_sha TEXT,
+      remote_branch TEXT,
+      pr_number INTEGER,
+      pr_url TEXT,
       session_status TEXT,
       session_started_at TEXT,
       session_updated_at TEXT,
@@ -397,6 +405,20 @@ function migrate(d: Database.Database): void {
   if (!hasStage) {
     d.exec(`ALTER TABLE runs ADD COLUMN stage TEXT`);
   }
+  const ensureRunColumn = (name: string, sql: string): void => {
+    if (!runColumns.some((column) => column.name === name)) {
+      d.exec(sql);
+      runColumns.push({ name });
+    }
+  };
+  ensureRunColumn('publish_verified', `ALTER TABLE runs ADD COLUMN publish_verified INTEGER`);
+  ensureRunColumn('publish_error', `ALTER TABLE runs ADD COLUMN publish_error TEXT`);
+  ensureRunColumn('branch_name', `ALTER TABLE runs ADD COLUMN branch_name TEXT`);
+  ensureRunColumn('base_branch', `ALTER TABLE runs ADD COLUMN base_branch TEXT`);
+  ensureRunColumn('commit_sha', `ALTER TABLE runs ADD COLUMN commit_sha TEXT`);
+  ensureRunColumn('remote_branch', `ALTER TABLE runs ADD COLUMN remote_branch TEXT`);
+  ensureRunColumn('pr_number', `ALTER TABLE runs ADD COLUMN pr_number INTEGER`);
+  ensureRunColumn('pr_url', `ALTER TABLE runs ADD COLUMN pr_url TEXT`);
 
   const usageColumns = d
     .prepare(`PRAGMA table_info(token_usage)`)

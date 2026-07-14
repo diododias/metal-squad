@@ -89,6 +89,14 @@ export function FeatureConfigDetail({ feature, backlogSettings, onSaveConfig }: 
             {feature.dependsOn.length ? feature.dependsOn.map((d) => <Tag key={d}>{d}</Tag>) : <span style={{ fontSize: 'var(--text-xs)', color: 'var(--text-faint)' }}>none</span>}
           </div>
         </div>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '6px 0' }}>
+          <span style={{ color: 'var(--text-dim)' }}>pendingDependencies</span>
+          <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+            {(feature.pendingDependencies?.length ?? 0) > 0
+              ? feature.pendingDependencies?.map((d) => <Tag key={d}>{d}</Tag>)
+              : <span style={{ fontSize: 'var(--text-xs)', color: 'var(--accent-ok)' }}>ready</span>}
+          </div>
+        </div>
       </ConfigCard>
 
       <ConfigCard title="Spec & context">

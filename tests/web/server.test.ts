@@ -27,6 +27,7 @@ const mocks = vi.hoisted(() => ({
   requestFeatureAbort: vi.fn(),
   forceResolveGate: vi.fn(),
   resolveStageRequest: vi.fn(),
+  listCompletedFeatureIds: vi.fn(() => new Set()),
   getPendingFeatures: vi.fn(() => []),
   computeRunBreakdown: vi.fn(),
   assertWritableDbPath: vi.fn(),
@@ -91,6 +92,7 @@ vi.mock('../../src/db/repo.js', () => ({
   abortPipeline: mocks.abortPipeline,
   requestFeatureAbort: mocks.requestFeatureAbort,
   forceResolveGate: mocks.forceResolveGate,
+  listCompletedFeatureIds: mocks.listCompletedFeatureIds,
 }));
 
 vi.mock('../../src/core/stats.js', () => ({
@@ -1072,6 +1074,12 @@ describe('web server', () => {
     mocks.getFeatureCatalog.mockReturnValue({ 'feat-1': featureEntry });
     mocks.getPendingFeatures.mockImplementation((catalog: Record<string, typeof featureEntry>, doneFeatureIds: Set<string>, activeFeatureIds: Set<string>) =>
       Object.values(catalog).filter((feature) => !doneFeatureIds.has(feature.id) && !activeFeatureIds.has(feature.id)));
+    mocks.loadBacklogFromCatalog.mockReturnValue({
+      version: 2,
+      repo: 'repo',
+      defaults: { tool: 'codex', effort: 'medium', skills: [], stageSkills: {} },
+      epics: [{ id: 'epic-1', title: 'Epic', features: [{ ...featureEntry, tasks: [] }] }],
+    });
     mocks.listRunsForTui.mockImplementation(() => runs);
 
     server = createWebServer({ host: '127.0.0.1', port: 0, auth: 'token', token: 'secret' });
@@ -1123,6 +1131,45 @@ describe('web server', () => {
       3000,
     );
     expect((reconciledState.payload as { runs: Array<{ featureId: string }> }).runs[0]?.featureId).toBe('feat-1');
+
+    socket.close();
+  });
+
+  it('does not spawn startFeature when dependencies are still pending', async () => {
+    const { createWebServer } = await import('../../src/web/server.js');
+
+    const featureEntry = {
+      id: 'feat-1',
+      title: 'Feature One',
+      tool: 'codex',
+      effort: 'medium',
+      skills: [],
+      dependsOn: ['feat-0'],
+      workflow: { mode: 'staged', stages: ['specify'], approvals: { channel: 'telegram', autoAdvance: false }, syncTasksToBacklog: true, sessionPolicy: { mode: 'isolated', alwaysIsolatedStages: [] } },
+    };
+    mocks.getFeatureCatalog.mockReturnValue({ 'feat-1': featureEntry });
+    mocks.getPendingFeatures.mockImplementation((catalog: Record<string, typeof featureEntry>, doneFeatureIds: Set<string>, activeFeatureIds: Set<string>) =>
+      Object.values(catalog)
+        .filter((feature) => !doneFeatureIds.has(feature.id) && !activeFeatureIds.has(feature.id))
+        .map((feature) => ({ ...feature, pendingDependencies: feature.dependsOn.filter((dependency) => !doneFeatureIds.has(dependency)) })));
+    mocks.loadBacklogFromCatalog.mockReturnValue({
+      version: 2,
+      repo: 'repo',
+      defaults: { tool: 'codex', effort: 'medium', skills: [], stageSkills: {} },
+      epics: [{ id: 'epic-1', title: 'Epic', features: [featureEntry] }],
+    });
+    mocks.listCompletedFeatureIds.mockReturnValue(new Set());
+
+    server = createWebServer({ host: '127.0.0.1', port: 0, auth: 'token', token: 'secret' });
+    await new Promise<void>((resolve) => server!.server.listen(0, '127.0.0.1', resolve));
+    const address = server!.server.address() as { port: number };
+    const socket = new WebSocket(`ws://127.0.0.1:${address.port}/ws`);
+    await waitForOpen(socket);
+    socket.send(JSON.stringify({ type: 'auth', token: 'secret' }));
+    await waitForSocketMessage(socket);
+
+    socket.send(JSON.stringify({ type: 'action:startFeature', featureId: 'feat-1' }));
+    await vi.waitFor(() => expect(mocks.spawn).not.toHaveBeenCalled());
 
     socket.close();
   });

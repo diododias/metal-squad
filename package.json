@@ -11,7 +11,8 @@
     "dist"
   ],
   "scripts": {
-    "build": "tsc && rm -rf dist/web/static dist/web/client && cp -r src/web/static dist/web/static && node esbuild.web.mjs && chmod +x dist/index.js",
+    "build": "tsc && rm -rf dist/web/static dist/web/client && cp -r src/web/static dist/web/static && node esbuild.web.mjs && chmod +x dist/index.js && node scripts/migrate-db.mjs",
+    "migrate:db": "node scripts/migrate-db.mjs",
     "dev": "tsx src/index.ts",
     "start": "node dist/index.js",
     "typecheck": "tsc --noEmit",
@@ -19,7 +20,7 @@
     "format": "prettier --write src",
     "test": "vitest run",
     "test:coverage": "vitest run --coverage",
-    "test:coverage:gate": "vitest run --config vitest.coverage-gate.config.ts --coverage",
+    "test:coverage:gate": "mkdir -p coverage/.tmp && vitest run --config vitest.coverage-gate.config.ts --coverage",
     "test:mutation": "stryker run",
     "verify:doc-refs": "node scripts/verify-doc-references.mjs",
     "verify:skill-shims": "node scripts/verify-skill-shims.mjs",

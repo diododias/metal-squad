@@ -4,7 +4,7 @@ import { FeatureIdentity } from '../components/data/FeatureIdentity.js';
 import { StatusPill } from '../components/core/StatusPill.js';
 import { Tag } from '../components/core/Tag.js';
 import { PageHeader } from '../PageHeader.js';
-import { formatElapsed, formatTokens } from '../lib/format.js';
+import { formatElapsed, formatPublishTarget, formatTokens, getPublishStatusLabel } from '../lib/format.js';
 import type { MsqWebState } from '../../types.js';
 import type { RunSummary } from '../../../db/repo.js';
 
@@ -38,6 +38,16 @@ export function RunsPage({ state, onOpenRun }: RunsPageProps): React.JSX.Element
     { key: 'status', label: 'Status', render: (r) => <StatusPill status={r.status} /> },
     { key: 'tool', label: 'Tool', render: (r) => <Tag>{r.tool}</Tag> },
     { key: 'model', label: 'Model', render: (r) => state.featureCatalog[r.featureId]?.model ?? '—' },
+    {
+      key: 'publish',
+      label: 'Publish',
+      render: (r) => (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+          <Tag tone={r.publishVerified ? 'accent' : 'default'}>{getPublishStatusLabel(r)}</Tag>
+          <span style={{ color: 'var(--text-faint)', fontSize: 'var(--text-2xs)' }}>{formatPublishTarget(r)}</span>
+        </div>
+      ),
+    },
     { key: 'totalTokens', label: 'Tokens', align: 'right', render: (r) => formatTokens(r.totalTokens) },
     { key: 'elapsed', label: 'Elapsed', align: 'right', render: (r) => formatElapsed(r.startedAt, r.endedAt) },
     { key: 'startedAt', label: 'Started', render: (r) => new Date(r.startedAt).toLocaleString() },

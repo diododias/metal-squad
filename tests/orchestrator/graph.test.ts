@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { selectFeaturePlan } from '../../src/core/orchestrator/graph.js';
+import { selectFeaturePlan, selectStartableFeaturePlan } from '../../src/core/orchestrator/graph.js';
 import type { BacklogV2 } from '../../src/core/backlog/schema.js';
 
 const backlog: BacklogV2 = {
@@ -79,5 +79,21 @@ describe('selectFeaturePlan', () => {
     expect(() => selectFeaturePlan(brokenBacklog, 'feat-03')).toThrow(
       'Feature feat-03 depends on missing feature feat-02',
     );
+  });
+});
+
+describe('selectStartableFeaturePlan', () => {
+  it('returns only the target when all dependencies are already completed', () => {
+    const plan = selectStartableFeaturePlan(backlog, 'feat-03', new Set(['feat-01', 'feat-02']));
+    expect(plan.target.id).toBe('feat-03');
+    expect(plan.pendingDependencies).toEqual([]);
+    expect(plan.completedDependencies).toEqual(['feat-01', 'feat-02']);
+  });
+
+  it('reports pending dependencies instead of scheduling them implicitly', () => {
+    const plan = selectStartableFeaturePlan(backlog, 'feat-03', new Set(['feat-01']));
+    expect(plan.target.id).toBe('feat-03');
+    expect(plan.pendingDependencies).toEqual(['feat-02']);
+    expect(plan.completedDependencies).toEqual(['feat-01']);
   });
 });

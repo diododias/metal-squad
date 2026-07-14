@@ -37,6 +37,19 @@ export function getRunStageLabel(run: RunSummary): string | null {
   return stage;
 }
 
+export function getPublishStatusLabel(run: RunSummary): string {
+  if (run.publishVerified) return 'verified';
+  if (run.prUrl || run.prNumber) return 'unverified';
+  if (run.publishError) return 'missing evidence';
+  return '—';
+}
+
+export function formatPublishTarget(run: RunSummary): string {
+  if (run.prNumber) return `PR #${String(run.prNumber)}`;
+  if (run.branchName) return run.branchName;
+  return '—';
+}
+
 export function formatTokens(total: number | null | undefined): string {
   if (total === null || total === undefined) return '—';
   if (total >= 1000) return `${(total / 1000).toFixed(1)}k`;

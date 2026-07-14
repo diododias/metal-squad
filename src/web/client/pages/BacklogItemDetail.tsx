@@ -26,6 +26,8 @@ export function BacklogItemDetail({
   onSaveConfig,
 }: BacklogItemDetailProps): React.JSX.Element {
   const feature = state.featureCatalog[featureId];
+  const blockedByDependencies = feature?.pendingDependencies ?? [];
+  const canStart = blockedByDependencies.length === 0;
 
   useEffect(() => onSubscribeHistory(featureId), [featureId, onSubscribeHistory]);
 
@@ -59,7 +61,13 @@ export function BacklogItemDetail({
         }
         actions={
           <>
-            <Button variant="primary" size="sm" onClick={() => { onStart(featureId); }}>
+            <Button
+              variant="primary"
+              size="sm"
+              disabled={!canStart}
+              title={!canStart ? `Pending dependencies: ${blockedByDependencies.join(', ')}` : 'Start feature'}
+              onClick={() => { onStart(featureId); }}
+            >
               start feature
             </Button>
             <Button variant="neutral" size="sm" onClick={onBack}>

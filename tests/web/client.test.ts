@@ -1,6 +1,15 @@
 import { describe, expect, it } from 'vitest';
 import { parseHash } from '../../src/web/client/lib/routes.js';
-import { formatDurationMs, formatPercent, formatTokens, truncateText, formatHeartbeatLine, getRunStatusLabel } from '../../src/web/client/lib/format.js';
+import {
+  formatDurationMs,
+  formatHeartbeatLine,
+  formatPercent,
+  formatPublishTarget,
+  formatTokens,
+  getPublishStatusLabel,
+  getRunStatusLabel,
+  truncateText,
+} from '../../src/web/client/lib/format.js';
 import { summarizeTaskRuns } from '../../src/web/client/lib/workflow.js';
 import { normalizeLegacyOpencodePayload, type OutputLine } from '../../src/web/client/hooks/useLocalOutput.js';
 import { subscriptionKey } from '../../src/web/client/hooks/useWebSocket.js';
@@ -61,6 +70,27 @@ describe('format helpers', () => {
     expect(getRunStatusLabel({ ...base, pendingStageRequestKind: 'approval' } as RunSummary)).toBe('awaiting approval');
     expect(getRunStatusLabel({ ...base, pendingStageRequestKind: 'input' } as RunSummary)).toBe('awaiting input');
     expect(getRunStatusLabel({ ...base, pipelineStatus: 'running', rawStatus: 'done' } as RunSummary)).toBe('advancing');
+  });
+
+  it('formats publish status and target from persisted evidence', () => {
+    const base = {} as RunSummary;
+    expect(getPublishStatusLabel(base)).toBe('—');
+    expect(formatPublishTarget(base)).toBe('—');
+
+    const blocked = {
+      publishError: 'missing pr',
+      branchName: 'feat/test',
+    } as RunSummary;
+    expect(getPublishStatusLabel(blocked)).toBe('missing evidence');
+    expect(formatPublishTarget(blocked)).toBe('feat/test');
+
+    const verified = {
+      publishVerified: true,
+      prNumber: 42,
+      prUrl: 'https://example/pr/42',
+    } as RunSummary;
+    expect(getPublishStatusLabel(verified)).toBe('verified');
+    expect(formatPublishTarget(verified)).toBe('PR #42');
   });
 });
 

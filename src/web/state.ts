@@ -1,6 +1,7 @@
 import { basename } from 'node:path';
 import {
   listRunsForTui,
+  listCompletedFeatureIds,
   openGates,
   listPendingStageRequests,
   listRunningTaskRuns,
@@ -76,10 +77,10 @@ function collectRunningTasks(): RunningTaskSummary[] {
   }
 }
 
-function collectPendingFeatures(runs: RunSummary[]): FeatureCatalogEntry[] {
+function collectPendingFeatures(runs: RunSummary[], repoId: string): FeatureCatalogEntry[] {
   try {
     const catalog = getFeatureCatalog();
-    const doneFeatureIds = new Set(runs.filter((run) => run.status === 'done').map((run) => run.featureId));
+    const doneFeatureIds = listCompletedFeatureIds(repoId);
     const activeFeatureIds = new Set(
       runs
         .filter((run) => run.status === 'running' || run.status === 'blocked' || run.status === 'done')
@@ -204,10 +205,11 @@ function collectSkillsCatalog(): Skill[] {
 }
 
 export function buildMsqWebState(): MsqWebState {
-  const repoLabel = basename(resolveRepo().path);
+  const repo = resolveRepo();
+  const repoLabel = basename(repo.path);
   const runs = collectRuns();
   const gates = collectGates();
-  const pendingFeatures = collectPendingFeatures(runs);
+  const pendingFeatures = collectPendingFeatures(runs, repo.repoId);
   const runningTasks = collectRunningTasks();
   const featureCatalog = normalizeFeatureCatalog(getFeatureCatalog());
   const backlogSettings = getBacklogSettings();

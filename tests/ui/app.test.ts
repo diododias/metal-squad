@@ -16,13 +16,35 @@ const mockUseTokenStats = vi.fn(() => ({ status: 'ready' as const, totalTokens: 
 const mockGetFeatureCatalog = vi.fn();
 const mockGetBacklogSettings = vi.fn(() => ({ stageSkills: {} }));
 const mockLoadConfig = vi.fn(() => ({ concurrency: 3 }));
-const mockLoadBacklog = vi.fn(() => ({ epics: [] }));
+const mockLoadBacklog = vi.fn(() => ({
+  version: 2,
+  repo: 'test-repo',
+  defaults: { tool: 'codex', effort: 'medium', skills: [], stageSkills: {} },
+  epics: [
+    {
+      id: 'epic-1',
+      title: 'Epic',
+      features: [
+        {
+          id: 'feat-9',
+          title: 'F09',
+          tool: 'codex',
+          effort: 'medium',
+          dependsOn: [],
+          tasks: [],
+          workflow: { mode: 'single', stages: [], approvals: { channel: 'telegram', autoAdvance: false }, syncTasksToBacklog: true, sessionPolicy: { mode: 'isolated', alwaysIsolatedStages: [] } },
+        },
+      ],
+    },
+  ],
+}));
 const mockValidateBacklogSkills = vi.fn();
 const mockAssertWritableDbPath = vi.fn();
 const mockPausePipeline = vi.fn();
 const mockResumePipeline = vi.fn();
 const mockRequestFeatureAbort = vi.fn();
 const mockAbortPipeline = vi.fn();
+const mockListCompletedFeatureIds = vi.fn(() => new Set<string>());
 const mockSpawn = vi.fn(() => ({ once: vi.fn(), unref: vi.fn() }));
 const mockEventBusEmit = vi.fn();
 const mockMainPanel = vi.fn(() => React.createElement('main-panel'));
@@ -154,6 +176,7 @@ vi.mock('../../src/db/index.js', () => ({
 }));
 
 vi.mock('../../src/db/repo.js', () => ({
+  listCompletedFeatureIds: mockListCompletedFeatureIds,
   pausePipeline: mockPausePipeline,
   resumePipeline: mockResumePipeline,
   requestFeatureAbort: mockRequestFeatureAbort,
@@ -273,6 +296,7 @@ describe('App', () => {
       detailDense: false,
     };
     mockUseTerminalWidth.mockReturnValue(88);
+    mockLoadBacklog.mockClear();
     mockUseRuns.mockReturnValue([]);
     mockUseRunningTasks.mockReturnValue([]);
     mockUseGates.mockReturnValue({ gates: [], resolve: vi.fn(), forceResolve: vi.fn(() => ({ resumedPipelineId: null })) });

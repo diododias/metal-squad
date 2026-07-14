@@ -10,6 +10,7 @@ import { assertWritableDbPath } from '../db/index.js';
 import {
   abortPipeline,
   forceResolveGate,
+  listCompletedFeatureIds,
   listRunEvents,
   listRunHistoryForFeature,
   getRunSessionStatus,
@@ -26,6 +27,7 @@ import {
 import { computeRunBreakdown } from '../core/stats.js';
 import { resolveRepo } from '../core/repo.js';
 import { loadBacklogFromCatalog } from '../core/backlog/load.js';
+import { selectStartableFeaturePlan } from '../core/orchestrator/graph.js';
 import { validateBacklogSkills } from '../core/skills/index.js';
 import { resolveRuntimeConfig } from '../config/index.js';
 import { updateCatalogFeature, updateCatalogTask, type FeaturePatch } from '../db/backlogCatalog.js';
@@ -797,8 +799,13 @@ export function createWebServer(options: {
       console.log(`[startFeature] featureId=${featureId}`);
       assertWritableDbPath();
       resolveRuntimeConfig(featureCwd);
-      const backlog = loadBacklogFromCatalog(resolveRepo(featureCwd).repoId, featureCwd);
+      const repo = resolveRepo(featureCwd);
+      const backlog = loadBacklogFromCatalog(repo.repoId, featureCwd);
       validateBacklogSkills(backlog, featureCwd);
+      const plan = selectStartableFeaturePlan(backlog, featureId, listCompletedFeatureIds(repo.repoId));
+      if (plan.pendingDependencies.length > 0) {
+        throw new Error(`pending dependencies: ${plan.pendingDependencies.join(', ')}. Complete them before starting ${featureId}.`);
+      }
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       const stack = error instanceof Error ? error.stack : undefined;
