@@ -8,6 +8,8 @@ const mocks = vi.hoisted(() => ({
   resolveRepo: vi.fn(),
   listRunsForTui: vi.fn(),
   listRunHistoryForFeature: vi.fn(),
+  getRunSessionStatus: vi.fn(),
+  listRunToolCalls: vi.fn(),
   openGates: vi.fn(),
   listPendingStageRequests: vi.fn(),
   listRunningTaskRuns: vi.fn(),
@@ -73,6 +75,8 @@ vi.mock('node:child_process', async () => {
 vi.mock('../../src/db/repo.js', () => ({
   listRunsForTui: mocks.listRunsForTui,
   listRunHistoryForFeature: mocks.listRunHistoryForFeature,
+  getRunSessionStatus: mocks.getRunSessionStatus,
+  listRunToolCalls: mocks.listRunToolCalls,
   openGates: mocks.openGates,
   listPendingStageRequests: mocks.listPendingStageRequests,
   listRunningTaskRuns: mocks.listRunningTaskRuns,

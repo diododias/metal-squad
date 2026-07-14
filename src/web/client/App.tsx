@@ -17,10 +17,14 @@ import { ConfigPage } from './pages/ConfigPage.js';
 import type { MsqWebState, WebSocketServerMessage, FeatureConfigPatch, TaskConfigPatch } from '../types.js';
 import type { RunHistoryEntry, TaskRun } from '../../db/repo.js';
 import type { RunBreakdown } from '../../core/stats.js';
+import type { SessionStatusSnapshot, ToolCallRecord } from '../../core/adapters/types.js';
 
 interface RunDetailData {
   taskRuns: TaskRun[];
   breakdown: RunBreakdown | null;
+  sessionStatus: SessionStatusSnapshot | null;
+  statusHistory: SessionStatusSnapshot[];
+  toolCalls: ToolCallRecord[];
 }
 
 function notificationTone(type: 'info' | 'notice'): NotificationListItem['tone'] {
@@ -61,10 +65,29 @@ export function App(): React.JSX.Element {
       } else if (message.type === 'run:output') {
         const payload = message.payload as OutputLine & { runId: number };
         append(payload.runId, payload);
+      } else if (message.type === 'run:status') {
+        const snapshot = message.payload;
+        setState((current) => current ? {
+          ...current,
+          runs: current.runs.map((run) => run.runId === snapshot.runId && run.featureId === snapshot.featureId
+            ? { ...run, sessionStatus: snapshot.status, sessionStartedAt: snapshot.startedAt, sessionUpdatedAt: snapshot.updatedAt, sessionElapsedMs: snapshot.elapsedMs, sessionLastOutputAt: snapshot.lastOutputAt, sessionIdleMs: snapshot.idleMs, sessionReason: snapshot.reason, sessionTerminal: snapshot.terminal }
+            : run),
+        } : current);
+        setRunDetails((current) => {
+          const existing = current[snapshot.runId];
+          return { ...current, [snapshot.runId]: { taskRuns: existing?.taskRuns ?? [], breakdown: existing?.breakdown ?? null, sessionStatus: snapshot, statusHistory: [...(existing?.statusHistory ?? []), snapshot], toolCalls: existing?.toolCalls ?? [] } };
+        });
+      } else if (message.type === 'tool:call') {
+        const record = message.payload;
+        setRunDetails((current) => {
+          const existing = current[record.runId];
+          const calls = [...(existing?.toolCalls ?? []).filter((call) => call.id !== record.id), record].sort((a, b) => a.sequence - b.sequence);
+          return { ...current, [record.runId]: { taskRuns: existing?.taskRuns ?? [], breakdown: existing?.breakdown ?? null, sessionStatus: existing?.sessionStatus ?? null, statusHistory: existing?.statusHistory ?? [], toolCalls: calls } };
+        });
       } else if (message.type === 'run:detail') {
         setRunDetails((current) => ({
           ...current,
-          [message.payload.runId]: { taskRuns: message.payload.taskRuns, breakdown: message.payload.breakdown },
+          [message.payload.runId]: { taskRuns: message.payload.taskRuns, breakdown: message.payload.breakdown, sessionStatus: message.payload.sessionStatus, statusHistory: message.payload.statusHistory, toolCalls: message.payload.toolCalls },
         }));
       } else if (message.type === 'run:history') {
         setRunHistories((current) => ({ ...current, [message.payload.featureId]: message.payload.runs }));

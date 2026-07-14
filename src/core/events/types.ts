@@ -1,5 +1,5 @@
 import type { Tool } from '../backlog/schema.js';
-import type { RunResult } from '../adapters/types.js';
+import type { RunResult, SessionStatusSnapshot, ToolCallRecord } from '../adapters/types.js';
 import type { StageTransitionDecision } from '../workflow/sessionPolicy.js';
 
 export type GateDecision = 'approved' | 'skipped' | 'retried';
@@ -16,6 +16,9 @@ export interface RunStartEvent {
   stage?: string;
   featureName?: string;
 }
+
+export type RunStatusEvent = SessionStatusSnapshot;
+export type ToolCallEvent = ToolCallRecord;
 
 export interface RunOutputEvent {
   runId: number;
@@ -162,6 +165,8 @@ export interface AutoPilotDecisionEvent {
 
 export interface MsqEvents {
   'run:start': RunStartEvent;
+  'run:status': RunStatusEvent;
+  'tool:call': ToolCallEvent;
   'run:output': RunOutputEvent;
   'run:done': RunDoneEvent;
   'run:failed': RunFailedEvent;

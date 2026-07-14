@@ -9,7 +9,7 @@ const DEFAULT_NOTIFICATIONS = {
 };
 const DEFAULT_WORKFLOW = { autoAdvanceStages: false, pollIntervalMs: 2_000 };
 const DEFAULT_BUDGET = { alertAtPercent: 80 };
-const DEFAULT_WEB = { host: '127.0.0.1', port: 8_743, auth: 'token' };
+const DEFAULT_WEB = { host: '127.0.0.1', port: 8_743, auth: 'token', statusSpinner: true };
 
 describe('config', () => {
   const previousHome = process.env.HOME;
@@ -40,6 +40,7 @@ describe('config', () => {
       concurrency: 3,
       toolTimeoutMs: 600_000,
       staleRunThresholdMinutes: 120,
+      idleThresholdMs: 30_000,
       promptContextCharLimit: 20_000,
       theme: undefined,
       stageSkills: {},
@@ -60,6 +61,7 @@ describe('config', () => {
       concurrency: 5,
       toolTimeoutMs: 1_000,
       staleRunThresholdMinutes: 30,
+      idleThresholdMs: 30_000,
       promptContextCharLimit: 10_000,
       theme: 'dark',
       telegramChatId: '123',
@@ -74,6 +76,7 @@ describe('config', () => {
       concurrency: 5,
       toolTimeoutMs: 1_000,
       staleRunThresholdMinutes: 30,
+      idleThresholdMs: 30_000,
       promptContextCharLimit: 10_000,
       theme: 'dark',
       telegramChatId: '123',
@@ -94,6 +97,7 @@ describe('config', () => {
       concurrency: 2,
       toolTimeoutMs: 999,
       staleRunThresholdMinutes: 45,
+      idleThresholdMs: 30_000,
       promptContextCharLimit: 15_000,
       theme: 'minimal',
       notifications: DEFAULT_NOTIFICATIONS,
@@ -107,6 +111,7 @@ describe('config', () => {
       concurrency: 2,
       toolTimeoutMs: 999,
       staleRunThresholdMinutes: 45,
+      idleThresholdMs: 30_000,
       promptContextCharLimit: 15_000,
       theme: 'minimal',
       stageSkills: {},
