@@ -335,6 +335,27 @@ function migrate(d: Database.Database): void {
       updated_at  TEXT NOT NULL DEFAULT (datetime('now')),
       PRIMARY KEY (task_id, feature_id)
     );
+
+    CREATE TABLE IF NOT EXISTS feature_topic_associations (
+      chat_id          TEXT NOT NULL,
+      feature_id       TEXT NOT NULL,
+      thread_id        INTEGER,
+      title            TEXT NOT NULL,
+      state            TEXT NOT NULL DEFAULT 'creating'
+                       CHECK (state IN ('creating', 'active', 'invalid', 'error')),
+      lease_token      TEXT,
+      lease_expires_at TEXT,
+      last_error       TEXT,
+      created_at       TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at       TEXT NOT NULL DEFAULT (datetime('now')),
+      PRIMARY KEY (chat_id, feature_id),
+      CHECK (state <> 'active' OR thread_id IS NOT NULL AND thread_id > 0)
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_feature_topic_associations_state
+      ON feature_topic_associations(state, lease_expires_at);
+    CREATE INDEX IF NOT EXISTS idx_feature_topic_associations_thread
+      ON feature_topic_associations(chat_id, thread_id);
   `);
 
   const runColumns = d

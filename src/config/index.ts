@@ -25,7 +25,24 @@ export const NOTIFICABLE_EVENTS = [
 ] as const;
 export type NotificableEvent = (typeof NOTIFICABLE_EVENTS)[number];
 
-const TelegramChannelConfig = z.object({ type: z.literal('telegram'), chatId: z.string(), forumTopicId: z.number().int().positive().optional() });
+/**
+ * Feature-linked notification metadata is consumed only by Telegram routing.
+ * `forumTopicId` remains the explicit static destination for no-feature alerts;
+ * chat ids and bot credentials are never included in web-facing state.
+ */
+export interface TelegramFeatureTopicMetadata {
+  featureId: string;
+  featureName?: string;
+  requestId?: number;
+  gateId?: number;
+  stage?: string;
+}
+
+const TelegramChannelConfig = z.object({
+  type: z.literal('telegram'),
+  chatId: z.string().trim().min(1),
+  forumTopicId: z.number().int().positive().optional(),
+});
 const SlackChannelConfig = z.object({ type: z.literal('slack'), webhookUrl: z.string() });
 const DiscordChannelConfig = z.object({ type: z.literal('discord'), webhookUrl: z.string() });
 const WebhookChannelConfig = z.object({ type: z.literal('webhook'), url: z.string() });

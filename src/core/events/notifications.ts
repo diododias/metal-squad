@@ -8,15 +8,16 @@ export function attachEventNotifications(
   eventBus: TypedEventBus<MsqEvents> = msqEventBus,
 ): () => void {
   const unsubscribers = [
-    eventBus.subscribe('run:start', ({ featureId, tool, stage }) => {
+    eventBus.subscribe('run:start', ({ featureId, featureName, tool, stage }) => {
       const stageLabel = stage ? ` · stage: ${stage}` : '';
       void dispatch('run:start', `metal-squad: ${featureId} started with ${tool}${stageLabel}`, {
         featureId,
         tool,
         stage,
+        ...(featureName ? { featureName } : {}),
       }).catch(() => { /* ignore dispatch errors */ });
     }),
-    eventBus.subscribe('gate:created', ({ gateId, featureId }) => {
+    eventBus.subscribe('gate:created', ({ gateId, featureId, featureName }) => {
       const message = [
         `metal-squad: gate ${String(gateId)} created for ${featureId}`,
         `Or reply: gate:${String(gateId)} approve | gate:${String(gateId)} skip | gate:${String(gateId)} retry`,
@@ -24,6 +25,7 @@ export function attachEventNotifications(
       void dispatch('gate:created', message, {
         gateId,
         featureId,
+        ...(featureName ? { featureName } : {}),
         reply_markup: {
           inline_keyboard: [[
             { text: '✅ Approve', callback_data: `gate:${String(gateId)} approve` },
@@ -33,7 +35,7 @@ export function attachEventNotifications(
         },
       }).catch(() => { /* ignore dispatch errors */ });
     }),
-    eventBus.subscribe('stage:request-created', ({ requestId, featureId, stage, kind, prompt, source, options }) => {
+    eventBus.subscribe('stage:request-created', ({ requestId, featureId, featureName, stage, kind, prompt, source, options }) => {
       if (kind === 'approval') {
         if (source === 'auto') {
           const message = [
@@ -44,6 +46,7 @@ export function attachEventNotifications(
           void dispatch('stage:approval', message, {
             requestId,
             featureId,
+            ...(featureName ? { featureName } : {}),
             stage,
             source: 'auto',
           }).catch(() => { /* ignore dispatch errors */ });
@@ -58,6 +61,7 @@ export function attachEventNotifications(
         void dispatch('stage:approval', message, {
           requestId,
           featureId,
+          ...(featureName ? { featureName } : {}),
           stage,
           source: 'manual',
           reply_markup: {
@@ -80,6 +84,7 @@ export function attachEventNotifications(
       void dispatch('stage:input', message, {
         requestId,
         featureId,
+        ...(featureName ? { featureName } : {}),
         stage,
         ...(hasOptions
           ? {
@@ -92,9 +97,10 @@ export function attachEventNotifications(
           : {}),
       }).catch(() => { /* ignore dispatch errors */ });
     }),
-    eventBus.subscribe('run:failed', ({ featureId, error }) => {
+    eventBus.subscribe('run:failed', ({ featureId, featureName, error }) => {
       void dispatch('run:failed', `metal-squad: ${featureId} failed — ${error}`, {
         featureId,
+        ...(featureName ? { featureName } : {}),
         error,
       }).catch(() => { /* ignore dispatch errors */ });
     }),
@@ -115,9 +121,10 @@ export function attachEventNotifications(
         reply_markup,
       }).catch(() => { /* ignore dispatch errors */ });
     }),
-    eventBus.subscribe('run:done', ({ featureId, result }) => {
+    eventBus.subscribe('run:done', ({ featureId, featureName, result }) => {
       void dispatch('run:done', `metal-squad: ${featureId} done — ${result.summary}`, {
         featureId,
+        ...(featureName ? { featureName } : {}),
       }).catch(() => { /* ignore dispatch errors */ });
     }),
   ];
