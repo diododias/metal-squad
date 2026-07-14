@@ -3,7 +3,7 @@ import { resolve, dirname, join } from 'node:path';
 import { spawn } from 'node:child_process';
 import type { Backlog, Effort, Feature, OnFail, Tool } from '../backlog/schema.js';
 import type { RunFeatureOptions, RunResult } from '../adapters/types.js';
-import { topoOrder, selectFeaturePlan } from '../orchestrator/graph.js';
+import { topoOrder, selectStartableFeaturePlan } from '../orchestrator/graph.js';
 import { schedule } from '../orchestrator/scheduler.js';
 import {
   classifyBlockedOutcome,
@@ -119,9 +119,18 @@ export async function executeBacklog(
 
   const repoStageSkills = backlog.version === 2 ? backlog.defaults.stageSkills : {};
   const effectiveStageSkills = collectEffectiveStageSkills(repoStageSkills, config.stageSkills);
+  const completedFeatureIds = listCompletedFeatureIds(repoId);
 
   const resolvedPlan = opts.featureId
-    ? selectFeaturePlan(backlog, opts.featureId)
+    ? ((): Feature[] => {
+        const plan = selectStartableFeaturePlan(backlog, opts.featureId, completedFeatureIds);
+        if (plan.pendingDependencies.length > 0) {
+          throw new Error(
+            `Feature ${opts.featureId} has pending dependencies: ${plan.pendingDependencies.join(', ')}. Complete them before starting this feature.`,
+          );
+        }
+        return [{ ...plan.target, dependsOn: [] }];
+      })()
     : topoOrder(backlog);
   const initialSnapshot = {
     plan: resolvedPlan.map((feature) => feature.id),

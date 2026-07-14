@@ -39,6 +39,8 @@ export interface FeatureCatalogEntry {
   /** F45: opt-in auto-pilot flag — when true, feature is eligible for automatic
    * continuation after qualifying outcomes (success, blocked-human, failed-execution). */
   autoStart?: boolean;
+  /** Dynamic projection for manual start guardrails. */
+  pendingDependencies?: string[];
 }
 
 /** F31 section 5b: backlog-level settings shown alongside per-feature config
@@ -145,5 +147,10 @@ export function getPendingFeatures(
   doneFeatureIds: Set<string>,
   activeFeatureIds: Set<string>,
 ): FeatureCatalogEntry[] {
-  return Object.values(catalog).filter((f) => !doneFeatureIds.has(f.id) && !activeFeatureIds.has(f.id));
+  return Object.values(catalog)
+    .filter((f) => !doneFeatureIds.has(f.id) && !activeFeatureIds.has(f.id))
+    .map((feature) => ({
+      ...feature,
+      pendingDependencies: feature.dependsOn.filter((dependency) => !doneFeatureIds.has(dependency)),
+    }));
 }

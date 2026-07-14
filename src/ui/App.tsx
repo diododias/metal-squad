@@ -5,10 +5,11 @@ import { basename } from 'node:path';
 import { resolveRuntimeConfig } from '../config/index.js';
 import { loadBacklogFromCatalog } from '../core/backlog/load.js';
 import { msqEventBus } from '../core/events/index.js';
+import { selectStartableFeaturePlan } from '../core/orchestrator/graph.js';
 import { resolveRepo } from '../core/repo.js';
 import { validateBacklogSkills } from '../core/skills/index.js';
 import { assertWritableDbPath } from '../db/index.js';
-import { abortPipeline, pausePipeline, requestFeatureAbort, resumePipeline } from '../db/repo.js';
+import { abortPipeline, listCompletedFeatureIds, pausePipeline, requestFeatureAbort, resumePipeline } from '../db/repo.js';
 import type { RunSummary } from '../db/repo.js';
 import { getBacklogSettings, getFeatureCatalog, getPendingFeatures } from './catalog.js';
 import { DASHBOARD_GROUP_ORDER, getRunGroup, sortRunsByGroup, type DashboardGroupId } from './dashboardGroups.js';
@@ -98,17 +99,22 @@ function formatStartError(featureId: string, error: unknown): string {
   return `Could not start ${featureId}: ${message}`;
 }
 
-function validateFeatureStart(cwd: string): void {
+function validateFeatureStart(featureId: string, cwd: string): void {
   assertWritableDbPath();
   resolveRuntimeConfig(cwd);
-  const backlog = loadBacklogFromCatalog(resolveRepo(cwd).repoId, cwd);
+  const repo = resolveRepo(cwd);
+  const backlog = loadBacklogFromCatalog(repo.repoId, cwd);
   validateBacklogSkills(backlog, cwd);
+  const plan = selectStartableFeaturePlan(backlog, featureId, listCompletedFeatureIds(repo.repoId));
+  if (plan.pendingDependencies.length > 0) {
+    throw new Error(`pending dependencies: ${plan.pendingDependencies.join(', ')}. Complete them before starting ${featureId}.`);
+  }
 }
 
 function launchFeatureRun(featureId: string): void {
   const cwd = process.cwd();
   try {
-    validateFeatureStart(cwd);
+    validateFeatureStart(featureId, cwd);
   } catch (error) {
     msqEventBus.emit('ui:notice', { message: formatStartError(featureId, error) });
     return;
@@ -537,6 +543,14 @@ export function App(): React.ReactElement {
     // F31 section 4: reachable both from the direct 'n' shortcut (overview)
     // and from confirming inside the TODO preview screen.
     if ((activeView !== 'overview' && activeView !== 'preview') || !selectedPending) return;
+    const pendingDependencies = selectedPending.pendingDependencies ?? [];
+    if (pendingDependencies.length > 0) {
+      const pendingDependenciesLabel = pendingDependencies.join(', ');
+      msqEventBus.emit('ui:notice', {
+        message: `Could not start ${selectedPending.id}: pending dependencies ${pendingDependenciesLabel}.`,
+      });
+      return;
+    }
     launchFeatureRun(selectedPending.id);
   }, [activeView, selectedPending]);
 
@@ -650,7 +664,7 @@ export function App(): React.ReactElement {
       canPause,
       canResume,
       canAbort: canAbortFeature || canAbortPipeline,
-      canStart: Boolean(selectedPending),
+      canStart: Boolean(selectedPending) && (selectedPending?.pendingDependencies?.length ?? 0) === 0,
       canResolveGate,
       canRetryGate,
       focusContext,
@@ -778,7 +792,7 @@ export function App(): React.ReactElement {
       canToggleLogs: activeView === 'run',
       canPauseOutput: activeView === 'run' && Boolean(selectedRun),
       hasTabs,
-      canStart: Boolean(selectedPending) && activeView === 'overview',
+      canStart: Boolean(selectedPending) && activeView === 'overview' && (selectedPending?.pendingDependencies?.length ?? 0) === 0,
       canAdjustDashboardPeriod: dashboardOpen,
       openPalette,
       openHelp,

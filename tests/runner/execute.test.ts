@@ -1795,3 +1795,102 @@ describe('executeBacklog auto-pilot', () => {
     expect(mockSpawn).not.toHaveBeenCalled();
   });
 });
+
+describe('executeBacklog dependency-aware manual start', () => {
+  it('starts only the requested feature when dependencies are already completed', async () => {
+    const backlog: Backlog = {
+      version: 2,
+      repo: 'repo',
+      defaults: { tool: 'codex', effort: 'medium', skills: [], stageSkills: {} },
+      epics: [
+        {
+          id: 'epic-1',
+          title: 'Epic',
+          features: [
+            {
+              id: 'feat-parent',
+              title: 'Parent',
+              spec: 'spec',
+              tasks: [],
+              tool: 'codex',
+              effort: 'medium',
+              dependsOn: [],
+              workflow: { mode: 'single', stages: [], approvals: { channel: 'telegram', autoAdvance: false }, syncTasksToBacklog: true, sessionPolicy: { mode: 'isolated', alwaysIsolatedStages: [] } },
+            },
+            {
+              id: 'feat-child',
+              title: 'Child',
+              spec: 'spec',
+              tasks: [],
+              tool: 'codex',
+              effort: 'medium',
+              dependsOn: ['feat-parent'],
+              workflow: { mode: 'single', stages: [], approvals: { channel: 'telegram', autoAdvance: false }, syncTasksToBacklog: true, sessionPolicy: { mode: 'isolated', alwaysIsolatedStages: [] } },
+            },
+          ],
+        },
+      ],
+    } as unknown as Backlog;
+    mockListCompletedFeatureIds.mockReturnValue(new Set(['feat-parent']));
+    mockRunFeature.mockResolvedValue({ ok: true, summary: 'done' });
+
+    const { executeBacklog } = await import('../../src/core/runner/execute.js');
+    await executeBacklog(backlog, { cwd: '/repo', concurrency: 1, featureId: 'feat-child' });
+
+    expect(mockCreatePipeline).toHaveBeenCalledWith(
+      'repo-1',
+      'feat-child',
+      false,
+      expect.objectContaining({
+        snapshot: expect.objectContaining({
+          plan: ['feat-child'],
+          pending: ['feat-child'],
+        }),
+      }),
+    );
+  });
+
+  it('rejects manual start when dependencies are still pending', async () => {
+    const backlog: Backlog = {
+      version: 2,
+      repo: 'repo',
+      defaults: { tool: 'codex', effort: 'medium', skills: [], stageSkills: {} },
+      epics: [
+        {
+          id: 'epic-1',
+          title: 'Epic',
+          features: [
+            {
+              id: 'feat-parent',
+              title: 'Parent',
+              spec: 'spec',
+              tasks: [],
+              tool: 'codex',
+              effort: 'medium',
+              dependsOn: [],
+              workflow: { mode: 'single', stages: [], approvals: { channel: 'telegram', autoAdvance: false }, syncTasksToBacklog: true, sessionPolicy: { mode: 'isolated', alwaysIsolatedStages: [] } },
+            },
+            {
+              id: 'feat-child',
+              title: 'Child',
+              spec: 'spec',
+              tasks: [],
+              tool: 'codex',
+              effort: 'medium',
+              dependsOn: ['feat-parent'],
+              workflow: { mode: 'single', stages: [], approvals: { channel: 'telegram', autoAdvance: false }, syncTasksToBacklog: true, sessionPolicy: { mode: 'isolated', alwaysIsolatedStages: [] } },
+            },
+          ],
+        },
+      ],
+    } as unknown as Backlog;
+    mockListCompletedFeatureIds.mockReturnValue(new Set());
+
+    const { executeBacklog } = await import('../../src/core/runner/execute.js');
+
+    await expect(executeBacklog(backlog, { cwd: '/repo', concurrency: 1, featureId: 'feat-child' })).rejects.toThrow(
+      'Feature feat-child has pending dependencies: feat-parent.',
+    );
+    expect(mockCreatePipeline).not.toHaveBeenCalled();
+  });
+});

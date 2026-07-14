@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const mocks = vi.hoisted(() => ({
   resolveRepo: vi.fn(),
+  listCompletedFeatureIds: vi.fn(),
   listRunsForTui: vi.fn(),
   openGates: vi.fn(),
   listPendingStageRequests: vi.fn(),
@@ -17,6 +18,7 @@ vi.mock('../../src/core/repo.js', () => ({
 }));
 
 vi.mock('../../src/db/repo.js', () => ({
+  listCompletedFeatureIds: mocks.listCompletedFeatureIds,
   listRunsForTui: mocks.listRunsForTui,
   openGates: mocks.openGates,
   listPendingStageRequests: mocks.listPendingStageRequests,
@@ -28,7 +30,12 @@ vi.mock('../../src/ui/catalog.js', () => ({
   getFeatureCatalog: mocks.getFeatureCatalog,
   getBacklogSettings: mocks.getBacklogSettings,
   getPendingFeatures: (catalog: Record<string, { id: string }>, doneFeatureIds: Set<string>, activeFeatureIds: Set<string>) =>
-    Object.values(catalog).filter((feature) => !doneFeatureIds.has(feature.id) && !activeFeatureIds.has(feature.id)),
+    Object.values(catalog)
+      .filter((feature: { id: string; dependsOn?: string[] }) => !doneFeatureIds.has(feature.id) && !activeFeatureIds.has(feature.id))
+      .map((feature: { dependsOn?: string[] }) => ({
+        ...feature,
+        pendingDependencies: (feature.dependsOn ?? []).filter((dependency) => !doneFeatureIds.has(dependency)),
+      })),
 }));
 
 vi.mock('../../src/config/index.js', () => ({
@@ -40,6 +47,7 @@ describe('buildMsqWebState pendingFeatures projection', () => {
     vi.clearAllMocks();
     (await import('../../src/web/state.js')).resetWebStateCaches();
     mocks.resolveRepo.mockReturnValue({ repoId: 'repo-1', path: '/tmp/metal-squad' });
+    mocks.listCompletedFeatureIds.mockReturnValue(new Set());
     mocks.openGates.mockReturnValue([]);
     mocks.listPendingStageRequests.mockReturnValue([]);
     mocks.listRunningTaskRuns.mockReturnValue([]);
@@ -100,6 +108,26 @@ describe('buildMsqWebState pendingFeatures projection', () => {
     ]);
 
     expect(buildMsqWebState().pendingFeatures).toEqual([]);
+  });
+
+  it('keeps pending features visible but marks unmet dependencies', async () => {
+    const { buildMsqWebState } = await import('../../src/web/state.js');
+    mocks.listRunsForTui.mockReturnValue([]);
+    mocks.getFeatureCatalog.mockReturnValue({
+      'feat-1': {
+        id: 'feat-1',
+        title: 'Feature One',
+        tool: 'codex',
+        effort: 'medium',
+        skills: [],
+        dependsOn: ['feat-0'],
+        workflow: { mode: 'staged', stages: ['specify'], approvals: { channel: 'telegram', autoAdvance: false }, syncTasksToBacklog: true, sessionPolicy: { mode: 'isolated', alwaysIsolatedStages: [] } },
+      },
+    });
+
+    expect(buildMsqWebState().pendingFeatures).toEqual([
+      expect.objectContaining({ id: 'feat-1', pendingDependencies: ['feat-0'] }),
+    ]);
   });
 
   it('keeps guardrail transition audit fields on run rows exposed to the web state', async () => {
