@@ -6,6 +6,8 @@ export type GateDecision = 'approved' | 'skipped' | 'retried';
 export type OutputStream = 'stdout' | 'stderr';
 export type OutputSource = 'stdout' | 'stderr' | 'agent' | 'tool' | 'heartbeat';
 export type StageRequestKind = 'approval' | 'input';
+export type ContextQueryTool = 'dora' | 'serena' | 'shell';
+export type ContextQueryKind = 'structured' | 'shell_read';
 
 export interface RunStartEvent {
   runId: number;
@@ -97,6 +99,19 @@ export interface TokensUpdateEvent {
   tool?: Tool;
 }
 
+export interface ContextQueryEvent {
+  runId: number;
+  featureId?: string;
+  tool?: Tool;
+  queryTool: ContextQueryTool;
+  kind: ContextQueryKind;
+  target?: string | null;
+  observedBytes: number;
+  latencyMs?: number | null;
+  cacheHit?: boolean | null;
+  rawLine: string;
+}
+
 export interface TaskStartedEvent {
   runId: number;
   featureId: string;
@@ -155,6 +170,7 @@ export interface MsqEvents {
   'scheduler:resumed': Record<string, never>;
   'budget:alert': BudgetAlertEvent;
   'tokens:update': TokensUpdateEvent;
+  'context:query': ContextQueryEvent;
   'task:started': TaskStartedEvent;
   'task:updated': TaskUpdatedEvent;
   'ui:info': UiInfoEvent;

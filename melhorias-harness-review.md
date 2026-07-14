@@ -58,6 +58,20 @@ O gate de coverage deve ser bloqueante e exigir resultado **acima de 90%**. Sepa
 - Emitir eventos `context:query` com ferramenta, bytes retornados, latencia e cache hit.
 - Medir por run a proporcao `Dora/Serena queries : shell reads`. Meta inicial: pelo menos 70% das exploracoes estruturais via indice/simbolos.
 
+**Avanco implementado neste repo (2026-07-14):**
+
+- `CLAUDE.md` agora instrui explicitamente OpenCode/Codex/Claude Code a consultar Dora e Serena antes de leitura bruta.
+- Foi adicionado um fallback versionado de `mem:core` em `.claude/serena/mem-core.md`, com invariantes duraveis do repo.
+- O runtime agora deriva e persiste eventos `context:query` a partir do streaming de output, com resumo por run em `msq stats --run`.
+- O resumo atual mede `Dora`, `Serena` e `shell reads`, calcula taxa estruturada por run e deixa bytes/cache rastreados quando esses sinais aparecem no output.
+
+**Ainda pendente para fechar P1.1 por completo:**
+
+- refresh automatico do indice Dora por `HEAD`/hash de arquivos;
+- recusa padrao a consultas em indice stale;
+- latencia/cache hit confiaveis vindos diretamente das ferramentas, em vez de heuristica sobre o output;
+- resolver definitivamente Dora `Pending approval` no Claude headless e a ausencia no OpenCode.
+
 ## P2.1 — Mutation testing orientado por risco
 
 - Corrigir primeiro sobreviventes em `execute.ts`, `repo.ts` e adapters.

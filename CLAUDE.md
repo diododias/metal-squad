@@ -31,6 +31,15 @@ As regras detalhadas por área vivem em `.claude/rules/`:
 - `testing.md` — baseline de build/test/typecheck/lint e suites focadas
 - `harness.md` — `MSQ_DB_PATH`, anti-recursão e validação live do `msq`
 
+## Exploracao de contexto
+
+- Para exploracao estrutural e impacto de mudanca, consulte **Dora antes de leitura bruta**.
+- Para simbolos, edicoes precisas e memoria operacional, consulte **Serena antes de leitura bruta**.
+- Leitura direta de arquivo via shell deve entrar depois que Dora/Serena nao cobrirem a necessidade.
+- Quando a memoria `mem:core` do Serena existir no ambiente, carregue-a primeiro.
+- Enquanto ela nao existir, use o fallback versionado em `.claude/serena/mem-core.md`.
+- O objetivo operacional e reduzir exploracoes estruturais por shell e deixar rastreio em runtime quando Dora/Serena forem usados.
+
 ## Baseline de validação (mudanças em `src/` ou `tests/`)
 
 ```bash

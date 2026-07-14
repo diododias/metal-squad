@@ -1,11 +1,13 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
 
 const appendRunOutput = vi.fn();
+const recordContextQuery = vi.fn();
 const updateRunUsage = vi.fn();
 const upsertTaskRun = vi.fn();
 
 vi.mock('../../src/db/repo.js', () => ({
   appendRunOutput,
+  recordContextQuery,
   updateRunUsage,
   upsertTaskRun,
 }));
@@ -80,6 +82,31 @@ describe('event persistence', () => {
       undefined,
       '2026-07-06T12:10:00.000Z',
     );
+
+    detach();
+  });
+
+  it('derives and persists context queries from tool output', async () => {
+    const { attachRunPersistence } = await import('../../src/core/events/persistence.js');
+    const { createMsqEventBus } = await import('../../src/core/events/bus.js');
+
+    const bus = createMsqEventBus();
+    const detach = attachRunPersistence(bus);
+
+    bus.emit('run:output', {
+      runId: 8,
+      featureId: 'feat-16',
+      tool: 'codex',
+      line: 'tool mcp__serena__find_symbol {"name_path":"Foo/bar"}',
+      stream: 'stdout',
+      source: 'tool',
+    });
+
+    expect(recordContextQuery).toHaveBeenCalledWith(expect.objectContaining({
+      runId: 8,
+      queryTool: 'serena',
+      kind: 'structured',
+    }));
 
     detach();
   });

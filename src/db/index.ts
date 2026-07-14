@@ -159,6 +159,21 @@ function migrate(d: Database.Database): void {
       created_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
 
+    CREATE TABLE IF NOT EXISTS context_queries (
+      id            INTEGER PRIMARY KEY AUTOINCREMENT,
+      run_id        INTEGER NOT NULL REFERENCES runs(id),
+      feature_id    TEXT,
+      tool          TEXT,
+      query_tool    TEXT NOT NULL,
+      kind          TEXT NOT NULL,
+      target        TEXT,
+      observed_bytes INTEGER NOT NULL DEFAULT 0,
+      latency_ms    INTEGER,
+      cache_hit     INTEGER,
+      raw_line      TEXT NOT NULL,
+      created_at    TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+
     CREATE TABLE IF NOT EXISTS task_runs (
       id         INTEGER PRIMARY KEY AUTOINCREMENT,
       run_id     INTEGER NOT NULL REFERENCES runs(id),

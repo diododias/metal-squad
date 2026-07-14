@@ -209,6 +209,9 @@ Options:
 - `--run <runId>`: show a time breakdown for one run
 - `--format <format>`: `text` or `json`
 
+When `--run` is used, `msq` also reports the run's context-exploration mix
+(Dora queries, Serena queries, and shell reads) when that telemetry is present.
+
 ### `msq ui`
 
 Starts the legacy interactive TUI. New UI work targets `msq web`.
