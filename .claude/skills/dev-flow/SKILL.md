@@ -42,13 +42,14 @@ Leia somente o necessario, priorizando estas fontes:
 
 Nao trate `docs/ARCHITECTURE.md` como fonte de verdade hoje; ele esta placeholder.
 
-### 3. Preparar o checkout
+### 3. Preparar a branch e o checkout
 
 - Trabalhe sempre no checkout atual deste repositorio.
+- Crie uma branch de trabalho a partir de `develop` antes de implementar uma
+  tarefa nova; nunca implemente ou commite diretamente em `develop`.
+- Se ja existir uma branch de trabalho para a tarefa, reutilize-a.
 - Nao crie worktree, nao use `EnterWorktree` e nao mova a tarefa para outro
   checkout durante o fluxo do agente.
-- Se isolamento for necessario, a ferramenta ou processo externo responsavel deve
-  preparar o checkout antes de iniciar o fluxo do agente.
 
 ### 4. Planejar de forma curta
 
@@ -87,6 +88,7 @@ Se rodar `msq`, `node dist/index.js`, `msq status` ou outro fluxo que persiste r
 Quando o usuario pedir publicacao ou quando a tarefa claramente inclui entrega pronta:
 
 - commit somente depois da validacao relevante
+- fazer push da branch de trabalho e abrir o PR ao final da implementacao
 - base de PR: `develop`
 - incluir referencia a feature/hotfix/issue real quando existir
 - usar o template em [`pr-template.md`](./pr-template.md)

@@ -14,8 +14,9 @@ Instruções para o Claude Code neste repositório. Estas regras têm precedênc
 
 ## Git
 
-- **Pode commitar direto da branch `develop`.** Não é necessário criar branch isolada.
+- **Sempre crie ou reutilize uma branch de trabalho antes de implementar.** Nunca commite diretamente em `develop`.
 - Base branch padrão para PRs: `develop` (nunca `main`).
+- Ao concluir a implementação e a validação, faça commit, push e abra um PR para `develop`.
 - Os desenvolvimentos são **sequenciais, não paralelos** — não há necessidade de isolamento entre tarefas.
 - Prefira Conventional Commits simples: `feat(msq): ...`, `fix(skill): ...`, `docs(dev-flow): ...`.
 - Commite somente depois da validação relevante (build/test/typecheck).
