@@ -1,6 +1,7 @@
 import React, { useMemo, useState } from 'react';
 import { MetricCard } from '../components/data/MetricCard.js';
 import { BarList } from '../components/data/BarList.js';
+import { FeatureIdentity } from '../components/data/FeatureIdentity.js';
 import { TrendBars, type TrendPoint } from '../components/data/TrendBars.js';
 import { PageHeader } from '../PageHeader.js';
 import { formatTokens } from '../lib/format.js';
@@ -69,7 +70,7 @@ export function AnalyticsPage({ state }: AnalyticsPageProps): React.JSX.Element 
     return [...totals.entries()]
       .sort(([, a], [, b]) => b - a)
       .slice(0, 10)
-      .map(([featureId, value]) => ({ id: featureId, label: `${featureId} — ${state.featureCatalog[featureId]?.title ?? ''}`, value }));
+      .map(([featureId, value]) => ({ id: featureId, label: <FeatureIdentity title={state.featureCatalog[featureId]?.title} id={featureId} />, value }));
   }, [filteredRows, state.featureCatalog]);
 
   const activeFeatures = state.runs.filter((r) => r.status === 'running' || r.status === 'blocked').length;
