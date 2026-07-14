@@ -20,10 +20,18 @@ e associação de tópico, como as suites atuais de Telegram.
 
 ```bash
 npx vitest run \
+  tests/adapters/misc.test.ts tests/adapters/codex.test.ts \
+  tests/adapters/codex-extended.test.ts tests/runner/execute.test.ts \
   tests/core/notify-telegram-poller.test.ts \
+  tests/core/notify-telegram-poller-context.test.ts \
+  tests/core/notify-telegram.test.ts \
   tests/core/events-notifications-full.test.ts \
+  tests/core/events-notifications.test.ts \
+  tests/core/events-persistence.test.ts tests/core/notify-manager.test.ts \
   tests/core/notify-telegram-topics.test.ts \
-  tests/db/repo.test.ts tests/db/repo-extended.test.ts
+  tests/db/index-migrate.test.ts tests/db/repo.test.ts \
+  tests/db/repo-extended.test.ts tests/db/telegram-topics.test.ts \
+  tests/web/state.test.ts tests/web/server.test.ts
 ```
 
 Adicionar suites focadas de runner/adapter para provar:
@@ -62,10 +70,10 @@ Executed in this checkout:
 
 ```text
 npx vitest run focused adapter, database, event, Telegram, and runner suites
-  8 files passed, 138 tests passed
+  18 files passed, 394 tests passed
 
 npm test
-  72 files passed, 1026 tests passed
+  72 files passed, 1038 tests passed
 
 npm run typecheck
   passed
@@ -75,6 +83,9 @@ npm run lint
 
 MSQ_DB_PATH="$PWD/.metal-squad/f55-test.db" npm run build
   schema migrated successfully; TypeScript/web build passed
+
+npm run verify:repo
+  documentation references, skill shims, and backlog checks passed
 ```
 
 The global database migration was not writable in the sandbox, so the build
