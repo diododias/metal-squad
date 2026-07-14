@@ -20,7 +20,7 @@
     "format": "prettier --write src",
     "test": "vitest run",
     "test:coverage": "vitest run --coverage",
-    "test:coverage:gate": "vitest run --config vitest.coverage-gate.config.ts --coverage",
+    "test:coverage:gate": "mkdir -p coverage/.tmp && vitest run --config vitest.coverage-gate.config.ts --coverage",
     "test:mutation": "stryker run",
     "verify:doc-refs": "node scripts/verify-doc-references.mjs",
     "verify:skill-shims": "node scripts/verify-skill-shims.mjs",
