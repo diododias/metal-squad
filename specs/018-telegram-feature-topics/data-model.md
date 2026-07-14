@@ -97,3 +97,11 @@ The new table is created and migrated by `src/db/index.ts`; repository helpers
 in `src/db/repo.ts` own reads, reservations, activation, invalidation, and
 error recording. `src/core/notify/telegram-topics.ts` owns lifecycle policy but
 does not issue ad hoc SQL outside the repository boundary.
+
+## Implementation Traceability
+
+`FeatureTopicAssociation` is implemented by the migration and repository
+helpers listed above; resolver transitions are exercised by the topic tests,
+and `FeatureTopicRequestContext` is enforced by `telegram-poller.ts` for both
+message and callback-query origins. The no-feature path remains outside this
+entity and continues through `forumTopicId`/legacy `telegramChatId`.

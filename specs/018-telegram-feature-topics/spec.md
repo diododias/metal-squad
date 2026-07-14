@@ -127,3 +127,14 @@ Como administrador, quero que mensagens gerais do sistema e configurações lega
 - O canal de resposta por texto, aprovação e entrada já existente permanece disponível; esta feature organiza o contexto, mas não redefine seus contratos de conteúdo.
 - Quando não for possível criar ou recuperar um tópico, a prioridade é preservar o isolamento entre features e tornar a falha recuperável, mesmo que a entrega precise aguardar correção da configuração ou do acesso.
 
+## Implementation Traceability
+
+- FR-001–FR-006 and FR-008 are covered by the SQLite unique association,
+  reservation lease, topic resolver, and Telegram channel tests.
+- FR-007 and FR-011 are covered by `getChat` validation and persisted
+  association errors.
+- FR-009 is covered by poller chat/thread validation for messages and callback
+  queries; FR-010 and FR-012 are covered by legacy/static routing regressions.
+- SC-001–SC-007 are represented by the focused routing, recovery, poller,
+  compatibility, and full repository validation suites documented in
+  `quickstart.md`.

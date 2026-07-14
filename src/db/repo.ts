@@ -1,5 +1,5 @@
 import { existsSync } from 'node:fs';
-import { getDb } from './index.js';
+import { getDb, withTransaction } from './index.js';
 import type { TokenUsage } from '../core/adapters/types.js';
 import { resolveDbPath } from '../config/index.js';
 import { msqEventBus } from '../core/events/index.js';
@@ -27,6 +27,136 @@ export function registerRepo(repoId: string, path: string): void {
        ON CONFLICT(repo_id) DO UPDATE SET path = excluded.path`,
     )
     .run(repoId, path);
+}
+
+export type FeatureTopicAssociationState = 'creating' | 'active' | 'invalid' | 'error';
+
+export interface FeatureTopicAssociationRow {
+  chatId: string;
+  featureId: string;
+  threadId: number | null;
+  title: string;
+  state: FeatureTopicAssociationState;
+  leaseToken: string | null;
+  leaseExpiresAt: string | null;
+  lastError: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+function mapFeatureTopicAssociation(row: Record<string, unknown> | undefined): FeatureTopicAssociationRow | null {
+  if (!row) return null;
+  return {
+    chatId: String(row.chatId),
+    featureId: String(row.featureId),
+    threadId: typeof row.threadId === 'number' ? row.threadId : null,
+    title: String(row.title),
+    state: row.state as FeatureTopicAssociationState,
+    leaseToken: typeof row.leaseToken === 'string' ? row.leaseToken : null,
+    leaseExpiresAt: typeof row.leaseExpiresAt === 'string' ? row.leaseExpiresAt : null,
+    lastError: typeof row.lastError === 'string' ? row.lastError : null,
+    createdAt: String(row.createdAt),
+    updatedAt: String(row.updatedAt),
+  };
+}
+
+const FEATURE_TOPIC_SELECT = `
+  SELECT chat_id AS chatId, feature_id AS featureId, thread_id AS threadId,
+         title, state, lease_token AS leaseToken,
+         lease_expires_at AS leaseExpiresAt, last_error AS lastError,
+         created_at AS createdAt, updated_at AS updatedAt
+    FROM feature_topic_associations
+`;
+
+export function getFeatureTopicAssociation(chatId: string, featureId: string): FeatureTopicAssociationRow | null {
+  if (!hasDbFile()) return null;
+  const row = getDb('readonly')
+    .prepare(`${FEATURE_TOPIC_SELECT} WHERE chat_id = ? AND feature_id = ?`)
+    .get(chatId, featureId) as Record<string, unknown> | undefined;
+  return mapFeatureTopicAssociation(row);
+}
+
+export function listFeatureTopicAssociations(chatId?: string): FeatureTopicAssociationRow[] {
+  if (!hasDbFile()) return [];
+  const query = chatId
+    ? `${FEATURE_TOPIC_SELECT} WHERE chat_id = ? ORDER BY feature_id ASC`
+    : `${FEATURE_TOPIC_SELECT} ORDER BY chat_id ASC, feature_id ASC`;
+  const rows = (chatId ? getDb('readonly').prepare(query).all(chatId) : getDb('readonly').prepare(query).all()) as Record<string, unknown>[];
+  return rows.map((row) => mapFeatureTopicAssociation(row)).filter((row): row is FeatureTopicAssociationRow => row !== null);
+}
+
+export interface FeatureTopicReservationOptions {
+  leaseToken: string;
+  leaseExpiresAt: string;
+}
+
+export function reserveFeatureTopicAssociation(
+  chatId: string,
+  featureId: string,
+  title: string,
+  options: FeatureTopicReservationOptions,
+): FeatureTopicAssociationRow | null {
+  return withTransaction((database) => {
+    const existing = database
+      .prepare(`${FEATURE_TOPIC_SELECT} WHERE chat_id = ? AND feature_id = ?`)
+      .get(chatId, featureId) as Record<string, unknown> | undefined;
+    const current = mapFeatureTopicAssociation(existing);
+    const leaseIsActive = current?.state === 'creating'
+      && current.leaseExpiresAt !== null
+      && Date.parse(current.leaseExpiresAt) > Date.now();
+    if (current?.state === 'active' || leaseIsActive) return current;
+
+    database.prepare(`
+      INSERT INTO feature_topic_associations
+        (chat_id, feature_id, thread_id, title, state, lease_token, lease_expires_at, last_error)
+      VALUES (?, ?, NULL, ?, 'creating', ?, ?, NULL)
+      ON CONFLICT(chat_id, feature_id) DO UPDATE SET
+        thread_id = NULL,
+        title = feature_topic_associations.title,
+        state = 'creating',
+        lease_token = excluded.lease_token,
+        lease_expires_at = excluded.lease_expires_at,
+        last_error = NULL,
+        updated_at = datetime('now')
+    `).run(chatId, featureId, title, options.leaseToken, options.leaseExpiresAt);
+
+    const reserved = database
+      .prepare(`${FEATURE_TOPIC_SELECT} WHERE chat_id = ? AND feature_id = ?`)
+      .get(chatId, featureId) as Record<string, unknown> | undefined;
+    return mapFeatureTopicAssociation(reserved);
+  });
+}
+
+export function activateFeatureTopicAssociation(chatId: string, featureId: string, threadId: number): void {
+  getDb('readwrite').prepare(`
+    UPDATE feature_topic_associations
+       SET thread_id = ?, state = 'active', lease_token = NULL,
+           lease_expires_at = NULL, last_error = NULL, updated_at = datetime('now')
+     WHERE chat_id = ? AND feature_id = ?
+  `).run(threadId, chatId, featureId);
+}
+
+export function invalidateFeatureTopicAssociation(chatId: string, featureId: string, error?: string): void {
+  getDb('readwrite').prepare(`
+    UPDATE feature_topic_associations
+       SET thread_id = NULL, state = 'invalid', lease_token = NULL,
+           lease_expires_at = NULL, last_error = ?, updated_at = datetime('now')
+     WHERE chat_id = ? AND feature_id = ?
+  `).run(error ?? null, chatId, featureId);
+}
+
+export function recordFeatureTopicAssociationError(
+  chatId: string,
+  featureId: string,
+  error: string,
+  state: FeatureTopicAssociationState = 'error',
+): void {
+  getDb('readwrite').prepare(`
+    UPDATE feature_topic_associations
+       SET state = ?, last_error = ?, lease_token = NULL,
+           lease_expires_at = NULL, updated_at = datetime('now')
+     WHERE chat_id = ? AND feature_id = ?
+  `).run(state, error, chatId, featureId);
 }
 
 export interface CreateRunOptions {
@@ -670,6 +800,18 @@ export interface GateRow {
   createdAt: string;
   resolvedAt: string | null;
   decision: GateDecision | null;
+}
+
+export function getGate(id: number): GateRow | null {
+  if (!hasDbFile()) return null;
+  return (getDb('readonly')
+    .prepare(
+      `SELECT id, run_id AS runId, feature_id AS featureId, repo_id AS repoId,
+              created_at AS createdAt, resolved_at AS resolvedAt, decision
+         FROM gates
+        WHERE id = ?`,
+    )
+    .get(id) as GateRow | undefined) ?? null;
 }
 
 // T005: openGates — SELECT WHERE resolved_at IS NULL, ORDER BY created_at ASC

@@ -71,3 +71,11 @@ Errors are actionable and include:
 The error is persisted in the feature-topic association when a feature identity
 exists. Notification dispatch remains isolated per channel, so a Telegram
 failure does not fail unrelated Slack, Discord, webhook, or desktop delivery.
+
+## Implementation Traceability
+
+The outbound rules are implemented by `telegram-topics.ts` and `telegram.ts`,
+the metadata boundary by `events/types.ts` and `events/notifications.ts`, and
+the inbound rules by `telegram-poller.ts` plus the association repository.
+Focused tests cover forum validation, one-topic idempotency, fragment payloads,
+controlled recovery, channel isolation, and legacy routing.

@@ -1,11 +1,30 @@
 import { getSecret } from '../../security/secrets.js';
-import { getStageRequest, resolveGate, resolveStageRequest, resumePipeline } from '../../db/repo.js';
+import { resolveRuntimeConfig } from '../../config/index.js';
+import {
+  getFeatureTopicAssociation,
+  getGate,
+  getStageRequest,
+  resolveGate,
+  resolveStageRequest,
+  resumePipeline,
+} from '../../db/repo.js';
 import type { GateDecision } from '../../db/repo.js';
+
+interface TelegramChat {
+  id: string | number;
+  type?: string;
+}
+
+interface TelegramMessage {
+  text?: string;
+  chat?: TelegramChat;
+  message_thread_id?: number;
+}
 
 interface TelegramUpdate {
   update_id: number;
-  message?: { text?: string };
-  callback_query?: { id: string; data?: string };
+  message?: TelegramMessage;
+  callback_query?: { id: string; data?: string; message?: TelegramMessage };
 }
 
 // Matches: gate:42 approve, gate:42 skip, gate:42 retry (and word variants)
@@ -21,6 +40,38 @@ function parseDecision(raw: string): GateDecision | null {
   if (lower.startsWith('skip')) return 'skipped';
   if (lower.startsWith('retr')) return 'retried';
   return null;
+}
+
+function configuredTelegramChatId(): string | undefined {
+  const config = resolveRuntimeConfig(process.cwd());
+  const explicit = config.notifications.channels.find((channel) => channel.type === 'telegram');
+  return explicit?.type === 'telegram' ? explicit.chatId : config.telegramChatId;
+}
+
+function updateContext(update: TelegramUpdate): { chatId?: string; threadId?: number } {
+  const message = update.callback_query?.message ?? update.message;
+  return {
+    chatId: message?.chat?.id !== undefined ? String(message.chat.id) : undefined,
+    threadId: message?.message_thread_id,
+  };
+}
+
+function matchesConfiguredChat(chatId: string | undefined, configuredChatId: string | undefined): boolean {
+  return configuredChatId === undefined || chatId === configuredChatId;
+}
+
+function matchesFeatureTopic(
+  featureId: string | undefined,
+  update: TelegramUpdate,
+): boolean {
+  const configuredChatId = configuredTelegramChatId();
+  const context = updateContext(update);
+  if (configuredChatId !== undefined && !featureId && context.chatId === undefined) return true;
+  if (!matchesConfiguredChat(context.chatId, configuredChatId)) return false;
+  if (configuredChatId === undefined) return true;
+  if (!featureId || context.chatId === undefined || context.threadId === undefined) return false;
+  const association = getFeatureTopicAssociation(context.chatId, featureId);
+  return association?.state === 'active' && association.threadId === context.threadId;
 }
 
 async function sleep(ms: number): Promise<void> {
@@ -71,7 +122,12 @@ export class TelegramPoller {
           if (match) {
             const gateId = Number(match[1]);
             const decision = match[2] ? parseDecision(match[2]) : null;
-            if (decision !== null) {
+            let featureId: string | undefined;
+            try {
+              const gate = typeof getGate === 'function' ? getGate(gateId) : null;
+              featureId = gate?.featureId;
+            } catch { /* DB may be unavailable */ }
+            if (decision !== null && matchesFeatureTopic(featureId, update)) {
               try { resolveGate(gateId, decision); } catch { /* DB may be unavailable */ }
             }
             if (callbackId) void this.answerCallback(token, callbackId);
@@ -83,7 +139,13 @@ export class TelegramPoller {
             const requestId = stageMatch[1];
             const response = stageMatch[2];
             if (!requestId || !response) continue;
-            try { resolveStageRequest(Number(requestId), response.toLowerCase()); } catch { /* DB may be unavailable */ }
+            let featureId: string | undefined;
+            if (updateContext(update).chatId !== undefined) {
+              try { featureId = getStageRequest(Number(requestId))?.featureId; } catch { /* DB may be unavailable */ }
+            }
+            if (matchesFeatureTopic(featureId, update)) {
+              try { resolveStageRequest(Number(requestId), response.toLowerCase()); } catch { /* DB may be unavailable */ }
+            }
             if (callbackId) void this.answerCallback(token, callbackId);
             continue;
           }
@@ -95,7 +157,9 @@ export class TelegramPoller {
             try {
               const row = getStageRequest(requestId);
               const label = row?.status === 'pending' ? row.options?.[optionIndex] : undefined;
-              if (label !== undefined) resolveStageRequest(requestId, label);
+              if (label !== undefined && matchesFeatureTopic(row?.featureId, update)) {
+                resolveStageRequest(requestId, label);
+              }
             } catch { /* DB may be unavailable */ }
             if (callbackId) void this.answerCallback(token, callbackId);
             continue;
@@ -106,14 +170,20 @@ export class TelegramPoller {
             const requestId = inputMatch[1];
             const response = inputMatch[2];
             if (!requestId || !response) continue;
-            try { resolveStageRequest(Number(requestId), response.trim()); } catch { /* DB may be unavailable */ }
+            let featureId: string | undefined;
+            if (updateContext(update).chatId !== undefined) {
+              try { featureId = getStageRequest(Number(requestId))?.featureId; } catch { /* DB may be unavailable */ }
+            }
+            if (matchesFeatureTopic(featureId, update)) {
+              try { resolveStageRequest(Number(requestId), response.trim()); } catch { /* DB may be unavailable */ }
+            }
             if (callbackId) void this.answerCallback(token, callbackId);
             continue;
           }
 
           if (text.startsWith('resume_pipeline:')) {
             const pipelineId = Number(text.split(':')[1]);
-            if (pipelineId) {
+            if (pipelineId && matchesConfiguredChat(updateContext(update).chatId, configuredTelegramChatId())) {
               try { resumePipeline(pipelineId); } catch { /* DB may be unavailable */ }
             }
             if (callbackId) void this.answerCallback(token, callbackId);

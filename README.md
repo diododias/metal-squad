@@ -709,6 +709,14 @@ Telegram requires:
 - `telegramChatId` or `notifications.channels[].chatId`
 - a bot token stored in the OS keychain under account `telegram-bot-token`
 
+For feature-linked notifications, configure the chat as a Telegram forum
+supergroup and make the bot an administrator with permission to create/manage
+topics and send messages. Metal Squad creates one topic per `featureId` on the
+first notification and reuses it across retries, stages, resumes, and restarts.
+The optional `forumTopicId` remains the static destination for global or legacy
+messages without a `featureId`; feature messages never fall back to that topic
+or to another feature's topic.
+
 There is currently no dedicated CLI command for secret management. From the repo
 root, you can store the token with:
 

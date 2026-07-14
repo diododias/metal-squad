@@ -16,7 +16,7 @@ description: "Implementation task list for F54 Telegram feature topics"
 
 **Purpose**: Confirm the existing project runtime is sufficient for F54 and keep dependency changes explicit.
 
-- [ ] T001 Confirm that the existing TypeScript, native `fetch`, `better-sqlite3`, `zod`, and Vitest setup supports F54; add only any missing dependency or script in `package.json`.
+- [X] T001 Confirm that the existing TypeScript, native `fetch`, `better-sqlite3`, `zod`, and Vitest setup supports F54; add only any missing dependency or script in `package.json`.
 
 ---
 
@@ -26,12 +26,12 @@ description: "Implementation task list for F54 Telegram feature topics"
 
 **⚠️ CRITICAL**: No user story implementation can begin until this phase is complete.
 
-- [ ] T002 [P] Add the `feature_topic_associations` migration with the `(chat_id, feature_id)` uniqueness constraint, lifecycle fields, lease fields, error fields, and indexes in `src/db/index.ts`.
-- [ ] T003 Implement association reads, creation reservations, lease-expiry recovery, activation, invalidation, and error recording behind repository helpers in `src/db/repo.ts`.
-- [ ] T004 [P] Extend outbound notification and inbound request context types with stable feature, chat, thread, request, gate, and stage metadata in `src/core/events/types.ts`.
-- [ ] T005 Propagate `featureId` and optional `featureName` on `run:start`, `run:failed`, `run:done`, `gate:created`, `stage:approval`, and `stage:input` notifications while leaving global alerts unassociated in `src/core/events/notifications.ts`.
-- [ ] T006 [P] Preserve `telegramChatId`, `chatId`, and optional static `forumTopicId` parsing and redaction while documenting the feature-aware metadata contract in `src/config/index.ts`.
-- [ ] T007 Add migration, uniqueness, reservation, activation, invalidation, and persisted-error coverage for `FeatureTopicAssociation` in `tests/db/telegram-topics.test.ts`.
+- [X] T002 [P] Add the `feature_topic_associations` migration with the `(chat_id, feature_id)` uniqueness constraint, lifecycle fields, lease fields, error fields, and indexes in `src/db/index.ts`.
+- [X] T003 Implement association reads, creation reservations, lease-expiry recovery, activation, invalidation, and error recording behind repository helpers in `src/db/repo.ts`.
+- [X] T004 [P] Extend outbound notification and inbound request context types with stable feature, chat, thread, request, gate, and stage metadata in `src/core/events/types.ts`.
+- [X] T005 Propagate `featureId` and optional `featureName` on `run:start`, `run:failed`, `run:done`, `gate:created`, `stage:approval`, and `stage:input` notifications while leaving global alerts unassociated in `src/core/events/notifications.ts`.
+- [X] T006 [P] Preserve `telegramChatId`, `chatId`, and optional static `forumTopicId` parsing and redaction while documenting the feature-aware metadata contract in `src/config/index.ts`.
+- [X] T007 Add migration, uniqueness, reservation, activation, invalidation, and persisted-error coverage for `FeatureTopicAssociation` in `tests/db/telegram-topics.test.ts`.
 
 **Checkpoint**: The database and event/configuration contracts are ready for story-specific Telegram routing.
 
@@ -45,14 +45,14 @@ description: "Implementation task list for F54 Telegram feature topics"
 
 ### Tests for User Story 1
 
-- [ ] T008 [US1] Add failing tests for sanitized topic titles, stable feature IDs, the 128-character boundary, first-event creation, and one-topic-per-feature routing in `tests/core/notify-telegram-topics.test.ts`.
-- [ ] T009 [US1] Add failing tests for `getChat`, `createForumTopic`, `sendMessage`, message splitting, and final-fragment-only `reply_markup` payloads in `tests/core/notify-telegram.test.ts`.
+- [X] T008 [US1] Add failing tests for sanitized topic titles, stable feature IDs, the 128-character boundary, first-event creation, and one-topic-per-feature routing in `tests/core/notify-telegram-topics.test.ts`.
+- [X] T009 [US1] Add failing tests for `getChat`, `createForumTopic`, `sendMessage`, message splitting, and final-fragment-only `reply_markup` payloads in `tests/core/notify-telegram.test.ts`.
 
 ### Implementation for User Story 1
 
-- [ ] T010 [US1] Implement feature-topic title sanitization, truncation, in-process locking, and create/resolve lifecycle policy in `src/core/notify/telegram-topics.ts`.
-- [ ] T011 [US1] Extend the Telegram Bot API client to validate/resolve a feature topic and send all message fragments with its `message_thread_id` in `src/core/notify/telegram.ts`.
-- [ ] T012 [US1] Route notification metadata with `featureId` and `featureName` through the notification manager while keeping channel delivery isolated in `src/core/notify/manager.ts`.
+- [X] T010 [US1] Implement feature-topic title sanitization, truncation, in-process locking, and create/resolve lifecycle policy in `src/core/notify/telegram-topics.ts`.
+- [X] T011 [US1] Extend the Telegram Bot API client to validate/resolve a feature topic and send all message fragments with its `message_thread_id` in `src/core/notify/telegram.ts`.
+- [X] T012 [US1] Route notification metadata with `featureId` and `featureName` through the notification manager while keeping channel delivery isolated in `src/core/notify/manager.ts`.
 
 **Checkpoint**: US1 is independently functional when a new feature notification creates one topic and all subsequent messages remain isolated to it.
 
@@ -66,14 +66,14 @@ description: "Implementation task list for F54 Telegram feature topics"
 
 ### Tests for User Story 2
 
-- [ ] T013 [US2] Add coverage for restart reuse, no extra `createForumTopic` call, concurrent first events, and lease-expiry recovery in `tests/core/notify-telegram-topics.test.ts`.
-- [ ] T014 [US2] Add coverage for matching and mismatched chat/thread context on message and callback-query commands for gates, stage approvals, and stage input in `tests/core/notify-telegram-poller.test.ts`.
+- [X] T013 [US2] Add coverage for restart reuse, no extra `createForumTopic` call, concurrent first events, and lease-expiry recovery in `tests/core/notify-telegram-topics.test.ts`.
+- [X] T014 [US2] Add coverage for matching and mismatched chat/thread context on message and callback-query commands for gates, stage approvals, and stage input in `tests/core/notify-telegram-poller.test.ts`.
 
 ### Implementation for User Story 2
 
-- [ ] T015 [US2] Update repository transactions so one active `(chatId, featureId)` association remains authoritative across concurrent creators and process restarts in `src/db/repo.ts`.
-- [ ] T016 [US2] Make the topic resolver reuse active persisted associations and recover only through the same feature association after invalidation or expired creation leases in `src/core/notify/telegram-topics.ts`.
-- [ ] T017 [US2] Parse Telegram chat and `message_thread_id` context for messages and callback queries, join pending requests to their feature association, and reject mismatches without state mutation in `src/core/notify/telegram-poller.ts`.
+- [X] T015 [US2] Update repository transactions so one active `(chatId, featureId)` association remains authoritative across concurrent creators and process restarts in `src/db/repo.ts`.
+- [X] T016 [US2] Make the topic resolver reuse active persisted associations and recover only through the same feature association after invalidation or expired creation leases in `src/core/notify/telegram-topics.ts`.
+- [X] T017 [US2] Parse Telegram chat and `message_thread_id` context for messages and callback queries, join pending requests to their feature association, and reject mismatches without state mutation in `src/core/notify/telegram-poller.ts`.
 
 **Checkpoint**: US2 is independently functional when a feature's full retry/resume history and valid interactive responses remain in one topic.
 
@@ -87,14 +87,14 @@ description: "Implementation task list for F54 Telegram feature topics"
 
 ### Tests for User Story 3
 
-- [ ] T018 [US3] Add coverage for incompatible destinations, missing topic-management permissions, create/recovery failures, delivery errors, unavailable threads, and duplicate-prevention guarantees in `tests/core/notify-telegram-topics.test.ts`.
-- [ ] T019 [US3] Add coverage proving a Telegram failure is isolated from Slack, Discord, webhook, and desktop delivery in `tests/core/notify-manager.test.ts`.
+- [X] T018 [US3] Add coverage for incompatible destinations, missing topic-management permissions, create/recovery failures, delivery errors, unavailable threads, and duplicate-prevention guarantees in `tests/core/notify-telegram-topics.test.ts`.
+- [X] T019 [US3] Add coverage proving a Telegram failure is isolated from Slack, Discord, webhook, and desktop delivery in `tests/core/notify-manager.test.ts`.
 
 ### Implementation for User Story 3
 
-- [ ] T020 [US3] Validate `getChat.type === 'supergroup'` and `getChat.is_forum === true`, and persist actionable configuration/API errors with feature and chat context in `src/core/notify/telegram-topics.ts`.
-- [ ] T021 [US3] Detect controlled thread-unavailable failures, invalidate and recreate the same feature association, retry the original delivery once, and persist terminal failures in `src/core/notify/telegram.ts`.
-- [ ] T022 [US3] Enforce that feature-linked sends never fall back to another feature's thread or the General topic while preserving `Promise.allSettled` channel isolation in `src/core/notify/manager.ts`.
+- [X] T020 [US3] Validate `getChat.type === 'supergroup'` and `getChat.is_forum === true`, and persist actionable configuration/API errors with feature and chat context in `src/core/notify/telegram-topics.ts`.
+- [X] T021 [US3] Detect controlled thread-unavailable failures, invalidate and recreate the same feature association, retry the original delivery once, and persist terminal failures in `src/core/notify/telegram.ts`.
+- [X] T022 [US3] Enforce that feature-linked sends never fall back to another feature's thread or the General topic while preserving `Promise.allSettled` channel isolation in `src/core/notify/manager.ts`.
 
 **Checkpoint**: US3 is independently functional when every incompatible or unavailable destination fails visibly and remains recoverable without violating feature isolation.
 
@@ -108,12 +108,12 @@ description: "Implementation task list for F54 Telegram feature topics"
 
 ### Tests for User Story 4
 
-- [ ] T023 [US4] Add regression coverage for no-feature messages, legacy `telegramChatId`, static `forumTopicId`, mixed global/feature dispatch, and the unchanged notification event set in `tests/core/notify-telegram.test.ts` and `tests/config/notifications.test.ts`.
+- [X] T023 [US4] Add regression coverage for no-feature messages, legacy `telegramChatId`, static `forumTopicId`, mixed global/feature dispatch, and the unchanged notification event set in `tests/core/notify-telegram.test.ts` and `tests/config/notifications.test.ts`.
 
 ### Implementation for User Story 4
 
-- [ ] T024 [US4] Preserve static `forumTopicId` delivery for messages without `featureId` and keep legacy `telegramChatId` normalization compatible in `src/core/notify/telegram.ts` and `src/config/index.ts`.
-- [ ] T025 [US4] Ensure global notifications do not create topic associations and Telegram-specific routing metadata remains ignored by non-Telegram channels in `src/core/notify/manager.ts`.
+- [X] T024 [US4] Preserve static `forumTopicId` delivery for messages without `featureId` and keep legacy `telegramChatId` normalization compatible in `src/core/notify/telegram.ts` and `src/config/index.ts`.
+- [X] T025 [US4] Ensure global notifications do not create topic associations and Telegram-specific routing metadata remains ignored by non-Telegram channels in `src/core/notify/manager.ts`.
 
 **Checkpoint**: US4 is independently functional when existing global and legacy notifications behave as before alongside feature-aware routing.
 
@@ -123,12 +123,12 @@ description: "Implementation task list for F54 Telegram feature topics"
 
 **Purpose**: Align source-of-truth documentation, verify the complete quickstart, and run repository validation gates.
 
-- [ ] T026 [P] Document forum-supergroup permissions, topic lifecycle, legacy `forumTopicId`, recovery behavior, and redaction expectations in `docs/features/F54-telegram-feature-topics.md`.
-- [ ] T027 [P] Update Telegram configuration examples and the requirement that the bot can manage forum topics in `README.md`.
-- [ ] T028 [P] Keep the deterministic scenarios, isolated `MSQ_DB_PATH`, captured Bot API requests, and association/error-row inspection steps synchronized in `specs/018-telegram-feature-topics/quickstart.md`.
-- [ ] T029 Run the focused F54 Vitest suites and record the results against the scenarios in `specs/018-telegram-feature-topics/quickstart.md`.
-- [ ] T030 Run `npm run build`, `npm test`, `npm run typecheck`, and `npm run lint`, and record any required follow-up in `package.json` or `specs/018-telegram-feature-topics/quickstart.md`.
-- [ ] T031 Audit every F54 requirement, contract rule, entity transition, and success criterion for task traceability in `specs/018-telegram-feature-topics/spec.md`, `specs/018-telegram-feature-topics/data-model.md`, and `specs/018-telegram-feature-topics/contracts/telegram-topic-routing-contract.md`.
+- [X] T026 [P] Document forum-supergroup permissions, topic lifecycle, legacy `forumTopicId`, recovery behavior, and redaction expectations in `docs/features/F54-telegram-feature-topics.md`.
+- [X] T027 [P] Update Telegram configuration examples and the requirement that the bot can manage forum topics in `README.md`.
+- [X] T028 [P] Keep the deterministic scenarios, isolated `MSQ_DB_PATH`, captured Bot API requests, and association/error-row inspection steps synchronized in `specs/018-telegram-feature-topics/quickstart.md`.
+- [X] T029 Run the focused F54 Vitest suites and record the results against the scenarios in `specs/018-telegram-feature-topics/quickstart.md`.
+- [X] T030 Run `npm run build`, `npm test`, `npm run typecheck`, and `npm run lint`, and record any required follow-up in `package.json` or `specs/018-telegram-feature-topics/quickstart.md`.
+- [X] T031 Audit every F54 requirement, contract rule, entity transition, and success criterion for task traceability in `specs/018-telegram-feature-topics/spec.md`, `specs/018-telegram-feature-topics/data-model.md`, and `specs/018-telegram-feature-topics/contracts/telegram-topic-routing-contract.md`.
 
 ---
 
@@ -204,7 +204,7 @@ Task T028: Synchronize specs/018-telegram-feature-topics/quickstart.md
 
 ### Completion Criteria
 
-- Every task above has a unique sequential ID, starts with `- [ ]`, uses `[P]` only for parallel work, uses `[USn]` only inside a user-story phase, and names at least one exact file path.
+- Every task above has a unique sequential ID, uses `[P]` only for parallel work, uses `[USn]` only inside a user-story phase, and names at least one exact file path.
 - Each user story has an independent test criterion and story-specific automated coverage.
 - The MVP is deliverable after US1 without requiring US2, US3, or US4.
 - The final documentation and quickstart remain aligned with the specification, plan, data model, and routing contract.

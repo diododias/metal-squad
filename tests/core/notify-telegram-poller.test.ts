@@ -4,6 +4,8 @@ const mockGetSecret = vi.fn();
 const mockResolveGate = vi.fn();
 const mockResolveStageRequest = vi.fn();
 const mockGetStageRequest = vi.fn();
+const mockGetGate = vi.fn();
+const mockGetFeatureTopicAssociation = vi.fn();
 const mockFetch = vi.fn();
 
 vi.mock('../../src/security/secrets.js', () => ({ getSecret: mockGetSecret }));
@@ -11,6 +13,14 @@ vi.mock('../../src/db/repo.js', () => ({
   resolveGate: mockResolveGate,
   resolveStageRequest: mockResolveStageRequest,
   getStageRequest: mockGetStageRequest,
+  getGate: mockGetGate,
+  getFeatureTopicAssociation: mockGetFeatureTopicAssociation,
+}));
+vi.mock('../../src/config/index.js', () => ({
+  resolveRuntimeConfig: vi.fn(() => ({
+    telegramChatId: undefined,
+    notifications: { channels: [{ type: 'telegram', chatId: 'chat-1' }] },
+  })),
 }));
 vi.stubGlobal('fetch', mockFetch);
 
@@ -19,7 +29,15 @@ async function flushMicrotasks(depth = 20) {
   for (let i = 0; i < depth; i++) await Promise.resolve();
 }
 
-function makeUpdateResponse(updates: Array<{ update_id: number; message?: { text?: string }; callback_query?: { id: string; data?: string } }>) {
+function makeUpdateResponse(updates: Array<{
+  update_id: number;
+  message?: { text?: string; chat?: { id: string | number }; message_thread_id?: number };
+  callback_query?: {
+    id: string;
+    data?: string;
+    message?: { chat?: { id: string | number }; message_thread_id?: number };
+  };
+}>) {
   return {
     ok: true,
     json: () => Promise.resolve({ ok: true, result: updates }),
@@ -32,6 +50,8 @@ beforeEach(() => {
   mockResolveGate.mockReset();
   mockResolveStageRequest.mockReset();
   mockGetStageRequest.mockReset();
+  mockGetGate.mockReset();
+  mockGetFeatureTopicAssociation.mockReset();
   mockFetch.mockReset();
 });
 
@@ -453,6 +473,57 @@ describe('TelegramPoller', () => {
     expect(mockResolveStageRequest).toHaveBeenCalledWith(40, 'advance');
     expect(mockResolveStageRequest).toHaveBeenCalledWith(40, 'free text response');
     expect(mockGetStageRequest).not.toHaveBeenCalled();
+    poller.stop();
+  });
+
+  it('accepts a stage response only from the associated feature topic', async () => {
+    mockGetSecret.mockResolvedValue('TOKEN');
+    mockGetStageRequest.mockReturnValue({ id: 50, featureId: 'F54', status: 'pending' });
+    mockGetFeatureTopicAssociation.mockReturnValue({ state: 'active', threadId: 91 });
+    let fetchCount = 0;
+    mockFetch.mockImplementation(() => {
+      if (++fetchCount === 1) return Promise.resolve(makeUpdateResponse([
+        { update_id: 50, message: { text: 'stage:50 advance', chat: { id: 'chat-1' }, message_thread_id: 91 } },
+      ]));
+      return new Promise(() => {});
+    });
+
+    const { TelegramPoller } = await import('../../src/core/notify/telegram-poller.js');
+    const poller = new TelegramPoller();
+    poller.start();
+    await flushMicrotasks(30);
+
+    expect(mockResolveStageRequest).toHaveBeenCalledWith(50, 'advance');
+    poller.stop();
+  });
+
+  it('acknowledges but ignores a callback from another feature topic', async () => {
+    mockGetSecret.mockResolvedValue('TOKEN');
+    mockGetGate.mockReturnValue({ id: 51, featureId: 'F54' });
+    mockGetFeatureTopicAssociation.mockReturnValue({ state: 'active', threadId: 91 });
+    let fetchCount = 0;
+    mockFetch.mockImplementation((url: string) => {
+      if (url.includes('getUpdates') && ++fetchCount === 1) return Promise.resolve(makeUpdateResponse([
+        {
+          update_id: 51,
+          callback_query: {
+            id: 'callback-51',
+            data: 'gate:51 approve',
+            message: { chat: { id: 'chat-1' }, message_thread_id: 92 },
+          },
+        },
+      ]));
+      if (url.includes('answerCallbackQuery')) return Promise.resolve({ ok: true });
+      return new Promise(() => {});
+    });
+
+    const { TelegramPoller } = await import('../../src/core/notify/telegram-poller.js');
+    const poller = new TelegramPoller();
+    poller.start();
+    await flushMicrotasks(40);
+
+    expect(mockResolveGate).not.toHaveBeenCalledWith(51, 'approved');
+    expect(mockFetch.mock.calls.some(([url]) => String(url).includes('answerCallbackQuery'))).toBe(true);
     poller.stop();
   });
 });

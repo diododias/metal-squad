@@ -176,6 +176,20 @@ describe('dispatch', () => {
     await expect(dispatch('run:start', 'msg')).resolves.toBeUndefined();
   });
 
+  it('isolates a feature-linked Telegram failure from other channels', async () => {
+    mockResolveRuntimeConfig.mockReturnValue(makeConfig({
+      channels: [
+        { type: 'telegram', chatId: 'c1' },
+        { type: 'slack', webhookUrl: 'https://slack/hook' },
+      ],
+    }));
+    mockTelegramSend.mockRejectedValue(new Error('topic unavailable'));
+    const { dispatch } = await import('../../src/core/notify/manager.js');
+
+    await expect(dispatch('run:failed', 'failure', { featureId: 'F54', featureName: 'Topics' })).resolves.toBeUndefined();
+    expect(mockSlackSend).toHaveBeenCalledWith('failure', { featureId: 'F54', featureName: 'Topics' });
+  });
+
   it('does not throw when DesktopChannel fallback rejects', async () => {
     mockResolveRuntimeConfig.mockReturnValue(makeConfig({ channels: [] }));
     mockDesktopSend.mockRejectedValue(new Error('desktop error'));

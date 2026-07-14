@@ -90,3 +90,20 @@ For live evidence, inspect both the captured/real Bot API requests and the
 isolated SQLite association/error rows. The relevant contract and entities are
 documented in [telegram-topic-routing-contract.md](contracts/telegram-topic-routing-contract.md)
 and [data-model.md](data-model.md).
+
+To inspect the isolated rows after a deterministic run:
+
+```bash
+rtk sqlite3 "$MSQ_DB_PATH" \
+  'SELECT chat_id, feature_id, thread_id, state, last_error FROM feature_topic_associations ORDER BY feature_id;'
+```
+
+Expected evidence is one authoritative row per `(chat_id, feature_id)`, an
+active positive `thread_id` after successful creation, and a non-empty
+`last_error` for incompatible destinations or terminal delivery failures.
+
+## Validation evidence
+
+On 2026-07-14 the focused F54 suites passed with 9 test files and 85 tests.
+The repository-wide suite passed with 71 test files and 1,012 tests; `npm run
+build`, `npm run typecheck`, and `npm run lint` also passed.

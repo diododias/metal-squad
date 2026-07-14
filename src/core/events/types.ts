@@ -14,6 +14,7 @@ export interface RunStartEvent {
   featureId: string;
   tool: Tool;
   stage?: string;
+  featureName?: string;
 }
 
 export interface RunOutputEvent {
@@ -30,6 +31,7 @@ export interface RunDoneEvent {
   featureId: string;
   tool: Tool;
   result: RunResult;
+  featureName?: string;
 }
 
 export type RunFailedKind = 'execution' | 'aborted';
@@ -40,6 +42,7 @@ export interface RunFailedEvent {
   tool: Tool;
   error: string;
   kind: RunFailedKind;
+  featureName?: string;
 }
 
 export type RunBlockedReason = 'needs_input' | 'gate' | 'budget' | 'token';
@@ -57,6 +60,7 @@ export interface GateCreatedEvent {
   featureId: string;
   runId?: number;
   repoId?: string;
+  featureName?: string;
 }
 
 export interface GateResolvedEvent {
@@ -73,6 +77,7 @@ export interface StageRequestCreatedEvent {
   prompt: string;
   source?: 'manual' | 'auto';
   options?: string[];
+  featureName?: string;
 }
 
 export interface StageRequestResolvedEvent {

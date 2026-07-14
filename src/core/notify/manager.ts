@@ -1,6 +1,6 @@
 import { resolveRuntimeConfig } from '../../config/index.js';
 import type { NotificableEvent } from '../../config/index.js';
-import type { NotificationChannel } from './types.js';
+import type { NotificationChannel, NotificationMetadata } from './types.js';
 import { TelegramChannel } from './telegram.js';
 import { SlackChannel } from './slack.js';
 import { DiscordChannel } from './discord.js';
@@ -31,7 +31,7 @@ function buildChannels(): NotificationChannel[] {
 export async function dispatch(
   event: NotificableEvent,
   message: string,
-  metadata?: Record<string, unknown>,
+  metadata?: NotificationMetadata,
 ): Promise<void> {
   const { notifications } = resolveRuntimeConfig(process.cwd());
   if (!notifications.events.includes(event)) return;
