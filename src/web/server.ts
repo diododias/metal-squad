@@ -13,8 +13,10 @@ import {
   listCompletedFeatureIds,
   listRunEvents,
   listRunHistoryForFeature,
+  getRunSessionStatus,
   listRunOutput,
   listRunOutputAfterId,
+  listRunToolCalls,
   listTaskRunsForRun,
   pausePipeline,
   requestFeatureAbort,
@@ -206,6 +208,8 @@ function computeRunChanges(runId: number, cwd: string): RunChangesPayload {
 
 const BROADCAST_EVENTS: (keyof MsqEvents)[] = [
   'run:start',
+  'run:status',
+  'tool:call',
   'run:done',
   'run:failed',
   'run:blocked',
@@ -279,17 +283,23 @@ export function createWebServer(options: {
     latestStateSignature = JSON.stringify(latestState);
   }
 
-  function buildRunDetailPayload(runId: number): { runId: number; taskRuns: ReturnType<typeof listTaskRunsForRun>; breakdown: ReturnType<typeof computeRunBreakdown> | null } | null {
+  function buildRunDetailPayload(runId: number): { runId: number; taskRuns: ReturnType<typeof listTaskRunsForRun>; breakdown: ReturnType<typeof computeRunBreakdown> | null; sessionStatus: ReturnType<typeof getRunSessionStatus>; statusHistory: ReturnType<typeof getStatusHistory>; toolCalls: ReturnType<typeof listRunToolCalls> } | null {
     try {
       const taskRuns = listTaskRunsForRun(runId);
       const runEvents = listRunEvents(runId);
       const startedAt = runEvents.find((event) => event.event === 'start')?.createdAt ?? null;
       const endedAt = runEvents.find((event) => event.event === 'done' || event.event === 'failed')?.createdAt ?? null;
       const breakdown = startedAt ? computeRunBreakdown(runEvents, startedAt, endedAt) : null;
-      return { runId, taskRuns, breakdown };
+      return { runId, taskRuns, breakdown, sessionStatus: getRunSessionStatus(runId), statusHistory: getStatusHistory(runEvents), toolCalls: listRunToolCalls(runId) };
     } catch {
       return null;
     }
+  }
+
+  function getStatusHistory(events: ReturnType<typeof listRunEvents>): NonNullable<ReturnType<typeof getRunSessionStatus>>[] {
+    return events
+      .filter((event) => event.event.startsWith('status:') && event.metadata)
+      .map((event) => event.metadata as unknown as NonNullable<ReturnType<typeof getRunSessionStatus>>);
   }
 
   function sendRunDetail(client: Client, runId: number, force = false): void {
@@ -358,7 +368,16 @@ export function createWebServer(options: {
           : JSON.stringify(payload);
         console.log(`[event:${event}]`, message);
       }
-      broadcast({ type: event, payload });
+      if (event === 'run:status' || event === 'tool:call') {
+        const runId = (payload as { runId?: number }).runId;
+        for (const client of clients.values()) {
+          if (client.authenticated && runId != null && client.detailSubscriptions.has(runId) && client.socket.readyState === 1) {
+            client.socket.send(JSON.stringify({ type: event, payload }));
+          }
+        }
+      } else {
+        broadcast({ type: event, payload });
+      }
       if (event === 'ui:info' || event === 'ui:notice') {
         const message =
           typeof payload === 'object' && 'message' in payload && typeof payload.message === 'string'
@@ -723,6 +742,9 @@ export function createWebServer(options: {
       case 'subscribe:runDetail': {
         client.detailSubscriptions.add(message.runId);
         sendRunDetail(client, message.runId);
+        const detail = buildRunDetailPayload(message.runId);
+        if (detail?.sessionStatus) sendTo(client, { type: 'run:status', payload: detail.sessionStatus });
+        for (const toolCall of detail?.toolCalls ?? []) sendTo(client, { type: 'tool:call', payload: toolCall });
         break;
       }
       case 'unsubscribe:runDetail': {

@@ -1,10 +1,11 @@
 import { randomUUID } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
-import type { SessionHandle, ToolAdapter, RunResult, RunFeatureOptions, TokenUsage } from './types.js';
+import { sanitizeToolCallRecord, type SessionHandle, type ToolAdapter, type RunResult, type RunFeatureOptions, type TokenUsage, type ToolCallRecord } from './types.js';
 import type { Effort, Feature } from '../backlog/schema.js';
 import { CliAbortError, CliTimeoutError, runCli } from './spawn.js';
 import { msqEventBus } from '../events/index.js';
 import { parseControlSignal } from './control.js';
+import { resolveRuntimeConfig } from '../../config/index.js';
 
 // Sem flag nativa de "effort": mapeia para o tier de modelo.
 const EFFORT_MODEL: Record<Effort, string> = {
@@ -16,7 +17,8 @@ const EFFORT_MODEL: Record<Effort, string> = {
 type ContentBlock =
   | { type: 'text'; text: string }
   | { type: 'thinking'; thinking: string }
-  | { type: 'tool_use'; name: string; input: unknown };
+  | { type: 'tool_use'; id?: string; name: string; input: unknown }
+  | { type: 'tool_result'; tool_use_id?: string; content?: unknown; is_error?: boolean };
 
 interface StreamUsage {
   input_tokens?: number;
@@ -71,6 +73,7 @@ export const claudeAdapter: ToolAdapter = {
     let stdout: string;
     let stderr: string;
     const progress = createClaudeProgress();
+    const seenToolCalls = new Set<string>();
 
     msqEventBus.emit('task:started', {
       runId: opts.runId,
@@ -82,11 +85,14 @@ export const claudeAdapter: ToolAdapter = {
     try {
       ({ code, stdout, stderr } = await runCli('claude', args, {
         cwd: opts.cwd,
-        heartbeatMs: 30_000,
-        logLabel: `claude ${feature.id}`,
+        idleThresholdMs: resolveRuntimeConfig(opts.cwd).idleThresholdMs,
+        runId: opts.runId,
+        featureId: feature.id,
+        tool: feature.tool,
         heartbeatSuffix: () => progress.heartbeatSuffix(),
         progressSnapshot: () => progress.heartbeatSuffix(),
         onHeartbeat: (message) => { emitRunOutput(opts.runId, feature, message, 'stderr', 'heartbeat'); },
+        onStatus: opts.onStatus ?? ((snapshot): void => { msqEventBus.emit('run:status', snapshot); }),
         signal: opts.signal,
         onStdoutLine: (line) => {
           const updates = progress.onStdoutLine(line);
@@ -94,12 +100,14 @@ export const claudeAdapter: ToolAdapter = {
             if (update.output) emitRunOutput(opts.runId, feature, update.output.line, 'stdout', update.output.source);
             if (update.usage) emitUsage(opts.runId, feature, update.usage);
             if (update.stage) emitTaskStage(opts.runId, feature, update.stage);
+            if (update.toolCall) emitToolCall(opts, feature, update.toolCall, seenToolCalls);
           }
         },
         onStderrLine: (line) => {
           const updates = progress.onStderrLine(line);
           for (const update of updates) {
             if (update.output) emitRunOutput(opts.runId, feature, update.output.line, 'stderr', update.output.source);
+            if (update.toolCall) emitToolCall(opts, feature, update.toolCall, seenToolCalls);
           }
         },
       }));
@@ -284,6 +292,7 @@ interface ProgressUpdate {
   /** true quando `usage` ja e o total autoritativo (evento `result`). */
   usageTotal?: boolean;
   stage?: string;
+  toolCall?: Omit<ToolCallRecord, 'runId' | 'featureId' | 'tool'>;
 }
 
 function createClaudeProgress(): {
@@ -375,6 +384,23 @@ function parseClaudeLine(line: string): ProgressUpdate[] {
       } else if (block.type === 'text') {
         const text = normalizeSnippet(block.text);
         if (text) updates.push({ output: { line: text, source: 'agent' } });
+      } else if (block.type === 'tool_result') {
+        const output = normalizeSnippet(JSON.stringify(block.content ?? ''));
+        updates.push({
+          output: output ? { line: `tool result ${output}`, source: 'tool' } : undefined,
+          toolCall: {
+            id: block.tool_use_id ?? `tool-result-${String(updates.length)}`,
+            sequence: updates.length + 1,
+            phase: block.is_error ? 'failed' : 'completed',
+            name: 'tool result',
+            arguments: null,
+            output: output || null,
+            step: null,
+            startedAt: new Date().toISOString(),
+            completedAt: new Date().toISOString(),
+            error: block.is_error ? output || 'tool failed' : null,
+          },
+        });
       } else {
         const name = normalizeSnippet(block.name);
         const input = normalizeSnippet(JSON.stringify(block.input ?? {}));
@@ -383,6 +409,18 @@ function parseClaudeLine(line: string): ProgressUpdate[] {
         updates.push({
           output: { line: outputLine, source: 'tool' },
           ...(stage ? { stage } : {}),
+          toolCall: {
+            id: block.id ?? `${name}-${String(updates.length)}`,
+            sequence: updates.length + 1,
+            phase: 'started',
+            name,
+            arguments: block.input ?? null,
+            output: null,
+            step: stage ?? null,
+            startedAt: new Date().toISOString(),
+            completedAt: null,
+            error: null,
+          },
         });
       }
     }
@@ -399,6 +437,14 @@ function parseClaudeLine(line: string): ProgressUpdate[] {
   }
 
   return [];
+}
+
+function emitToolCall(opts: RunFeatureOptions, feature: Feature, partial: Omit<ToolCallRecord, 'runId' | 'featureId' | 'tool'>, seen: Set<string>): void {
+  const record = sanitizeToolCallRecord({ ...partial, runId: opts.runId, featureId: feature.id, tool: feature.tool });
+  const emit = opts.onToolCall ?? ((value): void => { msqEventBus.emit('tool:call', value); });
+  if (record.phase !== 'started' && !seen.has(record.id)) emit({ ...record, phase: 'started', completedAt: null });
+  seen.add(record.id);
+  emit(record);
 }
 
 function emitRunOutput(

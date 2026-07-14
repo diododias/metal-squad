@@ -1,5 +1,72 @@
 import type { Effort, Feature, Tool } from '../backlog/schema.js';
 
+export type SessionStatus = 'running' | 'idle' | 'interrupted' | 'failed' | 'timed_out' | 'completed';
+
+export interface SessionStatusSnapshot {
+  runId: number;
+  featureId: string;
+  tool: Tool;
+  status: SessionStatus;
+  startedAt: string;
+  updatedAt: string;
+  elapsedMs: number;
+  lastOutputAt: string | null;
+  idleMs: number | null;
+  reason: string | null;
+  terminal: boolean;
+}
+
+export type ToolCallPhase = 'started' | 'completed' | 'failed';
+
+export interface ToolCallRecord {
+  id: string;
+  runId: number;
+  featureId: string;
+  tool: Tool;
+  sequence: number;
+  phase: ToolCallPhase;
+  name: string;
+  arguments: unknown;
+  output: string | null;
+  step: string | null;
+  startedAt: string;
+  completedAt: string | null;
+  error: string | null;
+}
+
+export type SessionStatusCallback = (snapshot: SessionStatusSnapshot) => void;
+export type ToolCallCallback = (record: ToolCallRecord) => void;
+
+const SENSITIVE_KEY = /(token|secret|password|authorization|api[_-]?key|cookie)/i;
+
+export function sanitizeToolCallValue(value: unknown, depth = 0): unknown {
+  if (depth > 4) return '[truncated]';
+  if (value == null || typeof value === 'number' || typeof value === 'boolean') return value;
+  if (typeof value === 'string') return value.slice(0, 2_000);
+  if (Array.isArray(value)) return value.slice(0, 50).map((entry) => sanitizeToolCallValue(entry, depth + 1));
+  if (typeof value === 'object') {
+    return Object.fromEntries(
+      Object.entries(value).slice(0, 50).map(([key, entry]) => [
+        key,
+        SENSITIVE_KEY.test(key) ? '[REDACTED]' : sanitizeToolCallValue(entry, depth + 1),
+      ]),
+    );
+  }
+  return '[unsupported]';
+}
+
+export function sanitizeToolCallRecord(record: ToolCallRecord): ToolCallRecord {
+  return {
+    ...record,
+    id: record.id.slice(0, 200),
+    name: record.name.slice(0, 200),
+    arguments: sanitizeToolCallValue(record.arguments),
+    output: record.output?.slice(0, 20_000) ?? null,
+    step: record.step?.slice(0, 200) ?? null,
+    error: record.error?.slice(0, 500) ?? null,
+  };
+}
+
 export interface TokenUsage {
   input: number;
   cachedInput?: number;
@@ -47,6 +114,8 @@ export interface RunFeatureOptions {
     mode: SessionReuseMode;
     handle?: SessionHandle;
   };
+  onStatus?: SessionStatusCallback;
+  onToolCall?: ToolCallCallback;
 }
 
 export interface RunResult {

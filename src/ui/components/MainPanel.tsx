@@ -9,7 +9,6 @@ import {
   STATUS_ICON,
   formatElapsed,
   formatPercent,
-  formatHeartbeatLine,
   formatTokens,
   getRunStatusTone,
   getRunStageLabel,
@@ -569,14 +568,6 @@ function renderOutputEntry(
     );
   }
 
-  if (entry.source === 'heartbeat') {
-    return (
-      <Text key={entry.id} {...getOutputStyle(theme, 'heartbeat')}>
-        {formatHeartbeatLine(entry.line, maxWidth)}
-      </Text>
-    );
-  }
-
   if (entry.source === 'stderr') {
     return (
       <Text key={entry.id} {...getOutputStyle(theme, 'stderr')}>
@@ -832,9 +823,7 @@ function renderDetailSection(sectionId: DetailSectionId, ctx: DetailSectionConte
                 {selectedRun.status === 'running'
                   ? outputPaused
                     ? 'Auto-scroll paused. Press Ctrl+S to resume live tailing.'
-                    : visibleOutput[visibleOutput.length - 1]?.source === 'heartbeat'
-                      ? 'Agent thinking... heartbeat received while waiting for the next visible event.'
-                      : 'Streaming latest run events in real time.'
+                    : 'Streaming latest run events in real time.'
                   : 'Run finished. Tail below shows the latest captured output.'}
               </Text>
               <Box marginTop={1} flexDirection="column">

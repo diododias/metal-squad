@@ -102,6 +102,9 @@ describe('getDb migration — column checks', () => {
       { name: 'publish_verified' }, { name: 'publish_error' }, { name: 'branch_name' },
       { name: 'base_branch' }, { name: 'commit_sha' }, { name: 'remote_branch' },
       { name: 'pr_number' }, { name: 'pr_url' },
+      { name: 'session_status' }, { name: 'session_started_at' }, { name: 'session_updated_at' },
+      { name: 'session_elapsed_ms' }, { name: 'session_last_output_at' }, { name: 'session_idle_ms' },
+      { name: 'session_reason' }, { name: 'session_terminal' },
     ];
     pragmaRunsColumns = ALL_RUN_COLS;
     pragmaTokenUsageColumns = [{ name: 'cached_input' }];

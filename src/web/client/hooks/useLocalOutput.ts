@@ -42,8 +42,10 @@ export function useLocalOutput(): UseLocalOutputResult {
   const [linesByRun, setLinesByRun] = useState<Record<number, OutputLine[]>>({});
 
   const append = useCallback((runId: number, line: OutputLine) => {
-    const normalizedLine = normalizeLegacyOpencodePayload(line);
-    if (!normalizedLine) return;
+    // Structured tool-call messages own provider normalization. Keep this
+    // buffer limited to ordinary output; the exported legacy normalizer is
+    // retained only for old history consumers and migration tests.
+    const normalizedLine = line;
     setLinesByRun((current) => {
       const existing = current[runId] ?? [];
       if (normalizedLine.id != null) {

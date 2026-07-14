@@ -1,4 +1,6 @@
 import { spawn } from 'node:child_process';
+import type { SessionStatus, SessionStatusCallback } from './types.js';
+import type { Tool } from '../backlog/schema.js';
 
 export interface SpawnResult {
   code: number;
@@ -68,6 +70,11 @@ export interface SpawnOptions {
   onStdoutLine?: (line: string) => void;
   onStderrChunk?: (chunk: string) => void;
   onStderrLine?: (line: string) => void;
+  runId?: number;
+  featureId?: string;
+  tool?: Tool;
+  idleThresholdMs?: number;
+  onStatus?: SessionStatusCallback;
 }
 
 export async function runCli(
@@ -93,12 +100,47 @@ export async function runCli(
     let abortRequested = false;
     let killTimer: NodeJS.Timeout | null = null;
     const heartbeatMs = opts.heartbeatMs ?? 0;
+    const idleThresholdMs = opts.idleThresholdMs ?? 30_000;
+    const startedAtIso = new Date(startedAt).toISOString();
+    let lastStatus: SessionStatus | null = null;
+    let statusTimer: NodeJS.Timeout | null = null;
+
+    const emitStatus = (status: SessionStatus, reason: string | null = null): void => {
+      if (!opts.onStatus || opts.runId == null || !opts.featureId || !opts.tool) return;
+      const now = Date.now();
+      const terminal = status === 'interrupted' || status === 'failed' || status === 'timed_out' || status === 'completed';
+      if (!terminal && status === lastStatus) return;
+      lastStatus = status;
+      const idleMs = status === 'idle' ? Math.max(0, now - lastOutputAt) : null;
+      opts.onStatus({
+        runId: opts.runId,
+        featureId: opts.featureId,
+        tool: opts.tool,
+        status,
+        startedAt: startedAtIso,
+        updatedAt: new Date(now).toISOString(),
+        elapsedMs: Math.max(0, now - startedAt),
+        lastOutputAt: lastOutputAt === startedAt ? null : new Date(lastOutputAt).toISOString(),
+        idleMs,
+        reason: reason ? reason.slice(0, 500) : null,
+        terminal,
+      });
+    };
+
+    const statusTickMs = Math.max(50, Math.min(idleThresholdMs, 1_000));
+    statusTimer = setInterval(() => {
+      if (settled) return;
+      if (Date.now() - lastOutputAt >= idleThresholdMs) emitStatus('idle');
+    }, statusTickMs);
+
+    emitStatus('running');
     const timer = setTimeout(() => {
       if (settled) return;
       settled = true;
       if (killTimer) clearTimeout(killTimer);
       if (opts.signal) opts.signal.removeEventListener('abort', onAbort);
       child.kill('SIGKILL');
+      emitStatus('timed_out', `${bin} exceeded timeout after ${String(timeoutMs)}ms`);
       reject(new CliTimeoutError(
         bin,
         timeoutMs,
@@ -135,6 +177,7 @@ export async function runCli(
     const cleanup = (): void => {
       clearTimeout(timer);
       if (heartbeat) clearInterval(heartbeat);
+      clearInterval(statusTimer);
       if (killTimer) clearTimeout(killTimer);
       if (opts.signal) opts.signal.removeEventListener('abort', onAbort);
     };
@@ -163,6 +206,7 @@ export async function runCli(
       opts.onStdoutChunk?.(chunk);
       stdoutPending = drainLines(chunk, stdoutPending, opts.onStdoutLine);
       lastOutputAt = Date.now();
+      emitStatus('running');
     });
     child.stderr.on('data', (d: Buffer) => {
       const chunk = d.toString();
@@ -170,11 +214,13 @@ export async function runCli(
       opts.onStderrChunk?.(chunk);
       stderrPending = drainLines(chunk, stderrPending, opts.onStderrLine);
       lastOutputAt = Date.now();
+      emitStatus('running');
     });
     child.on('error', (err: Error) => {
       if (settled) return;
       settled = true;
       cleanup();
+      emitStatus('failed', err.message);
       reject(err);
     });
     child.on('close', (code: number | null, signal: NodeJS.Signals | null) => {
@@ -184,9 +230,12 @@ export async function runCli(
       if (stdoutPending) opts.onStdoutLine?.(stdoutPending);
       if (stderrPending) opts.onStderrLine?.(stderrPending);
       if (abortRequested) {
+        emitStatus('interrupted', `${bin} aborted manually`);
         reject(new CliAbortError(bin, Date.now() - startedAt, stdout, stderr, signal));
         return;
       }
+      if ((code ?? -1) === 0) emitStatus('completed');
+      else emitStatus('failed', `${bin} exited with code ${String(code ?? -1)}`);
       resolve({ code: code ?? -1, stdout, stderr, signal });
     });
   });

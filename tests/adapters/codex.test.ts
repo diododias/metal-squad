@@ -98,9 +98,8 @@ describe('codexAdapter timeout observability', () => {
       expect.any(Array),
       expect.objectContaining({
         cwd: '/repo',
-        heartbeatMs: 30_000,
-        logLabel: 'codex feat-02',
-        onHeartbeat: expect.any(Function),
+        idleThresholdMs: undefined,
+        onStatus: expect.any(Function),
         onStdoutLine: expect.any(Function),
         heartbeatSuffix: expect.any(Function),
       }),

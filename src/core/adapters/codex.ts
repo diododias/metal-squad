@@ -1,4 +1,4 @@
-import type { SessionHandle, ToolAdapter, RunResult, RunFeatureOptions, TokenUsage } from './types.js';
+import { sanitizeToolCallRecord, type SessionHandle, type ToolAdapter, type RunResult, type RunFeatureOptions, type TokenUsage, type ToolCallRecord } from './types.js';
 import type { Effort, Feature } from '../backlog/schema.js';
 import { execFileSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
@@ -91,25 +91,31 @@ export const codexAdapter: ToolAdapter = {
     let stdout: string;
     let stderr: string;
     const progress = createCodexProgress();
+    const seenToolCalls = new Set<string>();
 
     try {
       ({ code, stdout, stderr } = await runCli('codex', args, {
         cwd: opts.cwd,
         timeoutMs,
         signal: opts.signal,
-        heartbeatMs: 30_000,
-        logLabel: `codex ${feature.id}`,
+        idleThresholdMs: resolveRuntimeConfig(opts.cwd).idleThresholdMs,
+        runId: opts.runId,
+        featureId: feature.id,
+        tool: feature.tool,
         heartbeatSuffix: () => progress.heartbeatSuffix(),
         progressSnapshot: () => progress.heartbeatSuffix(),
         onHeartbeat: (message) => { emitRunOutput(opts.runId, feature, message, 'stderr', 'heartbeat'); },
+        onStatus: opts.onStatus ?? ((snapshot): void => { msqEventBus.emit('run:status', snapshot); }),
         onStdoutLine: (line) => {
           const update = progress.onStdoutLine(line);
           if (update.output) emitRunOutput(opts.runId, feature, update.output.line, 'stdout', update.output.source);
           if (update.usage) emitUsage(opts.runId, feature, update.usage);
+          if (update.toolCall) emitToolCall(opts, feature, update.toolCall, seenToolCalls);
         },
         onStderrLine: (line) => {
           const update = progress.onStderrLine(line);
           if (update.output) emitRunOutput(opts.runId, feature, update.output.line, 'stderr', update.output.source);
+          if (update.toolCall) emitToolCall(opts, feature, update.toolCall, seenToolCalls);
         },
       }));
     } catch (error) {
@@ -311,6 +317,7 @@ interface ProgressUpdate {
     source: 'agent' | 'tool' | 'stderr';
   };
   usage?: TokenUsage;
+  toolCall?: Omit<ToolCallRecord, 'runId' | 'featureId' | 'tool'>;
 }
 
 function createCodexProgress(): {
@@ -370,6 +377,7 @@ function createCodexProgress(): {
             line: toolLine,
             source: 'tool',
           },
+          toolCall: normalizeCodexToolCall(evt, eventCount),
         };
       }
 
@@ -397,6 +405,24 @@ function createCodexProgress(): {
       return parts.length > 0 ? `[${parts.join(' | ')}]` : undefined;
     },
   };
+}
+
+function normalizeCodexToolCall(evt: CodexEvent, sequence: number): Omit<ToolCallRecord, 'runId' | 'featureId' | 'tool'> {
+  const item = evt.item ?? {};
+  const phase: ToolCallRecord['phase'] = evt.type === 'item.started' ? 'started' : 'completed';
+  const name = normalizeSnippet(item.name ?? item.tool_name ?? item.type ?? 'unknown');
+  const id = normalizeSnippet((item as { id?: string; call_id?: string }).id ?? (item as { call_id?: string }).call_id ?? `${name}-${String(sequence)}`);
+  const value = item.arguments ?? item.input ?? null;
+  const output = normalizeSnippet(item.output ?? item.result ?? item.aggregated_output ?? '') || null;
+  return { id, sequence, phase, name, arguments: value, output, step: null, startedAt: new Date().toISOString(), completedAt: phase === 'started' ? null : new Date().toISOString(), error: null };
+}
+
+function emitToolCall(opts: RunFeatureOptions, feature: Feature, partial: Omit<ToolCallRecord, 'runId' | 'featureId' | 'tool'>, seen: Set<string>): void {
+  const record = sanitizeToolCallRecord({ ...partial, runId: opts.runId, featureId: feature.id, tool: feature.tool });
+  const emit = opts.onToolCall ?? ((value): void => { msqEventBus.emit('tool:call', value); });
+  if (record.phase !== 'started' && !seen.has(record.id)) emit({ ...record, phase: 'started', completedAt: null });
+  seen.add(record.id);
+  emit(record);
 }
 
 function normalizeSnippet(text: unknown): string {
