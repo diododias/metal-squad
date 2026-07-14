@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { BacklogSchema, BacklogV1Schema, BacklogV2Schema, FallbackAlternativeSchema, RetrySchema } from '../../src/core/backlog/schema.js';
+import { BacklogInputSchema, BacklogSchema, BacklogV1Schema, BacklogV2Schema, EpicSchema, FallbackAlternativeSchema, RetrySchema } from '../../src/core/backlog/schema.js';
 
 const V1_YAML_OBJ = {
   version: 1,
@@ -360,6 +360,23 @@ describe('FallbackAlternativeSchema / RetrySchema.fallback', () => {
     if (v2Result.success) {
       expect(v2Result.data.epics[0]?.features[0]?.retry?.fallback).toEqual(retryWithFallback.fallback);
     }
+  });
+});
+
+describe('feature authoring identity boundary', () => {
+  it('accepts omitted feature IDs only at the input boundary', () => {
+    const parsed = BacklogInputSchema.parse({
+      version: 2,
+      repo: 'demo',
+      defaults: {},
+      epics: [{ id: 'epic-1', title: 'Epic', features: [{ title: 'New feature' }] }],
+    });
+    expect(parsed.epics[0]?.features[0]?.id).toBeUndefined();
+    expect(() => BacklogSchema.parse(parsed)).toThrow();
+  });
+
+  it('keeps EpicSchema IDs independent from feature registration', () => {
+    expect(EpicSchema.parse({ id: 'epic-legacy', title: 'Epic', features: [] }).id).toBe('epic-legacy');
   });
 });
 

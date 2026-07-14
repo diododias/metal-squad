@@ -112,6 +112,15 @@ function collectDashboardRows(): StatsRunRow[] {
 
 const FALLBACK_ROLE_COLOR = '#e5e7eb';
 
+function normalizeFeatureCatalog(catalog: Record<string, FeatureCatalogEntry>): Record<string, FeatureCatalogEntry> {
+  return Object.fromEntries(
+    Object.entries(catalog).map(([key, feature]) => [
+      key,
+      { ...feature, persistedId: feature.persistedId ?? feature.id },
+    ]),
+  );
+}
+
 function buildThemeSnapshot(): ThemeSnapshot {
   try {
     const config = resolveRuntimeConfig(process.cwd());
@@ -200,7 +209,7 @@ export function buildMsqWebState(): MsqWebState {
   const gates = collectGates();
   const pendingFeatures = collectPendingFeatures(runs);
   const runningTasks = collectRunningTasks();
-  const featureCatalog = getFeatureCatalog();
+  const featureCatalog = normalizeFeatureCatalog(getFeatureCatalog());
   const backlogSettings = getBacklogSettings();
   const executionRuns = runs.filter((run) => getRunGroup(run.status) === 'execution');
   const doneRuns = runs.filter((run) => run.status === 'done');

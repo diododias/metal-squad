@@ -17,6 +17,7 @@ export function toShortFeatureId(featureId: string): string {
 
 export interface KanbanCardRun {
   featureId: string;
+  persistedId?: string | null;
   title?: string | null;
   status: PillStatus;
   stage?: string | null;
@@ -64,7 +65,7 @@ export function KanbanCard({ run, selected, onClick }: KanbanCardProps): React.J
 
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
         <span style={{ fontSize: 'var(--text-2xs)', color: 'var(--text-faint)', fontFamily: 'var(--font-mono)' }}>
-          {toShortFeatureId(run.featureId)}
+          {run.persistedId ?? toShortFeatureId(run.featureId)}
         </span>
         {run.stage && <span style={{ fontSize: 'var(--text-2xs)', color: 'var(--accent-info)' }}>→ {run.stage}</span>}
       </div>

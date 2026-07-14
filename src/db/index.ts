@@ -95,6 +95,12 @@ export function resetDb(): void {
   dbMode = null;
 }
 
+/** Runs a write callback inside the shared SQLite transaction boundary. */
+export function withTransaction<T>(callback: (database: Database.Database) => T): T {
+  const database = getDb('readwrite');
+  return database.transaction(() => callback(database))();
+}
+
 function migrate(d: Database.Database): void {
   d.exec(`
     CREATE TABLE IF NOT EXISTS repos (

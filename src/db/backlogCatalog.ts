@@ -48,6 +48,24 @@ export interface BacklogCatalogDiff {
   unchangedFeatures: string[];
 }
 
+/** Returns every feature ID, including archived rows, because IDs are never reused. */
+export function listOccupiedFeatureIds(): Set<string> {
+  const db = getReadonlyDbOrNull();
+  if (!db) return new Set();
+  const rows = db.prepare(`SELECT feature_id FROM backlog_features`).all() as { feature_id: string }[];
+  return new Set(rows.map((row) => row.feature_id));
+}
+
+/** Finds the repository that owns an ID, including archived historical rows. */
+export function getFeatureIdOwner(featureId: string): string | undefined {
+  const db = getReadonlyDbOrNull();
+  if (!db) return undefined;
+  const row = db
+    .prepare(`SELECT repo_id FROM backlog_features WHERE feature_id = ? LIMIT 1`)
+    .get(featureId) as { repo_id: string } | undefined;
+  return row?.repo_id;
+}
+
 interface CatalogEpicRow {
   epic_id: string;
   title: string;
@@ -272,6 +290,19 @@ export function upsertBacklogCatalog(backlog: BacklogV2, repoId: string): Backlo
   );
 
   const run = db.transaction(() => {
+    const ownershipRows = db
+      .prepare(`SELECT feature_id, repo_id FROM backlog_features WHERE feature_id IN (${flattenFeatures(backlog).map(() => '?').join(',') || "''"})`)
+      .all(...flattenFeatures(backlog).map(({ feature }) => feature.id)) as { feature_id: string; repo_id: string }[];
+    const owners = new Map(ownershipRows.map((row) => [row.feature_id, row.repo_id]));
+    for (const { feature } of flattenFeatures(backlog)) {
+      const owner = owners.get(feature.id);
+      if (owner && owner !== repoId) {
+        throw new Error(
+          `Feature ID "${feature.id}" is already owned by repository "${owner}"; catalog update for "${repoId}" was rolled back.`,
+        );
+      }
+    }
+
     upsertMeta.run(
       repoId,
       backlog.repo,
