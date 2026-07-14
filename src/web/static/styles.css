@@ -10,6 +10,23 @@
 html, body { height: 100%; }
 #root { height: 100%; }
 
+.msq-status-spinner {
+  width: 11px;
+  height: 11px;
+  border: 2px solid var(--accent-info-10);
+  border-top-color: var(--accent-info);
+  border-radius: 50%;
+  animation: msq-status-spin 0.9s linear infinite;
+}
+
+@keyframes msq-status-spin {
+  to { transform: rotate(360deg); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .msq-status-spinner { animation: none; }
+}
+
 @media (max-width: 600px) {
   .msq-page-header { padding: 14px 16px 12px !important; }
 }

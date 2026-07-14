@@ -1,9 +1,10 @@
 import { execFileSync } from 'node:child_process';
-import type { SessionHandle, ToolAdapter, RunResult, RunFeatureOptions, TokenUsage } from './types.js';
+import { sanitizeToolCallRecord, type SessionHandle, type ToolAdapter, type RunResult, type RunFeatureOptions, type TokenUsage, type ToolCallRecord } from './types.js';
 import type { Effort, Feature } from '../backlog/schema.js';
 import { CliAbortError, runCli } from './spawn.js';
 import { msqEventBus } from '../events/index.js';
 import { parseControlSignal } from './control.js';
+import { resolveRuntimeConfig } from '../../config/index.js';
 
 interface OpenCodeUsage {
   input?: number;
@@ -89,11 +90,13 @@ export const opencodeAdapter: ToolAdapter = {
     let stdout: string;
     let stderr: string;
     const progress = createOpenCodeProgress();
+    const seenToolCalls = new Set<string>();
     const streamParser = createOpenCodeStreamParser(
       (event) => {
         const update = progress.onEvent(event);
         if (update.output) emitRunOutput(opts.runId, feature, update.output.line, 'stdout', update.output.source);
         if (update.usage) emitUsage(opts.runId, feature, update.usage);
+        if (update.toolCall) emitToolCall(opts, feature, update.toolCall, seenToolCalls);
       },
       (text) => {
         const line = normalizeSnippet(text);
@@ -105,10 +108,11 @@ export const opencodeAdapter: ToolAdapter = {
       ({ code, stdout, stderr } = await runCli('opencode', args, {
         cwd: opts.cwd,
         signal: opts.signal,
-        heartbeatMs: 30_000,
-        logLabel: `opencode ${feature.id}`,
-        heartbeatSuffix: () => progress.heartbeatSuffix(),
-        onHeartbeat: (message) => { emitRunOutput(opts.runId, feature, message, 'stderr', 'heartbeat'); },
+        idleThresholdMs: resolveRuntimeConfig(opts.cwd).idleThresholdMs,
+        runId: opts.runId,
+        featureId: feature.id,
+        tool: feature.tool,
+        onStatus: opts.onStatus ?? ((snapshot): void => { msqEventBus.emit('run:status', snapshot); }),
         onStdoutChunk: (chunk) => { streamParser.push(chunk); },
         onStderrLine: (line) => {
           const update = progress.onStderrLine(line);
@@ -217,6 +221,7 @@ function parseOpenCodeEvent(json: OpenCodeResponse): {
     source: 'agent' | 'tool' | 'stdout';
   };
   usage?: TokenUsage;
+  toolCall?: Omit<ToolCallRecord, 'runId' | 'featureId' | 'tool'>;
 } {
   if (json.type === 'error' || json.error) {
     const errorMsg = pickTextSnippet(
@@ -244,6 +249,18 @@ function parseOpenCodeEvent(json: OpenCodeResponse): {
       output: {
         line: normalizeSnippet(`tool ${toolName}${payload && payload !== '{}' ? ` ${payload}` : ''}`),
         source: 'tool',
+      },
+      toolCall: {
+        id: part?.callID ?? part?.id ?? `${toolName}-${String(Date.now())}`,
+        sequence: 0,
+        phase: part?.type === 'tool_use' || part?.type === 'tool_start' ? 'started' : 'completed',
+        name: toolName,
+        arguments: part?.input ?? part?.args ?? part?.arguments ?? json.input ?? json.args ?? json.arguments ?? null,
+        output: null,
+        step: null,
+        startedAt: new Date().toISOString(),
+        completedAt: part?.type === 'tool_use' || part?.type === 'tool_start' ? null : new Date().toISOString(),
+        error: null,
       },
     };
   }
@@ -419,6 +436,7 @@ function createOpenCodeProgress(): {
       source: 'agent' | 'tool' | 'stdout';
     };
     usage?: TokenUsage;
+    toolCall?: Omit<ToolCallRecord, 'runId' | 'featureId' | 'tool'>;
   };
   onStderrLine: (line: string) => {
     output?: {
@@ -435,15 +453,18 @@ function createOpenCodeProgress(): {
   let lastToolSnippet = '';
   let lastThinkingSnippet = '';
   let lastStderrSnippet = '';
+  let toolSequence = 0;
 
   return {
     onEvent(event: OpenCodeResponse): {
       output?: { line: string; source: 'agent' | 'tool' | 'stdout' };
       usage?: TokenUsage;
+      toolCall?: Omit<ToolCallRecord, 'runId' | 'featureId' | 'tool'>;
     } {
       eventCount += 1;
       lastEventType = pickTextSnippet(event.type, event.part?.type);
       const update = parseOpenCodeEvent(event);
+      if (update.toolCall) update.toolCall.sequence = ++toolSequence;
       if (update.output?.source === 'tool') {
         lastToolSnippet = update.output.line;
       } else if (update.output?.source === 'agent') {
@@ -471,6 +492,14 @@ function createOpenCodeProgress(): {
       return parts.length > 0 ? `[${parts.join(' | ')}]` : undefined;
     },
   };
+}
+
+function emitToolCall(opts: RunFeatureOptions, feature: Feature, partial: Omit<ToolCallRecord, 'runId' | 'featureId' | 'tool'>, seen: Set<string>): void {
+  const record = sanitizeToolCallRecord({ ...partial, runId: opts.runId, featureId: feature.id, tool: feature.tool });
+  const emit = opts.onToolCall ?? ((value): void => { msqEventBus.emit('tool:call', value); });
+  if (record.phase !== 'started' && !seen.has(record.id)) emit({ ...record, phase: 'started', completedAt: null });
+  seen.add(record.id);
+  emit(record);
 }
 
 function emitRunOutput(

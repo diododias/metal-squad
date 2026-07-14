@@ -7,6 +7,7 @@ build/
 coverage/
 .metal-squad/
 *.log
+*.tsbuildinfo
 .DS_Store
 *.db
 *.db-shm
