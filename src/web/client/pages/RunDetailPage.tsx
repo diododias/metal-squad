@@ -5,6 +5,8 @@ import { WorkflowStepper } from '../components/navigation/WorkflowStepper.js';
 import { Tabs } from '../components/navigation/Tabs.js';
 import { ApprovalBanner } from '../components/feedback/ApprovalBanner.js';
 import { AgentTranscript, type TranscriptEntry } from '../components/transcript/AgentTranscript.js';
+import { ToolCallGroup } from '../components/transcript/ToolCallGroup.js';
+import { RunStatusIndicator } from '../components/status/RunStatusIndicator.js';
 import { FeatureConfigDetail } from '../components/FeatureConfigDetail.js';
 import { PageHeader } from '../PageHeader.js';
 import { formatElapsed, formatPercent, formatTokens, getRunStatusLabel } from '../lib/format.js';
@@ -13,11 +15,12 @@ import type { MsqWebState, FeatureConfigPatch, WebSocketClientMessage } from '..
 import type { TaskRun } from '../../../db/repo.js';
 import type { RunBreakdown } from '../../../core/stats.js';
 import type { OutputLine } from '../hooks/useLocalOutput.js';
+import type { SessionStatusSnapshot, ToolCallRecord } from '../../../core/adapters/types.js';
 
 export interface RunDetailPageProps {
   state: MsqWebState;
   featureId: string;
-  runDetails: Record<number, { taskRuns: TaskRun[]; breakdown: RunBreakdown | null }>;
+  runDetails: Record<number, { taskRuns: TaskRun[]; breakdown: RunBreakdown | null; sessionStatus: SessionStatusSnapshot | null; statusHistory: SessionStatusSnapshot[]; toolCalls: ToolCallRecord[] }>;
   linesByRun: Record<number, OutputLine[]>;
   onSubscribeRun: (runId: number) => () => void;
   onBack: () => void;
@@ -46,6 +49,23 @@ function outputToTranscript(lines: OutputLine[]): TranscriptEntry[] {
   });
 }
 
+function snapshotFromRun(run: NonNullable<MsqWebState['runs'][number]>): SessionStatusSnapshot | null {
+  if (!run.sessionStatus || !run.sessionStartedAt || !run.sessionUpdatedAt) return null;
+  return {
+    runId: run.runId,
+    featureId: run.featureId,
+    tool: run.tool,
+    status: run.sessionStatus,
+    startedAt: run.sessionStartedAt,
+    updatedAt: run.sessionUpdatedAt,
+    elapsedMs: run.sessionElapsedMs ?? 0,
+    lastOutputAt: run.sessionLastOutputAt ?? null,
+    idleMs: run.sessionIdleMs ?? null,
+    reason: run.sessionReason ?? null,
+    terminal: run.sessionTerminal ?? false,
+  };
+}
+
 export function RunDetailPage({
   state,
   featureId,
@@ -68,6 +88,8 @@ export function RunDetailPage({
   const detail = run ? runDetails[run.runId] : undefined;
   const stageGroups = useMemo(() => summarizeTaskRuns(detail?.taskRuns ?? [], feature?.workflow.stages), [detail, feature]);
   const transcript = useMemo(() => outputToTranscript(run ? (linesByRun[run.runId] ?? []) : []), [run, linesByRun]);
+  const sessionStatus = detail?.sessionStatus ?? (run ? snapshotFromRun(run) : null);
+  const toolCalls = detail?.toolCalls ?? [];
 
   if (!run) {
     return (
@@ -109,6 +131,9 @@ export function RunDetailPage({
   const tabContent: Record<string, React.ReactNode> = {
     summary: (
       <div>
+        <div style={{ marginBottom: 14 }}>
+          <RunStatusIndicator status={sessionStatus} fallbackStatus={run.status} spinnerEnabled={state.runtimeConfig.web.statusSpinner} />
+        </div>
         <WorkflowStepper stages={stages} currentStage={run.pipelineCurrentStage ?? run.stage} />
         <div style={{ marginTop: 14, display: 'flex', flexDirection: 'column', gap: 6 }}>
           {stageGroups.map((g) => (
@@ -142,7 +167,12 @@ export function RunDetailPage({
     ) : (
       <div style={{ color: 'var(--text-faint)', fontSize: 'var(--text-sm)' }}>Feature config not found in catalog.</div>
     ),
-    output: transcript.length ? <AgentTranscript entries={transcript} /> : <div style={{ color: 'var(--text-faint)', fontSize: 'var(--text-sm)' }}>No output captured for this run yet.</div>,
+    output: (
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+        {toolCalls.length > 0 && <ToolCallGroup groupKey={`${String(runId ?? 0)}:${run.stage ?? 'run'}:0`} calls={toolCalls} />}
+        {transcript.length > 0 ? <AgentTranscript entries={transcript.filter((entry) => entry.type !== 'tool' || toolCalls.length === 0)} /> : toolCalls.length === 0 && <div style={{ color: 'var(--text-faint)', fontSize: 'var(--text-sm)' }}>No output captured for this run yet.</div>}
+      </div>
+    ),
   };
 
   return (
@@ -205,7 +235,7 @@ export function RunDetailPage({
           </div>
         )}
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(120px, 1fr))', gap: 8, marginBottom: 16 }}>
-          <MetricCard label="Status" value={getRunStatusLabel(run)} status={run.status} />
+          <MetricCard label="Status" value={sessionStatus?.status ?? getRunStatusLabel(run)} status={run.status} />
           <MetricCard label="Tool" value={run.tool} />
           <MetricCard label="Model" value={feature?.model ?? '—'} />
           <MetricCard label="Tokens" value={formatTokens(run.totalTokens)} />

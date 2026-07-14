@@ -95,12 +95,14 @@ export function resolveWebConfig(overrides: { host?: string; port?: number; auth
   host: string;
   port: number;
   auth: 'token' | 'none';
+  statusSpinner: boolean;
 } {
   const cfg = loadConfig();
   return {
     host: overrides.host ?? cfg.web.host,
     port: overrides.port ?? cfg.web.port,
     auth: overrides.auth ?? cfg.web.auth,
+    statusSpinner: cfg.web.statusSpinner,
   };
 }
 
@@ -130,6 +132,7 @@ export function persistWebConfig(overrides: { host?: string; port?: number; auth
     host: overrides.host ?? cfg.web.host,
     port: overrides.port ?? cfg.web.port,
     auth: overrides.auth ?? cfg.web.auth,
+    statusSpinner: cfg.web.statusSpinner,
   };
   saveConfig(cfg);
 }

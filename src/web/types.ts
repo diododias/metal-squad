@@ -1,4 +1,5 @@
 import type { MsqEvents } from '../core/events/types.js';
+import type { SessionStatusSnapshot, ToolCallRecord } from '../core/adapters/types.js';
 import type { RunHistoryEntry, RunSummary, RunningTaskSummary, StatsRunRow, TaskRun } from '../db/repo.js';
 import type { PendingApproval } from '../ui/hooks/useGates.js';
 import type { FeatureCatalogEntry, BacklogSettings } from '../ui/catalog.js';
@@ -140,11 +141,13 @@ export type WebSocketClientMessage =
 
 export type WebSocketServerMessage =
   | { type: 'state:full'; payload: MsqWebState }
-  | { type: 'run:detail'; payload: { runId: number; taskRuns: TaskRun[]; breakdown: RunBreakdown | null } }
+  | { type: 'run:detail'; payload: { runId: number; taskRuns: TaskRun[]; breakdown: RunBreakdown | null; sessionStatus: SessionStatusSnapshot | null; statusHistory: SessionStatusSnapshot[]; toolCalls: ToolCallRecord[] } }
   | { type: 'run:history'; payload: { featureId: string; runs: RunHistoryEntry[] } }
   | { type: 'run:changes'; payload: RunChangesPayload }
+  | { type: 'run:status'; payload: SessionStatusSnapshot }
+  | { type: 'tool:call'; payload: ToolCallRecord }
   | { type: 'error'; payload: { message: string } }
-  | { type: keyof MsqEvents; payload: unknown };
+  | { type: Exclude<keyof MsqEvents, 'run:status' | 'tool:call'>; payload: unknown };
 
 export interface WebServerOptions {
   host?: string;

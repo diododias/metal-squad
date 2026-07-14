@@ -124,7 +124,15 @@ function migrate(d: Database.Database): void {
       output_tokens INTEGER,
       total_tokens INTEGER,
       context_window_tokens INTEGER,
-      context_window_percent REAL
+      context_window_percent REAL,
+      session_status TEXT,
+      session_started_at TEXT,
+      session_updated_at TEXT,
+      session_elapsed_ms INTEGER,
+      session_last_output_at TEXT,
+      session_idle_ms INTEGER,
+      session_reason TEXT,
+      session_terminal INTEGER NOT NULL DEFAULT 0
     );
 
     CREATE TABLE IF NOT EXISTS token_usage (
@@ -164,6 +172,24 @@ function migrate(d: Database.Database): void {
       line       TEXT NOT NULL,
       created_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
+
+    CREATE TABLE IF NOT EXISTS run_tool_calls (
+      run_id       INTEGER NOT NULL REFERENCES runs(id),
+      id           TEXT NOT NULL,
+      feature_id   TEXT NOT NULL,
+      tool         TEXT NOT NULL,
+      sequence     INTEGER NOT NULL,
+      phase        TEXT NOT NULL,
+      name         TEXT NOT NULL,
+      arguments_json TEXT,
+      output       TEXT,
+      step         TEXT,
+      started_at   TEXT NOT NULL,
+      completed_at TEXT,
+      error        TEXT,
+      PRIMARY KEY (run_id, id)
+    );
+    CREATE INDEX IF NOT EXISTS idx_run_tool_calls_run_sequence ON run_tool_calls(run_id, sequence);
 
     CREATE TABLE IF NOT EXISTS context_queries (
       id            INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -392,6 +418,23 @@ function migrate(d: Database.Database): void {
   ensurePipelineColumn('requested_abort_feature_id', `ALTER TABLE pipelines ADD COLUMN requested_abort_feature_id TEXT`);
   ensurePipelineColumn('resume_count', `ALTER TABLE pipelines ADD COLUMN resume_count INTEGER NOT NULL DEFAULT 0`);
   ensurePipelineColumn('resume_summary', `ALTER TABLE pipelines ADD COLUMN resume_summary TEXT`);
+
+  const sessionColumns: [string, string][] = [
+    ['session_status', `ALTER TABLE runs ADD COLUMN session_status TEXT`],
+    ['session_started_at', `ALTER TABLE runs ADD COLUMN session_started_at TEXT`],
+    ['session_updated_at', `ALTER TABLE runs ADD COLUMN session_updated_at TEXT`],
+    ['session_elapsed_ms', `ALTER TABLE runs ADD COLUMN session_elapsed_ms INTEGER`],
+    ['session_last_output_at', `ALTER TABLE runs ADD COLUMN session_last_output_at TEXT`],
+    ['session_idle_ms', `ALTER TABLE runs ADD COLUMN session_idle_ms INTEGER`],
+    ['session_reason', `ALTER TABLE runs ADD COLUMN session_reason TEXT`],
+    ['session_terminal', `ALTER TABLE runs ADD COLUMN session_terminal INTEGER NOT NULL DEFAULT 0`],
+  ];
+  for (const [name, sql] of sessionColumns) {
+    if (!runColumns.some((column) => column.name === name)) {
+      d.exec(sql);
+      runColumns.push({ name });
+    }
+  }
 
   const retryHistoryColumns = d
     .prepare(`PRAGMA table_info(retry_history)`)

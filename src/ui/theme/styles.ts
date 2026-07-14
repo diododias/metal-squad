@@ -63,10 +63,10 @@ export function getOutputStyle(
   switch (source) {
     case 'tool':
       return mergeInkStyles(theme.role('primary'), { dimColor: true });
-    case 'heartbeat':
-      return theme.role('muted');
     case 'stderr':
       return theme.role('error');
+    case 'heartbeat':
+      return theme.role('muted');
     case 'stdout':
     case 'agent':
       return theme.role('text');
