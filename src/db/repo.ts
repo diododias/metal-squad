@@ -547,12 +547,29 @@ export interface RunSummary {
   prUrl?: string | null;
 }
 
+function getRunColumnProjection(
+  availableColumns: Set<string>,
+  columnName: string,
+  alias: string,
+): string {
+  return availableColumns.has(columnName)
+    ? `r.${columnName} AS ${alias}`
+    : `NULL AS ${alias}`;
+}
+
 // T003: listRunsForTui — most recent run per feature per repo (US2 deduplication via CTE)
 export function listRunsForTui(limit = 50, repoId?: string): RunSummary[] {
   if (!hasDbFile()) return [];
   const repoFilter = repoId ? 'WHERE repo_id = ?' : '';
   const params = repoId ? [repoId, limit] : [limit];
-  return getDb('readonly')
+  const db = getDb('readonly');
+  const runColumns = new Set(
+    (db.prepare(`PRAGMA table_info(runs)`).all() as { name?: string }[])
+      .map((column) => column.name)
+      .filter((name): name is string => typeof name === 'string'),
+  );
+
+  return db
     .prepare(
       `WITH latest AS (
          SELECT MAX(id) AS id
@@ -643,14 +660,14 @@ export function listRunsForTui(limit = 50, repoId?: string): RunSummary[] {
          ltd.context_window_percent AS latestTransitionContextWindowPercent,
          ltd.previous_session_id AS latestTransitionPreviousSessionId,
          ltd.next_session_id AS latestTransitionNextSessionId,
-         r.publish_verified AS publishVerified,
-         r.publish_error AS publishError,
-         r.branch_name AS branchName,
-         r.base_branch AS baseBranch,
-         r.commit_sha AS commitSha,
-         r.remote_branch AS remoteBranch,
-         r.pr_number AS prNumber,
-         r.pr_url AS prUrl
+         ${getRunColumnProjection(runColumns, 'publish_verified', 'publishVerified')},
+         ${getRunColumnProjection(runColumns, 'publish_error', 'publishError')},
+         ${getRunColumnProjection(runColumns, 'branch_name', 'branchName')},
+         ${getRunColumnProjection(runColumns, 'base_branch', 'baseBranch')},
+         ${getRunColumnProjection(runColumns, 'commit_sha', 'commitSha')},
+         ${getRunColumnProjection(runColumns, 'remote_branch', 'remoteBranch')},
+         ${getRunColumnProjection(runColumns, 'pr_number', 'prNumber')},
+         ${getRunColumnProjection(runColumns, 'pr_url', 'prUrl')}
        FROM runs r
        JOIN latest ON latest.id = r.id
        LEFT JOIN latest_usage lu ON lu.runId = r.id
