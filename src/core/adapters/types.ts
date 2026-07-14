@@ -13,6 +13,12 @@ export interface RunControlNeedsInput {
   options?: string[];
 }
 
+export interface TimeoutResult {
+  timeoutMs: number;
+  runtimeMs: number;
+  lastProgress?: string;
+}
+
 export type RunControl = RunControlNeedsInput;
 
 export interface SessionHandle {
@@ -53,6 +59,7 @@ export interface RunResult {
   publishEvidence?: PublishEvidence;
   publishVerified?: boolean;
   publishVerificationStatus?: 'blocked' | 'failed';
+  timeout?: TimeoutResult;
 }
 
 export interface ToolAdapter {

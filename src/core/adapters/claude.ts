@@ -85,6 +85,7 @@ export const claudeAdapter: ToolAdapter = {
         heartbeatMs: 30_000,
         logLabel: `claude ${feature.id}`,
         heartbeatSuffix: () => progress.heartbeatSuffix(),
+        progressSnapshot: () => progress.heartbeatSuffix(),
         onHeartbeat: (message) => { emitRunOutput(opts.runId, feature, message, 'stderr', 'heartbeat'); },
         signal: opts.signal,
         onStdoutLine: (line) => {
@@ -112,6 +113,11 @@ export const claudeAdapter: ToolAdapter = {
           ok: false,
           summary: `timeout após ${String(Math.round(error.runtimeMs / 1000))}s. ${partial}`,
           usage,
+          timeout: {
+            timeoutMs: error.timeoutMs,
+            runtimeMs: error.runtimeMs,
+            ...(error.lastProgress ? { lastProgress: sanitizeTimeoutProgress(error.lastProgress) } : {}),
+          },
         };
       }
       if (error instanceof CliAbortError) {
@@ -156,6 +162,13 @@ export const claudeAdapter: ToolAdapter = {
     return { input, cachedInput, output, total: input + cachedInput + output };
   },
 };
+
+function sanitizeTimeoutProgress(value: string): string {
+  return value.split('').filter((char) => {
+    const code = char.charCodeAt(0);
+    return code >= 32 && code !== 127;
+  }).join('').replace(/\s+/g, ' ').trim().slice(0, 500);
+}
 
 function safeJson<T>(s: string): T | null { // eslint-disable-line @typescript-eslint/no-unnecessary-type-parameters
   try {

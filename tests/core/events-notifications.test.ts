@@ -2,15 +2,21 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { createMsqEventBus } from '../../src/core/events/bus.js';
 
 const mockDispatch = vi.fn();
+const mockGetPausedPipelineIdForBudget = vi.fn();
 
 vi.mock('../../src/core/notify/manager.js', () => ({
   dispatch: mockDispatch,
+}));
+vi.mock('../../src/db/repo.js', () => ({
+  getPausedPipelineIdForBudget: mockGetPausedPipelineIdForBudget,
 }));
 
 describe('attachEventNotifications', () => {
   beforeEach(() => {
     mockDispatch.mockReset();
     mockDispatch.mockResolvedValue(undefined);
+    mockGetPausedPipelineIdForBudget.mockReset();
+    mockGetPausedPipelineIdForBudget.mockReturnValue(undefined);
   });
 
   it('dispatches run:start notifications', async () => {
@@ -146,6 +152,72 @@ describe('attachEventNotifications', () => {
             { text: '✅ Advance', callback_data: 'stage:3 advance' },
             { text: '🔄 Retry', callback_data: 'stage:3 retry' },
             { text: '⏸ Hold', callback_data: 'stage:3 hold' },
+          ]],
+        },
+      }),
+    );
+
+    detach();
+  });
+
+  it('dispatches timeout approval notifications with retry and keep-blocked actions', async () => {
+    const { attachEventNotifications } = await import('../../src/core/events/notifications.js');
+    const eventBus = createMsqEventBus();
+    const detach = attachEventNotifications(eventBus);
+
+    eventBus.emit('timeout:approval-created', {
+      requestId: 77,
+      occurrenceId: 19,
+      runId: 31,
+      pipelineId: 5,
+      featureId: 'feat-timeout',
+      stage: 'implement',
+      timeoutMs: 600_000,
+      runtimeMs: 605_000,
+      lastProgress: 'waiting for publish verification',
+    });
+
+    expect(mockDispatch).toHaveBeenCalledWith(
+      'timeout:approval-created',
+      expect.stringContaining('feat-timeout stage implement timed out'),
+      expect.objectContaining({
+        requestId: 77,
+        occurrenceId: 19,
+        runId: 31,
+        timeoutApprovalRequestId: 77,
+        featureId: 'feat-timeout',
+        stage: 'implement',
+        reply_markup: {
+          inline_keyboard: [[
+            { text: '🔄 Retry', callback_data: 'timeout:77 retry' },
+            { text: '⏸ Keep blocked', callback_data: 'timeout:77 keep_blocked' },
+          ]],
+        },
+      }),
+    );
+
+    detach();
+  });
+
+  it('adds a resume button to budget alerts when a paused pipeline exists', async () => {
+    mockGetPausedPipelineIdForBudget.mockReturnValue(14);
+    const { attachEventNotifications } = await import('../../src/core/events/notifications.js');
+    const eventBus = createMsqEventBus();
+    const detach = attachEventNotifications(eventBus);
+
+    eventBus.emit('budget:alert', {
+      percent: 85,
+      spent: 850,
+      limit: 1000,
+    });
+
+    expect(mockDispatch).toHaveBeenCalledWith(
+      'budget:alert',
+      'metal-squad: budget 85% reached (850/1000)',
+      expect.objectContaining({
+        reply_markup: {
+          inline_keyboard: [[
+            { text: '▶️ Resume Pipeline', callback_data: 'resume_pipeline:14' },
           ]],
         },
       }),

@@ -121,6 +121,12 @@ export function schedule(
             return;
           }
 
+          if (resultValue.timeout) {
+            remaining.unshift(feature);
+            setState('paused');
+            return;
+          }
+
           if (!resultValue.ok) {
             const policy = feature.retry?.onFail ?? 'stop';
             if (policy === 'stop') {

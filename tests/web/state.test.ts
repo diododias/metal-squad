@@ -8,6 +8,7 @@ const mocks = vi.hoisted(() => ({
   listPendingStageRequests: vi.fn(),
   listRunningTaskRuns: vi.fn(),
   listRunsForStats: vi.fn(),
+  listPendingTimeoutApprovalRequests: vi.fn(),
   getFeatureCatalog: vi.fn(),
   getBacklogSettings: vi.fn(),
   resolveRuntimeConfig: vi.fn(),
@@ -24,6 +25,7 @@ vi.mock('../../src/db/repo.js', () => ({
   listPendingStageRequests: mocks.listPendingStageRequests,
   listRunningTaskRuns: mocks.listRunningTaskRuns,
   listRunsForStats: mocks.listRunsForStats,
+  listPendingTimeoutApprovalRequests: mocks.listPendingTimeoutApprovalRequests,
 }));
 
 vi.mock('../../src/ui/catalog.js', () => ({
@@ -52,6 +54,7 @@ describe('buildMsqWebState pendingFeatures projection', () => {
     mocks.listPendingStageRequests.mockReturnValue([]);
     mocks.listRunningTaskRuns.mockReturnValue([]);
     mocks.listRunsForStats.mockReturnValue([]);
+    mocks.listPendingTimeoutApprovalRequests.mockReturnValue([]);
     mocks.getFeatureCatalog.mockReturnValue({
       'feat-1': {
         id: 'feat-1',
@@ -169,6 +172,39 @@ describe('buildMsqWebState pendingFeatures projection', () => {
       latestTransitionReason: 'sixty_percent_guardrail',
       latestTransitionDecision: 'new_session',
     });
+  });
+
+  it('exposes pending timeout approvals in the web state', async () => {
+    const { buildMsqWebState } = await import('../../src/web/state.js');
+    mocks.listPendingTimeoutApprovalRequests.mockReturnValue([
+      {
+        id: 7,
+        timeoutOccurrenceId: 3,
+        runId: 42,
+        pipelineId: 99,
+        featureId: 'feat-1',
+        stage: 'implement',
+        status: 'pending',
+        notificationStatus: 'sent',
+        notificationAttempts: 2,
+        createdAt: '2026-07-14T12:00:00.000Z',
+      },
+    ]);
+
+    expect(buildMsqWebState().timeoutApprovals).toEqual([
+      {
+        requestId: 7,
+        occurrenceId: 3,
+        runId: 42,
+        pipelineId: 99,
+        featureId: 'feat-1',
+        stage: 'implement',
+        status: 'pending',
+        notificationStatus: 'sent',
+        notificationAttempts: 2,
+        createdAt: '2026-07-14T12:00:00.000Z',
+      },
+    ]);
   });
 
   it('removes blocked execution-owned features from pendingFeatures', async () => {

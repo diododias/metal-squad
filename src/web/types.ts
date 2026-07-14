@@ -13,6 +13,19 @@ export interface TokenStats {
   error: string | null;
 }
 
+export interface TimeoutApprovalState {
+  requestId: number;
+  occurrenceId: number;
+  runId: number;
+  pipelineId: number | null;
+  featureId: string;
+  stage: string | null;
+  status: 'pending' | 'approved' | 'blocked' | 'cancelled' | 'superseded';
+  notificationStatus: 'pending' | 'sent' | 'failed';
+  notificationAttempts: number;
+  createdAt: string;
+}
+
 export interface UiNotification {
   id: string;
   type: 'info' | 'notice';
@@ -45,6 +58,7 @@ export interface MsqWebState {
   gates: PendingApproval[];
   pendingFeatures: FeatureCatalogEntry[];
   runningTasks: RunningTaskSummary[];
+  timeoutApprovals: TimeoutApprovalState[];
   featureCatalog: Record<string, FeatureCatalogEntry>;
   backlogSettings: BacklogSettings;
   stats: {
