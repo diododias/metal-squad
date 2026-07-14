@@ -173,8 +173,22 @@ export function BoardPage({ state, isMobile, onOpenRun, onOpenBacklogItem }: Boa
               {todo.map((f) => (
                 <div key={f.id} {...cardInteraction(() => { onOpenBacklogItem(f.id); })} style={{ cursor: 'pointer' }}>
                   <Card>
-                    <div style={{ fontWeight: 600, fontSize: 'var(--text-sm)', marginBottom: 4 }}>{f.id}</div>
-                    <div style={{ fontSize: 'var(--text-xs)', color: 'var(--text-dim)', marginBottom: 6 }}>{f.title}</div>
+                    <div
+                      style={{
+                        fontWeight: 600,
+                        fontSize: 'var(--text-sm)',
+                        color: 'var(--text-primary)',
+                        lineHeight: 1.3,
+                        display: '-webkit-box',
+                        WebkitLineClamp: 2,
+                        WebkitBoxOrient: 'vertical',
+                        overflow: 'hidden',
+                        marginBottom: 4,
+                      }}
+                    >
+                      {f.title}
+                    </div>
+                    <div style={{ fontSize: 'var(--text-2xs)', color: 'var(--text-faint)', fontFamily: 'var(--font-mono)', marginBottom: 6 }}>{f.id}</div>
                     <div style={{ display: 'flex', gap: 6 }}>
                       <Tag>{f.tool}</Tag>
                       <Tag>{f.effort}</Tag>
