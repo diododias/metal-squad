@@ -99,6 +99,9 @@ describe('getDb migration — column checks', () => {
       { name: 'summary' }, { name: 'input_tokens' }, { name: 'output_tokens' },
       { name: 'cached_input_tokens' }, { name: 'total_tokens' }, { name: 'pipeline_id' },
       { name: 'context_window_tokens' }, { name: 'context_window_percent' }, { name: 'stage' },
+      { name: 'publish_verified' }, { name: 'publish_error' }, { name: 'branch_name' },
+      { name: 'base_branch' }, { name: 'commit_sha' }, { name: 'remote_branch' },
+      { name: 'pr_number' }, { name: 'pr_url' },
     ];
     pragmaRunsColumns = ALL_RUN_COLS;
     pragmaTokenUsageColumns = [{ name: 'cached_input' }];

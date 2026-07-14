@@ -11,6 +11,7 @@ const mockCreateStageTransitionDecision = vi.fn();
 const mockCreateGate = vi.fn();
 const mockCreateRetryRecord = vi.fn();
 const mockUpdateRunTool = vi.fn();
+const mockUpdateRunPublishState = vi.fn();
 const mockUpdateStageTransitionDecisionNextSessionId = vi.fn();
 const mockFinishRun = vi.fn();
 const mockFinishPipeline = vi.fn();
@@ -35,6 +36,7 @@ const mockGetCatalogFeature = vi.fn();
 const mockListCompletedFeatureIds = vi.fn();
 const mockListRunsForTui = vi.fn();
 const mockSpawn = vi.fn();
+const mockVerifyPublishContract = vi.fn();
 let pipelineRow: any;
 
 vi.mock('../../src/core/repo.js', () => ({
@@ -55,6 +57,7 @@ vi.mock('../../src/db/repo.js', () => ({
   createGate: mockCreateGate,
   createRetryRecord: mockCreateRetryRecord,
   updateRunTool: mockUpdateRunTool,
+  updateRunPublishState: mockUpdateRunPublishState,
   updateStageTransitionDecisionNextSessionId: mockUpdateStageTransitionDecisionNextSessionId,
   finishRun: mockFinishRun,
   finishPipeline: mockFinishPipeline,
@@ -82,6 +85,10 @@ vi.mock('node:child_process', async (importOriginal) => {
 
 vi.mock('../../src/core/adapters/index.js', () => ({
   getAdapter: () => ({ runFeature: mockRunFeature }),
+}));
+
+vi.mock('../../src/core/git/publish.js', () => ({
+  verifyPublishContract: mockVerifyPublishContract,
 }));
 
 vi.mock('../../src/core/notify/telegram.js', () => ({
@@ -122,6 +129,7 @@ beforeEach(() => {
   mockCreateGate.mockReset();
   mockCreateRetryRecord.mockReset();
   mockUpdateRunTool.mockReset();
+  mockUpdateRunPublishState.mockReset();
   mockUpdateStageTransitionDecisionNextSessionId.mockReset();
   mockFinishRun.mockReset();
   mockFinishPipeline.mockReset();
@@ -137,6 +145,7 @@ beforeEach(() => {
   mockUpdatePipelineSnapshot.mockReset();
   mockNotify.mockReset();
   mockRunFeature.mockReset();
+  mockVerifyPublishContract.mockReset();
   mockEventEmit.mockReset();
   mockAttachDefaultEventLogger.mockReset();
   mockAttachEventNotifications.mockReset();
@@ -233,6 +242,19 @@ beforeEach(() => {
       })),
     ),
   });
+  mockVerifyPublishContract.mockReturnValue({
+    ok: true,
+    status: 'done',
+    summary: 'implement publish verified on feat/test (https://example/pr/1).',
+    evidence: {
+      branch: 'feat/test',
+      baseBranch: 'develop',
+      commitSha: 'abc1234',
+      remoteBranch: 'origin/feat/test',
+      prNumber: 1,
+      prUrl: 'https://example/pr/1',
+    },
+  });
 });
 
 function createAdaptiveBacklog(alwaysIsolatedStages: string[] = []): Backlog {
@@ -267,7 +289,117 @@ function createAdaptiveBacklog(alwaysIsolatedStages: string[] = []): Backlog {
   };
 }
 
+function createImplementStageBacklog(): Backlog {
+  return {
+    version: 2,
+    repo: 'repo',
+    defaults: { tool: 'codex', effort: 'medium', skills: ['implement'], stageSkills: {} },
+    epics: [
+      {
+        id: 'epic-1',
+        title: 'Epic',
+        features: [
+          {
+            id: 'feat-implement',
+            title: 'Implement Feature',
+            spec: 'spec',
+            tasks: [],
+            tool: 'codex',
+            effort: 'medium',
+            dependsOn: [],
+            workflow: {
+              mode: 'staged',
+              stages: ['implement'],
+              approvals: { channel: 'telegram', autoAdvance: false },
+              syncTasksToBacklog: false,
+              sessionPolicy: { mode: 'isolated', alwaysIsolatedStages: [] },
+            },
+          },
+        ],
+      },
+    ],
+  };
+}
+
 describe('executeBacklog failure persistence', () => {
+  it('verifies publish evidence after a successful implement stage', async () => {
+    mockRunFeature.mockResolvedValue({
+      ok: true,
+      summary: 'implemented and published',
+    });
+
+    const { executeBacklog } = await import('../../src/core/runner/execute.js');
+
+    await expect(
+      executeBacklog(createImplementStageBacklog(), { cwd: '/repo', concurrency: 1 }),
+    ).resolves.toBeUndefined();
+
+    expect(mockVerifyPublishContract).toHaveBeenCalledWith('/repo');
+    expect(mockUpdateRunPublishState).toHaveBeenCalledWith(7, {
+      verified: true,
+      error: null,
+      evidence: {
+        branch: 'feat/test',
+        baseBranch: 'develop',
+        commitSha: 'abc1234',
+        remoteBranch: 'origin/feat/test',
+        prNumber: 1,
+        prUrl: 'https://example/pr/1',
+      },
+    });
+    expect(mockFinishRun).toHaveBeenCalledWith(
+      7,
+      'done',
+      'implement publish verified on feat/test (https://example/pr/1).',
+    );
+  });
+
+  it('blocks implement completion when publish verification is inconclusive', async () => {
+    mockRunFeature.mockResolvedValue({
+      ok: true,
+      summary: 'implemented but publish verification pending',
+    });
+    mockVerifyPublishContract.mockReturnValue({
+      ok: false,
+      status: 'blocked',
+      summary: 'implement: GitHub CLI is unavailable, so PR verification could not be completed.',
+      evidence: {
+        branch: 'feat/test',
+        baseBranch: 'develop',
+        commitSha: 'abc1234',
+        remoteBranch: 'origin/feat/test',
+        prNumber: null,
+        prUrl: null,
+      },
+    });
+
+    const { executeBacklog } = await import('../../src/core/runner/execute.js');
+
+    await expect(
+      executeBacklog(createImplementStageBacklog(), { cwd: '/repo', concurrency: 1 }),
+    ).rejects.toThrow(
+      'Feature feat-implement falhou: implement: implemented but publish verification pending\nimplement: GitHub CLI is unavailable, so PR verification could not be completed.',
+    );
+
+    expect(mockFinishRun).toHaveBeenCalledWith(
+      7,
+      'blocked',
+      'implemented but publish verification pending\nimplement: GitHub CLI is unavailable, so PR verification could not be completed.',
+    );
+    expect(mockUpdateRunPublishState).toHaveBeenCalledWith(7, {
+      verified: false,
+      error: 'implemented but publish verification pending\nimplement: GitHub CLI is unavailable, so PR verification could not be completed.',
+      evidence: {
+        branch: 'feat/test',
+        baseBranch: 'develop',
+        commitSha: 'abc1234',
+        remoteBranch: 'origin/feat/test',
+        prNumber: null,
+        prUrl: null,
+      },
+    });
+  });
+
   it('stores failed status with partial summary from adapter timeout', async () => {
     const backlog: Backlog = {
       version: 2,

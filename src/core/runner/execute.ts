@@ -69,6 +69,8 @@ import {
 } from '../events/index.js';
 import { loadBudgetState, saveBudgetState } from '../../db/repo.js';
 import { saveConfig } from '../../config/index.js';
+import { verifyPublishContract } from '../git/publish.js';
+import { updateRunPublishState } from '../../db/repo.js';
 
 export interface ResumeOverride {
   featureId: string;
@@ -231,7 +233,7 @@ export async function executeBacklog(
       });
     }
     try {
-      const res = await runWithRetry(feature, prompt, {
+      const initialRes = await runWithRetry(feature, prompt, {
         cwd: opts.cwd,
         runId,
         repoId,
@@ -239,9 +241,17 @@ export async function executeBacklog(
         session,
         resumeOverride: opts.resumeOverride?.featureId === feature.id ? opts.resumeOverride : undefined,
       });
+      const res = applyImplementPublishGate(initialRes, stage, opts.cwd);
       if (res.usage) {
         recordUsage(runId, res.usage);
         applyBudgetUsage(feature, res.usage, runId);
+      }
+      if (res.publishEvidence) {
+        updateRunPublishState(runId, {
+          verified: res.publishVerified ?? false,
+          error: res.publishVerified ? null : res.summary,
+          evidence: res.publishEvidence,
+        });
       }
 
       if (res.control?.type === 'needs_input') {
@@ -291,7 +301,8 @@ export async function executeBacklog(
       }
 
       const failurePolicy = getOnFailPolicy(feature);
-      const status = res.ok ? 'done' : failurePolicy === 'gate' ? 'blocked' : 'failed';
+      const failureStatus = res.publishVerificationStatus ?? (failurePolicy === 'gate' ? 'blocked' : 'failed');
+      const status = res.ok ? 'done' : failureStatus;
       finishRun(runId, status, res.summary);
       if (stage) {
         msqEventBus.emit('task:updated', {
@@ -944,9 +955,39 @@ function buildStagePrompt(
   if (adminInputs.length > 0) {
     stageNotes.push(`Admin inputs already collected for this stage:\n- ${adminInputs.join('\n- ')}`);
   }
+  if (stage === 'implement') {
+    stageNotes.push([
+      'Implementation exit contract:',
+      `- work on a named branch that is not develop`,
+      '- complete the implementation in this session',
+      '- run the relevant validation commands before finishing',
+      '- create a commit for the implementation',
+      '- push the branch to its remote upstream',
+      '- open a pull request targeting develop',
+      '- do not claim the stage is complete unless all items above were actually completed',
+    ].join('\n'));
+  }
 
   const appendedSections = [stageNotes.join('\n'), ...stageContext].filter((section) => section.trim().length > 0);
   return `${basePrompt}\n\n---\n\n${appendedSections.join('\n\n')}`.trim();
+}
+
+function applyImplementPublishGate(
+  result: RunResult,
+  stage: string | undefined,
+  cwd: string,
+): RunResult {
+  if (stage !== 'implement' || !result.ok) return result;
+
+  const verification = verifyPublishContract(cwd);
+  return {
+    ...result,
+    ok: verification.ok,
+    summary: verification.ok ? verification.summary : `${result.summary}\n${verification.summary}`.trim(),
+    publishEvidence: verification.evidence,
+    publishVerified: verification.ok,
+    publishVerificationStatus: verification.status === 'done' ? undefined : verification.status,
+  };
 }
 
 function resolveStepGuidanceSkills(

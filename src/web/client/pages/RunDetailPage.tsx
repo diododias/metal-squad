@@ -7,7 +7,7 @@ import { ApprovalBanner } from '../components/feedback/ApprovalBanner.js';
 import { AgentTranscript, type TranscriptEntry } from '../components/transcript/AgentTranscript.js';
 import { FeatureConfigDetail } from '../components/FeatureConfigDetail.js';
 import { PageHeader } from '../PageHeader.js';
-import { formatElapsed, formatPercent, formatTokens, getRunStatusLabel } from '../lib/format.js';
+import { formatElapsed, formatPercent, formatPublishTarget, formatTokens, getPublishStatusLabel, getRunStatusLabel } from '../lib/format.js';
 import { summarizeTaskRuns } from '../lib/workflow.js';
 import type { MsqWebState, FeatureConfigPatch, WebSocketClientMessage } from '../../types.js';
 import type { TaskRun } from '../../../db/repo.js';
@@ -108,7 +108,7 @@ export function RunDetailPage({
 
   const tabContent: Record<string, React.ReactNode> = {
     summary: (
-      <div>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
         <WorkflowStepper stages={stages} currentStage={run.pipelineCurrentStage ?? run.stage} />
         <div style={{ marginTop: 14, display: 'flex', flexDirection: 'column', gap: 6 }}>
           {stageGroups.map((g) => (
@@ -120,6 +120,53 @@ export function RunDetailPage({
             </div>
           ))}
           {stageGroups.length === 0 && <div style={{ color: 'var(--text-faint)', fontSize: 'var(--text-sm)' }}>No task run data yet.</div>}
+        </div>
+        <div
+          style={{
+            display: 'grid',
+            gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))',
+            gap: 10,
+            padding: 12,
+            border: '1px solid var(--border-dim)',
+            borderRadius: 'var(--radius-md)',
+            background: 'var(--bg-panel)',
+          }}
+        >
+          <div>
+            <div style={{ color: 'var(--text-faint)', fontSize: 'var(--text-2xs)', textTransform: 'uppercase' }}>Publish</div>
+            <div style={{ color: 'var(--text-base)', fontSize: 'var(--text-sm)' }}>{getPublishStatusLabel(run)}</div>
+          </div>
+          <div>
+            <div style={{ color: 'var(--text-faint)', fontSize: 'var(--text-2xs)', textTransform: 'uppercase' }}>Branch / PR</div>
+            <div style={{ color: 'var(--text-base)', fontSize: 'var(--text-sm)' }}>
+              {run.prUrl ? (
+                <a href={run.prUrl} target="_blank" rel="noreferrer" style={{ color: 'var(--accent-info)' }}>
+                  {formatPublishTarget(run)}
+                </a>
+              ) : (
+                formatPublishTarget(run)
+              )}
+            </div>
+            {run.branchName && run.branchName !== formatPublishTarget(run) && (
+              <div style={{ color: 'var(--text-faint)', fontSize: 'var(--text-2xs)' }}>{run.branchName}</div>
+            )}
+          </div>
+          <div>
+            <div style={{ color: 'var(--text-faint)', fontSize: 'var(--text-2xs)', textTransform: 'uppercase' }}>Commit</div>
+            <div style={{ color: 'var(--text-base)', fontSize: 'var(--text-sm)', fontFamily: 'var(--font-mono)' }}>
+              {run.commitSha ? run.commitSha.slice(0, 12) : '—'}
+            </div>
+          </div>
+          <div>
+            <div style={{ color: 'var(--text-faint)', fontSize: 'var(--text-2xs)', textTransform: 'uppercase' }}>Base</div>
+            <div style={{ color: 'var(--text-base)', fontSize: 'var(--text-sm)' }}>{run.baseBranch ?? '—'}</div>
+          </div>
+          {run.publishError && (
+            <div style={{ gridColumn: '1 / -1' }}>
+              <div style={{ color: 'var(--text-faint)', fontSize: 'var(--text-2xs)', textTransform: 'uppercase' }}>Publish check</div>
+              <div style={{ color: 'var(--accent-danger)', fontSize: 'var(--text-sm)', whiteSpace: 'pre-wrap' }}>{run.publishError}</div>
+            </div>
+          )}
         </div>
       </div>
     ),
@@ -208,6 +255,7 @@ export function RunDetailPage({
           <MetricCard label="Status" value={getRunStatusLabel(run)} status={run.status} />
           <MetricCard label="Tool" value={run.tool} />
           <MetricCard label="Model" value={feature?.model ?? '—'} />
+          <MetricCard label="Publish" value={getPublishStatusLabel(run)} />
           <MetricCard label="Tokens" value={formatTokens(run.totalTokens)} />
           <MetricCard label="Context" value={formatPercent(run.contextWindowPercent)} />
           <MetricCard label="Elapsed" value={formatElapsed(run.startedAt, run.endedAt)} />

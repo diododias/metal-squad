@@ -1,6 +1,6 @@
 import { existsSync } from 'node:fs';
 import { getDb, withTransaction } from './index.js';
-import type { TokenUsage } from '../core/adapters/types.js';
+import type { PublishEvidence, TokenUsage } from '../core/adapters/types.js';
 import { resolveDbPath } from '../config/index.js';
 import { msqEventBus } from '../core/events/index.js';
 import type {
@@ -165,6 +165,12 @@ export interface CreateRunOptions {
 }
 
 export type RunStatus = 'running' | 'done' | 'failed' | 'blocked' | 'aborted';
+
+export interface RunPublishState {
+  verified: boolean;
+  error: string | null;
+  evidence: PublishEvidence;
+}
 export type PipelineStatus = 'running' | 'paused' | 'aborting' | 'aborted' | 'done' | 'failed' | 'blocked';
 
 export interface PipelineSnapshot {
@@ -201,6 +207,33 @@ export function finishRun(
     .prepare(`UPDATE runs SET status = ?, summary = ?, ended_at = datetime('now') WHERE id = ?`)
     .run(status, summary ?? null, runId);
   recordRunEvent(runId, status, summary ? { summary } : undefined);
+}
+
+export function updateRunPublishState(runId: number, publish: RunPublishState): void {
+  getDb('readwrite')
+    .prepare(
+      `UPDATE runs
+       SET publish_verified = ?,
+           publish_error = ?,
+           branch_name = ?,
+           base_branch = ?,
+           commit_sha = ?,
+           remote_branch = ?,
+           pr_number = ?,
+           pr_url = ?
+       WHERE id = ?`,
+    )
+    .run(
+      publish.verified ? 1 : 0,
+      publish.error,
+      publish.evidence.branch,
+      publish.evidence.baseBranch,
+      publish.evidence.commitSha,
+      publish.evidence.remoteBranch,
+      publish.evidence.prNumber,
+      publish.evidence.prUrl,
+      runId,
+    );
 }
 
 export function cleanupStaleRuns(olderThanMinutes: number): number {
@@ -504,6 +537,14 @@ export interface RunSummary {
   latestTransitionContextWindowPercent?: number | null;
   latestTransitionPreviousSessionId?: string | null;
   latestTransitionNextSessionId?: string | null;
+  publishVerified?: boolean | null;
+  publishError?: string | null;
+  branchName?: string | null;
+  baseBranch?: string | null;
+  commitSha?: string | null;
+  remoteBranch?: string | null;
+  prNumber?: number | null;
+  prUrl?: string | null;
 }
 
 // T003: listRunsForTui — most recent run per feature per repo (US2 deduplication via CTE)
@@ -601,7 +642,15 @@ export function listRunsForTui(limit = 50, repoId?: string): RunSummary[] {
          ltd.to_stage AS latestTransitionToStage,
          ltd.context_window_percent AS latestTransitionContextWindowPercent,
          ltd.previous_session_id AS latestTransitionPreviousSessionId,
-         ltd.next_session_id AS latestTransitionNextSessionId
+         ltd.next_session_id AS latestTransitionNextSessionId,
+         r.publish_verified AS publishVerified,
+         r.publish_error AS publishError,
+         r.branch_name AS branchName,
+         r.base_branch AS baseBranch,
+         r.commit_sha AS commitSha,
+         r.remote_branch AS remoteBranch,
+         r.pr_number AS prNumber,
+         r.pr_url AS prUrl
        FROM runs r
        JOIN latest ON latest.id = r.id
        LEFT JOIN latest_usage lu ON lu.runId = r.id

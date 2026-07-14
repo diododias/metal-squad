@@ -22,6 +22,15 @@ export interface SessionHandle {
   capturedAt: string;
 }
 
+export interface PublishEvidence {
+  branch: string | null;
+  baseBranch: string;
+  commitSha: string | null;
+  remoteBranch: string | null;
+  prNumber: number | null;
+  prUrl: string | null;
+}
+
 export type SessionReuseMode = 'new' | 'resume';
 
 export interface RunFeatureOptions {
@@ -41,6 +50,9 @@ export interface RunResult {
   control?: RunControl;
   aborted?: boolean;
   session?: SessionHandle | null;
+  publishEvidence?: PublishEvidence;
+  publishVerified?: boolean;
+  publishVerificationStatus?: 'blocked' | 'failed';
 }
 
 export interface ToolAdapter {
