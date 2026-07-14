@@ -6,6 +6,8 @@ const mockResolveStageRequest = vi.fn();
 const mockGetStageRequest = vi.fn();
 const mockGetGate = vi.fn();
 const mockGetFeatureTopicAssociation = vi.fn();
+const mockGetTimeoutApprovalRequest = vi.fn();
+const mockResolveTimeoutApproval = vi.fn();
 const mockFetch = vi.fn();
 
 vi.mock('../../src/security/secrets.js', () => ({ getSecret: mockGetSecret }));
@@ -15,6 +17,8 @@ vi.mock('../../src/db/repo.js', () => ({
   getStageRequest: mockGetStageRequest,
   getGate: mockGetGate,
   getFeatureTopicAssociation: mockGetFeatureTopicAssociation,
+  getTimeoutApprovalRequest: mockGetTimeoutApprovalRequest,
+  resolveTimeoutApproval: mockResolveTimeoutApproval,
 }));
 vi.mock('../../src/config/index.js', () => ({
   resolveRuntimeConfig: vi.fn(() => ({
@@ -52,6 +56,8 @@ beforeEach(() => {
   mockGetStageRequest.mockReset();
   mockGetGate.mockReset();
   mockGetFeatureTopicAssociation.mockReset();
+  mockGetTimeoutApprovalRequest.mockReset();
+  mockResolveTimeoutApproval.mockReset();
   mockFetch.mockReset();
 });
 
@@ -262,6 +268,51 @@ describe('TelegramPoller', () => {
     await flushMicrotasks(30);
 
     expect(capturedUrl).toContain('offset=100');
+    poller.stop();
+  });
+
+  it('resolves timeout retry command from callback_query data in the configured chat', async () => {
+    mockGetSecret.mockResolvedValue('TOKEN');
+    mockGetTimeoutApprovalRequest.mockReturnValue({
+      id: 9,
+      featureId: 'feat-timeout',
+      runId: 44,
+      stage: 'implement',
+    });
+    mockResolveTimeoutApproval.mockReturnValue(true);
+    let fetchCount = 0;
+    mockFetch.mockImplementation((url: string) => {
+      if (url.includes('getUpdates') && ++fetchCount === 1) {
+        return Promise.resolve(makeUpdateResponse([
+          {
+            update_id: 100,
+            callback_query: {
+              id: 'cb-timeout',
+              data: 'timeout:9 retry',
+              message: {
+                chat: { id: 'chat-1' },
+                message_thread_id: 321,
+              },
+            },
+          },
+        ]));
+      }
+      if (url.includes('answerCallbackQuery')) return Promise.resolve({ ok: true });
+      return new Promise(() => {});
+    });
+
+    const { TelegramPoller } = await import('../../src/core/notify/telegram-poller.js');
+    const poller = new TelegramPoller();
+    poller.start();
+    await flushMicrotasks(40);
+
+    expect(mockResolveTimeoutApproval).toHaveBeenCalledWith(9, 'retry', {
+      featureId: 'feat-timeout',
+      runId: 44,
+      stage: 'implement',
+      chatId: 'chat-1',
+      threadId: 321,
+    });
     poller.stop();
   });
 

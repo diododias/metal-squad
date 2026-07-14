@@ -5,6 +5,7 @@ import {
   openGates,
   listPendingStageRequests,
   listRunningTaskRuns,
+  listPendingTimeoutApprovalRequests,
   listRunsForStats,
   type GateRow,
   type StageRequestRow,
@@ -20,7 +21,7 @@ import { resolveThemePreference } from '../ui/theme/resolve.js';
 import type { ThemeRoleName } from '../ui/theme/types.js';
 import { createSkillRegistry } from '../core/skills/registry.js';
 import type { Skill } from '../core/skills/types.js';
-import type { MsqWebState, ThemeSnapshot, TokenStats, UiNotification, WebRuntimeConfig } from './types.js';
+import type { MsqWebState, ThemeSnapshot, TimeoutApprovalState, TokenStats, UiNotification, WebRuntimeConfig } from './types.js';
 
 const DASHBOARD_PERIODS: { label: string; days: number | null }[] = [
   { label: 'today', days: 1 },
@@ -72,6 +73,25 @@ function collectRuns(): RunSummary[] {
 function collectRunningTasks(): RunningTaskSummary[] {
   try {
     return listRunningTaskRuns(50);
+  } catch {
+    return [];
+  }
+}
+
+function collectTimeoutApprovals(): TimeoutApprovalState[] {
+  try {
+    return listPendingTimeoutApprovalRequests().map((request) => ({
+      requestId: request.id,
+      occurrenceId: request.timeoutOccurrenceId,
+      runId: request.runId,
+      pipelineId: request.pipelineId,
+      featureId: request.featureId,
+      stage: request.stage,
+      status: request.status,
+      notificationStatus: request.notificationStatus,
+      notificationAttempts: request.notificationAttempts,
+      createdAt: request.createdAt,
+    }));
   } catch {
     return [];
   }
@@ -211,6 +231,7 @@ export function buildMsqWebState(): MsqWebState {
   const gates = collectGates();
   const pendingFeatures = collectPendingFeatures(runs, repo.repoId);
   const runningTasks = collectRunningTasks();
+  const timeoutApprovals = collectTimeoutApprovals();
   const featureCatalog = normalizeFeatureCatalog(getFeatureCatalog());
   const backlogSettings = getBacklogSettings();
   const executionRuns = runs.filter((run) => getRunGroup(run.status) === 'execution');
@@ -223,6 +244,7 @@ export function buildMsqWebState(): MsqWebState {
     gates,
     pendingFeatures,
     runningTasks,
+    timeoutApprovals,
     featureCatalog,
     backlogSettings,
     stats: {

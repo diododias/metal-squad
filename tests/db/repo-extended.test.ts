@@ -7,7 +7,8 @@ const mockPrepare = vi.fn(() => ({ all: mockAll, run: mockRun, get: mockGet }));
 const mockPragma = vi.fn();
 const mockExec = vi.fn();
 const mockClose = vi.fn();
-const mockDb = { prepare: mockPrepare, pragma: mockPragma, exec: mockExec, close: mockClose };
+const mockTransaction = vi.fn((callback: () => unknown) => callback);
+const mockDb = { prepare: mockPrepare, pragma: mockPragma, exec: mockExec, close: mockClose, transaction: mockTransaction };
 const mockDatabase = vi.fn(() => mockDb);
 const mockEmit = vi.fn();
 
@@ -30,6 +31,7 @@ beforeEach(async () => {
   mockPrepare.mockImplementation(() => ({ all: mockAll, run: mockRun, get: mockGet }));
   mockEmit.mockReset();
   mockClose.mockReset();
+  mockTransaction.mockClear();
   mockPrepare.mockReset();
   mockPrepare.mockImplementation(() => ({ all: mockAll, run: mockRun, get: mockGet }));
   mockRun.mockReturnValue({ lastInsertRowid: 1, changes: 1 });
@@ -236,6 +238,234 @@ describe('stage transition decisions', () => {
         nextSessionId: 'thread_1',
       }),
     ]);
+  });
+});
+
+describe('timeout approval persistence', () => {
+  it('creates and reads timeout occurrences and approval requests', async () => {
+    mockGet
+      .mockReturnValueOnce({ status: 'running' })
+      .mockReturnValueOnce({
+        id: 12,
+        runId: 7,
+        pipelineId: 4,
+        featureId: 'feat-timeout',
+        stage: 'implement',
+        timeoutMs: 600_000,
+        runtimeMs: 605_000,
+        lastProgress: 'still writing tests',
+        status: 'pending',
+        createdAt: '2026-07-14T12:00:00.000Z',
+        resolvedAt: null,
+      })
+      .mockReturnValueOnce({
+        id: 12,
+        runId: 7,
+        pipelineId: 4,
+        featureId: 'feat-timeout',
+        stage: 'implement',
+        timeoutMs: 600_000,
+        runtimeMs: 605_000,
+        lastProgress: 'still writing tests',
+        status: 'pending',
+        createdAt: '2026-07-14T12:00:00.000Z',
+        resolvedAt: null,
+      })
+      .mockReturnValueOnce({
+        id: 30,
+        timeoutOccurrenceId: 12,
+        pipelineId: 4,
+        runId: 7,
+        featureId: 'feat-timeout',
+        stage: 'implement',
+        status: 'pending',
+        decision: null,
+        decisionSource: null,
+        notificationStatus: 'pending',
+        notificationAttempts: 0,
+        lastNotificationError: null,
+        notifiedAt: null,
+        retryRunId: null,
+        createdAt: '2026-07-14T12:00:00.000Z',
+        resolvedAt: null,
+      });
+
+    const { createTimeoutOccurrence, createTimeoutApprovalRequest } = await import('../../src/db/repo.js');
+    const occurrence = createTimeoutOccurrence({
+      runId: 7,
+      pipelineId: 4,
+      featureId: 'feat-timeout',
+      stage: 'implement',
+      timeoutMs: 600_000,
+      runtimeMs: 605_000,
+      lastProgress: 'still writing tests',
+    });
+    const request = createTimeoutApprovalRequest(12);
+
+    expect(occurrence).toMatchObject({
+      id: 12,
+      featureId: 'feat-timeout',
+      stage: 'implement',
+      status: 'pending',
+    });
+    expect(request).toMatchObject({
+      id: 30,
+      timeoutOccurrenceId: 12,
+      featureId: 'feat-timeout',
+      notificationStatus: 'pending',
+    });
+  });
+
+  it('returns null when creating a timeout occurrence for a finished run', async () => {
+    mockGet.mockReturnValueOnce({ status: 'done' });
+
+    const { createTimeoutOccurrence } = await import('../../src/db/repo.js');
+    const occurrence = createTimeoutOccurrence({
+      runId: 8,
+      featureId: 'feat-timeout',
+      timeoutMs: 600_000,
+      runtimeMs: 605_000,
+    });
+
+    expect(occurrence).toBeNull();
+  });
+
+  it('lists pending timeout approvals and looks up approved ones by stage', async () => {
+    mockAll.mockReturnValue([
+      {
+        id: 30,
+        timeoutOccurrenceId: 12,
+        pipelineId: 4,
+        runId: 7,
+        featureId: 'feat-timeout',
+        stage: 'implement',
+        status: 'pending',
+        decision: null,
+        decisionSource: null,
+        notificationStatus: 'sent',
+        notificationAttempts: 1,
+        lastNotificationError: null,
+        notifiedAt: '2026-07-14T12:00:05.000Z',
+        retryRunId: null,
+        createdAt: '2026-07-14T12:00:00.000Z',
+        resolvedAt: null,
+      },
+    ]);
+    mockGet.mockReturnValueOnce({
+      id: 31,
+      timeoutOccurrenceId: 13,
+      pipelineId: 4,
+      runId: 8,
+      featureId: 'feat-timeout',
+      stage: 'implement',
+      status: 'approved',
+      decision: 'retry',
+      decisionSource: 'telegram',
+      notificationStatus: 'sent',
+      notificationAttempts: 1,
+      lastNotificationError: null,
+      notifiedAt: '2026-07-14T12:00:05.000Z',
+      retryRunId: null,
+      createdAt: '2026-07-14T12:00:00.000Z',
+      resolvedAt: '2026-07-14T12:01:00.000Z',
+    });
+
+    const { listPendingTimeoutApprovalRequests, getApprovedTimeoutApproval } = await import('../../src/db/repo.js');
+    expect(listPendingTimeoutApprovalRequests()).toEqual([
+      expect.objectContaining({
+        id: 30,
+        featureId: 'feat-timeout',
+        status: 'pending',
+      }),
+    ]);
+    expect(getApprovedTimeoutApproval(4, 'feat-timeout', 'implement')).toMatchObject({
+      id: 31,
+      decision: 'retry',
+      decisionSource: 'telegram',
+    });
+  });
+
+  it('resolves timeout approvals, emits the resolution event, and tracks retry bookkeeping', async () => {
+    mockGet
+      .mockReturnValueOnce({
+        id: 30,
+        timeoutOccurrenceId: 12,
+        pipelineId: 4,
+        runId: 7,
+        featureId: 'feat-timeout',
+        stage: 'implement',
+        status: 'pending',
+        decision: null,
+        decisionSource: null,
+        notificationStatus: 'pending',
+        notificationAttempts: 0,
+        lastNotificationError: null,
+        notifiedAt: null,
+        retryRunId: null,
+        createdAt: '2026-07-14T12:00:00.000Z',
+        resolvedAt: null,
+      })
+      .mockReturnValueOnce({ state: 'active', threadId: 321 })
+      .mockReturnValueOnce({
+        id: 30,
+        timeoutOccurrenceId: 12,
+        pipelineId: 4,
+        runId: 7,
+        featureId: 'feat-timeout',
+        stage: 'implement',
+        status: 'approved',
+        decision: 'retry',
+        decisionSource: 'telegram',
+        notificationStatus: 'sent',
+        notificationAttempts: 1,
+        lastNotificationError: null,
+        notifiedAt: '2026-07-14T12:00:05.000Z',
+        retryRunId: null,
+        createdAt: '2026-07-14T12:00:00.000Z',
+        resolvedAt: '2026-07-14T12:01:00.000Z',
+      })
+      .mockReturnValueOnce({
+        id: 12,
+        runId: 7,
+        pipelineId: 4,
+        featureId: 'feat-timeout',
+        stage: 'implement',
+        timeoutMs: 600_000,
+        runtimeMs: 605_000,
+        lastProgress: 'still writing tests',
+        status: 'resolved',
+        createdAt: '2026-07-14T12:00:00.000Z',
+        resolvedAt: '2026-07-14T12:01:00.000Z',
+      });
+
+    const {
+      resolveTimeoutApproval,
+      claimTimeoutRetry,
+      attachTimeoutRetryRun,
+      recordTimeoutNotificationDelivery,
+    } = await import('../../src/db/repo.js');
+
+    expect(resolveTimeoutApproval(30, 'retry', {
+      featureId: 'feat-timeout',
+      runId: 7,
+      stage: 'implement',
+      chatId: 'chat-1',
+      threadId: 321,
+    })).toBe(true);
+    expect(mockEmit).toHaveBeenCalledWith('timeout:approval-resolved', expect.objectContaining({
+      requestId: 30,
+      featureId: 'feat-timeout',
+      decision: 'retry',
+    }));
+
+    expect(claimTimeoutRetry(30)).toBe(true);
+    attachTimeoutRetryRun(30, 99);
+    recordTimeoutNotificationDelivery(30, { status: 'failed', error: 'telegram down' });
+
+    expect(mockRun).toHaveBeenCalledWith('approved', 'retry', 30);
+    expect(mockRun).toHaveBeenCalledWith(99, 30);
+    expect(mockRun).toHaveBeenCalledWith(99, 30);
+    expect(mockRun).toHaveBeenCalledWith('failed', 'telegram down', 'failed', 30);
   });
 });
 

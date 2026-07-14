@@ -5,6 +5,7 @@ export interface NotificationMetadata extends Record<string, unknown> {
   gateId?: number;
   stage?: string;
   reply_markup?: Record<string, unknown>;
+  timeoutApprovalRequestId?: number;
 }
 
 export interface NotificationChannel {

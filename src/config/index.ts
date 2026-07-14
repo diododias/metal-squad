@@ -22,6 +22,7 @@ export const NOTIFICABLE_EVENTS = [
   'run:done',
   'stage:approval',
   'stage:input',
+  'timeout:approval-created',
 ] as const;
 export type NotificableEvent = (typeof NOTIFICABLE_EVENTS)[number];
 

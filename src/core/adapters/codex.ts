@@ -1,6 +1,8 @@
 import { sanitizeToolCallRecord, type SessionHandle, type ToolAdapter, type RunResult, type RunFeatureOptions, type TokenUsage, type ToolCallRecord } from './types.js';
 import type { Effort, Feature } from '../backlog/schema.js';
 import { execFileSync } from 'node:child_process';
+import { existsSync } from 'node:fs';
+import { join } from 'node:path';
 import { resolveRuntimeConfig } from '../../config/index.js';
 import { CliAbortError, CliTimeoutError, runCli } from './spawn.js';
 import { msqEventBus } from '../events/index.js';
@@ -58,6 +60,7 @@ export const codexAdapter: ToolAdapter = {
   },
 
   async runFeature(feature: Feature, prompt: string, opts: RunFeatureOptions): Promise<RunResult> {
+    const gitWritableArgs = resolveGitWritableArgs(opts.cwd);
     const args = opts.session?.mode === 'resume' && opts.session.handle
       ? [
           'exec',
@@ -65,6 +68,7 @@ export const codexAdapter: ToolAdapter = {
           '--json',
           '--skip-git-repo-check',
           '--sandbox', 'workspace-write',
+          ...gitWritableArgs,
           ...(feature.model ? ['-m', feature.model] : []),
           ...this.effortFlag(feature.effort),
           opts.session.handle.sessionId,
@@ -75,6 +79,7 @@ export const codexAdapter: ToolAdapter = {
           '--json',
           '--skip-git-repo-check',
           '--sandbox', 'workspace-write',
+          ...gitWritableArgs,
           ...(feature.model ? ['-m', feature.model] : []),
           ...this.effortFlag(feature.effort),
           '--',
@@ -98,6 +103,8 @@ export const codexAdapter: ToolAdapter = {
         featureId: feature.id,
         tool: feature.tool,
         heartbeatSuffix: () => progress.heartbeatSuffix(),
+        progressSnapshot: () => progress.heartbeatSuffix(),
+        onHeartbeat: (message) => { emitRunOutput(opts.runId, feature, message, 'stderr', 'heartbeat'); },
         onStatus: opts.onStatus ?? ((snapshot): void => { msqEventBus.emit('run:status', snapshot); }),
         onStdoutLine: (line) => {
           const update = progress.onStdoutLine(line);
@@ -121,6 +128,11 @@ export const codexAdapter: ToolAdapter = {
           ok: false,
           summary: `timeout após ${String(Math.round(error.runtimeMs / 1000))}s. ${partial}`,
           usage,
+          timeout: {
+            timeoutMs: error.timeoutMs,
+            runtimeMs: error.runtimeMs,
+            ...(error.lastProgress ? { lastProgress: sanitizeTimeoutProgress(error.lastProgress) } : {}),
+          },
         };
       }
       if (error instanceof CliAbortError) {
@@ -169,6 +181,18 @@ export const codexAdapter: ToolAdapter = {
     return usage;
   },
 };
+
+function resolveGitWritableArgs(cwd: string): string[] {
+  const gitDir = join(cwd, '.git');
+  return existsSync(gitDir) ? ['--add-dir', gitDir] : [];
+}
+
+function sanitizeTimeoutProgress(value: string): string {
+  return value.split('').filter((char) => {
+    const code = char.charCodeAt(0);
+    return code >= 32 && code !== 127;
+  }).join('').replace(/\s+/g, ' ').trim().slice(0, 500);
+}
 
 function lastAgentMessage(transcript: string): string {
   let msg = '';

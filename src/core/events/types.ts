@@ -89,6 +89,28 @@ export interface StageRequestResolvedEvent {
   response: string;
 }
 
+export interface TimeoutApprovalCreatedEvent {
+  requestId: number;
+  occurrenceId: number;
+  runId: number;
+  pipelineId?: number;
+  featureId: string;
+  stage?: string;
+  timeoutMs: number;
+  runtimeMs: number;
+  lastProgress?: string;
+}
+
+export interface TimeoutApprovalResolvedEvent {
+  requestId: number;
+  occurrenceId: number;
+  runId: number;
+  featureId: string;
+  stage?: string;
+  decision: 'retry' | 'keep_blocked';
+  source: 'telegram';
+}
+
 export type StageTransitionDecidedEvent = StageTransitionDecision;
 
 export interface BudgetAlertEvent {
@@ -175,6 +197,8 @@ export interface MsqEvents {
   'gate:resolved': GateResolvedEvent;
   'stage:request-created': StageRequestCreatedEvent;
   'stage:request-resolved': StageRequestResolvedEvent;
+  'timeout:approval-created': TimeoutApprovalCreatedEvent;
+  'timeout:approval-resolved': TimeoutApprovalResolvedEvent;
   'stage:transition-decided': StageTransitionDecidedEvent;
   'scheduler:paused': Record<string, never>;
   'scheduler:resumed': Record<string, never>;

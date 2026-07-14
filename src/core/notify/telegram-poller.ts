@@ -4,6 +4,8 @@ import {
   getFeatureTopicAssociation,
   getGate,
   getStageRequest,
+  getTimeoutApprovalRequest,
+  resolveTimeoutApproval,
   resolveGate,
   resolveStageRequest,
   resumePipeline,
@@ -33,6 +35,7 @@ const STAGE_CMD = /stage:(\d+)\s+(advance|hold|retry)/i;
 const INPUT_CMD = /^input:(\d+)\s+([\s\S]+)$/i;
 // Matches a tap on an option button: input:<requestId>:<optionIndex>
 const INPUT_OPTION_CMD = /^input:(\d+):(\d+)$/;
+const TIMEOUT_CMD = /^timeout:(\d+)\s+(retry|keep_blocked)$/i;
 
 function parseDecision(raw: string): GateDecision | null {
   const lower = raw.toLowerCase();
@@ -161,6 +164,31 @@ export class TelegramPoller {
                 resolveStageRequest(requestId, label);
               }
             } catch { /* DB may be unavailable */ }
+            if (callbackId) void this.answerCallback(token, callbackId);
+            continue;
+          }
+
+          const timeoutMatch = TIMEOUT_CMD.exec(text);
+          if (timeoutMatch) {
+            const requestId = Number(timeoutMatch[1]);
+            const decision = timeoutMatch[2]?.toLowerCase() as 'retry' | 'keep_blocked' | undefined;
+            try {
+              const request = typeof getTimeoutApprovalRequest === 'function'
+                ? getTimeoutApprovalRequest(requestId)
+                : null;
+              const context = updateContext(update);
+              if (request && decision && matchesConfiguredChat(context.chatId, configuredTelegramChatId())) {
+                const won = typeof resolveTimeoutApproval === 'function'
+                  && resolveTimeoutApproval(requestId, decision, {
+                    featureId: request.featureId,
+                    runId: request.runId,
+                    stage: request.stage,
+                    ...(context.chatId ? { chatId: context.chatId } : {}),
+                    ...(context.threadId !== undefined ? { threadId: context.threadId } : {}),
+                  });
+                void won;
+              }
+            } catch { /* DB may be unavailable or callback may be stale */ }
             if (callbackId) void this.answerCallback(token, callbackId);
             continue;
           }

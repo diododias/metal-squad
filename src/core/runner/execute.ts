@@ -24,6 +24,8 @@ import {
   createStageTransitionDecision,
   createGate,
   createRetryRecord,
+  createTimeoutApprovalRequest,
+  createTimeoutOccurrence,
   finishPipeline,
   finishRun,
   getRunContextTelemetry,
@@ -261,6 +263,42 @@ export async function executeBacklog(
           error: res.publishVerified ? null : res.summary,
           evidence: res.publishEvidence,
         });
+      }
+
+      if (res.timeout) {
+        const occurrence = createTimeoutOccurrence({
+          runId,
+          pipelineId,
+          featureId: feature.id,
+          stage,
+          timeoutMs: res.timeout.timeoutMs,
+          runtimeMs: res.timeout.runtimeMs,
+          lastProgress: res.timeout.lastProgress,
+        });
+        const request = occurrence ? createTimeoutApprovalRequest(occurrence.id) : null;
+        finishRun(runId, 'blocked', res.summary);
+        setPipelineStatus(pipelineId, 'blocked');
+        if (stage) {
+          msqEventBus.emit('task:updated', {
+            runId, featureId: feature.id, taskId: stage, status: 'blocked', stage,
+            endedAt: new Date().toISOString(),
+          });
+        }
+        if (occurrence && request) {
+          msqEventBus.emit('timeout:approval-created', {
+            requestId: request.id,
+            occurrenceId: occurrence.id,
+            runId,
+            pipelineId,
+            featureId: feature.id,
+            ...(stage ? { stage } : {}),
+            timeoutMs: occurrence.timeoutMs,
+            runtimeMs: occurrence.runtimeMs,
+            ...(occurrence.lastProgress ? { lastProgress: occurrence.lastProgress } : {}),
+          });
+        }
+        activeRunIds.delete(runId);
+        return { runId, res };
       }
 
       if (res.control?.type === 'needs_input') {
@@ -552,6 +590,18 @@ export async function executeBacklog(
         evaluateAutoPilot(feature, result);
         return;
       }
+      if (result.timeout) {
+        updatePipelineSnapshot(pipelineId, {
+          active: withoutActive,
+          pending: snapshot.pending.filter((item) => item !== feature.id),
+          aborted: [...snapshot.aborted.filter((item) => item !== feature.id), feature.id],
+        }, {
+          status: 'blocked',
+          clearAbortRequest: true,
+        });
+        evaluateAutoPilot(feature, result);
+        return;
+      }
       const shouldCountAsDone = result.ok || getOnFailPolicy(feature) === 'continue';
       // A genuine failure (stop/gate policy, not aborted) must land in `aborted` —
       // the "needs rerun" bucket — instead of nowhere. Otherwise it vanishes from
@@ -701,6 +751,8 @@ async function runWithRetry(
         if (candidate.tool !== feature.tool) updateRunTool(opts.runId, candidate.tool);
         return res;
       }
+
+      if (res.timeout) return res;
 
       lastResult = res;
       lastCandidateTool = candidate.tool;

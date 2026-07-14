@@ -108,6 +108,11 @@ export const opencodeAdapter: ToolAdapter = {
       ({ code, stdout, stderr } = await runCli('opencode', args, {
         cwd: opts.cwd,
         signal: opts.signal,
+        heartbeatMs: 30_000,
+        logLabel: `opencode ${feature.id}`,
+        heartbeatSuffix: () => progress.heartbeatSuffix(),
+        progressSnapshot: () => progress.heartbeatSuffix(),
+        onHeartbeat: (message) => { emitRunOutput(opts.runId, feature, message, 'stderr', 'heartbeat'); },
         idleThresholdMs: resolveRuntimeConfig(opts.cwd).idleThresholdMs,
         runId: opts.runId,
         featureId: feature.id,
@@ -121,6 +126,20 @@ export const opencodeAdapter: ToolAdapter = {
         },
       }));
     } catch (error) {
+      if (isCliTimeoutError(error)) {
+        const usage = this.parseUsage?.(error.stdout) ?? undefined;
+        if (usage) emitUsage(opts.runId, feature, usage);
+        return {
+          ok: false,
+          summary: `timeout após ${String(Math.round(error.runtimeMs / 1000))}s`,
+          usage,
+          timeout: {
+            timeoutMs: error.timeoutMs,
+            runtimeMs: error.runtimeMs,
+            ...(error.lastProgress ? { lastProgress: sanitizeTimeoutProgress(error.lastProgress) } : {}),
+          },
+        };
+      }
       if (error instanceof CliAbortError) {
         const usage = this.parseUsage?.(error.stdout) ?? undefined;
         if (usage) emitUsage(opts.runId, feature, usage);
@@ -183,6 +202,25 @@ export const opencodeAdapter: ToolAdapter = {
     return usage;
   },
 };
+
+function sanitizeTimeoutProgress(value: string): string {
+  return value.split('').filter((char) => {
+    const code = char.charCodeAt(0);
+    return code >= 32 && code !== 127;
+  }).join('').replace(/\s+/g, ' ').trim().slice(0, 500);
+}
+
+function isCliTimeoutError(error: unknown): error is {
+  stdout: string;
+  stderr: string;
+  timeoutMs: number;
+  runtimeMs: number;
+  lastProgress?: string;
+} {
+  return error instanceof Error
+    && error.name === 'CliTimeoutError'
+    && typeof (error as Error & { timeoutMs?: unknown }).timeoutMs === 'number';
+}
 
 function safeJson<T>(s: string): T | null { // eslint-disable-line @typescript-eslint/no-unnecessary-type-parameters
   try {

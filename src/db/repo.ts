@@ -2035,6 +2035,240 @@ export function listStageRequestsForFeature(
   return rows;
 }
 
+export type TimeoutOccurrenceStatus = 'pending' | 'resolved' | 'cancelled' | 'superseded';
+export type TimeoutApprovalStatus = 'pending' | 'approved' | 'blocked' | 'cancelled' | 'superseded';
+export type TimeoutDecision = 'retry' | 'keep_blocked';
+export type TimeoutDecisionSource = 'telegram' | 'system' | 'resume';
+
+export interface TimeoutOccurrenceInput {
+  runId: number;
+  pipelineId?: number | null;
+  featureId: string;
+  stage?: string | null;
+  timeoutMs: number;
+  runtimeMs: number;
+  lastProgress?: string | null;
+}
+
+export interface TimeoutOccurrenceRow extends TimeoutOccurrenceInput {
+  id: number;
+  status: TimeoutOccurrenceStatus;
+  createdAt: string;
+  resolvedAt: string | null;
+}
+
+export interface TimeoutApprovalRequestRow {
+  id: number;
+  timeoutOccurrenceId: number;
+  pipelineId: number | null;
+  runId: number;
+  featureId: string;
+  stage: string | null;
+  status: TimeoutApprovalStatus;
+  decision: TimeoutDecision | null;
+  decisionSource: TimeoutDecisionSource | null;
+  notificationStatus: 'pending' | 'sent' | 'failed';
+  notificationAttempts: number;
+  lastNotificationError: string | null;
+  notifiedAt: string | null;
+  retryRunId: number | null;
+  createdAt: string;
+  resolvedAt: string | null;
+}
+
+function mapTimeoutOccurrence(row: Record<string, unknown> | undefined): TimeoutOccurrenceRow | null {
+  if (!row) return null;
+  return {
+    id: Number(row.id),
+    runId: Number(row.runId),
+    pipelineId: row.pipelineId === null || row.pipelineId === undefined ? null : Number(row.pipelineId),
+    featureId: String(row.featureId),
+    stage: typeof row.stage === 'string' ? row.stage : null,
+    timeoutMs: Number(row.timeoutMs),
+    runtimeMs: Number(row.runtimeMs),
+    lastProgress: typeof row.lastProgress === 'string' ? row.lastProgress : null,
+    status: row.status as TimeoutOccurrenceStatus,
+    createdAt: String(row.createdAt),
+    resolvedAt: typeof row.resolvedAt === 'string' ? row.resolvedAt : null,
+  };
+}
+
+function mapTimeoutApprovalRequest(row: Record<string, unknown> | undefined): TimeoutApprovalRequestRow | null {
+  if (!row) return null;
+  return {
+    id: Number(row.id),
+    timeoutOccurrenceId: Number(row.timeoutOccurrenceId),
+    pipelineId: row.pipelineId === null || row.pipelineId === undefined ? null : Number(row.pipelineId),
+    runId: Number(row.runId),
+    featureId: String(row.featureId),
+    stage: typeof row.stage === 'string' ? row.stage : null,
+    status: row.status as TimeoutApprovalStatus,
+    decision: row.decision === 'retry' || row.decision === 'keep_blocked' ? row.decision : null,
+    decisionSource: row.decisionSource === 'telegram' || row.decisionSource === 'system' || row.decisionSource === 'resume'
+      ? row.decisionSource
+      : null,
+    notificationStatus: row.notificationStatus as 'pending' | 'sent' | 'failed',
+    notificationAttempts: Number(row.notificationAttempts ?? 0),
+    lastNotificationError: typeof row.lastNotificationError === 'string' ? row.lastNotificationError : null,
+    notifiedAt: typeof row.notifiedAt === 'string' ? row.notifiedAt : null,
+    retryRunId: row.retryRunId === null || row.retryRunId === undefined ? null : Number(row.retryRunId),
+    createdAt: String(row.createdAt),
+    resolvedAt: typeof row.resolvedAt === 'string' ? row.resolvedAt : null,
+  };
+}
+
+const TIMEOUT_OCCURRENCE_SELECT = `
+  SELECT id, run_id AS runId, pipeline_id AS pipelineId, feature_id AS featureId,
+         stage, timeout_ms AS timeoutMs, runtime_ms AS runtimeMs,
+         last_progress AS lastProgress, status, created_at AS createdAt,
+         resolved_at AS resolvedAt
+    FROM timeout_occurrences`;
+
+const TIMEOUT_REQUEST_SELECT = `
+  SELECT id, timeout_occurrence_id AS timeoutOccurrenceId,
+         pipeline_id AS pipelineId, run_id AS runId, feature_id AS featureId,
+         stage, status, decision, decision_source AS decisionSource,
+         notification_status AS notificationStatus,
+         notification_attempts AS notificationAttempts,
+         last_notification_error AS lastNotificationError,
+         notified_at AS notifiedAt, retry_run_id AS retryRunId,
+         created_at AS createdAt, resolved_at AS resolvedAt
+    FROM timeout_approval_requests`;
+
+export function createTimeoutOccurrence(input: TimeoutOccurrenceInput): TimeoutOccurrenceRow | null {
+  return withTransaction((database) => {
+    const run = database.prepare(`SELECT status FROM runs WHERE id = ?`).get(input.runId) as { status?: string } | undefined;
+    if (!run || ['done', 'failed', 'aborted'].includes(run.status ?? '')) return null;
+    database.prepare(`
+      INSERT OR IGNORE INTO timeout_occurrences
+        (run_id, pipeline_id, feature_id, stage, timeout_ms, runtime_ms, last_progress)
+      VALUES (?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      input.runId, input.pipelineId ?? null, input.featureId, input.stage ?? null,
+      input.timeoutMs, input.runtimeMs, input.lastProgress ?? null,
+    );
+    return mapTimeoutOccurrence(database.prepare(`${TIMEOUT_OCCURRENCE_SELECT} WHERE run_id = ?`).get(input.runId) as Record<string, unknown> | undefined);
+  });
+}
+
+export function getTimeoutOccurrence(id: number): TimeoutOccurrenceRow | null {
+  if (!hasDbFile()) return null;
+  return mapTimeoutOccurrence(getDb('readonly').prepare(`${TIMEOUT_OCCURRENCE_SELECT} WHERE id = ?`).get(id) as Record<string, unknown> | undefined);
+}
+
+export function createTimeoutApprovalRequest(occurrenceId: number): TimeoutApprovalRequestRow | null {
+  return withTransaction((database) => {
+    const occurrence = mapTimeoutOccurrence(database.prepare(`${TIMEOUT_OCCURRENCE_SELECT} WHERE id = ?`).get(occurrenceId) as Record<string, unknown> | undefined);
+    if (!occurrence) return null;
+    database.prepare(`
+      INSERT OR IGNORE INTO timeout_approval_requests
+        (timeout_occurrence_id, pipeline_id, run_id, feature_id, stage)
+      VALUES (?, ?, ?, ?, ?)
+    `).run(occurrence.id, occurrence.pipelineId, occurrence.runId, occurrence.featureId, occurrence.stage);
+    return mapTimeoutApprovalRequest(database.prepare(`${TIMEOUT_REQUEST_SELECT} WHERE timeout_occurrence_id = ?`).get(occurrenceId) as Record<string, unknown> | undefined);
+  });
+}
+
+export function getTimeoutApprovalRequest(id: number): TimeoutApprovalRequestRow | null {
+  if (!hasDbFile()) return null;
+  return mapTimeoutApprovalRequest(getDb('readonly').prepare(`${TIMEOUT_REQUEST_SELECT} WHERE id = ?`).get(id) as Record<string, unknown> | undefined);
+}
+
+export function listPendingTimeoutApprovalRequests(): TimeoutApprovalRequestRow[] {
+  if (!hasDbFile()) return [];
+  return (getDb('readonly').prepare(`${TIMEOUT_REQUEST_SELECT} WHERE status = 'pending' ORDER BY id ASC`).all() as Record<string, unknown>[])
+    .map((row) => mapTimeoutApprovalRequest(row))
+    .filter((row): row is TimeoutApprovalRequestRow => row !== null);
+}
+
+export function getApprovedTimeoutApproval(
+  pipelineId: number,
+  featureId: string,
+  stage?: string,
+): TimeoutApprovalRequestRow | null {
+  if (!hasDbFile()) return null;
+  return mapTimeoutApprovalRequest(getDb('readonly').prepare(
+    `${TIMEOUT_REQUEST_SELECT} WHERE pipeline_id = ? AND feature_id = ? AND status = 'approved' AND stage IS ? ORDER BY id ASC LIMIT 1`,
+  ).get(pipelineId, featureId, stage ?? null) as Record<string, unknown> | undefined);
+}
+
+export interface TimeoutApprovalContext {
+  featureId: string;
+  runId: number;
+  stage?: string | null;
+  chatId?: string;
+  threadId?: number;
+}
+
+export function resolveTimeoutApproval(
+  requestId: number,
+  decision: TimeoutDecision,
+  context: TimeoutApprovalContext,
+): boolean {
+  const resolved = withTransaction((database) => {
+    const request = mapTimeoutApprovalRequest(database.prepare(`${TIMEOUT_REQUEST_SELECT} WHERE id = ?`).get(requestId) as Record<string, unknown> | undefined);
+    if (!request) return false;
+    if (request.status !== 'pending' || request.featureId !== context.featureId || request.runId !== context.runId) return false;
+    if ((request.stage ?? null) !== (context.stage ?? null)) return false;
+    if (context.chatId !== undefined && context.threadId !== undefined) {
+      const association = database.prepare(`SELECT state, thread_id AS threadId FROM feature_topic_associations WHERE chat_id = ? AND feature_id = ?`).get(context.chatId, context.featureId) as { state?: string; threadId?: number } | undefined;
+      if ((association?.state ?? null) !== 'active' || (association?.threadId ?? null) !== context.threadId) return false;
+    }
+    const result = database.prepare(`
+      UPDATE timeout_approval_requests
+         SET status = ?, decision = ?, decision_source = 'telegram', resolved_at = datetime('now')
+       WHERE id = ? AND status = 'pending'
+    `).run(decision === 'retry' ? 'approved' : 'blocked', decision, requestId);
+    if (result.changes !== 1) return false;
+    database.prepare(`
+      INSERT INTO recovery_decisions
+        (timeout_occurrence_id, approval_request_id, decision, source)
+      VALUES (?, ?, ?, 'telegram')
+    `).run(request.timeoutOccurrenceId, request.id, decision);
+    database.prepare(`UPDATE timeout_occurrences SET status = 'resolved', resolved_at = datetime('now') WHERE id = ? AND status = 'pending'`).run(request.timeoutOccurrenceId);
+    return true;
+  });
+  if (resolved) {
+    const request = getTimeoutApprovalRequest(requestId);
+    const occurrence = request ? getTimeoutOccurrence(request.timeoutOccurrenceId) : null;
+    if (request && occurrence) {
+      msqEventBus.emit('timeout:approval-resolved', {
+        requestId,
+        occurrenceId: occurrence.id,
+        runId: request.runId,
+        featureId: request.featureId,
+        ...(request.stage ? { stage: request.stage } : {}),
+        decision,
+        source: 'telegram',
+      });
+    }
+  }
+  return resolved;
+}
+
+export function claimTimeoutRetry(requestId: number): boolean {
+  return getDb('readwrite').prepare(`UPDATE timeout_approval_requests SET retry_claimed = 1 WHERE id = ? AND status = 'approved' AND retry_run_id IS NULL AND retry_claimed = 0`).run(requestId).changes === 1;
+}
+
+export function attachTimeoutRetryRun(requestId: number, retryRunId: number): void {
+  withTransaction((database) => {
+    database.prepare(`UPDATE timeout_approval_requests SET retry_run_id = ? WHERE id = ? AND status = 'approved' AND retry_claimed = 1 AND retry_run_id IS NULL`).run(retryRunId, requestId);
+    database.prepare(`UPDATE recovery_decisions SET retry_run_id = ? WHERE approval_request_id = ? AND retry_run_id IS NULL`).run(retryRunId, requestId);
+  });
+}
+
+export function recordTimeoutNotificationDelivery(
+  requestId: number,
+  result: { status: 'sent' | 'failed'; error?: string },
+): void {
+  getDb('readwrite').prepare(`
+    UPDATE timeout_approval_requests
+       SET notification_status = ?, notification_attempts = notification_attempts + 1,
+           last_notification_error = ?, notified_at = CASE WHEN ? = 'sent' THEN datetime('now') ELSE notified_at END
+     WHERE id = ?
+  `).run(result.status, result.error ?? null, result.status, requestId);
+}
+
 function encodeJson(value: string[]): string {
   return JSON.stringify(value);
 }

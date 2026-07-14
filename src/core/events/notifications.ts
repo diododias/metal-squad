@@ -97,6 +97,31 @@ export function attachEventNotifications(
           : {}),
       }).catch(() => { /* ignore dispatch errors */ });
     }),
+    eventBus.subscribe('timeout:approval-created', (event) => {
+      const stageLabel = event.stage ? `stage ${event.stage}` : 'feature run';
+      const progress = event.lastProgress ? `\nLast progress: ${event.lastProgress}` : '';
+      const message = [
+        `metal-squad: ${event.featureId} ${stageLabel} timed out`,
+        `Run ${String(event.runId)} ran for ${String(event.runtimeMs)}ms (limit ${String(event.timeoutMs)}ms).`,
+        `Reason: execution exceeded the configured timeout.${progress}`,
+        'Retry reruns only the affected stage; Keep blocked leaves the pipeline paused.',
+        `Or reply: timeout:${String(event.requestId)} retry | timeout:${String(event.requestId)} keep_blocked`,
+      ].join('\n');
+      void dispatch('timeout:approval-created', message, {
+        requestId: event.requestId,
+        occurrenceId: event.occurrenceId,
+        runId: event.runId,
+        timeoutApprovalRequestId: event.requestId,
+        featureId: event.featureId,
+        ...(event.stage ? { stage: event.stage } : {}),
+        reply_markup: {
+          inline_keyboard: [[
+            { text: '🔄 Retry', callback_data: `timeout:${String(event.requestId)} retry` },
+            { text: '⏸ Keep blocked', callback_data: `timeout:${String(event.requestId)} keep_blocked` },
+          ]],
+        },
+      }).catch(() => { /* ignore dispatch errors */ });
+    }),
     eventBus.subscribe('run:failed', ({ featureId, featureName, error }) => {
       void dispatch('run:failed', `metal-squad: ${featureId} failed — ${error}`, {
         featureId,

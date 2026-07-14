@@ -364,6 +364,64 @@ function migrate(d: Database.Database): void {
       ON feature_topic_associations(state, lease_expires_at);
     CREATE INDEX IF NOT EXISTS idx_feature_topic_associations_thread
       ON feature_topic_associations(chat_id, thread_id);
+
+    CREATE TABLE IF NOT EXISTS timeout_occurrences (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      run_id INTEGER NOT NULL UNIQUE REFERENCES runs(id),
+      pipeline_id INTEGER REFERENCES pipelines(id),
+      feature_id TEXT NOT NULL,
+      stage TEXT,
+      timeout_ms INTEGER NOT NULL CHECK (timeout_ms > 0),
+      runtime_ms INTEGER NOT NULL CHECK (runtime_ms >= 0),
+      last_progress TEXT,
+      status TEXT NOT NULL DEFAULT 'pending'
+        CHECK (status IN ('pending', 'resolved', 'cancelled', 'superseded')),
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      resolved_at TEXT
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_timeout_occurrences_pipeline
+      ON timeout_occurrences(pipeline_id, status);
+
+    CREATE TABLE IF NOT EXISTS timeout_approval_requests (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      timeout_occurrence_id INTEGER NOT NULL UNIQUE REFERENCES timeout_occurrences(id),
+      pipeline_id INTEGER REFERENCES pipelines(id),
+      run_id INTEGER NOT NULL REFERENCES runs(id),
+      feature_id TEXT NOT NULL,
+      stage TEXT,
+      status TEXT NOT NULL DEFAULT 'pending'
+        CHECK (status IN ('pending', 'approved', 'blocked', 'cancelled', 'superseded')),
+      decision TEXT CHECK (decision IN ('retry', 'keep_blocked')),
+      decision_source TEXT CHECK (decision_source IN ('telegram', 'system', 'resume')),
+      notification_status TEXT NOT NULL DEFAULT 'pending'
+        CHECK (notification_status IN ('pending', 'sent', 'failed')),
+      notification_attempts INTEGER NOT NULL DEFAULT 0 CHECK (notification_attempts >= 0),
+      last_notification_error TEXT,
+      notified_at TEXT,
+      retry_run_id INTEGER UNIQUE REFERENCES runs(id),
+      retry_claimed INTEGER NOT NULL DEFAULT 0 CHECK (retry_claimed IN (0, 1)),
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      resolved_at TEXT
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_timeout_requests_pending
+      ON timeout_approval_requests(status, feature_id);
+
+    CREATE TABLE IF NOT EXISTS recovery_decisions (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      timeout_occurrence_id INTEGER NOT NULL REFERENCES timeout_occurrences(id),
+      approval_request_id INTEGER NOT NULL REFERENCES timeout_approval_requests(id),
+      decision TEXT NOT NULL CHECK (decision IN ('retry', 'keep_blocked')),
+      source TEXT NOT NULL CHECK (source IN ('telegram', 'system', 'resume')),
+      retry_run_id INTEGER REFERENCES runs(id),
+      reason TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      UNIQUE(approval_request_id)
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_recovery_decisions_occurrence
+      ON recovery_decisions(timeout_occurrence_id);
   `);
 
   const runColumns = d

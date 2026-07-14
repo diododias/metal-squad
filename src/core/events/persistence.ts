@@ -1,4 +1,12 @@
-import { appendRunOutput, recordContextQuery, updateRunUsage, upsertRunSessionStatus, upsertRunToolCall, upsertTaskRun } from '../../db/repo.js';
+import {
+  appendRunOutput,
+  recordContextQuery,
+  recordRunEvent,
+  updateRunUsage,
+  upsertRunSessionStatus,
+  upsertRunToolCall,
+  upsertTaskRun,
+} from '../../db/repo.js';
 import { msqEventBus } from './bus.js';
 import type { TypedEventBus } from './bus.js';
 import { deriveContextQueryEvent } from './context-query.js';
@@ -45,6 +53,12 @@ export function attachRunPersistence(
         undefined,
         event.endedAt,
       );
+    }),
+    eventBus.subscribe('timeout:approval-created', (event) => {
+      recordRunEvent(event.runId, 'timeout:approval-created', { ...event });
+    }),
+    eventBus.subscribe('timeout:approval-resolved', (event) => {
+      recordRunEvent(event.runId, 'timeout:approval-resolved', { ...event });
     }),
   ];
 

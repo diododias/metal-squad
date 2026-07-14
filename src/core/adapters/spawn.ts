@@ -14,6 +14,7 @@ export class CliTimeoutError extends Error {
   public readonly stderr: string;
   public readonly timeoutMs: number;
   public readonly runtimeMs: number;
+  public readonly lastProgress?: string;
 
   public constructor(
     bin: string,
@@ -21,6 +22,7 @@ export class CliTimeoutError extends Error {
     runtimeMs: number,
     stdout: string,
     stderr: string,
+    lastProgress?: string,
   ) {
     super(`${bin} excedeu timeout (${String(timeoutMs)}ms)`);
     this.name = 'CliTimeoutError';
@@ -28,6 +30,7 @@ export class CliTimeoutError extends Error {
     this.stderr = stderr;
     this.timeoutMs = timeoutMs;
     this.runtimeMs = runtimeMs;
+    this.lastProgress = lastProgress;
   }
 }
 
@@ -61,6 +64,7 @@ export interface SpawnOptions {
   heartbeatMs?: number;
   logLabel?: string;
   heartbeatSuffix?: () => string | undefined;
+  progressSnapshot?: () => string | undefined;
   onHeartbeat?: (message: string) => void;
   onStdoutChunk?: (chunk: string) => void;
   onStdoutLine?: (line: string) => void;
@@ -137,7 +141,14 @@ export async function runCli(
       if (opts.signal) opts.signal.removeEventListener('abort', onAbort);
       child.kill('SIGKILL');
       emitStatus('timed_out', `${bin} exceeded timeout after ${String(timeoutMs)}ms`);
-      reject(new CliTimeoutError(bin, timeoutMs, Date.now() - startedAt, stdout, stderr));
+      reject(new CliTimeoutError(
+        bin,
+        timeoutMs,
+        Date.now() - startedAt,
+        stdout,
+        stderr,
+        opts.progressSnapshot?.(),
+      ));
     }, timeoutMs);
 
     const heartbeat = heartbeatMs > 0
