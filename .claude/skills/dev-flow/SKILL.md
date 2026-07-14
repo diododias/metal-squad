@@ -35,10 +35,10 @@ Se for harness do produto, interrompa esta skill e siga `msq-develop`.
 Leia somente o necessario, priorizando estas fontes:
 
 1. `README.md` para setup/comandos
-2. `docs/ROADMAP.md` para prioridade, dependencias e nomenclatura `Fxx/Hxx`
-3. `docs/features/Fxx-*.md` ou `docs/hotfixes/Hxx-*.md` quando a demanda mapear para um item do backlog
-4. `backlog.yaml` quando a mudanca tocar fluxo de feature, skills, prompt ou selecao de tool/model
-5. arquivos reais em `src/` e `tests/` que serao alterados
+2. `backlog.yaml` quando a mudanca tocar fluxo de feature, skills, prompt ou selecao de tool/model
+3. `docs/features/Fxx-*.md` ou `docs/hotfixes/Hxx-*.md` quando a demanda mapear para um item ainda valido no repo
+4. arquivos reais em `src/` e `tests/` que serao alterados
+5. `docs/ROADMAP.md` apenas como aviso de transicao; nao use roadmap antigo como fonte operacional
 
 Nao trate `docs/ARCHITECTURE.md` como fonte de verdade hoje; ele esta placeholder.
 

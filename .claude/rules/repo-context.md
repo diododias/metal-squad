@@ -28,21 +28,16 @@ migracao) estao no roadmap (ver Fontes de verdade abaixo).
 Leia nesta ordem quando precisar de contexto funcional:
 
 1. `README.md` para setup e comandos reais
-2. Roadmap oficial, **fora do repo**, no vault Obsidian:
-   `/Users/luizdiodo/Library/Mobile Documents/iCloud~md~obsidian/Documents/default/metal-squad/project/docs/ROADMAP.md`
-   (proximos passos, prioridades, hotfixes pendentes) e
-   `.../project/docs/HISTORICO.md` (entregas passadas e decisoes de produto,
-   como a aposentadoria da TUI). `docs/ROADMAP.md` dentro deste repo e so um
-   stub apontando pra la — nao usar como fonte.
-3. `docs/features/Fxx-*.md` para escopo de feature
+2. `backlog.yaml` para configuracao executavel atual
+3. `docs/features/Fxx-*.md` para escopo de feature ainda valido no repo
 4. `docs/hotfixes/Hxx-*.md` para bugs operacionais ja descobertos
-5. `backlog.yaml` para configuracao executavel atual
-6. codigo e testes em `src/` e `tests/`
+5. codigo e testes em `src/` e `tests/`
+6. `docs/ROADMAP.md` apenas como aviso de transicao, nunca como backlog vivo
 
 ## Fontes que hoje NAO sao verdade
 
 - `docs/ARCHITECTURE.md` esta placeholder; nao use como base de decisao sem validar no codigo.
-- `docs/ROADMAP.md` (neste repo) e um stub desde 2026-07-13; o roadmap real esta no vault Obsidian (ver Fontes de verdade acima).
+- qualquer roadmap/historico antigo fora do repo; novas referencias devem apontar apenas para specs versionadas publicadas
 
 ## Mapa rapido do repo
 
@@ -56,7 +51,8 @@ Leia nesta ordem quando precisar de contexto funcional:
 - `src/db/`: SQLite, migracoes e queries
 - `src/ui/`: TUI Ink (aposentada — sem evolucao nova, ver secao acima)
 - `tests/`: suites por area
-- `.claude/skills/` e `.agents/skills/`: skills locais do repo
+- `.claude/skills/`: fonte canonica das skills locais do repo
+- `.agents/skills/`: apenas shim de compatibilidade para discovery legado
 
 ## Como categorizar uma mudanca
 
