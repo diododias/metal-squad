@@ -8,7 +8,7 @@ defaults:
     specify: [speckit-specify]
     plan: [speckit-plan, speckit-tasks]
     implement: [speckit-implement, dev-flow]
-    validate: [reviewr]
+    validate: [review]
 budget:
   maxTokens: 500000
   maxCostUsd: 10
@@ -26,10 +26,9 @@ epics:
         effort: high
         dependsOn: []
         skills: [specify, plan, implement]
-        specFile: docs/features/F01-yaml-schema-v2.md
         context:
           - src/core/backlog/schema.ts
-          - docs/epics/E01-skills-system.md
+          - src/core/runner/execute.ts
         tasks:
           - id: t-graph
             title: Topological ordering for backlog features
@@ -63,9 +62,9 @@ epics:
         effort: medium
         dependsOn: [feat-scheduler]
         skills: [implement]
-        specFile: docs/features/F19-notifications-v2.md
         context:
-          - docs/features/F15-event-system.md
+          - src/core/events/notifications.ts
+          - src/core/notify/telegram.ts
         tasks:
           - id: t-notify
             title: Telegram Bot API integration
@@ -93,7 +92,6 @@ epics:
         effort: low
         dependsOn: []
         skills: [implement, review]
-        specFile: docs/features/F20-plugin-adapters.md
         context:
           - src/core/adapters/opencode.ts
         tasks:

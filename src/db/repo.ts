@@ -3,7 +3,15 @@ import { getDb } from './index.js';
 import type { TokenUsage } from '../core/adapters/types.js';
 import { resolveDbPath } from '../config/index.js';
 import { msqEventBus } from '../core/events/index.js';
-import type { OutputSource, OutputStream, RunOutputEvent, TokensUpdateEvent } from '../core/events/types.js';
+import type {
+  ContextQueryEvent,
+  ContextQueryKind,
+  ContextQueryTool,
+  OutputSource,
+  OutputStream,
+  RunOutputEvent,
+  TokensUpdateEvent,
+} from '../core/events/types.js';
 import { resolveContextWindow } from '../core/tasks/blocks.js';
 import type { Tool } from '../core/backlog/schema.js';
 import type {
@@ -152,6 +160,115 @@ export function appendRunOutput(event: RunOutputEvent): void {
       event.source ?? event.stream,
       event.line,
     );
+}
+
+export interface ContextQueryRow {
+  id: number;
+  runId: number;
+  featureId: string | null;
+  tool: string | null;
+  queryTool: ContextQueryTool;
+  kind: ContextQueryKind;
+  target: string | null;
+  observedBytes: number;
+  latencyMs: number | null;
+  cacheHit: boolean | null;
+  rawLine: string;
+  createdAt: string;
+}
+
+export interface RunContextSummary {
+  totalQueries: number;
+  doraQueries: number;
+  serenaQueries: number;
+  shellReads: number;
+  structuredRate: number | null;
+  observedBytes: number;
+  cacheHits: number;
+  cacheMisses: number;
+}
+
+export function recordContextQuery(event: ContextQueryEvent): void {
+  getDb('readwrite')
+    .prepare(
+      `INSERT INTO context_queries (
+         run_id, feature_id, tool, query_tool, kind, target, observed_bytes, latency_ms, cache_hit, raw_line
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    )
+    .run(
+      event.runId,
+      event.featureId ?? null,
+      event.tool ?? null,
+      event.queryTool,
+      event.kind,
+      event.target ?? null,
+      event.observedBytes,
+      event.latencyMs ?? null,
+      event.cacheHit == null ? null : (event.cacheHit ? 1 : 0),
+      event.rawLine,
+    );
+}
+
+export function listRunContextQueries(runId: number, limit = 200): ContextQueryRow[] {
+  if (!hasDbFile()) return [];
+  const rows = getDb('readonly')
+    .prepare(
+      `SELECT
+         id,
+         run_id AS runId,
+         feature_id AS featureId,
+         tool,
+         query_tool AS queryTool,
+         kind,
+         target,
+         observed_bytes AS observedBytes,
+         latency_ms AS latencyMs,
+         cache_hit AS cacheHit,
+         raw_line AS rawLine,
+         created_at AS createdAt
+       FROM context_queries
+       WHERE run_id = ?
+       ORDER BY id DESC
+       LIMIT ?`,
+    )
+    .all(runId, limit) as (Omit<ContextQueryRow, 'cacheHit'> & { cacheHit: number | null })[];
+  return rows.map((row) => ({
+    ...row,
+    cacheHit: row.cacheHit == null ? null : Boolean(row.cacheHit),
+  }));
+}
+
+export function summarizeRunContextQueries(runId: number): RunContextSummary {
+  const rows = listRunContextQueries(runId, 500);
+  let doraQueries = 0;
+  let serenaQueries = 0;
+  let shellReads = 0;
+  let observedBytes = 0;
+  let cacheHits = 0;
+  let cacheMisses = 0;
+
+  for (const row of rows) {
+    if (row.queryTool === 'dora') doraQueries += 1;
+    else if (row.queryTool === 'serena') serenaQueries += 1;
+    else shellReads += 1;
+
+    observedBytes += row.observedBytes;
+    if (row.cacheHit === true) cacheHits += 1;
+    if (row.cacheHit === false) cacheMisses += 1;
+  }
+
+  const structuredQueries = doraQueries + serenaQueries;
+  const totalQueries = structuredQueries + shellReads;
+  return {
+    totalQueries,
+    doraQueries,
+    serenaQueries,
+    shellReads,
+    structuredRate: totalQueries > 0 ? structuredQueries / totalQueries : null,
+    observedBytes,
+    cacheHits,
+    cacheMisses,
+  };
 }
 
 export function listRunOutput(runId: number, limit = 120): RunOutputRow[] {

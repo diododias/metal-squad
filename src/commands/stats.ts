@@ -1,5 +1,10 @@
 import type { Command } from 'commander';
-import { listRunEvents, listRunsForStats, type StatsFilters } from '../db/repo.js';
+import {
+  listRunEvents,
+  listRunsForStats,
+  summarizeRunContextQueries,
+  type StatsFilters,
+} from '../db/repo.js';
 import {
   computeRunBreakdown,
   computeStats,
@@ -80,6 +85,7 @@ function printRunBreakdown(runId: number, asJson: boolean): void {
     throw new Error(`Run not found: ${String(runId)}`);
   }
   const breakdown = computeRunBreakdown(listRunEvents(runId), run.startedAt, run.endedAt);
+  const contextQueries = summarizeRunContextQueries(runId);
   if (asJson) {
     console.log(JSON.stringify({
       runId,
@@ -87,6 +93,7 @@ function printRunBreakdown(runId: number, asJson: boolean): void {
       totalTokens: run.totalTokens,
       contextWindowTokens: run.contextWindowTokens ?? null,
       contextWindowPercent: run.contextWindowPercent ?? null,
+      contextQueries,
       ...breakdown,
     }, null, 2));
     return;
@@ -98,7 +105,11 @@ function printRunBreakdown(runId: number, asJson: boolean): void {
       ? `${formatContextPercent(run.contextWindowPercent)} of context`
       : null,
   ].filter(Boolean).join(' — ');
-  console.log(`${header} — ${formatBreakdown(breakdown) || 'no timeline recorded'}`);
+  const contextLine = formatContextQueries(contextQueries);
+  console.log([
+    `${header} — ${formatBreakdown(breakdown) || 'no timeline recorded'}`,
+    contextLine ? `  Context queries: ${contextLine}` : null,
+  ].filter(Boolean).join('\n'));
 }
 
 export function parsePeriodDays(period: string): number {
@@ -117,4 +128,33 @@ function formatContextPercent(value: number | null): string {
   if (value === null || !Number.isFinite(value)) return '—';
   const rounded = Math.round(value * 10) / 10;
   return Number.isInteger(rounded) ? `${String(rounded)}%` : `${rounded.toFixed(1)}%`;
+}
+
+function formatContextQueries(summary: {
+  totalQueries: number;
+  doraQueries: number;
+  serenaQueries: number;
+  shellReads: number;
+  structuredRate: number | null;
+  observedBytes: number;
+  cacheHits: number;
+  cacheMisses: number;
+}): string {
+  if (summary.totalQueries === 0) return '';
+  const parts = [
+    `${String(summary.totalQueries)} total`,
+    `${String(summary.doraQueries)} Dora`,
+    `${String(summary.serenaQueries)} Serena`,
+    `${String(summary.shellReads)} shell reads`,
+  ];
+  if (summary.structuredRate !== null) {
+    parts.push(`${String(Math.round(summary.structuredRate * 100))}% structured`);
+  }
+  if (summary.observedBytes > 0) {
+    parts.push(`${formatTokensCompact(summary.observedBytes)} observed bytes`);
+  }
+  if (summary.cacheHits > 0 || summary.cacheMisses > 0) {
+    parts.push(`cache ${String(summary.cacheHits)} hit / ${String(summary.cacheMisses)} miss`);
+  }
+  return parts.join(', ');
 }

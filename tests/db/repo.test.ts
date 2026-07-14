@@ -146,6 +146,53 @@ describe('live run persistence helpers', () => {
     expect(listRunOutput(7, 20)).toEqual([{ id: 1, line: 'done' }]);
     expect(mockAll).toHaveBeenCalledWith(7, 20);
   });
+
+  it('stores context query rows', async () => {
+    const { recordContextQuery } = await import('../../src/db/repo.js');
+    recordContextQuery({
+      runId: 9,
+      featureId: 'feat-9',
+      tool: 'codex',
+      queryTool: 'dora',
+      kind: 'structured',
+      target: 'src/core/events',
+      observedBytes: 120,
+      latencyMs: 35,
+      cacheHit: true,
+      rawLine: 'tool mcp__dora__search {"query":"src/core/events"}',
+    });
+    expect(mockRun).toHaveBeenCalledWith(
+      9,
+      'feat-9',
+      'codex',
+      'dora',
+      'structured',
+      'src/core/events',
+      120,
+      35,
+      1,
+      'tool mcp__dora__search {"query":"src/core/events"}',
+    );
+  });
+
+  it('summarizes context query mix for a run', async () => {
+    mockAll.mockReturnValue([
+      { queryTool: 'dora', observedBytes: 100, cacheHit: 1 },
+      { queryTool: 'serena', observedBytes: 50, cacheHit: null },
+      { queryTool: 'shell', observedBytes: 25, cacheHit: 0 },
+    ]);
+    const { summarizeRunContextQueries } = await import('../../src/db/repo.js');
+    expect(summarizeRunContextQueries(7)).toEqual({
+      totalQueries: 3,
+      doraQueries: 1,
+      serenaQueries: 1,
+      shellReads: 1,
+      structuredRate: 2 / 3,
+      observedBytes: 175,
+      cacheHits: 1,
+      cacheMisses: 1,
+    });
+  });
 });
 
 // T022: openGates, resolveGate (idempotency), createGate

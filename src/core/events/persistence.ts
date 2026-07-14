@@ -1,6 +1,7 @@
-import { appendRunOutput, updateRunUsage, upsertTaskRun } from '../../db/repo.js';
+import { appendRunOutput, recordContextQuery, updateRunUsage, upsertTaskRun } from '../../db/repo.js';
 import { msqEventBus } from './bus.js';
 import type { TypedEventBus } from './bus.js';
+import { deriveContextQueryEvent } from './context-query.js';
 import type { MsqEvents } from './types.js';
 
 export function attachRunPersistence(
@@ -9,9 +10,14 @@ export function attachRunPersistence(
   const unsubscribers = [
     eventBus.subscribe('run:output', (event) => {
       appendRunOutput(event);
+      const contextQuery = deriveContextQueryEvent(event);
+      if (contextQuery) eventBus.emit('context:query', contextQuery);
     }),
     eventBus.subscribe('tokens:update', (event) => {
       updateRunUsage(event.runId, event);
+    }),
+    eventBus.subscribe('context:query', (event) => {
+      recordContextQuery(event);
     }),
     eventBus.subscribe('task:started', (event) => {
       upsertTaskRun(

@@ -19,7 +19,12 @@
     "format": "prettier --write src",
     "test": "vitest run",
     "test:coverage": "vitest run --coverage",
+    "test:coverage:gate": "vitest run --config vitest.coverage-gate.config.ts --coverage",
     "test:mutation": "stryker run",
+    "verify:doc-refs": "node scripts/verify-doc-references.mjs",
+    "verify:skill-shims": "node scripts/verify-skill-shims.mjs",
+    "verify:backlog": "node scripts/verify-backlog.mjs",
+    "verify:repo": "npm run verify:doc-refs && npm run verify:skill-shims && npm run verify:backlog",
     "prepare": "husky",
     "clean:db": "rm -f ~/.local/share/metal-squad/app.db && rm -rf .metal-squad",
     "web": "npm run build && export MSQ_WEB_PASSWORD=diodex && msq web --host 0.0.0.0"

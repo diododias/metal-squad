@@ -1,22 +1,18 @@
 # metal-squad — Roadmap
 
-**O roadmap oficial deste projeto saiu do repo em 2026-07-13.** Este arquivo
-não é mais atualizado — mantido só como ponteiro pra quem abrir o repo/GitHub
-sem acesso ao vault.
+Este arquivo nao e uma fonte de verdade funcional.
 
-O roadmap vivo (próximos passos, prioridades, backlog) e o histórico de
-entregas agora ficam no vault Obsidian:
+Em 2026-07-13, o roadmap consolidado antigo foi explicitamente removido deste
+repo. Ele nao deve ser restaurado nem referenciado como base operacional.
 
-```
-/Users/luizdiodo/Library/Mobile Documents/iCloud~md~obsidian/Documents/default/metal-squad/project/docs/ROADMAP.md
-/Users/luizdiodo/Library/Mobile Documents/iCloud~md~obsidian/Documents/default/metal-squad/project/docs/HISTORICO.md
-```
+Enquanto o novo conjunto versionado de specs nao for publicado, use apenas as
+fontes locais abaixo:
 
-- `ROADMAP.md` (vault) — o que ainda falta fazer, em andamento, hotfixes
-  pendentes e gaps de migração TUI → web.
-- `HISTORICO.md` (vault) — tudo que já foi entregue, fases concluídas e
-  decisões de produto (ex.: aposentadoria da TUI).
+- `README.md` para setup e comandos reais
+- `backlog.yaml` para a configuracao executavel atual
+- `docs/features/` para escopo de features ainda valido no repo
+- `docs/hotfixes/` para bugs operacionais ainda rastreados no repo
+- `src/` e `tests/` para o comportamento implementado
 
-As specs individuais de cada feature/hotfix **continuam sendo a fonte de
-verdade aqui no repo**, em `docs/features/` e `docs/hotfixes/`. Só o
-roadmap consolidado saiu daqui.
+Quando novas specs versionadas forem disponibilizadas, este arquivo deve ser
+atualizado para apontar somente para esse novo conjunto.
