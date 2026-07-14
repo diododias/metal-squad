@@ -221,6 +221,7 @@ export function BoardPage({ state, isMobile, onOpenRun, onOpenBacklogItem }: Boa
                     <KanbanCard
                       run={{
                         featureId: r.featureId,
+                        persistedId: state.featureCatalog[r.featureId]?.persistedId,
                         title: state.featureCatalog[r.featureId]?.title,
                         status: r.status,
                         tool: r.tool,

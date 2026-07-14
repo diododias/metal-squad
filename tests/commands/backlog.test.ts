@@ -4,6 +4,7 @@ import { Command } from 'commander';
 const mockResolveRepo = vi.fn();
 const mockRegisterRepo = vi.fn();
 const mockLoadBacklog = vi.fn();
+const mockStageBacklogFile = vi.fn();
 const mockAssertWritableDbPath = vi.fn();
 const mockDiffBacklogCatalog = vi.fn();
 const mockUpsertBacklogCatalog = vi.fn();
@@ -17,6 +18,7 @@ vi.mock('../../src/core/backlog/load.js', async () => {
   return {
     ...actual,
     loadBacklog: mockLoadBacklog,
+    stageBacklogFile: mockStageBacklogFile,
   };
 });
 
@@ -53,6 +55,7 @@ describe('backlog load command', () => {
     vi.clearAllMocks();
     mockResolveRepo.mockReturnValue({ repoId: 'repo-1', path: '/repo' });
     mockLoadBacklog.mockReturnValue(backlog);
+    mockStageBacklogFile.mockReturnValue({ commit: vi.fn(), rollback: vi.fn() });
     mockAssertWritableDbPath.mockReturnValue(undefined);
     mockDiffBacklogCatalog.mockReturnValue(diff);
     mockUpsertBacklogCatalog.mockReturnValue(diff);

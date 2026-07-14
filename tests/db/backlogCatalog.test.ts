@@ -47,6 +47,7 @@ describe('backlogCatalog upsert/diff/load', () => {
   let home = '';
 
   afterEach(async () => {
+    await import('../../src/db/index.js').then(({ resetDb }) => resetDb()).catch(() => {});
     if (home) rmSync(home, { recursive: true, force: true });
     process.env.HOME = previousHome;
     if (previousMsqDbPath === undefined) {
@@ -55,13 +56,12 @@ describe('backlogCatalog upsert/diff/load', () => {
       process.env['MSQ_DB_PATH'] = previousMsqDbPath;
     }
     home = '';
-    await import('../../src/db/index.js').then(({ resetDb }) => resetDb()).catch(() => {});
   });
 
   async function setup() {
     home = mkdtempSync(join(tmpdir(), 'msq-backlog-catalog-'));
     process.env.HOME = home;
-    delete process.env['MSQ_DB_PATH'];
+    process.env['MSQ_DB_PATH'] = join(home, 'app.db');
 
     const { getDb } = await import('../../src/db/index.js');
     const repo = await import('../../src/db/backlogCatalog.js');
@@ -72,7 +72,7 @@ describe('backlogCatalog upsert/diff/load', () => {
   }
 
   it('loads a fresh catalog end-to-end after upsert', async () => {
-    const { upsertBacklogCatalog } = await setup();
+    const { db, upsertBacklogCatalog } = await setup();
     const { loadBacklogFromCatalog } = await import('../../src/core/backlog/load.js');
     const backlog = makeBacklog();
 
@@ -80,6 +80,7 @@ describe('backlogCatalog upsert/diff/load', () => {
     expect(diff.addedFeatures).toEqual(['feat-1']);
     expect(diff.changedFeatures).toEqual([]);
     expect(diff.archivedFeatures).toEqual([]);
+    expect(db.prepare(`SELECT epic_id FROM backlog_epics WHERE epic_id = 'epic-1'`).get()).toEqual({ epic_id: 'epic-1' });
 
     const reloaded = loadBacklogFromCatalog('repo-1');
     expect(reloaded.epics).toHaveLength(1);
@@ -144,6 +145,28 @@ describe('backlogCatalog upsert/diff/load', () => {
       pipelines: (db.prepare('SELECT COUNT(*) AS n FROM pipelines').get() as { n: number }).n,
     };
     expect(countsAfter).toEqual(countsBefore);
+  });
+
+  it('rejects an explicit feature ID owned by another repository and rolls back', async () => {
+    const { db, upsertBacklogCatalog } = await setup();
+    const { registerRepo } = await import('../../src/db/repo.js');
+    registerRepo('repo-2', '/tmp/repo-2');
+    upsertBacklogCatalog(makeBacklog(), 'repo-1');
+
+    expect(() => upsertBacklogCatalog(makeBacklog({ repo: 'other' }), 'repo-2'))
+      .toThrow('already owned by repository "repo-1"');
+    const row = db
+      .prepare(`SELECT repo_id, title FROM backlog_features WHERE feature_id = 'feat-1'`)
+      .get() as { repo_id: string; title: string };
+    expect(row).toEqual({ repo_id: 'repo-1', title: 'Feature One' });
+  });
+
+  it('keeps archived IDs occupied so a later allocation cannot reuse them', async () => {
+    const { upsertBacklogCatalog } = await setup();
+    const { listOccupiedFeatureIds } = await import('../../src/db/backlogCatalog.js');
+    upsertBacklogCatalog(makeBacklog(), 'repo-1');
+    upsertBacklogCatalog(makeBacklog({ epics: [{ id: 'epic-1', title: 'Epic One', features: [] }] }), 'repo-1');
+    expect(listOccupiedFeatureIds()).toContain('feat-1');
   });
 
   it('throws an actionable error when no catalog was ever loaded', async () => {

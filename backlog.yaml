@@ -1,0 +1,249 @@
+version: 2
+repo: metal-squad
+defaults:
+  tool: codex
+  model: gpt-5.6-luna
+  effort: high
+  skills: []
+  stageSkills:
+    plan:
+      - speckit-plan
+    tasks:
+      - speckit-tasks
+    implement:
+      - speckit-implement
+      - dev-flow
+    validate:
+      - review
+epics:
+  - id: v1-foundation-quick-wins
+    title: V1 — Marco 1 (Fundação + Quick Wins)
+    features:
+      - id: feat-1
+        title: F52 — Registro de Features com ID Gerado Automaticamente
+        tool: codex
+        model: gpt-5.6-luna
+        effort: high
+        specFile: docs/features/F52-feature-id-generation.md
+        context:
+          - specs/017-feature-id-generation/spec.md
+          - docs/features/F52-feature-id-generation.md
+          - src/core/backlog/schema.ts
+          - src/core/backlog/load.ts
+          - src/db/backlogCatalog.ts
+          - src/core/orchestrator/graph.ts
+          - src/web/client/components/data/KanbanCard.tsx
+        dependsOn: []
+        tasks:
+          - id: T001
+            title: "[P] Create the feature-ID domain test entry point in
+              `tests/backlog/feature-id.test.ts`."
+            status: todo
+            dependsOn: []
+          - id: T002
+            title: "[P] Prepare isolated YAML and SQLite fixtures for feature-ID
+              registration scenarios in `tests/backlog/load-extended.test.ts`
+              and `tests/db/backlogCatalog.test.ts`."
+            status: todo
+            dependsOn: []
+          - id: T003
+            title: "[P] Create the shared feature-ID module entry point in
+              `src/core/backlog/featureId.ts` without changing `EpicSchema.id`
+              in `src/core/backlog/schema.ts`."
+            status: todo
+            dependsOn: []
+          - id: T004
+            title: "Add an authoring-time feature schema with optional `id` and keep the
+              normalized `FeatureSchema`/`Feature` contract requiring `id:
+              string` in `src/core/backlog/schema.ts`."
+            status: todo
+            dependsOn: []
+          - id: T005
+            title: Implement canonical alphabet/regex validation, unbiased random
+              generation, collision retry, opaque manual-ID classification, and
+              `FeatureRegistrationResult` types in
+              `src/core/backlog/featureId.ts`.
+            status: todo
+            dependsOn: []
+          - id: T006
+            title: "[P] Add transaction and staged-file rollback primitives needed for
+              atomic YAML/catalog publication in `src/db/index.ts`."
+            status: todo
+            dependsOn: []
+          - id: T007
+            title: Extend catalog feature row handling with global occupied-ID lookup,
+              repository ownership checks, and transaction-safe publication
+              hooks in `src/db/backlogCatalog.ts`.
+            status: todo
+            dependsOn: []
+          - id: T008
+            title: "[P] [US1] Cover canonical alphabet/length, 200 distinct generated IDs,
+              deterministic collision retry, and occupied-ID exhaustion in
+              `tests/backlog/feature-id.test.ts`."
+            status: todo
+            dependsOn: []
+          - id: T009
+            title: "[P] [US1] Cover omitted-ID normalization, YAML materialization,
+              repeated-load stability, feature reordering/title/spec-file edits,
+              and read-only `--dry-run` behavior in
+              `tests/backlog/load-extended.test.ts`."
+            status: todo
+            dependsOn: []
+          - id: T010
+            title: "[P] [US1] Cover catalog/YAML identity agreement, atomic rollback,
+              archived-ID non-reuse, concurrent writers, and unchanged
+              run/gate/pipeline history in `tests/db/backlogCatalog.test.ts`."
+            status: todo
+            dependsOn: []
+          - id: T011
+            title: "[US1] Refactor `loadBacklog` into parse/default/validate, registration,
+              staged YAML materialization, and normalized publication steps in
+              `src/core/backlog/load.ts`."
+            status: todo
+            dependsOn: []
+          - id: T012
+            title: "[US1] Wire `msq backlog load` to allocate missing IDs, honor
+              `--dry-run`, stage the source file, and print catalog diffs only
+              after commit in `src/commands/backlog.ts`."
+            status: todo
+            dependsOn: []
+          - id: T013
+            title: "[US1] Publish normalized metadata, epics, features, and tasks in one
+              guarded SQLite transaction while archiving removed rows and
+              preserving history in `src/db/backlogCatalog.ts`."
+            status: todo
+            dependsOn: []
+          - id: T014
+            title: "[US1] Preserve original feature order and unrelated YAML values while
+              writing assigned IDs and restoring the original file when
+              publication fails in `src/core/backlog/load.ts`."
+            status: todo
+            dependsOn: []
+          - id: T015
+            title: "[P] [US2] Cover legacy/manual preservation, whitespace/control
+              rejection, malformed reserved `F-` rejection, duplicate IDs, and
+              `EpicSchema.id` non-regression in `tests/backlog/schema.test.ts`."
+            status: todo
+            dependsOn: []
+          - id: T016
+            title: "[P] [US2] Cover opaque canonical/legacy/manual dependency ordering and
+              exact feature-ID resolution for graph, run, and notification paths
+              in `tests/orchestrator/graph.test.ts` and
+              `tests/commands/backlog.test.ts`."
+            status: todo
+            dependsOn: []
+          - id: T017
+            title: "[US2] Enforce explicit-ID validation and duplicate detection before
+              allocation or persistence, retaining valid values without
+              case/prefix normalization in `src/core/backlog/featureId.ts` and
+              `src/core/backlog/load.ts`."
+            status: todo
+            dependsOn: []
+          - id: T018
+            title: "[US2] Reject cross-repository explicit-ID ownership conflicts instead of
+              moving rows through upsert, and report the conflicting ID, owner,
+              and rollback status in `src/db/backlogCatalog.ts`."
+            status: todo
+            dependsOn: []
+          - id: T019
+            title: "[US2] Propagate feature location/title, invalid value/rule, duplicate,
+              ownership, and no-commit error details through the batch command
+              in `src/commands/backlog.ts`."
+            status: todo
+            dependsOn: []
+          - id: T020
+            title: "[US2] Keep dependency ordering and runtime feature identity as opaque
+              string equality for canonical, legacy, and manual IDs in
+              `src/core/orchestrator/graph.ts`."
+            status: todo
+            dependsOn: []
+          - id: T021
+            title: "[P] [US3] Cover the reusable batch/online registration input/output
+              contract, `assigned`/`idKind` semantics, and exclusion of Epic IDs
+              in `tests/backlog/feature-id.test.ts` and
+              `tests/commands/backlog.test.ts`."
+            status: todo
+            dependsOn: []
+          - id: T022
+            title: "[P] [US3] Cover persisted-ID board state, canonical/legacy display, and
+              missing-catalog legacy fallback behavior in
+              `tests/web/client.test.ts` and `tests/web/kanban-card.test.tsx`."
+            status: todo
+            dependsOn: []
+          - id: T023
+            title: "[US3] Expose the reusable registration boundary with normalized feature,
+              assigned flag, previous-ID/audit information, source, and
+              ownership error results in `src/core/backlog/featureId.ts`."
+            status: todo
+            dependsOn: []
+          - id: T024
+            title: "[US3] Include the persisted catalog feature ID in the web state contract
+              without generating an authoritative identity in the UI in
+              `src/web/state.ts`."
+            status: todo
+            dependsOn: []
+          - id: T025
+            title: "[US3] Pass catalog identity through board columns/items to cards while
+              retaining the run feature ID as an opaque value in
+              `src/web/client/pages/BoardPage.tsx`."
+            status: todo
+            dependsOn: []
+          - id: T026
+            title: "[US3] Render `persistedId ?? legacyFallback` in the board card and
+              ensure the fallback is never used for server lookup or catalog
+              persistence in `src/web/client/components/data/KanbanCard.tsx`."
+            status: todo
+            dependsOn: []
+          - id: T027
+            title: "[P] Update the source-of-truth feature record with implementation
+              decisions, atomicity guarantees, and compatibility boundaries in
+              `docs/features/F52-feature-id-generation.md`."
+            status: todo
+            dependsOn: []
+          - id: T028
+            title: "[P] Keep the quickstart scenarios aligned with the 200-feature batch,
+              collision retry, rollback, board fallback, and concurrent
+              publication checks in
+              `specs/017-feature-id-generation/quickstart.md`."
+            status: todo
+            dependsOn: []
+          - id: T029
+            title: "[P] Add a regression assertion that `EpicSchema.id` and
+              `backlog_epics.epic_id` remain unchanged by feature registration
+              in `tests/backlog/schema.test.ts` and
+              `tests/db/backlogCatalog.test.ts`."
+            status: todo
+            dependsOn: []
+          - id: T030
+            title: Run the focused feature-ID suites from
+              `specs/017-feature-id-generation/quickstart.md` and record any
+              required command or fixture corrections in
+              `specs/017-feature-id-generation/quickstart.md`.
+            status: todo
+            dependsOn: []
+          - id: T031
+            title: Run `npm run build`, `npm test`, `npm run typecheck`, and `npm run lint`
+              and resolve or document failures in `package.json` and the
+              affected source/test paths before implementation handoff.
+            status: todo
+            dependsOn: []
+        skills: []
+        workflow:
+          mode: staged
+          stages:
+            - plan
+            - tasks
+            - implement
+            - validate
+          approvals:
+            channel: telegram
+            autoAdvance: true
+          syncTasksToBacklog: true
+          sessionPolicy:
+            mode: isolated
+            alwaysIsolatedStages: []
+        retry:
+          maxAttempts: 1
+          backoffMs: 5000
+          onFail: stop
+          fallback: []

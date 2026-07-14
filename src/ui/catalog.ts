@@ -9,6 +9,8 @@ const DESCRIPTION_CHAR_LIMIT = 4000;
 
 export interface FeatureCatalogEntry {
   id: string;
+  /** Persistent catalog identity; kept separate from display-only fallbacks. */
+  persistedId?: string;
   title: string;
   skills: string[];
   tool: string;
@@ -97,6 +99,7 @@ function loadCatalogAndSettings(cwd: string): void {
           feature.id,
           {
             id: feature.id,
+            persistedId: feature.id,
             title: feature.title,
             skills: feature.skills ?? [],
             tool: feature.tool,

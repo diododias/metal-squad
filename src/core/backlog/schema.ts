@@ -115,10 +115,21 @@ export const FeatureSchema = z.object({
   autoStart: z.boolean().default(false),
 });
 
+/** Authoring shape accepted by backlog.yaml before registration assigns an id. */
+export const FeatureInputSchema = FeatureSchema.extend({
+  id: z.string().optional(),
+});
+
 export const EpicSchema = z.object({
   id: z.string(),
   title: z.string(),
   features: z.array(FeatureSchema).default([]),
+});
+
+export const EpicInputSchema = z.object({
+  id: z.string(),
+  title: z.string(),
+  features: z.array(FeatureInputSchema).default([]),
 });
 
 export const BacklogV1Schema = z.object({
@@ -126,6 +137,13 @@ export const BacklogV1Schema = z.object({
   repo: z.string(),
   budget: BudgetSchema.optional(),
   epics: z.array(EpicSchema).default([]),
+});
+
+export const BacklogV1InputSchema = z.object({
+  version: z.literal(1).default(1 as const),
+  repo: z.string(),
+  budget: BudgetSchema.optional(),
+  epics: z.array(EpicInputSchema).default([]),
 });
 
 export const BacklogV2Schema = z.object({
@@ -136,7 +154,16 @@ export const BacklogV2Schema = z.object({
   epics: z.array(EpicSchema).default([]),
 });
 
+export const BacklogV2InputSchema = z.object({
+  version: z.literal(2),
+  repo: z.string(),
+  defaults: DefaultsSchema.default({}),
+  budget: BudgetSchema.optional(),
+  epics: z.array(EpicInputSchema).default([]),
+});
+
 export const BacklogSchema = z.union([BacklogV1Schema, BacklogV2Schema]);
+export const BacklogInputSchema = z.union([BacklogV1InputSchema, BacklogV2InputSchema]);
 
 export type Tool = z.infer<typeof ToolSchema>;
 export type Effort = z.infer<typeof EffortSchema>;
@@ -152,7 +179,11 @@ export type WorkflowSessionPolicy = z.infer<typeof WorkflowSessionPolicySchema>;
 export type StepGuidance = z.infer<typeof StepGuidanceSchema>;
 export type Workflow = z.infer<typeof WorkflowSchema>;
 export type Feature = z.infer<typeof FeatureSchema>;
+export type FeatureInput = z.infer<typeof FeatureInputSchema>;
 export type Epic = z.infer<typeof EpicSchema>;
+export type EpicInput = z.infer<typeof EpicInputSchema>;
 export type BacklogV1 = z.infer<typeof BacklogV1Schema>;
+export type BacklogV1Input = z.infer<typeof BacklogV1InputSchema>;
 export type BacklogV2 = z.infer<typeof BacklogV2Schema>;
+export type BacklogV2Input = z.infer<typeof BacklogV2InputSchema>;
 export type Backlog = z.infer<typeof BacklogSchema>;

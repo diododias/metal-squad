@@ -1,23 +1,25 @@
-import { readFileSync, existsSync } from 'node:fs';
+import { readFileSync, existsSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { resolve, dirname, isAbsolute } from 'node:path';
-import { parse } from 'yaml';
+import { parse, stringify } from 'yaml';
 import { loadRepoConfig, mergeStageSkills } from '../../config/index.js';
 import {
-  BacklogSchema,
+  BacklogInputSchema,
   BacklogV2Schema,
-  type BacklogV1,
+  type BacklogV1Input,
   type BacklogV2,
+  type BacklogV2Input,
   type Defaults,
   type Epic,
   type Feature,
 } from './schema.js';
-import { getCatalogMeta, listCatalogEpics, listCatalogFeatures } from '../../db/backlogCatalog.js';
+import { getCatalogMeta, listCatalogEpics, listCatalogFeatures, listOccupiedFeatureIds } from '../../db/backlogCatalog.js';
+import { registerBacklogFeatures } from './featureId.js';
 
 export const BACKLOG_FILE = 'backlog.yaml';
 
 type RawYamlMap = Record<string, unknown>;
 
-function normalizeV1(backlog: BacklogV1, repoDefaults: ReturnType<typeof loadRepoConfig>['defaults'] = {}): BacklogV2 {
+function normalizeV1(backlog: BacklogV1Input, repoDefaults: ReturnType<typeof loadRepoConfig>['defaults'] = {}): BacklogV2Input {
   const defaults: Defaults = {
     tool: repoDefaults.tool ?? 'claude',
     ...(repoDefaults.model ? { model: repoDefaults.model } : {}),
@@ -44,7 +46,7 @@ function normalizeV1(backlog: BacklogV1, repoDefaults: ReturnType<typeof loadRep
   };
 }
 
-function propagateDefaults(backlog: BacklogV2, repoDefaults: ReturnType<typeof loadRepoConfig>['defaults'] = {}): BacklogV2 {
+function propagateDefaults(backlog: BacklogV2Input, repoDefaults: ReturnType<typeof loadRepoConfig>['defaults'] = {}): BacklogV2Input {
   const defaults: Defaults = {
     ...backlog.defaults,
     tool: backlog.defaults.tool,
@@ -146,23 +148,101 @@ function isRecord(value: unknown): value is RawYamlMap {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
+function occupiedFeatureIds(): Set<string> {
+  try {
+    return listOccupiedFeatureIds();
+  } catch (error) {
+    // A first load has no catalog file yet. Keep parsing available in that
+    // state; the guarded SQLite publication remains the final uniqueness gate.
+    const message = error instanceof Error ? error.message : String(error);
+    if (/resolveDbPath|unable to open database|SQLITE_CANTOPEN|no such table/i.test(message)) return new Set();
+    throw error;
+  }
+}
+
 export function loadBacklog(path = BACKLOG_FILE, cwd = process.cwd()): BacklogV2 {
   const absPath = isAbsolute(path) ? path : resolve(cwd, path);
   const root = dirname(absPath);
   const raw = readFileSync(absPath, 'utf8');
   const repoDefaults = loadRepoConfig(cwd).defaults;
-  const parsed = BacklogSchema.parse(applyDefaultsBeforeParse(parse(raw), repoDefaults));
+  const parsed = BacklogInputSchema.parse(applyDefaultsBeforeParse(parse(raw), repoDefaults));
 
-  let v2: BacklogV2;
+  let v2Input: BacklogV2Input;
   if (parsed.version === 1) {
     console.warn('[msq] backlog.yaml is in v1 format — consider upgrading to version: 2');
-    v2 = normalizeV1(parsed, repoDefaults);
+    v2Input = normalizeV1(parsed, repoDefaults);
   } else {
-    v2 = propagateDefaults(parsed, repoDefaults);
+    v2Input = propagateDefaults(parsed, repoDefaults);
   }
 
-  validateFiles(v2, root);
-  return v2;
+  const { backlog: v2 } = registerBacklogFeatures(v2Input, occupiedFeatureIds());
+  const normalized = BacklogV2Schema.parse(v2);
+  validateFiles(normalized, root);
+  return normalized;
+}
+
+export interface StagedBacklogFile {
+  commit(): void;
+  rollback(): void;
+}
+
+/**
+ * Stages generated IDs into the source YAML. The original file remains
+ * recoverable until the caller commits its catalog transaction.
+ */
+export function stageBacklogFile(path = BACKLOG_FILE, cwd = process.cwd(), backlog: BacklogV2): StagedBacklogFile {
+  const absPath = isAbsolute(path) ? path : resolve(cwd, path);
+  const parsedRaw: unknown = parse(readFileSync(absPath, 'utf8'));
+  if (!isRecord(parsedRaw)) throw new Error(`Backlog YAML must contain a mapping: ${absPath}`);
+  const raw = parsedRaw;
+  const rawEpics: unknown[] = Array.isArray(raw.epics) ? raw.epics as unknown[] : [];
+  let assignments = 0;
+  backlog.epics.forEach((epic, epicIndex) => {
+    const rawEpic = rawEpics[epicIndex];
+    if (!isRecord(rawEpic)) return;
+    const rawFeatures: unknown[] = Array.isArray(rawEpic.features) ? rawEpic.features as unknown[] : [];
+    epic.features.forEach((feature, featureIndex) => {
+      const rawFeature = rawFeatures[featureIndex];
+      if (!isRecord(rawFeature)) return;
+      if (rawFeature.id !== feature.id) {
+        rawFeature.id = feature.id;
+        assignments += 1;
+      }
+    });
+  });
+
+  if (assignments === 0) {
+    return {
+      commit: (): void => undefined,
+      rollback: (): void => undefined,
+    };
+  }
+
+  const temporaryPath = `${absPath}.msq-${String(process.pid)}-${String(Date.now())}.tmp`;
+  const backupPath = `${absPath}.msq-${String(process.pid)}-${String(Date.now())}.bak`;
+  let replaced = false;
+  try {
+    writeFileSync(temporaryPath, stringify(raw), 'utf8');
+    renameSync(absPath, backupPath);
+    renameSync(temporaryPath, absPath);
+    replaced = true;
+  } catch (error) {
+    rmSync(temporaryPath, { force: true });
+    if (existsSync(backupPath) && !existsSync(absPath)) renameSync(backupPath, absPath);
+    throw error;
+  }
+
+  return {
+    commit(): void {
+      rmSync(backupPath, { force: true });
+    },
+    rollback(): void {
+      if (!replaced) return;
+      rmSync(absPath, { force: true });
+      if (existsSync(backupPath)) renameSync(backupPath, absPath);
+      replaced = false;
+    },
+  };
 }
 
 /**
@@ -202,5 +282,5 @@ export function loadBacklogFromCatalog(repoId: string, cwd = process.cwd()): Bac
     epics,
   };
 
-  return propagateDefaults(BacklogV2Schema.parse(raw), loadRepoConfig(cwd).defaults);
+  return BacklogV2Schema.parse(propagateDefaults(BacklogV2Schema.parse(raw), loadRepoConfig(cwd).defaults));
 }

@@ -1,5 +1,5 @@
 import type { Command } from 'commander';
-import { loadBacklog } from '../core/backlog/load.js';
+import { loadBacklog, stageBacklogFile } from '../core/backlog/load.js';
 import { resolveRepo } from '../core/repo.js';
 import { assertWritableDbPath, DbAccessError } from '../db/index.js';
 import { registerRepo } from '../db/repo.js';
@@ -35,12 +35,19 @@ export function registerBacklog(program: Command): void {
 
         assertWritableDbPath();
         registerRepo(repoId, path);
-        const diff = upsertBacklogCatalog(parsed, repoId);
-        printDiff(diff);
-        console.log(
-          `Catalogo atualizado: ${String(parsed.epics.length)} epics, `
-            + `${String(parsed.epics.flatMap((e) => e.features).length)} features.`,
-        );
+        const staged = stageBacklogFile(opts.file, cwd, parsed);
+        try {
+          const diff = upsertBacklogCatalog(parsed, repoId);
+          staged.commit();
+          printDiff(diff);
+          console.log(
+            `Catalogo atualizado: ${String(parsed.epics.length)} epics, `
+              + `${String(parsed.epics.flatMap((e) => e.features).length)} features.`,
+          );
+        } catch (error) {
+          staged.rollback();
+          throw error;
+        }
       } catch (error) {
         if (error instanceof DbAccessError) {
           throw new Error(`${error.message}\nCatalogo nao foi atualizado.`);
