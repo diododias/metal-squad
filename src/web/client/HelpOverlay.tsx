@@ -19,7 +19,7 @@ const SHORTCUTS: ShortcutGroup[] = [
       { key: 'g r', label: 'Go to Runs' },
       { key: 'g g', label: 'Go to Gates' },
       { key: 'g a', label: 'Go to Analytics' },
-      { key: 'g c', label: 'Go to Config' },
+      { key: 'g c', label: 'Go to Settings' },
       { key: '?', label: 'Toggle this help overlay' },
     ],
   },

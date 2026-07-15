@@ -192,7 +192,7 @@ export function ConfigPage({ state }: ConfigPageProps): React.JSX.Element {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
-      <PageHeader title="Config" breadcrumb="Runtime, defaults, skills, notifications and budget" />
+      <PageHeader title="Settings" breadcrumb="Runtime, defaults, skills, notifications and budget" />
       <div style={{ padding: '0 20px' }}>
         <Tabs tabs={SUB_TABS} activeId={tab} onSelect={setTab} />
       </div>
