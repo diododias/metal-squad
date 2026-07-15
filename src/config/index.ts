@@ -6,8 +6,8 @@ import { z } from 'zod';
 import type { Defaults, Feature } from '../core/backlog/schema.js';
 import { EffortSchema, ToolSchema } from '../core/backlog/schema.js';
 
-const CONFIG_DIR = join(homedir(), '.config', 'metal-squad');
-const DATA_DIR = join(homedir(), '.local', 'share', 'metal-squad');
+export const CONFIG_DIR = join(homedir(), '.config', 'metal-squad');
+export const DATA_DIR = join(homedir(), '.local', 'share', 'metal-squad');
 export const DB_PATH_ENV = 'MSQ_DB_PATH';
 
 export const CONFIG_PATH = join(CONFIG_DIR, 'config.json');

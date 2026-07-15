@@ -53,6 +53,19 @@ export type WebRuntimeConfig = Omit<Config, 'notifications' | 'telegramChatId'> 
   };
 };
 
+/** Read-only diagnostics collected by the backend for the Settings page. */
+export interface EnvironmentInfo {
+  databasePath: string;
+  databaseSource: 'default' | 'override';
+  dbWritable: boolean;
+  dataDir: string;
+  configDir: string;
+  configWritable: boolean;
+  repoPath?: string;
+  repoId?: string;
+  version?: string;
+}
+
 export interface MsqWebState {
   repoLabel: string;
   runs: RunSummary[];
@@ -62,6 +75,7 @@ export interface MsqWebState {
   timeoutApprovals: TimeoutApprovalState[];
   featureCatalog: Record<string, FeatureCatalogEntry>;
   backlogSettings: BacklogSettings;
+  environment: EnvironmentInfo;
   stats: {
     totalRuns: number;
     doneRuns: number;

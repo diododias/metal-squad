@@ -21,6 +21,7 @@ import { resolveThemePreference } from '../ui/theme/resolve.js';
 import type { ThemeRoleName } from '../ui/theme/types.js';
 import { createSkillRegistry } from '../core/skills/registry.js';
 import type { Skill } from '../core/skills/types.js';
+import { collectEnvironmentInfo } from './environment.js';
 import type { MsqWebState, ThemeSnapshot, TimeoutApprovalState, TokenStats, UiNotification, WebRuntimeConfig } from './types.js';
 
 const DASHBOARD_PERIODS: { label: string; days: number | null }[] = [
@@ -249,6 +250,7 @@ export function buildMsqWebState(): MsqWebState {
     timeoutApprovals,
     featureCatalog,
     backlogSettings,
+    environment: collectEnvironmentInfo(),
     stats: {
       totalRuns: runs.length,
       doneRuns: doneRuns.length,

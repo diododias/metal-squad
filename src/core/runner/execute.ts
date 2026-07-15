@@ -1083,9 +1083,6 @@ function buildStagePrompt(
       ].join('\n'));
     }
   }
-  if (adminInputs.length > 0) {
-    stageNotes.push(`Admin inputs already collected for this stage:\n- ${adminInputs.join('\n- ')}`);
-  }
   if (stage === 'implement') {
     stageNotes.push([
       'Implementation exit contract:',
@@ -1099,7 +1096,11 @@ function buildStagePrompt(
     ].join('\n'));
   }
 
-  const appendedSections = [stageNotes.join('\n'), ...stageContext].filter((section) => section.trim().length > 0);
+  const adminInputSection = adminInputs.length > 0
+    ? `Admin inputs already collected for this stage:\n- ${adminInputs.join('\n- ')}`
+    : null;
+  const appendedSections = [stageNotes.join('\n'), ...stageContext, adminInputSection]
+    .filter((section): section is string => Boolean(section?.trim()));
   return `${basePrompt}\n\n---\n\n${appendedSections.join('\n\n')}`.trim();
 }
 
@@ -1136,7 +1137,7 @@ function resolveStepGuidanceSkills(
 function buildSpecifyStageDescription(
   feature: Feature,
   cwd: string,
-  maxContextChars: number,
+  _maxContextChars: number,
 ): string | null {
   const parts = [`Feature: ${feature.title}`];
 
@@ -1145,22 +1146,13 @@ function buildSpecifyStageDescription(
   }
 
   if (feature.specFile && existsSync(resolve(cwd, feature.specFile))) {
-    const specFileContent = truncateForStageContext(readFileSync(resolve(cwd, feature.specFile), 'utf8'), maxContextChars);
+    const specFileContent = readFileSync(resolve(cwd, feature.specFile), 'utf8');
     if (specFileContent) {
       parts.push(`Existing feature brief from ${feature.specFile}:\n${specFileContent}`);
     }
   }
 
   return parts.join('\n\n').trim() || null;
-}
-
-function truncateForStageContext(content: string, maxChars: number): string | null {
-  if (!content) return null;
-  if (content.length <= maxChars) return content;
-
-  const notice = '\n\n[truncated to respect promptContextCharLimit]';
-  const sliceLength = Math.max(0, maxChars - notice.length);
-  return `${content.slice(0, sliceLength)}${notice}`.trim();
 }
 
 function resolveGeneratedTasksFile(feature: Feature, cwd: string): string {
