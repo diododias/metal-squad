@@ -1,8 +1,15 @@
-import { describe, expect, it } from 'vitest';
-import { createElement } from 'react';
+// @vitest-environment happy-dom
+
+import React, { act, createElement } from 'react';
+import { createRoot, type Root } from 'react-dom/client';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { renderToStaticMarkup } from 'react-dom/server';
+import { App } from '../../src/web/client/App.js';
 import { parseHash } from '../../src/web/client/lib/routes.js';
+import { HelpOverlay } from '../../src/web/client/HelpOverlay.js';
+import { ConfigPage } from '../../src/web/client/pages/ConfigPage.js';
 import { BoardPage } from '../../src/web/client/pages/BoardPage.js';
+import type { MsqWebState } from '../../src/web/types.js';
 import {
   formatDurationMs,
   formatHeartbeatLine,
@@ -17,7 +24,50 @@ import { summarizeTaskRuns } from '../../src/web/client/lib/workflow.js';
 import { normalizeLegacyOpencodePayload, type OutputLine } from '../../src/web/client/hooks/useLocalOutput.js';
 import { subscriptionKey } from '../../src/web/client/hooks/useWebSocket.js';
 import type { RunSummary, TaskRun } from '../../src/db/repo.js';
-import type { MsqWebState } from '../../src/web/types.js';
+
+vi.mock('../../src/web/client/hooks/useWebSocket.js', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../src/web/client/hooks/useWebSocket.js')>()),
+  useWebSocket: () => ({ send: () => undefined, error: null }),
+}));
+
+globalThis.IS_REACT_ACT_ENVIRONMENT = true;
+
+let roots: Root[] = [];
+
+const settingsState = {
+  runtimeConfig: {
+    concurrency: 1,
+    toolTimeoutMs: 60_000,
+    staleRunThresholdMinutes: 10,
+    promptContextCharLimit: 20_000,
+    workflow: { autoAdvanceStages: false, pollIntervalMs: 5_000 },
+    web: { host: '127.0.0.1', port: 3000, auth: 'none' },
+    notifications: { channels: [], events: [] },
+    budget: { alertAtPercent: 80, lastResetDate: null },
+  },
+  backlogSettings: { configSources: undefined, resolvedDefaults: undefined, budget: undefined },
+  featureCatalog: {},
+  skillsCatalog: [],
+} as unknown as MsqWebState;
+
+function render(element: React.ReactElement): HTMLElement {
+  const container = document.createElement('div');
+  document.body.append(container);
+  const root = createRoot(container);
+  roots.push(root);
+  act(() => {
+    root.render(element);
+  });
+  return container;
+}
+
+afterEach(() => {
+  act(() => {
+    roots.forEach((root) => { root.unmount(); });
+  });
+  roots = [];
+  document.body.replaceChildren();
+});
 
 describe('parseHash', () => {
   it('maps hashes to routes', () => {
@@ -33,6 +83,39 @@ describe('parseHash', () => {
 
   it('falls back to board for unknown hashes', () => {
     expect(parseHash('#/nope')).toEqual({ page: 'board' });
+  });
+});
+
+describe('Settings client surfaces', () => {
+  it('keeps the Settings route stable', () => {
+    expect(parseHash('#/config')).toEqual({ page: 'config' });
+  });
+
+  it('renders the Settings heading and preserves all selectable categories', () => {
+    const container = render(React.createElement(ConfigPage, { state: settingsState, isMobile: false, send: () => undefined }));
+
+    expect(container.querySelector('h1')?.textContent).toBe('Settings');
+    expect(Array.from(container.querySelectorAll('button')).map((button) => button.textContent)).toEqual([
+      '[Runtime]',
+      'Defaults',
+      'Skills',
+      'Notifications',
+      'Budget',
+    ]);
+  });
+
+  it('renders Settings in the main navigation while retaining the config route', () => {
+    const container = render(React.createElement(App));
+
+    expect(container.textContent).toContain('Settings');
+    expect(parseHash('#/config')).toEqual({ page: 'config' });
+  });
+
+  it('renders the Settings label for the g c shortcut', () => {
+    const container = render(React.createElement(HelpOverlay, { open: true, onClose: () => undefined }));
+
+    expect(container.textContent).toContain('g c');
+    expect(container.textContent).toContain('Go to Settings');
   });
 });
 

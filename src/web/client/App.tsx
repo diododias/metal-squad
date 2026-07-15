@@ -161,7 +161,7 @@ export function App(): React.JSX.Element {
     { path: '/runs', label: 'Runs' },
     { path: '/gates', label: 'Gates', count: state?.gates.length },
     { path: '/analytics', label: 'Analytics' },
-    { path: '/config', label: 'Config' },
+    { path: '/config', label: 'Settings' },
   ];
 
   const totalTokens = (state?.runs ?? []).reduce((s, r) => s + (r.totalTokens ?? 0), 0);
