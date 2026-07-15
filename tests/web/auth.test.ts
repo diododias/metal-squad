@@ -120,4 +120,27 @@ describe('createWebAuth', () => {
     expect(cookie).toContain('SameSite=Strict');
     expect(cookie).toContain('Path=/');
   });
+
+  it('invalidates a session so it no longer authenticates', () => {
+    const auth = createWebAuth();
+    const sessionId = auth.createSession();
+    expect(auth.hasValidSession(`${SESSION_COOKIE_NAME}=${sessionId}`)).toBe(true);
+
+    auth.invalidateSession(`${SESSION_COOKIE_NAME}=${sessionId}`);
+
+    expect(auth.hasValidSession(`${SESSION_COOKIE_NAME}=${sessionId}`)).toBe(false);
+  });
+
+  it('does not throw when invalidating a missing or forged session', () => {
+    const auth = createWebAuth();
+    expect(() => { auth.invalidateSession(undefined); }).not.toThrow();
+    expect(() => { auth.invalidateSession(`${SESSION_COOKIE_NAME}=forged`); }).not.toThrow();
+  });
+
+  it('serializes a cookie that clears the session in the browser', () => {
+    const auth = createWebAuth();
+    const cookie = auth.expiredSessionCookie();
+    expect(cookie).toContain(`${SESSION_COOKIE_NAME}=;`);
+    expect(cookie).toContain('Max-Age=0');
+  });
 });

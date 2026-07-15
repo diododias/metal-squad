@@ -106,8 +106,12 @@ export interface WebAuth {
   createSession: () => string;
   /** True when the Cookie header carries a live session id. */
   hasValidSession: (cookieHeader: string | undefined) => boolean;
+  /** Removes the session carried by the Cookie header, if any. */
+  invalidateSession: (cookieHeader: string | undefined) => void;
   /** Serialized Set-Cookie value for a session id. */
   sessionCookie: (sessionId: string) => string;
+  /** Serialized Set-Cookie value that clears the session cookie in the browser. */
+  expiredSessionCookie: () => string;
 }
 
 export function createWebAuth(now: () => number = Date.now): WebAuth {
@@ -131,8 +135,18 @@ export function createWebAuth(now: () => number = Date.now): WebAuth {
       }
       return false;
     },
+    invalidateSession(cookieHeader: string | undefined): void {
+      const sessionId = parseCookies(cookieHeader)[SESSION_COOKIE_NAME];
+      if (!sessionId) return;
+      for (const stored of sessions.keys()) {
+        if (timingSafeEqualStrings(stored, sessionId)) sessions.delete(stored);
+      }
+    },
     sessionCookie(sessionId: string): string {
       return `${SESSION_COOKIE_NAME}=${sessionId}; HttpOnly; SameSite=Strict; Path=/; Max-Age=${String(SESSION_COOKIE_MAX_AGE_SECONDS)}`;
+    },
+    expiredSessionCookie(): string {
+      return `${SESSION_COOKIE_NAME}=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0`;
     },
   };
 }

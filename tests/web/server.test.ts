@@ -1344,6 +1344,76 @@ describe('web server', () => {
     expect(res.headers.get('location')).toBe('/');
   });
 
+  it('redirects unauthenticated GET / to the login screen', async () => {
+    const { createWebServer } = await import('../../src/web/server.js');
+    server = createWebServer({ host: '127.0.0.1', port: 0, auth: 'token', token: 'secret' });
+    await new Promise<void>((resolve) => server!.server.listen(0, '127.0.0.1', resolve));
+    const address = server!.server.address() as { port: number };
+    const base = `http://127.0.0.1:${address.port}`;
+
+    const res = await fetch(`${base}/`, { redirect: 'manual' });
+    expect(res.status).toBe(302);
+    expect(res.headers.get('location')).toBe('/auth');
+  });
+
+  it('serves the SPA at / for a request carrying a valid session cookie', async () => {
+    const { createWebServer } = await import('../../src/web/server.js');
+    server = createWebServer({ host: '127.0.0.1', port: 0, auth: 'token', token: 'secret' });
+    await new Promise<void>((resolve) => server!.server.listen(0, '127.0.0.1', resolve));
+    const address = server!.server.address() as { port: number };
+    const base = `http://127.0.0.1:${address.port}`;
+
+    const login = await fetch(`${base}/auth`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({ password: 'secret' }),
+      redirect: 'manual',
+    });
+    const cookie = (login.headers.get('set-cookie') ?? '').split(';')[0] ?? '';
+
+    const res = await fetch(`${base}/`, { headers: { Cookie: cookie }, redirect: 'manual' });
+    expect(res.status).toBe(200);
+    const body = await res.text();
+    expect(body).toContain('METAL SQUAD');
+  });
+
+  it('invalidates the session and redirects to the login screen on POST /logout', async () => {
+    const { createWebServer } = await import('../../src/web/server.js');
+    server = createWebServer({ host: '127.0.0.1', port: 0, auth: 'token', token: 'secret' });
+    await new Promise<void>((resolve) => server!.server.listen(0, '127.0.0.1', resolve));
+    const address = server!.server.address() as { port: number };
+    const base = `http://127.0.0.1:${address.port}`;
+
+    const login = await fetch(`${base}/auth`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({ password: 'secret' }),
+      redirect: 'manual',
+    });
+    const cookie = (login.headers.get('set-cookie') ?? '').split(';')[0] ?? '';
+
+    const logout = await fetch(`${base}/logout`, { method: 'POST', headers: { Cookie: cookie }, redirect: 'manual' });
+    expect(logout.status).toBe(302);
+    expect(logout.headers.get('location')).toBe('/auth');
+    const clearedCookie = logout.headers.get('set-cookie') ?? '';
+    expect(clearedCookie).toContain('Max-Age=0');
+
+    const afterLogout = await fetch(`${base}/`, { headers: { Cookie: cookie }, redirect: 'manual' });
+    expect(afterLogout.status).toBe(302);
+    expect(afterLogout.headers.get('location')).toBe('/auth');
+  });
+
+  it('rejects GET /logout', async () => {
+    const { createWebServer } = await import('../../src/web/server.js');
+    server = createWebServer({ host: '127.0.0.1', port: 0, auth: 'token', token: 'secret' });
+    await new Promise<void>((resolve) => server!.server.listen(0, '127.0.0.1', resolve));
+    const address = server!.server.address() as { port: number };
+    const base = `http://127.0.0.1:${address.port}`;
+
+    const res = await fetch(`${base}/logout`, { redirect: 'manual' });
+    expect(res.status).toBe(405);
+  });
+
   it('authenticates the WebSocket by session cookie without an auth message', async () => {
     const { createWebServer } = await import('../../src/web/server.js');
     server = createWebServer({ host: '127.0.0.1', port: 0, auth: 'token', token: 'secret' });
