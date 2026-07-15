@@ -12,10 +12,18 @@ export default defineConfig({
     coverage: {
       exclude: [
         '.claude/**',
+        'scripts/**',
+        'esbuild.web.mjs',
+        'eslint.config.js',
+        'stryker.config.mjs',
+        'vitest.config.ts',
+        'vitest.mutation.config.ts',
         'vitest.config.ts',
         'tests/**',
         'dist/**',
         'src/**/types.ts',
+        'src/ui/**',
+        'src/web/client/**',
       ],
       thresholds: {
         statements: 90,

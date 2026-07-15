@@ -4,6 +4,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 const mockAll = vi.fn();
 const mockRun = vi.fn();
 const mockGet = vi.fn();
+const mockRunColumnsAll = vi.fn();
 const mockPrepare = vi.fn(() => ({ all: mockAll, run: mockRun, get: mockGet }));
 const mockPragma = vi.fn();
 const mockExec = vi.fn();
@@ -26,7 +27,9 @@ beforeEach(async () => {
   mockAll.mockReset();
   mockRun.mockReset();
   mockGet.mockReset();
+  mockRunColumnsAll.mockReset();
   mockAll.mockReturnValue([]);
+  mockRunColumnsAll.mockReturnValue([]);
   mockPrepare.mockImplementation(() => ({ all: mockAll, run: mockRun, get: mockGet }));
 });
 
@@ -82,6 +85,56 @@ describe('listRunsForTui', () => {
     const result = listRunsForTui(10);
     expect(result[0]!.totalTokens).toBe(1200);
     expect(result[0]!.status).toBe('done');
+  });
+
+  it('falls back to NULL publish metadata when the runs schema is older than the query', async () => {
+    const row = {
+      runId: 15,
+      repoId: 'repo1',
+      featureId: 'feat-15',
+      tool: 'codex',
+      status: 'done',
+      startedAt: '2026-07-14T15:05:44',
+      endedAt: '2026-07-14T15:24:36',
+      totalTokens: 123,
+      inputTokens: 100,
+      outputTokens: 23,
+      gateId: null,
+      gateDecision: null,
+      publishVerified: null,
+      publishError: null,
+      branchName: null,
+      baseBranch: null,
+      commitSha: null,
+      remoteBranch: null,
+      prNumber: null,
+      prUrl: null,
+    };
+    mockPrepare.mockImplementation((sql: string) => {
+      if (sql.includes('PRAGMA table_info(runs)')) {
+        return { all: mockRunColumnsAll, run: mockRun, get: mockGet };
+      }
+      return { all: mockAll, run: mockRun, get: mockGet };
+    });
+    mockRunColumnsAll.mockReturnValue([
+      { name: 'id' },
+      { name: 'repo_id' },
+      { name: 'feature_id' },
+      { name: 'tool' },
+      { name: 'status' },
+      { name: 'started_at' },
+      { name: 'ended_at' },
+    ]);
+    mockAll.mockReturnValue([row]);
+
+    const { listRunsForTui } = await import('../../src/db/repo.js');
+    const result = listRunsForTui();
+
+    expect(result).toHaveLength(1);
+    expect(result[0]!.publishVerified).toBeNull();
+    expect(result[0]!.branchName).toBeNull();
+    expect(mockPrepare).toHaveBeenCalledWith(expect.stringContaining('NULL AS publishVerified'));
+    expect(mockPrepare).toHaveBeenCalledWith(expect.stringContaining('NULL AS prUrl'));
   });
 });
 
@@ -145,6 +198,53 @@ describe('live run persistence helpers', () => {
     const { listRunOutput } = await import('../../src/db/repo.js');
     expect(listRunOutput(7, 20)).toEqual([{ id: 1, line: 'done' }]);
     expect(mockAll).toHaveBeenCalledWith(7, 20);
+  });
+
+  it('stores context query rows', async () => {
+    const { recordContextQuery } = await import('../../src/db/repo.js');
+    recordContextQuery({
+      runId: 9,
+      featureId: 'feat-9',
+      tool: 'codex',
+      queryTool: 'dora',
+      kind: 'structured',
+      target: 'src/core/events',
+      observedBytes: 120,
+      latencyMs: 35,
+      cacheHit: true,
+      rawLine: 'tool mcp__dora__search {"query":"src/core/events"}',
+    });
+    expect(mockRun).toHaveBeenCalledWith(
+      9,
+      'feat-9',
+      'codex',
+      'dora',
+      'structured',
+      'src/core/events',
+      120,
+      35,
+      1,
+      'tool mcp__dora__search {"query":"src/core/events"}',
+    );
+  });
+
+  it('summarizes context query mix for a run', async () => {
+    mockAll.mockReturnValue([
+      { queryTool: 'dora', observedBytes: 100, cacheHit: 1 },
+      { queryTool: 'serena', observedBytes: 50, cacheHit: null },
+      { queryTool: 'shell', observedBytes: 25, cacheHit: 0 },
+    ]);
+    const { summarizeRunContextQueries } = await import('../../src/db/repo.js');
+    expect(summarizeRunContextQueries(7)).toEqual({
+      totalQueries: 3,
+      doraQueries: 1,
+      serenaQueries: 1,
+      shellReads: 1,
+      structuredRate: 2 / 3,
+      observedBytes: 175,
+      cacheHits: 1,
+      cacheMisses: 1,
+    });
   });
 });
 

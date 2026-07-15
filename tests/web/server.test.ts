@@ -8,6 +8,8 @@ const mocks = vi.hoisted(() => ({
   resolveRepo: vi.fn(),
   listRunsForTui: vi.fn(),
   listRunHistoryForFeature: vi.fn(),
+  getRunSessionStatus: vi.fn(),
+  listRunToolCalls: vi.fn(),
   openGates: vi.fn(),
   listPendingStageRequests: vi.fn(),
   listRunningTaskRuns: vi.fn(),
@@ -25,6 +27,7 @@ const mocks = vi.hoisted(() => ({
   requestFeatureAbort: vi.fn(),
   forceResolveGate: vi.fn(),
   resolveStageRequest: vi.fn(),
+  listCompletedFeatureIds: vi.fn(() => new Set()),
   getPendingFeatures: vi.fn(() => []),
   computeRunBreakdown: vi.fn(),
   assertWritableDbPath: vi.fn(),
@@ -72,6 +75,8 @@ vi.mock('node:child_process', async () => {
 vi.mock('../../src/db/repo.js', () => ({
   listRunsForTui: mocks.listRunsForTui,
   listRunHistoryForFeature: mocks.listRunHistoryForFeature,
+  getRunSessionStatus: mocks.getRunSessionStatus,
+  listRunToolCalls: mocks.listRunToolCalls,
   openGates: mocks.openGates,
   listPendingStageRequests: mocks.listPendingStageRequests,
   listRunningTaskRuns: mocks.listRunningTaskRuns,
@@ -87,6 +92,7 @@ vi.mock('../../src/db/repo.js', () => ({
   abortPipeline: mocks.abortPipeline,
   requestFeatureAbort: mocks.requestFeatureAbort,
   forceResolveGate: mocks.forceResolveGate,
+  listCompletedFeatureIds: mocks.listCompletedFeatureIds,
 }));
 
 vi.mock('../../src/core/stats.js', () => ({
@@ -1068,6 +1074,12 @@ describe('web server', () => {
     mocks.getFeatureCatalog.mockReturnValue({ 'feat-1': featureEntry });
     mocks.getPendingFeatures.mockImplementation((catalog: Record<string, typeof featureEntry>, doneFeatureIds: Set<string>, activeFeatureIds: Set<string>) =>
       Object.values(catalog).filter((feature) => !doneFeatureIds.has(feature.id) && !activeFeatureIds.has(feature.id)));
+    mocks.loadBacklogFromCatalog.mockReturnValue({
+      version: 2,
+      repo: 'repo',
+      defaults: { tool: 'codex', effort: 'medium', skills: [], stageSkills: {} },
+      epics: [{ id: 'epic-1', title: 'Epic', features: [{ ...featureEntry, tasks: [] }] }],
+    });
     mocks.listRunsForTui.mockImplementation(() => runs);
 
     server = createWebServer({ host: '127.0.0.1', port: 0, auth: 'token', token: 'secret' });
@@ -1121,5 +1133,205 @@ describe('web server', () => {
     expect((reconciledState.payload as { runs: Array<{ featureId: string }> }).runs[0]?.featureId).toBe('feat-1');
 
     socket.close();
+  });
+
+  it('does not spawn startFeature when dependencies are still pending', async () => {
+    const { createWebServer } = await import('../../src/web/server.js');
+
+    const featureEntry = {
+      id: 'feat-1',
+      title: 'Feature One',
+      tool: 'codex',
+      effort: 'medium',
+      skills: [],
+      dependsOn: ['feat-0'],
+      workflow: { mode: 'staged', stages: ['specify'], approvals: { channel: 'telegram', autoAdvance: false }, syncTasksToBacklog: true, sessionPolicy: { mode: 'isolated', alwaysIsolatedStages: [] } },
+    };
+    mocks.getFeatureCatalog.mockReturnValue({ 'feat-1': featureEntry });
+    mocks.getPendingFeatures.mockImplementation((catalog: Record<string, typeof featureEntry>, doneFeatureIds: Set<string>, activeFeatureIds: Set<string>) =>
+      Object.values(catalog)
+        .filter((feature) => !doneFeatureIds.has(feature.id) && !activeFeatureIds.has(feature.id))
+        .map((feature) => ({ ...feature, pendingDependencies: feature.dependsOn.filter((dependency) => !doneFeatureIds.has(dependency)) })));
+    mocks.loadBacklogFromCatalog.mockReturnValue({
+      version: 2,
+      repo: 'repo',
+      defaults: { tool: 'codex', effort: 'medium', skills: [], stageSkills: {} },
+      epics: [{ id: 'epic-1', title: 'Epic', features: [featureEntry] }],
+    });
+    mocks.listCompletedFeatureIds.mockReturnValue(new Set());
+
+    server = createWebServer({ host: '127.0.0.1', port: 0, auth: 'token', token: 'secret' });
+    await new Promise<void>((resolve) => server!.server.listen(0, '127.0.0.1', resolve));
+    const address = server!.server.address() as { port: number };
+    const socket = new WebSocket(`ws://127.0.0.1:${address.port}/ws`);
+    await waitForOpen(socket);
+    socket.send(JSON.stringify({ type: 'auth', token: 'secret' }));
+    await waitForSocketMessage(socket);
+
+    socket.send(JSON.stringify({ type: 'action:startFeature', featureId: 'feat-1' }));
+    await vi.waitFor(() => expect(mocks.spawn).not.toHaveBeenCalled());
+
+    socket.close();
+  });
+
+  it('serves a login form on GET /auth and never puts the password in the URL', async () => {
+    const { createWebServer } = await import('../../src/web/server.js');
+    server = createWebServer({ host: '127.0.0.1', port: 0, auth: 'token', token: 'secret' });
+    await new Promise<void>((resolve) => server!.server.listen(0, '127.0.0.1', resolve));
+    const address = server!.server.address() as { port: number };
+    const base = `http://127.0.0.1:${address.port}`;
+
+    const res = await fetch(`${base}/auth`, { redirect: 'manual' });
+    expect(res.status).toBe(200);
+    const body = await res.text();
+    expect(body).toContain('<form method="post" action="/auth">');
+    expect(body).toContain('name="password"');
+  });
+
+  it('grants a session via POST /auth with the correct password and rejects bad credentials', async () => {
+    const { createWebServer } = await import('../../src/web/server.js');
+    server = createWebServer({ host: '127.0.0.1', port: 0, auth: 'token', token: 'secret' });
+    await new Promise<void>((resolve) => server!.server.listen(0, '127.0.0.1', resolve));
+    const address = server!.server.address() as { port: number };
+    const base = `http://127.0.0.1:${address.port}`;
+
+    const good = await fetch(`${base}/auth`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({ password: 'secret' }),
+      redirect: 'manual',
+    });
+    expect(good.status).toBe(302);
+    expect(good.headers.get('location')).toBe('/');
+    const setCookie = good.headers.get('set-cookie') ?? '';
+    expect(setCookie).toContain('msq_session=');
+    expect(setCookie).toContain('HttpOnly');
+    expect(setCookie).toContain('SameSite=Strict');
+
+    const bad = await fetch(`${base}/auth`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({ password: 'wrong' }),
+      redirect: 'manual',
+    });
+    expect(bad.status).toBe(401);
+    expect(bad.headers.get('set-cookie')).toBeNull();
+
+    const empty = await fetch(`${base}/auth`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams(),
+      redirect: 'manual',
+    });
+    expect(empty.status).toBe(401);
+  });
+
+  it('redirects GET /auth straight through when already carrying a valid session', async () => {
+    const { createWebServer } = await import('../../src/web/server.js');
+    server = createWebServer({ host: '127.0.0.1', port: 0, auth: 'token', token: 'secret' });
+    await new Promise<void>((resolve) => server!.server.listen(0, '127.0.0.1', resolve));
+    const address = server!.server.address() as { port: number };
+    const base = `http://127.0.0.1:${address.port}`;
+
+    const login = await fetch(`${base}/auth`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({ password: 'secret' }),
+      redirect: 'manual',
+    });
+    const cookie = (login.headers.get('set-cookie') ?? '').split(';')[0] ?? '';
+
+    const res = await fetch(`${base}/auth`, { headers: { Cookie: cookie }, redirect: 'manual' });
+    expect(res.status).toBe(302);
+    expect(res.headers.get('location')).toBe('/');
+  });
+
+  it('authenticates the WebSocket by session cookie without an auth message', async () => {
+    const { createWebServer } = await import('../../src/web/server.js');
+    server = createWebServer({ host: '127.0.0.1', port: 0, auth: 'token', token: 'secret' });
+    await new Promise<void>((resolve) => server!.server.listen(0, '127.0.0.1', resolve));
+    const address = server!.server.address() as { port: number };
+    const base = `http://127.0.0.1:${address.port}`;
+
+    const login = await fetch(`${base}/auth`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({ password: 'secret' }),
+      redirect: 'manual',
+    });
+    const cookie = (login.headers.get('set-cookie') ?? '').split(';')[0] ?? '';
+    expect(cookie).toContain('msq_session=');
+
+    const socket = new WebSocket(`ws://127.0.0.1:${address.port}/ws`, { headers: { Cookie: cookie } });
+    const message = await waitForMessageType(socket, 'state:full');
+    expect((message as { type: string }).type).toBe('state:full');
+    socket.close();
+  });
+
+  it('does not authenticate the WebSocket with a forged session cookie', async () => {
+    const { createWebServer } = await import('../../src/web/server.js');
+    server = createWebServer({ host: '127.0.0.1', port: 0, auth: 'token', token: 'secret' });
+    await new Promise<void>((resolve) => server!.server.listen(0, '127.0.0.1', resolve));
+    const address = server!.server.address() as { port: number };
+
+    const socket = new WebSocket(`ws://127.0.0.1:${address.port}/ws`, {
+      headers: { Cookie: 'msq_session=forged' },
+    });
+    await waitForOpen(socket);
+    socket.send(JSON.stringify({ type: 'subscribe:output', runId: 1 }));
+    await waitForClose(socket);
+    expect(socket.readyState).toBe(WebSocket.CLOSED);
+  });
+
+  it('closes WebSocket upgrades from a foreign Origin', async () => {
+    const { createWebServer } = await import('../../src/web/server.js');
+    server = createWebServer({ host: '127.0.0.1', port: 0, auth: 'token', token: 'secret' });
+    await new Promise<void>((resolve) => server!.server.listen(0, '127.0.0.1', resolve));
+    const address = server!.server.address() as { port: number };
+
+    const socket = new WebSocket(`ws://127.0.0.1:${address.port}/ws`, { origin: 'http://evil.example' });
+    const closeCode = await new Promise<number>((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error('close timeout')), 2000);
+      socket.once('close', (code) => {
+        clearTimeout(timer);
+        resolve(code);
+      });
+      socket.once('error', () => undefined);
+    });
+    expect(closeCode).toBe(1008);
+  });
+
+  it('allows WebSocket upgrades from the local browser origin', async () => {
+    const { createWebServer } = await import('../../src/web/server.js');
+    server = createWebServer({ host: '127.0.0.1', port: 0, auth: 'token', token: 'secret' });
+    await new Promise<void>((resolve) => server!.server.listen(0, '127.0.0.1', resolve));
+    const address = server!.server.address() as { port: number };
+
+    const socket = new WebSocket(`ws://127.0.0.1:${address.port}/ws`, {
+      origin: `http://127.0.0.1:${address.port}`,
+    });
+    await waitForOpen(socket);
+    socket.send(JSON.stringify({ type: 'auth', token: 'secret' }));
+    const message = await waitForSocketMessage(socket);
+    expect((message as { type: string }).type).toBe('state:full');
+    socket.close();
+  });
+
+  it('rejects HTTP requests with a foreign Host header', async () => {
+    const { createWebServer } = await import('../../src/web/server.js');
+    server = createWebServer({ host: '127.0.0.1', port: 0, auth: 'token', token: 'secret' });
+    await new Promise<void>((resolve) => server!.server.listen(0, '127.0.0.1', resolve));
+    const address = server!.server.address() as { port: number };
+    const http = await import('node:http');
+
+    const status = await new Promise<number>((resolve, reject) => {
+      const req = http.request(
+        { host: '127.0.0.1', port: address.port, path: '/api/health', headers: { Host: 'evil.example' } },
+        (res) => { resolve(res.statusCode ?? 0); res.resume(); },
+      );
+      req.on('error', reject);
+      req.end();
+    });
+    expect(status).toBe(403);
   });
 });

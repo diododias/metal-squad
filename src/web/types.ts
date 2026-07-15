@@ -1,14 +1,30 @@
 import type { MsqEvents } from '../core/events/types.js';
+import type { SessionStatusSnapshot, ToolCallRecord } from '../core/adapters/types.js';
 import type { RunHistoryEntry, RunSummary, RunningTaskSummary, StatsRunRow, TaskRun } from '../db/repo.js';
 import type { PendingApproval } from '../ui/hooks/useGates.js';
 import type { FeatureCatalogEntry, BacklogSettings } from '../ui/catalog.js';
 import type { RunBreakdown } from '../core/stats.js';
 import type { ThemeRoleName } from '../ui/theme/types.js';
+import type { Config, NotificationChannelConfig } from '../config/index.js';
+import type { Skill } from '../core/skills/types.js';
 
 export interface TokenStats {
   status: 'loading' | 'ready' | 'error';
   totalTokens: number | null;
   error: string | null;
+}
+
+export interface TimeoutApprovalState {
+  requestId: number;
+  occurrenceId: number;
+  runId: number;
+  pipelineId: number | null;
+  featureId: string;
+  stage: string | null;
+  status: 'pending' | 'approved' | 'blocked' | 'cancelled' | 'superseded';
+  notificationStatus: 'pending' | 'sent' | 'failed';
+  notificationAttempts: number;
+  createdAt: string;
 }
 
 export interface UiNotification {
@@ -26,12 +42,24 @@ export interface ThemeSnapshot {
   roles: Record<ThemeRoleName, string>;
 }
 
+export interface WebNotificationChannel {
+  type: NotificationChannelConfig['type'];
+}
+
+export type WebRuntimeConfig = Omit<Config, 'notifications' | 'telegramChatId'> & {
+  notifications: {
+    channels: WebNotificationChannel[];
+    events: Config['notifications']['events'];
+  };
+};
+
 export interface MsqWebState {
   repoLabel: string;
   runs: RunSummary[];
   gates: PendingApproval[];
   pendingFeatures: FeatureCatalogEntry[];
   runningTasks: RunningTaskSummary[];
+  timeoutApprovals: TimeoutApprovalState[];
   featureCatalog: Record<string, FeatureCatalogEntry>;
   backlogSettings: BacklogSettings;
   stats: {
@@ -47,6 +75,15 @@ export interface MsqWebState {
   };
   notifications: UiNotification[];
   theme: ThemeSnapshot;
+  /** Config page (Runtime/Notifications/Budget sub-tabs) — read-only
+   * resolved runtime config. Notification channels are reduced to their type:
+   * Slack/Discord/webhook URLs and the Telegram chat id are bearer-style
+   * credentials and must not reach WebSocket clients (with auth 'none' any
+   * local process could read them). */
+  runtimeConfig: WebRuntimeConfig;
+  /** Config page (Skills sub-tab) — discovered skills with precedence
+   * already applied (repo > global > external > builtin), read-only. */
+  skillsCatalog: Skill[];
 }
 
 export interface RunChangedFile {
@@ -79,6 +116,7 @@ export interface FeatureConfigPatch {
     stages?: string[];
     syncTasksToBacklog?: boolean;
     approvals?: { autoAdvance?: boolean };
+    stepGuidance?: Record<string, { skills?: string[]; prompt?: string }>;
   };
   retry?: { maxAttempts?: number; backoffMs?: number; onFail?: string };
 }
@@ -117,11 +155,13 @@ export type WebSocketClientMessage =
 
 export type WebSocketServerMessage =
   | { type: 'state:full'; payload: MsqWebState }
-  | { type: 'run:detail'; payload: { runId: number; taskRuns: TaskRun[]; breakdown: RunBreakdown | null } }
+  | { type: 'run:detail'; payload: { runId: number; taskRuns: TaskRun[]; breakdown: RunBreakdown | null; sessionStatus: SessionStatusSnapshot | null; statusHistory: SessionStatusSnapshot[]; toolCalls: ToolCallRecord[] } }
   | { type: 'run:history'; payload: { featureId: string; runs: RunHistoryEntry[] } }
   | { type: 'run:changes'; payload: RunChangesPayload }
+  | { type: 'run:status'; payload: SessionStatusSnapshot }
+  | { type: 'tool:call'; payload: ToolCallRecord }
   | { type: 'error'; payload: { message: string } }
-  | { type: keyof MsqEvents; payload: unknown };
+  | { type: Exclude<keyof MsqEvents, 'run:status' | 'tool:call'>; payload: unknown };
 
 export interface WebServerOptions {
   host?: string;

@@ -35,18 +35,21 @@ Se for harness do produto, interrompa esta skill e siga `msq-develop`.
 Leia somente o necessario, priorizando estas fontes:
 
 1. `README.md` para setup/comandos
-2. `docs/ROADMAP.md` para prioridade, dependencias e nomenclatura `Fxx/Hxx`
-3. `docs/features/Fxx-*.md` ou `docs/hotfixes/Hxx-*.md` quando a demanda mapear para um item do backlog
-4. `backlog.yaml` quando a mudanca tocar fluxo de feature, skills, prompt ou selecao de tool/model
-5. arquivos reais em `src/` e `tests/` que serao alterados
+2. `backlog.yaml` quando a mudanca tocar fluxo de feature, skills, prompt ou selecao de tool/model
+3. `docs/features/Fxx-*.md` ou `docs/hotfixes/Hxx-*.md` quando a demanda mapear para um item ainda valido no repo
+4. arquivos reais em `src/` e `tests/` que serao alterados
+5. `docs/ROADMAP.md` apenas como aviso de transicao; nao use roadmap antigo como fonte operacional
 
 Nao trate `docs/ARCHITECTURE.md` como fonte de verdade hoje; ele esta placeholder.
 
-### 3. Isolar o trabalho
+### 3. Preparar a branch e o checkout
 
-- Para feature, hotfix ou refactor de medio/alto risco, prefira worktree isolada.
-- Para ajuste pequeno de docs/skill/regra no checkout ja preparado pelo usuario, trabalhar no checkout atual e aceitavel.
-- Nunca crie worktree de dentro do fluxo `msq-develop`.
+- Trabalhe sempre no checkout atual deste repositorio.
+- Crie uma branch de trabalho a partir de `develop` antes de implementar uma
+  tarefa nova; nunca implemente ou commite diretamente em `develop`.
+- Se ja existir uma branch de trabalho para a tarefa, reutilize-a.
+- Nao crie worktree, nao use `EnterWorktree` e nao mova a tarefa para outro
+  checkout durante o fluxo do agente.
 
 ### 4. Planejar de forma curta
 
@@ -85,6 +88,7 @@ Se rodar `msq`, `node dist/index.js`, `msq status` ou outro fluxo que persiste r
 Quando o usuario pedir publicacao ou quando a tarefa claramente inclui entrega pronta:
 
 - commit somente depois da validacao relevante
+- fazer push da branch de trabalho e abrir o PR ao final da implementacao
 - base de PR: `develop`
 - incluir referencia a feature/hotfix/issue real quando existir
 - usar o template em [`pr-template.md`](./pr-template.md)

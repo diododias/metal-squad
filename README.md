@@ -16,8 +16,8 @@ repositories, and can ask for human approval or input through Telegram.
 - Supports staged workflows with pause/resume/abort and approval gates
 - Persists runs, token usage, output, retry history, gates, and pipelines in SQLite
 - Streams notifications to Telegram, Slack, Discord, webhook, or desktop
-- Exposes a TUI for monitoring runs, gates, output, and costs
-- Exposes a web dashboard for remote monitoring and control
+- Keeps a legacy TUI for monitoring runs, gates, output, and costs
+- Exposes the official web dashboard for remote monitoring and control
 - Lets you customize prompts via builtin, global, repo, and Spec Kit skills
 
 ## Requirements
@@ -209,9 +209,12 @@ Options:
 - `--run <runId>`: show a time breakdown for one run
 - `--format <format>`: `text` or `json`
 
+When `--run` is used, `msq` also reports the run's context-exploration mix
+(Dora queries, Serena queries, and shell reads) when that telemetry is present.
+
 ### `msq ui`
 
-Starts the interactive TUI.
+Starts the legacy interactive TUI. New UI work targets `msq web`.
 
 ```bash
 msq ui
@@ -231,12 +234,20 @@ Options:
 
 - `--host <host>`: bind address (default `127.0.0.1`)
 - `--port <port>`: port number (default `8743`)
-- `--no-auth`: disable token authentication
+- `--no-auth`: disable password authentication
+- `--rotate-token`: generate a fresh auto-generated password before starting,
+  invalidating the previous one (ignored when `MSQ_WEB_PASSWORD` is set)
 
-The first run generates a token stored in the OS keychain (fallback to
-`~/.config/metal-squad/config.json` under `webToken`). The token is appended to
-the printed URL; clients can also authenticate with `Authorization: Bearer <token>`
-or by sending `{ type: 'auth', token: '...' }` over WebSocket.
+No credential is ever put in the printed URL. Open it, then log in through the
+password form at `/auth` (a plain HTML form, submitted via `POST`, never a
+query param). The password is resolved in this order:
+
+1. `MSQ_WEB_PASSWORD` env var — set your own, never persisted by `msq`.
+2. a fallback token auto-generated on first run and stored in the OS keychain
+   (fallback to `~/.config/metal-squad/config.json` under `webToken`).
+
+Programmatic clients can still authenticate with `Authorization: Bearer
+<password>` or by sending `{ type: 'auth', token: '...' }` over WebSocket.
 
 ### `msq daemon`
 
@@ -698,6 +709,14 @@ Telegram requires:
 - `telegramChatId` or `notifications.channels[].chatId`
 - a bot token stored in the OS keychain under account `telegram-bot-token`
 
+For feature-linked notifications, configure the chat as a Telegram forum
+supergroup and make the bot an administrator with permission to create/manage
+topics and send messages. Metal Squad creates one topic per `featureId` on the
+first notification and reuses it across retries, stages, resumes, and restarts.
+The optional `forumTopicId` remains the static destination for global or legacy
+messages without a `featureId`; feature messages never fall back to that topic
+or to another feature's topic.
+
 There is currently no dedicated CLI command for secret management. From the repo
 root, you can store the token with:
 
@@ -711,13 +730,16 @@ The poller reads Telegram updates and resolves:
 - stage approvals
 - stage input requests
 
-## TUI Usage
+## Legacy TUI Usage
 
 Start it with:
 
 ```bash
 msq ui
 ```
+
+The TUI remains available for compatibility, but new features, improvements, and
+hotfixes target the web dashboard.
 
 The optional `theme` config changes the built-in TUI palette on the next
 startup. If the configured value is unknown, `msq ui` falls back to `default`
@@ -767,7 +789,7 @@ The SQLite DB persists:
 - run events
 - stage requests
 
-`msq status`, `msq stats`, and the TUI all read from this DB.
+`msq status`, `msq stats`, the web dashboard, and the legacy TUI all read from this DB.
 
 ## Troubleshooting
 

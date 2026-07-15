@@ -1,1 +1,4 @@
-#npm run test:mutation
+#!/usr/bin/env sh
+. "$(dirname "$0")/_/husky.sh"
+
+rtk node scripts/husky-gate.mjs pre-push

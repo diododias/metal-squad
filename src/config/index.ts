@@ -22,10 +22,28 @@ export const NOTIFICABLE_EVENTS = [
   'run:done',
   'stage:approval',
   'stage:input',
+  'timeout:approval-created',
 ] as const;
 export type NotificableEvent = (typeof NOTIFICABLE_EVENTS)[number];
 
-const TelegramChannelConfig = z.object({ type: z.literal('telegram'), chatId: z.string(), forumTopicId: z.number().int().positive().optional() });
+/**
+ * Feature-linked notification metadata is consumed only by Telegram routing.
+ * `forumTopicId` remains the explicit static destination for no-feature alerts;
+ * chat ids and bot credentials are never included in web-facing state.
+ */
+export interface TelegramFeatureTopicMetadata {
+  featureId: string;
+  featureName?: string;
+  requestId?: number;
+  gateId?: number;
+  stage?: string;
+}
+
+const TelegramChannelConfig = z.object({
+  type: z.literal('telegram'),
+  chatId: z.string().trim().min(1),
+  forumTopicId: z.number().int().positive().optional(),
+});
 const SlackChannelConfig = z.object({ type: z.literal('slack'), webhookUrl: z.string() });
 const DiscordChannelConfig = z.object({ type: z.literal('discord'), webhookUrl: z.string() });
 const WebhookChannelConfig = z.object({ type: z.literal('webhook'), url: z.string() });
@@ -68,12 +86,14 @@ const WebConfig = z.object({
   host: z.string().trim().min(1).default('127.0.0.1'),
   port: z.number().int().min(1).max(65_535).default(8_743),
   auth: z.enum(['token', 'none']).default('token'),
+  statusSpinner: z.boolean().default(true),
 });
 
 const RuntimeConfigOverrideSchema = z.object({
   concurrency: z.number().int().positive().optional(),
   toolTimeoutMs: z.number().int().positive().optional(),
   staleRunThresholdMinutes: z.number().int().positive().optional(),
+  idleThresholdMs: z.number().int().positive().optional(),
   promptContextCharLimit: z.number().int().positive().optional(),
   theme: z.string().trim().min(1).optional(),
   telegramChatId: z.string().optional(),
@@ -99,6 +119,7 @@ export const ConfigSchema = z.object({
   concurrency: z.number().int().positive().default(3),
   toolTimeoutMs: z.number().int().positive().default(600_000),
   staleRunThresholdMinutes: z.number().int().positive().default(120),
+  idleThresholdMs: z.number().int().positive().default(30_000),
   promptContextCharLimit: z.number().int().positive().default(20_000),
   theme: z.string().trim().min(1).optional(),
   telegramChatId: z.string().optional(),

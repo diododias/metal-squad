@@ -6,6 +6,7 @@ const mockSlackSend = vi.fn();
 const mockDiscordSend = vi.fn();
 const mockWebhookSend = vi.fn();
 const mockDesktopSend = vi.fn();
+const mockRecordTimeoutNotificationDelivery = vi.fn();
 
 const MockTelegramChannel = vi.fn(() => ({ send: mockTelegramSend }));
 const MockSlackChannel = vi.fn(() => ({ send: mockSlackSend }));
@@ -15,6 +16,9 @@ const MockDesktopChannel = vi.fn(() => ({ send: mockDesktopSend }));
 
 vi.mock('../../src/config/index.js', () => ({
   resolveRuntimeConfig: mockResolveRuntimeConfig,
+}));
+vi.mock('../../src/db/repo.js', () => ({
+  recordTimeoutNotificationDelivery: mockRecordTimeoutNotificationDelivery,
 }));
 vi.mock('../../src/core/notify/telegram.js', () => ({ TelegramChannel: MockTelegramChannel }));
 vi.mock('../../src/core/notify/slack.js', () => ({ SlackChannel: MockSlackChannel }));
@@ -44,6 +48,7 @@ beforeEach(() => {
   mockDiscordSend.mockReset().mockResolvedValue(undefined);
   mockWebhookSend.mockReset().mockResolvedValue(undefined);
   mockDesktopSend.mockReset().mockResolvedValue(undefined);
+  mockRecordTimeoutNotificationDelivery.mockReset();
   MockTelegramChannel.mockClear();
   MockSlackChannel.mockClear();
   MockDiscordChannel.mockClear();
@@ -176,6 +181,20 @@ describe('dispatch', () => {
     await expect(dispatch('run:start', 'msg')).resolves.toBeUndefined();
   });
 
+  it('isolates a feature-linked Telegram failure from other channels', async () => {
+    mockResolveRuntimeConfig.mockReturnValue(makeConfig({
+      channels: [
+        { type: 'telegram', chatId: 'c1' },
+        { type: 'slack', webhookUrl: 'https://slack/hook' },
+      ],
+    }));
+    mockTelegramSend.mockRejectedValue(new Error('topic unavailable'));
+    const { dispatch } = await import('../../src/core/notify/manager.js');
+
+    await expect(dispatch('run:failed', 'failure', { featureId: 'F54', featureName: 'Topics' })).resolves.toBeUndefined();
+    expect(mockSlackSend).toHaveBeenCalledWith('failure', { featureId: 'F54', featureName: 'Topics' });
+  });
+
   it('does not throw when DesktopChannel fallback rejects', async () => {
     mockResolveRuntimeConfig.mockReturnValue(makeConfig({ channels: [] }));
     mockDesktopSend.mockRejectedValue(new Error('desktop error'));
@@ -195,5 +214,34 @@ describe('dispatch', () => {
 
     expect(MockTelegramChannel).not.toHaveBeenCalled();
     expect(mockSlackSend).toHaveBeenCalledWith('msg', undefined);
+  });
+
+  it('always allows timeout approvals and records successful delivery', async () => {
+    mockResolveRuntimeConfig.mockReturnValue(makeConfig({
+      events: ['run:done'],
+      channels: [{ type: 'desktop' }],
+    }));
+    const { dispatch } = await import('../../src/core/notify/manager.js');
+
+    await dispatch('timeout:approval-created', 'timeout message', { timeoutApprovalRequestId: 55, featureId: 'feat-timeout' });
+
+    expect(mockDesktopSend).toHaveBeenCalledWith('timeout message', { timeoutApprovalRequestId: 55, featureId: 'feat-timeout' });
+    expect(mockRecordTimeoutNotificationDelivery).toHaveBeenCalledWith(55, { status: 'sent' });
+  });
+
+  it('records failed timeout approval delivery when any channel rejects', async () => {
+    mockResolveRuntimeConfig.mockReturnValue(makeConfig({
+      events: ['timeout:approval-created'],
+      channels: [{ type: 'telegram', chatId: 'c1' }],
+    }));
+    mockTelegramSend.mockRejectedValue(new Error('telegram down'));
+    const { dispatch } = await import('../../src/core/notify/manager.js');
+
+    await dispatch('timeout:approval-created', 'timeout message', { timeoutApprovalRequestId: 56 });
+
+    expect(mockRecordTimeoutNotificationDelivery).toHaveBeenCalledWith(56, {
+      status: 'failed',
+      error: 'telegram down',
+    });
   });
 });

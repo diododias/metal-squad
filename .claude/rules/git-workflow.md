@@ -2,20 +2,17 @@
 
 ## Regra base
 
-Para feature, hotfix e refactor com risco real, prefira worktree isolada antes de editar.
+Para toda feature, hotfix, refactor ou ajuste de docs/skills, crie ou reutilize uma
+branch de trabalho no checkout atual e valide antes de commitar.
 
-## Quando usar worktree
+## Checkout e isolamento
 
-Use worktree por padrao quando:
-
-- a tarefa toca `src/` ou `tests/`
-- a entrega pode virar commit/PR
-- ha chance de o usuario querer continuar outras tarefas no checkout principal
-
-Pode trabalhar no checkout atual quando:
-
-- o usuario ja preparou este checkout especificamente para a tarefa
-- a mudanca e pequena e localizada em docs/skills/regras
+- Trabalhe sempre no checkout atual deste repositorio.
+- Crie a branch a partir de `develop` quando iniciar uma tarefa nova; nunca commite
+  diretamente em `develop`.
+- Nao crie worktrees, nao use `EnterWorktree` e nao mova a tarefa para outro
+  checkout durante o fluxo do agente.
+- Se ja existir uma branch de trabalho para a tarefa, reutilize-a.
 
 ## Naming sugerido
 
@@ -35,7 +32,7 @@ Se existir `Fxx` ou `Hxx`, inclua esse id no branch, no commit ou no PR.
 ## Push e PR
 
 - base branch padrao: `develop`
-- abra PR quando o usuario pedir publicacao ou quando a tarefa estiver claramente no fluxo "ate PR"
+- ao final da implementacao validada, faca push da branch de trabalho e abra um PR para `develop`
 - use o template em `.claude/skills/dev-flow/pr-template.md`
 - nao faca merge por conta propria
 

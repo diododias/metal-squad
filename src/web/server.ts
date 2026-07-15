@@ -10,10 +10,13 @@ import { assertWritableDbPath } from '../db/index.js';
 import {
   abortPipeline,
   forceResolveGate,
+  listCompletedFeatureIds,
   listRunEvents,
   listRunHistoryForFeature,
+  getRunSessionStatus,
   listRunOutput,
   listRunOutputAfterId,
+  listRunToolCalls,
   listTaskRunsForRun,
   pausePipeline,
   requestFeatureAbort,
@@ -24,11 +27,13 @@ import {
 import { computeRunBreakdown } from '../core/stats.js';
 import { resolveRepo } from '../core/repo.js';
 import { loadBacklogFromCatalog } from '../core/backlog/load.js';
+import { selectStartableFeaturePlan } from '../core/orchestrator/graph.js';
 import { validateBacklogSkills } from '../core/skills/index.js';
 import { resolveRuntimeConfig } from '../config/index.js';
 import { updateCatalogFeature, updateCatalogTask, type FeaturePatch } from '../db/backlogCatalog.js';
 import type { Feature, Task } from '../core/backlog/schema.js';
 import { buildMsqWebState, appendNotification } from './state.js';
+import { createWebAuth, isAllowedHostHeader, isAllowedOrigin, timingSafeEqualStrings } from './auth.js';
 import type {
   FeatureConfigPatch,
   RunChangesPayload,
@@ -73,6 +78,55 @@ interface Client {
 const GIT_ENV_OVERRIDE = Object.fromEntries(
   Object.entries(process.env).filter(([key]) => !key.startsWith('GIT_')),
 );
+
+const MAX_AUTH_BODY_BYTES = 8192;
+
+/** Reads a request body up to a size cap, rejecting oversized payloads
+ * instead of buffering unbounded attacker-controlled input. */
+async function readRequestBody(req: IncomingMessage, maxBytes = MAX_AUTH_BODY_BYTES): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const chunks: Buffer[] = [];
+    let size = 0;
+    req.on('data', (chunk: Buffer) => {
+      size += chunk.length;
+      if (size > maxBytes) {
+        req.destroy();
+        reject(new Error('Payload too large'));
+        return;
+      }
+      chunks.push(chunk);
+    });
+    req.on('end', () => { resolve(Buffer.concat(chunks).toString('utf8')); });
+    req.on('error', reject);
+  });
+}
+
+function renderLoginPage(error: boolean): string {
+  return `<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>msq web login</title>
+<style>
+  body { font-family: system-ui, sans-serif; display: flex; align-items: center; justify-content: center; height: 100vh; margin: 0; background: #111; color: #eee; }
+  form { background: #1c1c1c; padding: 2rem; border-radius: 8px; min-width: 280px; }
+  h1 { font-size: 1.1rem; margin: 0 0 1rem; }
+  input { width: 100%; padding: 0.5rem; margin: 0.5rem 0 1rem; box-sizing: border-box; border-radius: 4px; border: 1px solid #333; background: #0d0d0d; color: #eee; }
+  button { width: 100%; padding: 0.5rem; cursor: pointer; border-radius: 4px; border: none; background: #4a7dff; color: #fff; }
+  .error { color: #f66; margin: 0 0 0.75rem; font-size: 0.9rem; }
+</style>
+</head>
+<body>
+<form method="post" action="/auth">
+  <h1>msq web</h1>
+  ${error ? '<p class="error">Incorrect password.</p>' : ''}
+  <input type="password" name="password" placeholder="Password" autofocus required autocomplete="current-password" />
+  <button type="submit">Log in</button>
+</form>
+</body>
+</html>`;
+}
 
 function runGit(args: string[], cwd: string): string {
   return execFileSync('git', args, {
@@ -154,6 +208,8 @@ function computeRunChanges(runId: number, cwd: string): RunChangesPayload {
 
 const BROADCAST_EVENTS: (keyof MsqEvents)[] = [
   'run:start',
+  'run:status',
+  'tool:call',
   'run:done',
   'run:failed',
   'run:blocked',
@@ -187,6 +243,7 @@ export function createWebServer(options: {
 }): RunningWebServer {
   const clients = new Map<HeartbeatWebSocket, Client>();
   const cwd = options.cwd ?? process.cwd();
+  const webAuth = createWebAuth();
   let latestState = buildMsqWebState();
   let latestStateSignature = JSON.stringify(latestState);
 
@@ -226,17 +283,23 @@ export function createWebServer(options: {
     latestStateSignature = JSON.stringify(latestState);
   }
 
-  function buildRunDetailPayload(runId: number): { runId: number; taskRuns: ReturnType<typeof listTaskRunsForRun>; breakdown: ReturnType<typeof computeRunBreakdown> | null } | null {
+  function buildRunDetailPayload(runId: number): { runId: number; taskRuns: ReturnType<typeof listTaskRunsForRun>; breakdown: ReturnType<typeof computeRunBreakdown> | null; sessionStatus: ReturnType<typeof getRunSessionStatus>; statusHistory: ReturnType<typeof getStatusHistory>; toolCalls: ReturnType<typeof listRunToolCalls> } | null {
     try {
       const taskRuns = listTaskRunsForRun(runId);
       const runEvents = listRunEvents(runId);
       const startedAt = runEvents.find((event) => event.event === 'start')?.createdAt ?? null;
       const endedAt = runEvents.find((event) => event.event === 'done' || event.event === 'failed')?.createdAt ?? null;
       const breakdown = startedAt ? computeRunBreakdown(runEvents, startedAt, endedAt) : null;
-      return { runId, taskRuns, breakdown };
+      return { runId, taskRuns, breakdown, sessionStatus: getRunSessionStatus(runId), statusHistory: getStatusHistory(runEvents), toolCalls: listRunToolCalls(runId) };
     } catch {
       return null;
     }
+  }
+
+  function getStatusHistory(events: ReturnType<typeof listRunEvents>): NonNullable<ReturnType<typeof getRunSessionStatus>>[] {
+    return events
+      .filter((event) => event.event.startsWith('status:') && event.metadata)
+      .map((event) => event.metadata as unknown as NonNullable<ReturnType<typeof getRunSessionStatus>>);
   }
 
   function sendRunDetail(client: Client, runId: number, force = false): void {
@@ -305,7 +368,16 @@ export function createWebServer(options: {
           : JSON.stringify(payload);
         console.log(`[event:${event}]`, message);
       }
-      broadcast({ type: event, payload });
+      if (event === 'run:status' || event === 'tool:call') {
+        const runId = (payload as { runId?: number }).runId;
+        for (const client of clients.values()) {
+          if (client.authenticated && runId != null && client.detailSubscriptions.has(runId) && client.socket.readyState === 1) {
+            client.socket.send(JSON.stringify({ type: event, payload }));
+          }
+        }
+      } else {
+        broadcast({ type: event, payload });
+      }
       if (event === 'ui:info' || event === 'ui:notice') {
         const message =
           typeof payload === 'object' && 'message' in payload && typeof payload.message === 'string'
@@ -333,10 +405,14 @@ export function createWebServer(options: {
     return null;
   }
 
+  function isValidToken(token: string | null): boolean {
+    return token !== null && options.token.length > 0 && timingSafeEqualStrings(token, options.token);
+  }
+
   function isAuthenticated(req: IncomingMessage): boolean {
     if (options.auth === 'none') return true;
-    const token = extractToken(req);
-    return token === options.token;
+    if (webAuth.hasValidSession(req.headers.cookie)) return true;
+    return isValidToken(extractToken(req));
   }
 
   function readStaticBody(urlPath: string): { body: Buffer; contentType: string } | null {
@@ -368,10 +444,59 @@ export function createWebServer(options: {
   }
 
   const httpServer = createServer((req, res) => {
+    void handleRequest(req, res);
+  });
+
+  async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise<void> {
     const url = new URL(req.url ?? '/', `http://${req.headers.host ?? 'localhost'}`);
     const pathname = url.pathname;
 
     try {
+      if (!isAllowedHostHeader(req.headers.host, options.host)) {
+        res.writeHead(403, { 'Content-Type': 'text/plain' });
+        res.end('Forbidden host');
+        return;
+      }
+
+      if (pathname === '/auth') {
+        if (options.auth === 'none' || webAuth.hasValidSession(req.headers.cookie)) {
+          res.writeHead(302, { Location: '/' });
+          res.end();
+          return;
+        }
+
+        if (req.method === 'GET') {
+          res.writeHead(200, { 'Content-Type': 'text/html' });
+          res.end(renderLoginPage(false));
+          return;
+        }
+
+        if (req.method === 'POST') {
+          let body: string;
+          try {
+            body = await readRequestBody(req);
+          } catch {
+            res.writeHead(413, { 'Content-Type': 'text/plain' });
+            res.end('Payload too large');
+            return;
+          }
+          const password = new URLSearchParams(body).get('password') ?? '';
+          if (!isValidToken(password)) {
+            res.writeHead(401, { 'Content-Type': 'text/html' });
+            res.end(renderLoginPage(true));
+            return;
+          }
+          const sessionId = webAuth.createSession();
+          res.writeHead(302, { Location: '/', 'Set-Cookie': webAuth.sessionCookie(sessionId) });
+          res.end();
+          return;
+        }
+
+        res.writeHead(405, { 'Content-Type': 'text/plain', Allow: 'GET, POST' });
+        res.end('Method not allowed');
+        return;
+      }
+
       if (pathname === '/api/health') {
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ status: 'ok' }));
@@ -419,12 +544,19 @@ export function createWebServer(options: {
       res.writeHead(500, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({ error: error instanceof Error ? error.message : String(error) }));
     }
-  });
+  }
 
   const wss = new WebSocketServer({ server: httpServer, path: '/ws' });
 
-  wss.on('connection', (rawSocket) => {
+  wss.on('connection', (rawSocket, req: IncomingMessage) => {
     const socket = rawSocket as HeartbeatWebSocket;
+    // A page on any site can open a WebSocket to 127.0.0.1 (CSWSH) and a
+    // DNS-rebinding page reaches here with a foreign Host — reject both
+    // before any state or auth handling.
+    if (!isAllowedOrigin(req.headers.origin, options.host) || !isAllowedHostHeader(req.headers.host, options.host)) {
+      socket.close(1008, 'Forbidden origin');
+      return;
+    }
     socket.isAlive = true;
     socket.on('pong', () => { socket.isAlive = true; });
 
@@ -441,7 +573,7 @@ export function createWebServer(options: {
 
     const client: Client = {
       socket,
-      authenticated: options.auth === 'none',
+      authenticated: options.auth === 'none' || webAuth.hasValidSession(req.headers.cookie),
       outputSubscriptions: new Set(),
       outputLastIdByRun: new Map(),
       detailSubscriptions: new Set(),
@@ -475,12 +607,11 @@ export function createWebServer(options: {
       }
 
       if (message.type === 'auth') {
-        if (options.auth === 'none') {
-          client.authenticated = true;
-          // state:full was already sent on connection for auth=none
+        if (client.authenticated) {
+          // state:full was already sent on connection (auth=none or session cookie)
           return;
         }
-        if (message.token === options.token) {
+        if (isValidToken(message.token)) {
           client.authenticated = true;
           refreshState();
           sendTo(client, { type: 'state:full', payload: latestState });
@@ -512,8 +643,8 @@ export function createWebServer(options: {
       clients.delete(socket);
     });
 
-    // If auth is disabled, send full state immediately
-    if (options.auth === 'none') {
+    // Cookie-authenticated browsers and auth=none get full state immediately
+    if (client.authenticated) {
       refreshState();
       sendTo(client, { type: 'state:full', payload: latestState });
     } else {
@@ -611,6 +742,9 @@ export function createWebServer(options: {
       case 'subscribe:runDetail': {
         client.detailSubscriptions.add(message.runId);
         sendRunDetail(client, message.runId);
+        const detail = buildRunDetailPayload(message.runId);
+        if (detail?.sessionStatus) sendTo(client, { type: 'run:status', payload: detail.sessionStatus });
+        for (const toolCall of detail?.toolCalls ?? []) sendTo(client, { type: 'tool:call', payload: toolCall });
         break;
       }
       case 'unsubscribe:runDetail': {
@@ -665,8 +799,13 @@ export function createWebServer(options: {
       console.log(`[startFeature] featureId=${featureId}`);
       assertWritableDbPath();
       resolveRuntimeConfig(featureCwd);
-      const backlog = loadBacklogFromCatalog(resolveRepo(featureCwd).repoId, featureCwd);
+      const repo = resolveRepo(featureCwd);
+      const backlog = loadBacklogFromCatalog(repo.repoId, featureCwd);
       validateBacklogSkills(backlog, featureCwd);
+      const plan = selectStartableFeaturePlan(backlog, featureId, listCompletedFeatureIds(repo.repoId));
+      if (plan.pendingDependencies.length > 0) {
+        throw new Error(`pending dependencies: ${plan.pendingDependencies.join(', ')}. Complete them before starting ${featureId}.`);
+      }
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       const stack = error instanceof Error ? error.stack : undefined;

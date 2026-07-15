@@ -1,0 +1,53 @@
+/* Metal Squad — color tokens
+   Source: v2 design notes (validated from v1 TUI/web palette).
+   Base values first, semantic aliases after. Only add new colors here
+   if the brand notes define them — do not invent accents. */
+
+:root {
+  /* ---- base values ---- */
+  --gray-0: #0a0a0b;   /* bg-base */
+  --gray-1: #151517;   /* bg-panel */
+  --gray-2: #1c1c1f;   /* bg-panel-alt */
+  --gray-3: #2a2a2d;   /* border-dim */
+  --gray-4: #4a4a4e;   /* border-strong */
+  --gray-5: #7a7a80;   /* text-dim */
+  --gray-6: #4d4d52;   /* text-faint */
+  --gray-7: #d4d4d8;   /* text-primary */
+
+  --green-1: #5fbf6f;  /* accent-ok */
+  --yellow-1: #d1b34a; /* accent-warn */
+  --red-1: #d1615f;    /* accent-danger */
+  --blue-1: #5fa8bf;   /* accent-info */
+
+  /* ---- semantic surfaces ---- */
+  --bg-base: var(--gray-0);
+  --bg-panel: var(--gray-1);
+  --bg-panel-alt: var(--gray-2);
+  --bg-sunken: var(--gray-0);   /* cards/inputs sit on base, one level below panel */
+
+  /* ---- semantic borders ---- */
+  --border-dim: var(--gray-3);
+  --border-strong: var(--gray-4);
+  --border-focus: var(--blue-1);
+
+  /* ---- semantic text ---- */
+  --text-primary: var(--gray-7);
+  --text-dim: var(--gray-5);
+  --text-faint: var(--gray-6);
+
+  /* ---- semantic status/accent (run states, gates, alerts) ---- */
+  --accent-ok: var(--green-1);       /* done / success / advance */
+  --accent-warn: var(--yellow-1);    /* awaiting / pending / hold */
+  --accent-danger: var(--red-1);     /* failed / abort / error */
+  --accent-info: var(--blue-1);      /* running / active / live */
+
+  /* translucent variants for fills/backgrounds behind status text */
+  --accent-ok-10: rgb(95 191 111 / 0.12);
+  --accent-warn-10: rgb(209 179 74 / 0.12);
+  --accent-danger-10: rgb(209 97 95 / 0.12);
+  --accent-info-10: rgb(95 168 191 / 0.12);
+
+  /* shadows: minimal, low-opacity, cool-toned (no brand-color glows) */
+  --shadow-panel: 0 4px 16px rgb(0 0 0 / 0.4);
+  --shadow-overlay: 0 8px 32px rgb(0 0 0 / 0.55);
+}

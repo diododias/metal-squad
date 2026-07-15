@@ -1,18 +1,24 @@
 import type { Tool } from '../backlog/schema.js';
-import type { RunResult } from '../adapters/types.js';
+import type { RunResult, SessionStatusSnapshot, ToolCallRecord } from '../adapters/types.js';
 import type { StageTransitionDecision } from '../workflow/sessionPolicy.js';
 
 export type GateDecision = 'approved' | 'skipped' | 'retried';
 export type OutputStream = 'stdout' | 'stderr';
 export type OutputSource = 'stdout' | 'stderr' | 'agent' | 'tool' | 'heartbeat';
 export type StageRequestKind = 'approval' | 'input';
+export type ContextQueryTool = 'dora' | 'serena' | 'shell';
+export type ContextQueryKind = 'structured' | 'shell_read';
 
 export interface RunStartEvent {
   runId: number;
   featureId: string;
   tool: Tool;
   stage?: string;
+  featureName?: string;
 }
+
+export type RunStatusEvent = SessionStatusSnapshot;
+export type ToolCallEvent = ToolCallRecord;
 
 export interface RunOutputEvent {
   runId: number;
@@ -28,6 +34,7 @@ export interface RunDoneEvent {
   featureId: string;
   tool: Tool;
   result: RunResult;
+  featureName?: string;
 }
 
 export type RunFailedKind = 'execution' | 'aborted';
@@ -38,6 +45,7 @@ export interface RunFailedEvent {
   tool: Tool;
   error: string;
   kind: RunFailedKind;
+  featureName?: string;
 }
 
 export type RunBlockedReason = 'needs_input' | 'gate' | 'budget' | 'token';
@@ -55,6 +63,7 @@ export interface GateCreatedEvent {
   featureId: string;
   runId?: number;
   repoId?: string;
+  featureName?: string;
 }
 
 export interface GateResolvedEvent {
@@ -71,12 +80,35 @@ export interface StageRequestCreatedEvent {
   prompt: string;
   source?: 'manual' | 'auto';
   options?: string[];
+  featureName?: string;
 }
 
 export interface StageRequestResolvedEvent {
   requestId: number;
   kind: StageRequestKind;
   response: string;
+}
+
+export interface TimeoutApprovalCreatedEvent {
+  requestId: number;
+  occurrenceId: number;
+  runId: number;
+  pipelineId?: number;
+  featureId: string;
+  stage?: string;
+  timeoutMs: number;
+  runtimeMs: number;
+  lastProgress?: string;
+}
+
+export interface TimeoutApprovalResolvedEvent {
+  requestId: number;
+  occurrenceId: number;
+  runId: number;
+  featureId: string;
+  stage?: string;
+  decision: 'retry' | 'keep_blocked';
+  source: 'telegram';
 }
 
 export type StageTransitionDecidedEvent = StageTransitionDecision;
@@ -95,6 +127,19 @@ export interface TokensUpdateEvent {
   total: number;
   featureId?: string;
   tool?: Tool;
+}
+
+export interface ContextQueryEvent {
+  runId: number;
+  featureId?: string;
+  tool?: Tool;
+  queryTool: ContextQueryTool;
+  kind: ContextQueryKind;
+  target?: string | null;
+  observedBytes: number;
+  latencyMs?: number | null;
+  cacheHit?: boolean | null;
+  rawLine: string;
 }
 
 export interface TaskStartedEvent {
@@ -142,6 +187,8 @@ export interface AutoPilotDecisionEvent {
 
 export interface MsqEvents {
   'run:start': RunStartEvent;
+  'run:status': RunStatusEvent;
+  'tool:call': ToolCallEvent;
   'run:output': RunOutputEvent;
   'run:done': RunDoneEvent;
   'run:failed': RunFailedEvent;
@@ -150,11 +197,14 @@ export interface MsqEvents {
   'gate:resolved': GateResolvedEvent;
   'stage:request-created': StageRequestCreatedEvent;
   'stage:request-resolved': StageRequestResolvedEvent;
+  'timeout:approval-created': TimeoutApprovalCreatedEvent;
+  'timeout:approval-resolved': TimeoutApprovalResolvedEvent;
   'stage:transition-decided': StageTransitionDecidedEvent;
   'scheduler:paused': Record<string, never>;
   'scheduler:resumed': Record<string, never>;
   'budget:alert': BudgetAlertEvent;
   'tokens:update': TokensUpdateEvent;
+  'context:query': ContextQueryEvent;
   'task:started': TaskStartedEvent;
   'task:updated': TaskUpdatedEvent;
   'ui:info': UiInfoEvent;

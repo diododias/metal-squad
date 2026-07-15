@@ -4,6 +4,7 @@ const mockRunCli = vi.fn();
 const mockExecFileSync = vi.fn();
 const mockEventEmit = vi.fn();
 const mockParseControlSignal = vi.fn();
+const mockExistsSync = vi.fn();
 
 class MockCliTimeoutError extends Error {
   readonly stdout: string;
@@ -53,6 +54,10 @@ vi.mock('node:child_process', () => ({
   execFileSync: mockExecFileSync,
 }));
 
+vi.mock('node:fs', () => ({
+  existsSync: mockExistsSync,
+}));
+
 vi.mock('../../src/core/adapters/control.js', () => ({
   parseControlSignal: mockParseControlSignal,
 }));
@@ -71,6 +76,7 @@ beforeEach(() => {
   mockExecFileSync.mockReset();
   mockEventEmit.mockReset();
   mockParseControlSignal.mockReset().mockReturnValue(null);
+  mockExistsSync.mockReset().mockReturnValue(false);
 });
 
 describe('codexAdapter.effortFlag', () => {
@@ -264,6 +270,18 @@ describe('codexAdapter.runFeature — success path', () => {
     expect(args.slice(0, 3)).toEqual(['exec', 'resume', '--json']);
     expect(args).toContain('thread_123');
     expect(args).toContain('prompt');
+  });
+
+  it('adds .git as a writable directory when repository metadata exists', async () => {
+    mockRunCli.mockResolvedValue({ code: 0, stdout: '', stderr: '' });
+    mockExistsSync.mockImplementation((path: string) => path === '/repo/.git');
+
+    const { codexAdapter } = await import('../../src/core/adapters/codex.js');
+    await codexAdapter.runFeature(feature, 'prompt', { cwd: '/repo', runId: 8 });
+
+    const [, args] = mockRunCli.mock.calls[0]!;
+    expect(args).toContain('--add-dir');
+    expect(args).toContain('/repo/.git');
   });
 });
 
@@ -505,7 +523,7 @@ describe('createCodexProgress — onStderrLine', () => {
   });
 });
 
-describe('createCodexProgress — heartbeatSuffix', () => {
+describe('createCodexProgress — compatibility suffix (not emitted as heartbeat text)', () => {
   it('returns undefined when no events processed', async () => {
     let capturedSuffix: (() => string | undefined) | undefined;
     mockRunCli.mockImplementation(async (_bin, _args, opts) => {

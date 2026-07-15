@@ -116,9 +116,8 @@ describe('claude adapter', () => {
       expect.arrayContaining(['--print', '--output-format', 'stream-json', '--verbose', '--dangerously-skip-permissions', '--model', 'custom', '--', 'PROMPT']),
       expect.objectContaining({
         cwd: '/repo',
-        heartbeatMs: 30_000,
-        logLabel: 'claude feat-1',
-        onHeartbeat: expect.any(Function),
+        idleThresholdMs: 30_000,
+        onStatus: expect.any(Function),
         onStdoutLine: expect.any(Function),
         onStderrLine: expect.any(Function),
         heartbeatSuffix: expect.any(Function),

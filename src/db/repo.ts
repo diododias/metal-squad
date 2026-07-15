@@ -1,9 +1,17 @@
 import { existsSync } from 'node:fs';
-import { getDb } from './index.js';
-import type { TokenUsage } from '../core/adapters/types.js';
+import { getDb, withTransaction } from './index.js';
+import { sanitizeToolCallRecord, type PublishEvidence, type SessionStatusSnapshot, type TokenUsage, type ToolCallRecord } from '../core/adapters/types.js';
 import { resolveDbPath } from '../config/index.js';
 import { msqEventBus } from '../core/events/index.js';
-import type { OutputSource, OutputStream, RunOutputEvent, TokensUpdateEvent } from '../core/events/types.js';
+import type {
+  ContextQueryEvent,
+  ContextQueryKind,
+  ContextQueryTool,
+  OutputSource,
+  OutputStream,
+  RunOutputEvent,
+  TokensUpdateEvent,
+} from '../core/events/types.js';
 import { resolveContextWindow } from '../core/tasks/blocks.js';
 import type { Tool } from '../core/backlog/schema.js';
 import type {
@@ -21,12 +29,148 @@ export function registerRepo(repoId: string, path: string): void {
     .run(repoId, path);
 }
 
+export type FeatureTopicAssociationState = 'creating' | 'active' | 'invalid' | 'error';
+
+export interface FeatureTopicAssociationRow {
+  chatId: string;
+  featureId: string;
+  threadId: number | null;
+  title: string;
+  state: FeatureTopicAssociationState;
+  leaseToken: string | null;
+  leaseExpiresAt: string | null;
+  lastError: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+function mapFeatureTopicAssociation(row: Record<string, unknown> | undefined): FeatureTopicAssociationRow | null {
+  if (!row) return null;
+  return {
+    chatId: String(row.chatId),
+    featureId: String(row.featureId),
+    threadId: typeof row.threadId === 'number' ? row.threadId : null,
+    title: String(row.title),
+    state: row.state as FeatureTopicAssociationState,
+    leaseToken: typeof row.leaseToken === 'string' ? row.leaseToken : null,
+    leaseExpiresAt: typeof row.leaseExpiresAt === 'string' ? row.leaseExpiresAt : null,
+    lastError: typeof row.lastError === 'string' ? row.lastError : null,
+    createdAt: String(row.createdAt),
+    updatedAt: String(row.updatedAt),
+  };
+}
+
+const FEATURE_TOPIC_SELECT = `
+  SELECT chat_id AS chatId, feature_id AS featureId, thread_id AS threadId,
+         title, state, lease_token AS leaseToken,
+         lease_expires_at AS leaseExpiresAt, last_error AS lastError,
+         created_at AS createdAt, updated_at AS updatedAt
+    FROM feature_topic_associations
+`;
+
+export function getFeatureTopicAssociation(chatId: string, featureId: string): FeatureTopicAssociationRow | null {
+  if (!hasDbFile()) return null;
+  const row = getDb('readonly')
+    .prepare(`${FEATURE_TOPIC_SELECT} WHERE chat_id = ? AND feature_id = ?`)
+    .get(chatId, featureId) as Record<string, unknown> | undefined;
+  return mapFeatureTopicAssociation(row);
+}
+
+export function listFeatureTopicAssociations(chatId?: string): FeatureTopicAssociationRow[] {
+  if (!hasDbFile()) return [];
+  const query = chatId
+    ? `${FEATURE_TOPIC_SELECT} WHERE chat_id = ? ORDER BY feature_id ASC`
+    : `${FEATURE_TOPIC_SELECT} ORDER BY chat_id ASC, feature_id ASC`;
+  const rows = (chatId ? getDb('readonly').prepare(query).all(chatId) : getDb('readonly').prepare(query).all()) as Record<string, unknown>[];
+  return rows.map((row) => mapFeatureTopicAssociation(row)).filter((row): row is FeatureTopicAssociationRow => row !== null);
+}
+
+export interface FeatureTopicReservationOptions {
+  leaseToken: string;
+  leaseExpiresAt: string;
+}
+
+export function reserveFeatureTopicAssociation(
+  chatId: string,
+  featureId: string,
+  title: string,
+  options: FeatureTopicReservationOptions,
+): FeatureTopicAssociationRow | null {
+  return withTransaction((database) => {
+    const existing = database
+      .prepare(`${FEATURE_TOPIC_SELECT} WHERE chat_id = ? AND feature_id = ?`)
+      .get(chatId, featureId) as Record<string, unknown> | undefined;
+    const current = mapFeatureTopicAssociation(existing);
+    const leaseIsActive = current?.state === 'creating'
+      && current.leaseExpiresAt !== null
+      && Date.parse(current.leaseExpiresAt) > Date.now();
+    if (current?.state === 'active' || leaseIsActive) return current;
+
+    database.prepare(`
+      INSERT INTO feature_topic_associations
+        (chat_id, feature_id, thread_id, title, state, lease_token, lease_expires_at, last_error)
+      VALUES (?, ?, NULL, ?, 'creating', ?, ?, NULL)
+      ON CONFLICT(chat_id, feature_id) DO UPDATE SET
+        thread_id = NULL,
+        title = feature_topic_associations.title,
+        state = 'creating',
+        lease_token = excluded.lease_token,
+        lease_expires_at = excluded.lease_expires_at,
+        last_error = NULL,
+        updated_at = datetime('now')
+    `).run(chatId, featureId, title, options.leaseToken, options.leaseExpiresAt);
+
+    const reserved = database
+      .prepare(`${FEATURE_TOPIC_SELECT} WHERE chat_id = ? AND feature_id = ?`)
+      .get(chatId, featureId) as Record<string, unknown> | undefined;
+    return mapFeatureTopicAssociation(reserved);
+  });
+}
+
+export function activateFeatureTopicAssociation(chatId: string, featureId: string, threadId: number): void {
+  getDb('readwrite').prepare(`
+    UPDATE feature_topic_associations
+       SET thread_id = ?, state = 'active', lease_token = NULL,
+           lease_expires_at = NULL, last_error = NULL, updated_at = datetime('now')
+     WHERE chat_id = ? AND feature_id = ?
+  `).run(threadId, chatId, featureId);
+}
+
+export function invalidateFeatureTopicAssociation(chatId: string, featureId: string, error?: string): void {
+  getDb('readwrite').prepare(`
+    UPDATE feature_topic_associations
+       SET thread_id = NULL, state = 'invalid', lease_token = NULL,
+           lease_expires_at = NULL, last_error = ?, updated_at = datetime('now')
+     WHERE chat_id = ? AND feature_id = ?
+  `).run(error ?? null, chatId, featureId);
+}
+
+export function recordFeatureTopicAssociationError(
+  chatId: string,
+  featureId: string,
+  error: string,
+  state: FeatureTopicAssociationState = 'error',
+): void {
+  getDb('readwrite').prepare(`
+    UPDATE feature_topic_associations
+       SET state = ?, last_error = ?, lease_token = NULL,
+           lease_expires_at = NULL, updated_at = datetime('now')
+     WHERE chat_id = ? AND feature_id = ?
+  `).run(state, error, chatId, featureId);
+}
+
 export interface CreateRunOptions {
   pipelineId?: number;
   stage?: string;
 }
 
 export type RunStatus = 'running' | 'done' | 'failed' | 'blocked' | 'aborted';
+
+export interface RunPublishState {
+  verified: boolean;
+  error: string | null;
+  evidence: PublishEvidence;
+}
 export type PipelineStatus = 'running' | 'paused' | 'aborting' | 'aborted' | 'done' | 'failed' | 'blocked';
 
 export interface PipelineSnapshot {
@@ -63,6 +207,140 @@ export function finishRun(
     .prepare(`UPDATE runs SET status = ?, summary = ?, ended_at = datetime('now') WHERE id = ?`)
     .run(status, summary ?? null, runId);
   recordRunEvent(runId, status, summary ? { summary } : undefined);
+}
+
+export function updateRunPublishState(runId: number, publish: RunPublishState): void {
+  getDb('readwrite')
+    .prepare(
+      `UPDATE runs
+       SET publish_verified = ?,
+           publish_error = ?,
+           branch_name = ?,
+           base_branch = ?,
+           commit_sha = ?,
+           remote_branch = ?,
+           pr_number = ?,
+           pr_url = ?
+       WHERE id = ?`,
+    )
+    .run(
+      publish.verified ? 1 : 0,
+      publish.error,
+      publish.evidence.branch,
+      publish.evidence.baseBranch,
+      publish.evidence.commitSha,
+      publish.evidence.remoteBranch,
+      publish.evidence.prNumber,
+      publish.evidence.prUrl,
+      runId,
+    );
+}
+
+export function upsertRunSessionStatus(snapshot: SessionStatusSnapshot): void {
+  const database = getDb('readwrite');
+  const legacyStatus = snapshot.status === 'completed'
+    ? 'done'
+    : snapshot.status === 'interrupted'
+      ? 'aborted'
+      : snapshot.status === 'failed' || snapshot.status === 'timed_out'
+        ? 'failed'
+        : null;
+  database.prepare(
+    `UPDATE runs
+       SET session_status = ?,
+           session_started_at = ?,
+           session_updated_at = ?,
+           session_elapsed_ms = ?,
+           session_last_output_at = ?,
+           session_idle_ms = ?,
+           session_reason = ?,
+           session_terminal = ?,
+           status = CASE WHEN ? IS NULL THEN status WHEN status IN ('running', 'done', 'failed', 'aborted') THEN ? ELSE status END,
+           ended_at = CASE WHEN ? = 1 AND ended_at IS NULL THEN ? ELSE ended_at END
+     WHERE id = ? AND (session_terminal = 0 OR ? = 1)`,
+  ).run(
+    snapshot.status,
+    snapshot.startedAt,
+    snapshot.updatedAt,
+    snapshot.elapsedMs,
+    snapshot.lastOutputAt,
+    snapshot.idleMs,
+    snapshot.reason,
+    snapshot.terminal ? 1 : 0,
+    legacyStatus,
+    legacyStatus,
+    snapshot.terminal ? 1 : 0,
+    snapshot.updatedAt,
+    snapshot.runId,
+    snapshot.terminal ? 1 : 0,
+  );
+  recordRunEvent(snapshot.runId, `status:${snapshot.status}`, snapshot as unknown as Record<string, unknown>);
+}
+
+export type RunToolCallRow = ToolCallRecord;
+
+export function upsertRunToolCall(record: ToolCallRecord): void {
+  record = sanitizeToolCallRecord(record);
+  const args = record.arguments == null ? null : JSON.stringify(record.arguments).slice(0, 20_000);
+  getDb('readwrite').prepare(
+    `INSERT INTO run_tool_calls (
+       run_id, id, feature_id, tool, sequence, phase, name, arguments_json, output, step,
+       started_at, completed_at, error
+     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+     ON CONFLICT(run_id, id) DO UPDATE SET
+       phase = CASE WHEN run_tool_calls.phase IN ('completed', 'failed') THEN run_tool_calls.phase ELSE excluded.phase END,
+       sequence = MIN(run_tool_calls.sequence, excluded.sequence),
+       arguments_json = COALESCE(excluded.arguments_json, run_tool_calls.arguments_json),
+       output = COALESCE(excluded.output, run_tool_calls.output),
+       step = COALESCE(excluded.step, run_tool_calls.step),
+       completed_at = COALESCE(excluded.completed_at, run_tool_calls.completed_at),
+       error = COALESCE(excluded.error, run_tool_calls.error)`,
+  ).run(
+    record.runId,
+    record.id.slice(0, 200),
+    record.featureId,
+    record.tool,
+    record.sequence,
+    record.phase,
+    record.name.slice(0, 200),
+    args,
+    record.output?.slice(0, 20_000) ?? null,
+    record.step?.slice(0, 200) ?? null,
+    record.startedAt,
+    record.completedAt,
+    record.error?.slice(0, 500) ?? null,
+  );
+}
+
+export function listRunToolCalls(runId: number, limit = 200): RunToolCallRow[] {
+  if (!hasDbFile()) return [];
+  type RawToolCallRow = Omit<RunToolCallRow, 'arguments'> & { argumentsJson: string | null };
+  const rows = getDb('readonly').prepare(
+    `SELECT run_id AS runId, id, feature_id AS featureId, tool, sequence, phase, name,
+            arguments_json AS argumentsJson, output, step, started_at AS startedAt,
+            completed_at AS completedAt, error
+       FROM run_tool_calls WHERE run_id = ? ORDER BY sequence ASC, started_at ASC LIMIT ?`,
+  ).all(runId, limit) as RawToolCallRow[];
+  return rows.map(({ argumentsJson, ...row }) => ({
+    ...row,
+    arguments: argumentsJson ? parseJsonValue(argumentsJson) : null,
+  }));
+}
+
+export function getRunSessionStatus(runId: number): SessionStatusSnapshot | null {
+  if (!hasDbFile()) return null;
+  const row = getDb('readonly').prepare(
+    `SELECT run_id AS runId, feature_id AS featureId, tool, session_status AS status,
+            session_started_at AS startedAt, session_updated_at AS updatedAt,
+            session_elapsed_ms AS elapsedMs, session_last_output_at AS lastOutputAt,
+            session_idle_ms AS idleMs, session_reason AS reason, session_terminal AS terminal
+       FROM runs WHERE id = ? AND session_status IS NOT NULL`,
+  ).get(runId) as (Omit<SessionStatusSnapshot, 'terminal'> & { terminal: number }) | undefined;
+  return row ? { ...row, terminal: Boolean(row.terminal) } : null;
+}
+
+function parseJsonValue(value: string): unknown {
+  try { return JSON.parse(value) as unknown; } catch { return null; }
 }
 
 export function cleanupStaleRuns(olderThanMinutes: number): number {
@@ -152,6 +430,115 @@ export function appendRunOutput(event: RunOutputEvent): void {
       event.source ?? event.stream,
       event.line,
     );
+}
+
+export interface ContextQueryRow {
+  id: number;
+  runId: number;
+  featureId: string | null;
+  tool: string | null;
+  queryTool: ContextQueryTool;
+  kind: ContextQueryKind;
+  target: string | null;
+  observedBytes: number;
+  latencyMs: number | null;
+  cacheHit: boolean | null;
+  rawLine: string;
+  createdAt: string;
+}
+
+export interface RunContextSummary {
+  totalQueries: number;
+  doraQueries: number;
+  serenaQueries: number;
+  shellReads: number;
+  structuredRate: number | null;
+  observedBytes: number;
+  cacheHits: number;
+  cacheMisses: number;
+}
+
+export function recordContextQuery(event: ContextQueryEvent): void {
+  getDb('readwrite')
+    .prepare(
+      `INSERT INTO context_queries (
+         run_id, feature_id, tool, query_tool, kind, target, observed_bytes, latency_ms, cache_hit, raw_line
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    )
+    .run(
+      event.runId,
+      event.featureId ?? null,
+      event.tool ?? null,
+      event.queryTool,
+      event.kind,
+      event.target ?? null,
+      event.observedBytes,
+      event.latencyMs ?? null,
+      event.cacheHit == null ? null : (event.cacheHit ? 1 : 0),
+      event.rawLine,
+    );
+}
+
+export function listRunContextQueries(runId: number, limit = 200): ContextQueryRow[] {
+  if (!hasDbFile()) return [];
+  const rows = getDb('readonly')
+    .prepare(
+      `SELECT
+         id,
+         run_id AS runId,
+         feature_id AS featureId,
+         tool,
+         query_tool AS queryTool,
+         kind,
+         target,
+         observed_bytes AS observedBytes,
+         latency_ms AS latencyMs,
+         cache_hit AS cacheHit,
+         raw_line AS rawLine,
+         created_at AS createdAt
+       FROM context_queries
+       WHERE run_id = ?
+       ORDER BY id DESC
+       LIMIT ?`,
+    )
+    .all(runId, limit) as (Omit<ContextQueryRow, 'cacheHit'> & { cacheHit: number | null })[];
+  return rows.map((row) => ({
+    ...row,
+    cacheHit: row.cacheHit == null ? null : Boolean(row.cacheHit),
+  }));
+}
+
+export function summarizeRunContextQueries(runId: number): RunContextSummary {
+  const rows = listRunContextQueries(runId, 500);
+  let doraQueries = 0;
+  let serenaQueries = 0;
+  let shellReads = 0;
+  let observedBytes = 0;
+  let cacheHits = 0;
+  let cacheMisses = 0;
+
+  for (const row of rows) {
+    if (row.queryTool === 'dora') doraQueries += 1;
+    else if (row.queryTool === 'serena') serenaQueries += 1;
+    else shellReads += 1;
+
+    observedBytes += row.observedBytes;
+    if (row.cacheHit === true) cacheHits += 1;
+    if (row.cacheHit === false) cacheMisses += 1;
+  }
+
+  const structuredQueries = doraQueries + serenaQueries;
+  const totalQueries = structuredQueries + shellReads;
+  return {
+    totalQueries,
+    doraQueries,
+    serenaQueries,
+    shellReads,
+    structuredRate: totalQueries > 0 ? structuredQueries / totalQueries : null,
+    observedBytes,
+    cacheHits,
+    cacheMisses,
+  };
 }
 
 export function listRunOutput(runId: number, limit = 120): RunOutputRow[] {
@@ -251,12 +638,38 @@ export interface RunSummary {
   pendingStageRequestKind: StageRequestKind | null;
   pendingStageRequestPrompt: string | null;
   pendingStageRequestCreatedAt: string | null;
+  sessionStatus?: SessionStatusSnapshot['status'] | null;
+  sessionStartedAt?: string | null;
+  sessionUpdatedAt?: string | null;
+  sessionElapsedMs?: number | null;
+  sessionLastOutputAt?: string | null;
+  sessionIdleMs?: number | null;
+  sessionReason?: string | null;
+  sessionTerminal?: boolean;
   latestTransitionDecision?: 'reuse' | 'new_session' | null;
   latestTransitionReason?: TransitionDecisionReason | null;
   latestTransitionToStage?: string | null;
   latestTransitionContextWindowPercent?: number | null;
   latestTransitionPreviousSessionId?: string | null;
   latestTransitionNextSessionId?: string | null;
+  publishVerified?: boolean | null;
+  publishError?: string | null;
+  branchName?: string | null;
+  baseBranch?: string | null;
+  commitSha?: string | null;
+  remoteBranch?: string | null;
+  prNumber?: number | null;
+  prUrl?: string | null;
+}
+
+function getRunColumnProjection(
+  availableColumns: Set<string>,
+  columnName: string,
+  alias: string,
+): string {
+  return availableColumns.has(columnName)
+    ? `r.${columnName} AS ${alias}`
+    : `NULL AS ${alias}`;
 }
 
 // T003: listRunsForTui — most recent run per feature per repo (US2 deduplication via CTE)
@@ -264,7 +677,14 @@ export function listRunsForTui(limit = 50, repoId?: string): RunSummary[] {
   if (!hasDbFile()) return [];
   const repoFilter = repoId ? 'WHERE repo_id = ?' : '';
   const params = repoId ? [repoId, limit] : [limit];
-  return getDb('readonly')
+  const db = getDb('readonly');
+  const runColumns = new Set(
+    (db.prepare(`PRAGMA table_info(runs)`).all() as { name?: string }[])
+      .map((column) => column.name)
+      .filter((name): name is string => typeof name === 'string'),
+  );
+
+  return db
     .prepare(
       `WITH latest AS (
          SELECT MAX(id) AS id
@@ -349,12 +769,28 @@ export function listRunsForTui(limit = 50, repoId?: string): RunSummary[] {
          psr.kind AS pendingStageRequestKind,
          psr.prompt AS pendingStageRequestPrompt,
          psr.created_at AS pendingStageRequestCreatedAt,
+         r.session_status AS sessionStatus,
+         r.session_started_at AS sessionStartedAt,
+         r.session_updated_at AS sessionUpdatedAt,
+         r.session_elapsed_ms AS sessionElapsedMs,
+         r.session_last_output_at AS sessionLastOutputAt,
+         r.session_idle_ms AS sessionIdleMs,
+         r.session_reason AS sessionReason,
+         r.session_terminal AS sessionTerminal,
          ltd.decision AS latestTransitionDecision,
          ltd.reason AS latestTransitionReason,
          ltd.to_stage AS latestTransitionToStage,
          ltd.context_window_percent AS latestTransitionContextWindowPercent,
          ltd.previous_session_id AS latestTransitionPreviousSessionId,
-         ltd.next_session_id AS latestTransitionNextSessionId
+         ltd.next_session_id AS latestTransitionNextSessionId,
+         ${getRunColumnProjection(runColumns, 'publish_verified', 'publishVerified')},
+         ${getRunColumnProjection(runColumns, 'publish_error', 'publishError')},
+         ${getRunColumnProjection(runColumns, 'branch_name', 'branchName')},
+         ${getRunColumnProjection(runColumns, 'base_branch', 'baseBranch')},
+         ${getRunColumnProjection(runColumns, 'commit_sha', 'commitSha')},
+         ${getRunColumnProjection(runColumns, 'remote_branch', 'remoteBranch')},
+         ${getRunColumnProjection(runColumns, 'pr_number', 'prNumber')},
+         ${getRunColumnProjection(runColumns, 'pr_url', 'prUrl')}
        FROM runs r
        JOIN latest ON latest.id = r.id
        LEFT JOIN latest_usage lu ON lu.runId = r.id
@@ -553,6 +989,18 @@ export interface GateRow {
   createdAt: string;
   resolvedAt: string | null;
   decision: GateDecision | null;
+}
+
+export function getGate(id: number): GateRow | null {
+  if (!hasDbFile()) return null;
+  return (getDb('readonly')
+    .prepare(
+      `SELECT id, run_id AS runId, feature_id AS featureId, repo_id AS repoId,
+              created_at AS createdAt, resolved_at AS resolvedAt, decision
+         FROM gates
+        WHERE id = ?`,
+    )
+    .get(id) as GateRow | undefined) ?? null;
 }
 
 // T005: openGates — SELECT WHERE resolved_at IS NULL, ORDER BY created_at ASC
@@ -1585,6 +2033,240 @@ export function listStageRequestsForFeature(
     .all(pipelineId, featureId) as StageRequestRow[];
   for (const row of rows) row.options = decodeStageRequestOptions(row.options);
   return rows;
+}
+
+export type TimeoutOccurrenceStatus = 'pending' | 'resolved' | 'cancelled' | 'superseded';
+export type TimeoutApprovalStatus = 'pending' | 'approved' | 'blocked' | 'cancelled' | 'superseded';
+export type TimeoutDecision = 'retry' | 'keep_blocked';
+export type TimeoutDecisionSource = 'telegram' | 'system' | 'resume';
+
+export interface TimeoutOccurrenceInput {
+  runId: number;
+  pipelineId?: number | null;
+  featureId: string;
+  stage?: string | null;
+  timeoutMs: number;
+  runtimeMs: number;
+  lastProgress?: string | null;
+}
+
+export interface TimeoutOccurrenceRow extends TimeoutOccurrenceInput {
+  id: number;
+  status: TimeoutOccurrenceStatus;
+  createdAt: string;
+  resolvedAt: string | null;
+}
+
+export interface TimeoutApprovalRequestRow {
+  id: number;
+  timeoutOccurrenceId: number;
+  pipelineId: number | null;
+  runId: number;
+  featureId: string;
+  stage: string | null;
+  status: TimeoutApprovalStatus;
+  decision: TimeoutDecision | null;
+  decisionSource: TimeoutDecisionSource | null;
+  notificationStatus: 'pending' | 'sent' | 'failed';
+  notificationAttempts: number;
+  lastNotificationError: string | null;
+  notifiedAt: string | null;
+  retryRunId: number | null;
+  createdAt: string;
+  resolvedAt: string | null;
+}
+
+function mapTimeoutOccurrence(row: Record<string, unknown> | undefined): TimeoutOccurrenceRow | null {
+  if (!row) return null;
+  return {
+    id: Number(row.id),
+    runId: Number(row.runId),
+    pipelineId: row.pipelineId === null || row.pipelineId === undefined ? null : Number(row.pipelineId),
+    featureId: String(row.featureId),
+    stage: typeof row.stage === 'string' ? row.stage : null,
+    timeoutMs: Number(row.timeoutMs),
+    runtimeMs: Number(row.runtimeMs),
+    lastProgress: typeof row.lastProgress === 'string' ? row.lastProgress : null,
+    status: row.status as TimeoutOccurrenceStatus,
+    createdAt: String(row.createdAt),
+    resolvedAt: typeof row.resolvedAt === 'string' ? row.resolvedAt : null,
+  };
+}
+
+function mapTimeoutApprovalRequest(row: Record<string, unknown> | undefined): TimeoutApprovalRequestRow | null {
+  if (!row) return null;
+  return {
+    id: Number(row.id),
+    timeoutOccurrenceId: Number(row.timeoutOccurrenceId),
+    pipelineId: row.pipelineId === null || row.pipelineId === undefined ? null : Number(row.pipelineId),
+    runId: Number(row.runId),
+    featureId: String(row.featureId),
+    stage: typeof row.stage === 'string' ? row.stage : null,
+    status: row.status as TimeoutApprovalStatus,
+    decision: row.decision === 'retry' || row.decision === 'keep_blocked' ? row.decision : null,
+    decisionSource: row.decisionSource === 'telegram' || row.decisionSource === 'system' || row.decisionSource === 'resume'
+      ? row.decisionSource
+      : null,
+    notificationStatus: row.notificationStatus as 'pending' | 'sent' | 'failed',
+    notificationAttempts: Number(row.notificationAttempts ?? 0),
+    lastNotificationError: typeof row.lastNotificationError === 'string' ? row.lastNotificationError : null,
+    notifiedAt: typeof row.notifiedAt === 'string' ? row.notifiedAt : null,
+    retryRunId: row.retryRunId === null || row.retryRunId === undefined ? null : Number(row.retryRunId),
+    createdAt: String(row.createdAt),
+    resolvedAt: typeof row.resolvedAt === 'string' ? row.resolvedAt : null,
+  };
+}
+
+const TIMEOUT_OCCURRENCE_SELECT = `
+  SELECT id, run_id AS runId, pipeline_id AS pipelineId, feature_id AS featureId,
+         stage, timeout_ms AS timeoutMs, runtime_ms AS runtimeMs,
+         last_progress AS lastProgress, status, created_at AS createdAt,
+         resolved_at AS resolvedAt
+    FROM timeout_occurrences`;
+
+const TIMEOUT_REQUEST_SELECT = `
+  SELECT id, timeout_occurrence_id AS timeoutOccurrenceId,
+         pipeline_id AS pipelineId, run_id AS runId, feature_id AS featureId,
+         stage, status, decision, decision_source AS decisionSource,
+         notification_status AS notificationStatus,
+         notification_attempts AS notificationAttempts,
+         last_notification_error AS lastNotificationError,
+         notified_at AS notifiedAt, retry_run_id AS retryRunId,
+         created_at AS createdAt, resolved_at AS resolvedAt
+    FROM timeout_approval_requests`;
+
+export function createTimeoutOccurrence(input: TimeoutOccurrenceInput): TimeoutOccurrenceRow | null {
+  return withTransaction((database) => {
+    const run = database.prepare(`SELECT status FROM runs WHERE id = ?`).get(input.runId) as { status?: string } | undefined;
+    if (!run || ['done', 'failed', 'aborted'].includes(run.status ?? '')) return null;
+    database.prepare(`
+      INSERT OR IGNORE INTO timeout_occurrences
+        (run_id, pipeline_id, feature_id, stage, timeout_ms, runtime_ms, last_progress)
+      VALUES (?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      input.runId, input.pipelineId ?? null, input.featureId, input.stage ?? null,
+      input.timeoutMs, input.runtimeMs, input.lastProgress ?? null,
+    );
+    return mapTimeoutOccurrence(database.prepare(`${TIMEOUT_OCCURRENCE_SELECT} WHERE run_id = ?`).get(input.runId) as Record<string, unknown> | undefined);
+  });
+}
+
+export function getTimeoutOccurrence(id: number): TimeoutOccurrenceRow | null {
+  if (!hasDbFile()) return null;
+  return mapTimeoutOccurrence(getDb('readonly').prepare(`${TIMEOUT_OCCURRENCE_SELECT} WHERE id = ?`).get(id) as Record<string, unknown> | undefined);
+}
+
+export function createTimeoutApprovalRequest(occurrenceId: number): TimeoutApprovalRequestRow | null {
+  return withTransaction((database) => {
+    const occurrence = mapTimeoutOccurrence(database.prepare(`${TIMEOUT_OCCURRENCE_SELECT} WHERE id = ?`).get(occurrenceId) as Record<string, unknown> | undefined);
+    if (!occurrence) return null;
+    database.prepare(`
+      INSERT OR IGNORE INTO timeout_approval_requests
+        (timeout_occurrence_id, pipeline_id, run_id, feature_id, stage)
+      VALUES (?, ?, ?, ?, ?)
+    `).run(occurrence.id, occurrence.pipelineId, occurrence.runId, occurrence.featureId, occurrence.stage);
+    return mapTimeoutApprovalRequest(database.prepare(`${TIMEOUT_REQUEST_SELECT} WHERE timeout_occurrence_id = ?`).get(occurrenceId) as Record<string, unknown> | undefined);
+  });
+}
+
+export function getTimeoutApprovalRequest(id: number): TimeoutApprovalRequestRow | null {
+  if (!hasDbFile()) return null;
+  return mapTimeoutApprovalRequest(getDb('readonly').prepare(`${TIMEOUT_REQUEST_SELECT} WHERE id = ?`).get(id) as Record<string, unknown> | undefined);
+}
+
+export function listPendingTimeoutApprovalRequests(): TimeoutApprovalRequestRow[] {
+  if (!hasDbFile()) return [];
+  return (getDb('readonly').prepare(`${TIMEOUT_REQUEST_SELECT} WHERE status = 'pending' ORDER BY id ASC`).all() as Record<string, unknown>[])
+    .map((row) => mapTimeoutApprovalRequest(row))
+    .filter((row): row is TimeoutApprovalRequestRow => row !== null);
+}
+
+export function getApprovedTimeoutApproval(
+  pipelineId: number,
+  featureId: string,
+  stage?: string,
+): TimeoutApprovalRequestRow | null {
+  if (!hasDbFile()) return null;
+  return mapTimeoutApprovalRequest(getDb('readonly').prepare(
+    `${TIMEOUT_REQUEST_SELECT} WHERE pipeline_id = ? AND feature_id = ? AND status = 'approved' AND stage IS ? ORDER BY id ASC LIMIT 1`,
+  ).get(pipelineId, featureId, stage ?? null) as Record<string, unknown> | undefined);
+}
+
+export interface TimeoutApprovalContext {
+  featureId: string;
+  runId: number;
+  stage?: string | null;
+  chatId?: string;
+  threadId?: number;
+}
+
+export function resolveTimeoutApproval(
+  requestId: number,
+  decision: TimeoutDecision,
+  context: TimeoutApprovalContext,
+): boolean {
+  const resolved = withTransaction((database) => {
+    const request = mapTimeoutApprovalRequest(database.prepare(`${TIMEOUT_REQUEST_SELECT} WHERE id = ?`).get(requestId) as Record<string, unknown> | undefined);
+    if (!request) return false;
+    if (request.status !== 'pending' || request.featureId !== context.featureId || request.runId !== context.runId) return false;
+    if ((request.stage ?? null) !== (context.stage ?? null)) return false;
+    if (context.chatId !== undefined && context.threadId !== undefined) {
+      const association = database.prepare(`SELECT state, thread_id AS threadId FROM feature_topic_associations WHERE chat_id = ? AND feature_id = ?`).get(context.chatId, context.featureId) as { state?: string; threadId?: number } | undefined;
+      if ((association?.state ?? null) !== 'active' || (association?.threadId ?? null) !== context.threadId) return false;
+    }
+    const result = database.prepare(`
+      UPDATE timeout_approval_requests
+         SET status = ?, decision = ?, decision_source = 'telegram', resolved_at = datetime('now')
+       WHERE id = ? AND status = 'pending'
+    `).run(decision === 'retry' ? 'approved' : 'blocked', decision, requestId);
+    if (result.changes !== 1) return false;
+    database.prepare(`
+      INSERT INTO recovery_decisions
+        (timeout_occurrence_id, approval_request_id, decision, source)
+      VALUES (?, ?, ?, 'telegram')
+    `).run(request.timeoutOccurrenceId, request.id, decision);
+    database.prepare(`UPDATE timeout_occurrences SET status = 'resolved', resolved_at = datetime('now') WHERE id = ? AND status = 'pending'`).run(request.timeoutOccurrenceId);
+    return true;
+  });
+  if (resolved) {
+    const request = getTimeoutApprovalRequest(requestId);
+    const occurrence = request ? getTimeoutOccurrence(request.timeoutOccurrenceId) : null;
+    if (request && occurrence) {
+      msqEventBus.emit('timeout:approval-resolved', {
+        requestId,
+        occurrenceId: occurrence.id,
+        runId: request.runId,
+        featureId: request.featureId,
+        ...(request.stage ? { stage: request.stage } : {}),
+        decision,
+        source: 'telegram',
+      });
+    }
+  }
+  return resolved;
+}
+
+export function claimTimeoutRetry(requestId: number): boolean {
+  return getDb('readwrite').prepare(`UPDATE timeout_approval_requests SET retry_claimed = 1 WHERE id = ? AND status = 'approved' AND retry_run_id IS NULL AND retry_claimed = 0`).run(requestId).changes === 1;
+}
+
+export function attachTimeoutRetryRun(requestId: number, retryRunId: number): void {
+  withTransaction((database) => {
+    database.prepare(`UPDATE timeout_approval_requests SET retry_run_id = ? WHERE id = ? AND status = 'approved' AND retry_claimed = 1 AND retry_run_id IS NULL`).run(retryRunId, requestId);
+    database.prepare(`UPDATE recovery_decisions SET retry_run_id = ? WHERE approval_request_id = ? AND retry_run_id IS NULL`).run(retryRunId, requestId);
+  });
+}
+
+export function recordTimeoutNotificationDelivery(
+  requestId: number,
+  result: { status: 'sent' | 'failed'; error?: string },
+): void {
+  getDb('readwrite').prepare(`
+    UPDATE timeout_approval_requests
+       SET notification_status = ?, notification_attempts = notification_attempts + 1,
+           last_notification_error = ?, notified_at = CASE WHEN ? = 'sent' THEN datetime('now') ELSE notified_at END
+     WHERE id = ?
+  `).run(result.status, result.error ?? null, result.status, requestId);
 }
 
 function encodeJson(value: string[]): string {
