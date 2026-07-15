@@ -97,6 +97,8 @@ export function FeatureConfigDetail({ feature, backlogSettings, onSaveConfig, wo
   const [newStageSkill, setNewStageSkill] = useState('');
   const [newStageIssue, setNewStageIssue] = useState<string | null>(null);
   const [pendingAddedStage, setPendingAddedStage] = useState<string | null>(null);
+  const [pendingRemovedStage, setPendingRemovedStage] = useState<{ stage: string; nextStage: string } | null>(null);
+  const [awaitingRemovedStageRefresh, setAwaitingRemovedStageRefresh] = useState<{ stage: string; nextStage: string } | null>(null);
   const [savedFlash, setSavedFlash] = useState(false);
   const [draftExecution, setDraftExecution] = useState<ExecutionDraft>(() => executionDraftFrom(feature));
   const [draftWorkflow, setDraftWorkflow] = useState<WorkflowDraft>(() => workflowDraftFrom(feature));
@@ -135,12 +137,18 @@ export function FeatureConfigDetail({ feature, backlogSettings, onSaveConfig, wo
       || workflowSaveResult === workflowResultAtSaveStart.current
     ) return;
     if (workflowSaveResult.payload.ok) {
-      setAwaitingWorkflowRefresh(draftWorkflow);
+      if (pendingRemovedStage) {
+        setAwaitingRemovedStageRefresh(pendingRemovedStage);
+        setPendingRemovedStage(null);
+      } else {
+        setAwaitingWorkflowRefresh(draftWorkflow);
+      }
     } else {
       setWorkflowIssues(workflowSaveResult.payload.issues ?? [{ message: 'The workflow was not saved. Correct the issue and retry.' }]);
+      setPendingRemovedStage(null);
     }
     setWorkflowSavePending(false);
-  }, [draftWorkflow, feature.id, workflowSavePending, workflowSaveResult]);
+  }, [draftWorkflow, feature.id, pendingRemovedStage, workflowSavePending, workflowSaveResult]);
 
   useEffect(() => {
     if (!awaitingWorkflowRefresh || !sameWorkflowDraft(workflowDraftFrom(feature), awaitingWorkflowRefresh)) return;
@@ -148,6 +156,14 @@ export function FeatureConfigDetail({ feature, backlogSettings, onSaveConfig, wo
     setWorkflowIssues([]);
     setAwaitingWorkflowRefresh(null);
   }, [awaitingWorkflowRefresh, feature]);
+
+  useEffect(() => {
+    if (!awaitingRemovedStageRefresh || stages.includes(awaitingRemovedStageRefresh.stage)) return;
+    setSelectedStage(stages.includes(awaitingRemovedStageRefresh.nextStage)
+      ? awaitingRemovedStageRefresh.nextStage
+      : (stages[0] ?? 'specify'));
+    setAwaitingRemovedStageRefresh(null);
+  }, [awaitingRemovedStageRefresh, stages]);
 
   function saveGuidance(): void {
     onSaveConfig({
@@ -192,6 +208,32 @@ export function FeatureConfigDetail({ feature, backlogSettings, onSaveConfig, wo
     setNewStageSkill('');
     setNewStageIssue(null);
     setPendingAddedStage(stage);
+  }
+
+  function removeStage(stage: string): void {
+    if (stages.length <= 1 || workflowSavePending || awaitingRemovedStageRefresh) return;
+    const removedIndex = stages.indexOf(stage);
+    if (removedIndex < 0) return;
+    const nextStages = stages.filter((candidate) => candidate !== stage);
+    const nextStage = nextStages[removedIndex] ?? nextStages[removedIndex - 1] ?? nextStages[0];
+    if (!nextStage) return;
+    const nextGuidance = Object.fromEntries(
+      Object.entries(feature.workflow.stepGuidance).filter(([candidate]) => candidate !== stage),
+    );
+
+    setWorkflowIssues([]);
+    workflowResultAtSaveStart.current = workflowSaveResult;
+    setPendingRemovedStage({ stage, nextStage });
+    setWorkflowSavePending(true);
+    onSaveConfig({
+      workflow: {
+        stages: nextStages,
+        stepGuidance: nextGuidance,
+        sessionPolicy: {
+          alwaysIsolatedStages: feature.workflow.sessionPolicy.alwaysIsolatedStages.filter((candidate) => candidate !== stage),
+        },
+      },
+    });
   }
 
   const executionBaseline = executionDraftFrom(feature);
@@ -404,25 +446,26 @@ export function FeatureConfigDetail({ feature, backlogSettings, onSaveConfig, wo
         {newStageIssue && <div role="alert" style={{ color: 'var(--accent-warn)', fontSize: 'var(--text-xs)', marginBottom: 8 }}>{newStageIssue}</div>}
         <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 4 }}>
           {stages.map((s) => (
-            <button
-              key={s}
-              onClick={() => { setSelectedStage(s); }}
-              style={{
-                fontFamily: 'var(--font-mono)',
-                fontSize: 'var(--text-xs)',
-                padding: '6px 12px',
-                borderRadius: 'var(--radius-pill)',
-                cursor: 'pointer',
-                border: `1px solid ${selectedStage === s ? 'var(--accent-info)' : 'var(--border-strong)'}`,
-                background: selectedStage === s ? 'var(--accent-info-10)' : 'transparent',
-                color: selectedStage === s ? 'var(--accent-info)' : 'var(--text-dim)',
-                fontWeight: selectedStage === s ? 600 : 400,
-              }}
-            >
-              {s}
-            </button>
+            <div key={s} style={{ display: 'flex', alignItems: 'center', border: `1px solid ${selectedStage === s ? 'var(--accent-info)' : 'var(--border-strong)'}`, borderRadius: 'var(--radius-pill)', background: selectedStage === s ? 'var(--accent-info-10)' : 'transparent' }}>
+              <button
+                onClick={() => { setSelectedStage(s); }}
+                style={{ fontFamily: 'var(--font-mono)', fontSize: 'var(--text-xs)', padding: '6px 8px 6px 12px', border: 0, borderRadius: 'var(--radius-pill)', cursor: 'pointer', background: 'transparent', color: selectedStage === s ? 'var(--accent-info)' : 'var(--text-dim)', fontWeight: selectedStage === s ? 600 : 400 }}
+              >
+                {s}
+              </button>
+              <button
+                type="button"
+                aria-label={`Remove ${s}`}
+                disabled={stages.length <= 1 || workflowSavePending || awaitingRemovedStageRefresh !== null}
+                onClick={() => { removeStage(s); }}
+                style={{ border: 0, borderLeft: '1px solid var(--border-dim)', padding: '4px 8px', background: 'transparent', color: 'var(--text-dim)', cursor: stages.length <= 1 ? 'not-allowed' : 'pointer' }}
+              >
+                ×
+              </button>
+            </div>
           ))}
         </div>
+        {stages.length <= 1 && <div style={{ color: 'var(--text-faint)', fontSize: 'var(--text-xs)', marginBottom: 8 }}>A workflow must keep at least one step.</div>}
 
         <SubHeading>Resolved skills ({selectedStage}) — global, via stageSkills</SubHeading>
         <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 10 }}>

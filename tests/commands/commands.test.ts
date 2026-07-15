@@ -8,6 +8,7 @@ const mockResolveRepo = vi.fn();
 const mockRegisterRepo = vi.fn();
 const mockLoadBacklog = vi.fn();
 const mockExecuteBacklog = vi.fn();
+const mockRehydrateBacklogWorkflowRevisions = vi.fn((backlog) => backlog);
 const mockValidateBacklogSkills = vi.fn();
 const mockResolveRuntimeConfig = vi.fn();
 const mockResolveConfigSnapshot = vi.fn();
@@ -52,6 +53,7 @@ vi.mock('../../src/core/backlog/load.js', async () => {
 
 vi.mock('../../src/core/runner/execute.js', () => ({
   executeBacklog: mockExecuteBacklog,
+  rehydrateBacklogWorkflowRevisions: mockRehydrateBacklogWorkflowRevisions,
 }));
 
 vi.mock('../../src/core/skills/index.js', () => ({

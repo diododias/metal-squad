@@ -244,6 +244,7 @@ function migrate(d: Database.Database): void {
       pending_json TEXT NOT NULL DEFAULT '[]',
       active_json TEXT NOT NULL DEFAULT '[]',
       aborted_json TEXT NOT NULL DEFAULT '[]',
+      workflow_snapshot_json TEXT NOT NULL DEFAULT '{}',
       requested_abort_feature_id TEXT,
       resume_count INTEGER NOT NULL DEFAULT 0,
       resume_summary TEXT,
@@ -516,6 +517,7 @@ function migrate(d: Database.Database): void {
   ensurePipelineColumn('pending_json', `ALTER TABLE pipelines ADD COLUMN pending_json TEXT NOT NULL DEFAULT '[]'`);
   ensurePipelineColumn('active_json', `ALTER TABLE pipelines ADD COLUMN active_json TEXT NOT NULL DEFAULT '[]'`);
   ensurePipelineColumn('aborted_json', `ALTER TABLE pipelines ADD COLUMN aborted_json TEXT NOT NULL DEFAULT '[]'`);
+  ensurePipelineColumn('workflow_snapshot_json', `ALTER TABLE pipelines ADD COLUMN workflow_snapshot_json TEXT NOT NULL DEFAULT '{}'`);
   ensurePipelineColumn('requested_abort_feature_id', `ALTER TABLE pipelines ADD COLUMN requested_abort_feature_id TEXT`);
   ensurePipelineColumn('resume_count', `ALTER TABLE pipelines ADD COLUMN resume_count INTEGER NOT NULL DEFAULT 0`);
   ensurePipelineColumn('resume_summary', `ALTER TABLE pipelines ADD COLUMN resume_summary TEXT`);

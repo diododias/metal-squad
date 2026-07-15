@@ -177,6 +177,7 @@ beforeEach(() => {
     pendingJson: '[]',
     activeJson: '[]',
     abortedJson: '[]',
+    workflowSnapshotJson: '{}',
     requestedAbortFeatureId: null,
     resumeCount: 0,
     resumeSummary: null,
@@ -195,6 +196,7 @@ beforeEach(() => {
       pendingJson: JSON.stringify(opts?.snapshot?.pending ?? []),
       activeJson: JSON.stringify(opts?.snapshot?.active ?? []),
       abortedJson: JSON.stringify(opts?.snapshot?.aborted ?? []),
+      workflowSnapshotJson: JSON.stringify(opts?.snapshot?.workflowRevisions ?? {}),
     };
     return 9;
   });
@@ -213,6 +215,7 @@ beforeEach(() => {
     pending: JSON.parse(row.pendingJson),
     active: JSON.parse(row.activeJson),
     aborted: JSON.parse(row.abortedJson),
+    workflowRevisions: JSON.parse(row.workflowSnapshotJson ?? '{}'),
   }));
   mockUpdatePipelineSnapshot.mockImplementation((_pipelineId, patch, opts = {}) => {
     const current = mockGetPipelineSnapshot(pipelineRow);
@@ -224,6 +227,7 @@ beforeEach(() => {
       pendingJson: JSON.stringify(next.pending),
       activeJson: JSON.stringify(next.active),
       abortedJson: JSON.stringify(next.aborted),
+      workflowSnapshotJson: JSON.stringify(next.workflowRevisions ?? {}),
       status: opts.status ?? pipelineRow.status,
       requestedAbortFeatureId: opts.clearAbortRequest ? null : pipelineRow.requestedAbortFeatureId,
     };
@@ -810,7 +814,17 @@ describe('executeBacklog failure persistence', () => {
       'repo-1',
       'feat-27',
       false,
-      expect.objectContaining({ cwd: '/repo' }),
+      expect.objectContaining({
+        cwd: '/repo',
+        snapshot: expect.objectContaining({
+          workflowRevisions: {
+            'feat-27': expect.objectContaining({
+              stages: ['specify', 'plan'],
+              stepGuidance: { plan: { prompt: 'Focus only on planning output.' } },
+            }),
+          },
+        }),
+      }),
     );
     expect(mockCreateRun).toHaveBeenNthCalledWith(1, 'repo-1', 'feat-27', 'codex', {
       pipelineId: 9,
@@ -838,6 +852,40 @@ describe('executeBacklog failure persistence', () => {
     expect(mockRunFeature.mock.calls[0]?.[1]).toContain('Summary:\nspec');
     expect(mockRunFeature.mock.calls[1]?.[1]).toContain('Focus only on planning output.');
     expect(mockFinishPipeline).toHaveBeenCalledWith(9, 'done');
+  });
+
+  it('rehydrates a stored structural workflow revision while retaining live approvals', async () => {
+    const backlog: Backlog = {
+      version: 2,
+      repo: 'repo',
+      defaults: { tool: 'codex', effort: 'medium', skills: ['implement'], stageSkills: {} },
+      epics: [{
+        id: 'epic-1',
+        title: 'Epic',
+        features: [{
+          id: 'feat-27', title: 'Feature', spec: 'spec', tasks: [], tool: 'codex', effort: 'medium', dependsOn: [],
+          workflow: {
+            mode: 'staged', stages: ['specify', 'validate'], approvals: { channel: 'telegram', autoAdvance: true },
+            syncTasksToBacklog: false, sessionPolicy: { mode: 'adaptive', alwaysIsolatedStages: [] },
+          },
+        }],
+      }],
+    };
+    const { rehydrateBacklogWorkflowRevisions } = await import('../../src/core/runner/execute.js');
+
+    const restored = rehydrateBacklogWorkflowRevisions(backlog, {
+      'feat-27': {
+        mode: 'staged', stages: ['specify', 'plan', 'implement'], syncTasksToBacklog: true,
+        sessionPolicy: { mode: 'isolated', alwaysIsolatedStages: ['plan'] },
+        stepGuidance: { plan: { prompt: 'Revision A.' } },
+      },
+    });
+
+    expect(restored.epics[0]?.features[0]?.workflow).toEqual({
+      mode: 'staged', stages: ['specify', 'plan', 'implement'], approvals: { channel: 'telegram', autoAdvance: true },
+      syncTasksToBacklog: true, sessionPolicy: { mode: 'isolated', alwaysIsolatedStages: ['plan'] },
+      stepGuidance: { plan: { prompt: 'Revision A.' } },
+    });
   });
 
   it('honors autoAdvance toggled mid-run via the catalog instead of the value captured at run start', async () => {

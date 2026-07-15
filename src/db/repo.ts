@@ -13,7 +13,7 @@ import type {
   TokensUpdateEvent,
 } from '../core/events/types.js';
 import { resolveContextWindow } from '../core/tasks/blocks.js';
-import type { Tool } from '../core/backlog/schema.js';
+import type { Tool, Workflow } from '../core/backlog/schema.js';
 import type {
   SessionContextTelemetrySnapshot,
   StageTransitionDecision,
@@ -179,7 +179,11 @@ export interface PipelineSnapshot {
   pending: string[];
   active: string[];
   aborted: string[];
+  workflowRevisions?: PipelineWorkflowRevisions;
 }
+
+export type PipelineWorkflowRevision = Pick<Workflow, 'mode' | 'stages' | 'syncTasksToBacklog' | 'sessionPolicy' | 'stepGuidance'>;
+export type PipelineWorkflowRevisions = Record<string, PipelineWorkflowRevision>;
 
 export function createRun(
   repoId: string,
@@ -1482,6 +1486,7 @@ export interface PipelineRow {
   pendingJson: string;
   activeJson: string;
   abortedJson: string;
+  workflowSnapshotJson?: string;
   requestedAbortFeatureId: string | null;
   resumeCount: number;
   resumeSummary: string | null;
@@ -1637,8 +1642,8 @@ export function createPipeline(
   const info = getDb('readwrite')
     .prepare(
       `INSERT INTO pipelines
-         (repo_id, feature_id, auto_advance, cwd, plan_json, done_json, pending_json, active_json, aborted_json, resume_summary)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         (repo_id, feature_id, auto_advance, cwd, plan_json, done_json, pending_json, active_json, aborted_json, workflow_snapshot_json, resume_summary)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     )
     .run(
       repoId,
@@ -1650,6 +1655,7 @@ export function createPipeline(
       encodeJson(snapshot.pending),
       encodeJson(snapshot.active),
       encodeJson(snapshot.aborted),
+      JSON.stringify(snapshot.workflowRevisions ?? {}),
       opts.resumeSummary ?? summarizeSnapshot(snapshot),
     );
   return Number(info.lastInsertRowid);
@@ -1766,6 +1772,7 @@ export function updatePipelineSnapshot(
            pending_json = ?,
            active_json = ?,
            aborted_json = ?,
+           workflow_snapshot_json = ?,
            resume_summary = ?,
            requested_abort_feature_id = ?,
            resume_count = ?,
@@ -1780,6 +1787,7 @@ export function updatePipelineSnapshot(
       encodeJson(snapshot.pending),
       encodeJson(snapshot.active),
       encodeJson(snapshot.aborted),
+      JSON.stringify(snapshot.workflowRevisions ?? {}),
       opts.resumeSummary ?? summarizeSnapshot(snapshot),
       opts.clearAbortRequest ? null : (opts.requestedAbortFeatureId ?? row.requestedAbortFeatureId),
       opts.resumeCount ?? row.resumeCount,
@@ -1804,6 +1812,7 @@ export function getPipeline(id: number): PipelineRow | null {
          pending_json AS pendingJson,
          active_json AS activeJson,
          aborted_json AS abortedJson,
+         workflow_snapshot_json AS workflowSnapshotJson,
          requested_abort_feature_id AS requestedAbortFeatureId,
          resume_count AS resumeCount,
          resume_summary AS resumeSummary,
@@ -1833,6 +1842,7 @@ export function listResumablePipelines(): PipelineRow[] {
          pending_json AS pendingJson,
          active_json AS activeJson,
          aborted_json AS abortedJson,
+         workflow_snapshot_json AS workflowSnapshotJson,
          requested_abort_feature_id AS requestedAbortFeatureId,
          resume_count AS resumeCount,
          resume_summary AS resumeSummary,
@@ -1869,7 +1879,26 @@ export function getPipelineSnapshot(row: PipelineRow): PipelineSnapshot {
     pending: decodeJsonArray(row.pendingJson),
     active: decodeJsonArray(row.activeJson),
     aborted: decodeJsonArray(row.abortedJson),
+    workflowRevisions: decodeWorkflowRevisions(row.workflowSnapshotJson),
   };
+}
+
+function decodeWorkflowRevisions(json: string | undefined): PipelineWorkflowRevisions {
+  if (!json) return {};
+  try {
+    const parsed = JSON.parse(json) as unknown;
+    if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) return {};
+    return Object.fromEntries(
+      Object.entries(parsed).filter(([, revision]) => (
+        typeof revision === 'object'
+        && revision !== null
+        && !Array.isArray(revision)
+        && Array.isArray(Reflect.get(revision, 'stages'))
+      )),
+    );
+  } catch {
+    return {};
+  }
 }
 
 export function createStageRequest(

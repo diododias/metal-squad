@@ -332,6 +332,35 @@ describe('backlogCatalog upsert/diff/load', () => {
       });
     });
 
+    it('persists one valid removal patch that clears only the removed stage references', async () => {
+      const { upsertBacklogCatalog, updateCatalogFeature } = await setup();
+      const workflow = {
+        mode: 'staged' as const,
+        stages: ['specify', 'implement', 'validate'],
+        approvals: { channel: 'telegram' as const, autoAdvance: false },
+        syncTasksToBacklog: true,
+        sessionPolicy: { mode: 'isolated' as const, alwaysIsolatedStages: ['implement', 'validate'] },
+        stepGuidance: {
+          specify: { prompt: 'Keep this.' },
+          implement: { prompt: 'Remove this.' },
+          validate: { prompt: 'Keep this too.' },
+        },
+      };
+      upsertBacklogCatalog(makeBacklog({ epics: [{ id: 'epic-1', title: 'Epic One', features: [{ ...makeBacklog().epics[0]!.features[0]!, workflow }] }] }), 'repo-1');
+
+      const updated = updateCatalogFeature('repo-1', 'feat-1', {
+        workflow: {
+          stages: ['specify', 'validate'],
+          stepGuidance: { specify: { prompt: 'Keep this.' }, validate: { prompt: 'Keep this too.' } },
+          sessionPolicy: { alwaysIsolatedStages: ['validate'] },
+        },
+      });
+
+      expect(updated.workflow.stages).toEqual(['specify', 'validate']);
+      expect(updated.workflow.stepGuidance).toEqual({ specify: { prompt: 'Keep this.' }, validate: { prompt: 'Keep this too.' } });
+      expect(updated.workflow.sessionPolicy).toEqual({ mode: 'isolated', alwaysIsolatedStages: ['validate'] });
+    });
+
     it('throws on an invalid patch and writes nothing', async () => {
       const { db, upsertBacklogCatalog, updateCatalogFeature } = await setup();
       upsertBacklogCatalog(makeBacklog(), 'repo-1');

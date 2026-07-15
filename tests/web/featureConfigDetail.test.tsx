@@ -95,6 +95,14 @@ function addStepButton(container: HTMLElement): HTMLButtonElement | undefined {
   return Array.from(container.querySelectorAll('button')).find((button) => button.textContent === 'add step');
 }
 
+function removeStepButton(container: HTMLElement, stage: string): HTMLButtonElement {
+  const control = container.querySelector(`button[aria-label="Remove ${stage}"]`);
+  if (!(control instanceof HTMLButtonElement)) {
+    throw new Error(`Missing remove control for step: ${stage}`);
+  }
+  return control;
+}
+
 afterEach(() => {
   act(() => {
     roots.forEach((root) => { root.unmount(); });
@@ -352,6 +360,59 @@ describe('FeatureConfigDetail steps', () => {
       addStepButton(view.container)?.click();
     });
     expect(view.container.textContent).toContain('Step "specify" already exists.');
+    expect(onSaveConfig).not.toHaveBeenCalled();
+  });
+
+  it('removes one stage with its guidance and isolation in one composed patch', () => {
+    const onSaveConfig = vi.fn();
+    const feature = makeFeature({
+      workflow: {
+        ...makeFeature().workflow,
+        stages: ['specify', 'implement', 'validate'],
+        stepGuidance: {
+          specify: { prompt: 'Keep this.' },
+          implement: { skills: ['implement-skill'], prompt: 'Remove this.' },
+          validate: { skills: ['validate-skill'] },
+        },
+        sessionPolicy: { mode: 'isolated', alwaysIsolatedStages: ['implement', 'validate'] },
+      },
+    });
+    const view = mount();
+    view.rerender(feature, onSaveConfig);
+
+    act(() => { removeStepButton(view.container, 'implement').click(); });
+
+    expect(onSaveConfig).toHaveBeenCalledWith({
+      workflow: {
+        stages: ['specify', 'validate'],
+        stepGuidance: {
+          specify: { prompt: 'Keep this.' },
+          validate: { skills: ['validate-skill'] },
+        },
+        sessionPolicy: { alwaysIsolatedStages: ['validate'] },
+      },
+    });
+
+    const accepted: FeatureConfigSaveResult = { type: 'featureConfig:saveResult', payload: { featureId: 'feat-1', ok: true } };
+    view.rerender(feature, onSaveConfig, accepted);
+    view.rerender(makeFeature({
+      workflow: {
+        ...feature.workflow,
+        stages: ['specify', 'validate'],
+        stepGuidance: { specify: { prompt: 'Keep this.' }, validate: { skills: ['validate-skill'] } },
+        sessionPolicy: { mode: 'isolated', alwaysIsolatedStages: ['validate'] },
+      },
+    }), onSaveConfig, accepted);
+    expect(view.container.textContent).toContain('Resolved skills (validate)');
+  });
+
+  it('disables the final step removal control without dispatching a patch', () => {
+    const onSaveConfig = vi.fn();
+    const view = mount();
+    view.rerender(makeFeature(), onSaveConfig);
+
+    expect(removeStepButton(view.container, 'specify').disabled).toBe(true);
+    expect(view.container.textContent).toContain('A workflow must keep at least one step.');
     expect(onSaveConfig).not.toHaveBeenCalled();
   });
 });
