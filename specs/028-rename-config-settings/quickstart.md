@@ -29,8 +29,8 @@
 2. In the sidebar or mobile navigation, select **Settings**.
 3. Confirm the destination heading is **Settings** and the URL remains
    `#/config`.
-4. Confirm the category order is Runtime, Defaults, Features & Prompts, Skills,
-   Notifications, Budget; select each category and verify its existing content appears.
+4. Confirm the category order is Runtime, Defaults, Skills, Notifications, Budget;
+   select each category and verify its existing content appears.
 5. Open keyboard help and confirm `g c` says **Go to Settings**; use it and
    confirm the same destination opens.
 

@@ -1,8 +1,6 @@
 import React, { useMemo, useState } from 'react';
 import { Tabs } from '../components/navigation/Tabs.js';
 import { Tag } from '../components/core/Tag.js';
-import { FeatureConfigDetail } from '../components/FeatureConfigDetail.js';
-import { FeatureIdentity } from '../components/data/FeatureIdentity.js';
 import { PageHeader } from '../PageHeader.js';
 import type { MsqWebState, WebSocketClientMessage } from '../../types.js';
 
@@ -15,7 +13,6 @@ export interface ConfigPageProps {
 const SUB_TABS = [
   { id: 'runtime', label: 'Runtime' },
   { id: 'defaults', label: 'Defaults' },
-  { id: 'features', label: 'Features & Prompts' },
   { id: 'skills', label: 'Skills' },
   { id: 'notifications', label: 'Notifications' },
   { id: 'budget', label: 'Budget' },
@@ -113,59 +110,6 @@ function DefaultsTab({ state }: { state: MsqWebState }): React.JSX.Element {
   );
 }
 
-function FeaturesPromptsTab({ state, send }: { state: MsqWebState; send: (m: WebSocketClientMessage) => void }): React.JSX.Element {
-  const features = Object.values(state.featureCatalog);
-  const [query, setQuery] = useState('');
-  const [selectedId, setSelectedId] = useState(features[0]?.id ?? '');
-  const filtered = features.filter((f) => f.id.includes(query) || f.title.toLowerCase().includes(query.toLowerCase()));
-  const selected = state.featureCatalog[selectedId];
-
-  return (
-    <div style={{ display: 'flex', gap: 16, alignItems: 'flex-start' }}>
-      <div style={{ width: 220, flexShrink: 0, display: 'flex', flexDirection: 'column', gap: 8 }}>
-        <input
-          value={query}
-          onChange={(e) => { setQuery(e.target.value); }}
-          placeholder="Search…"
-          style={{ background: 'var(--bg-sunken)', border: '1px solid var(--border-dim)', borderRadius: 'var(--radius-sm)', color: 'var(--text-primary)', fontFamily: 'var(--font-mono)', fontSize: 'var(--text-sm)', padding: '7px 10px' }}
-        />
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 2, maxHeight: 480, overflowY: 'auto' }}>
-          {filtered.map((f) => (
-            <button
-              key={f.id}
-              onClick={() => { setSelectedId(f.id); }}
-              style={{
-                textAlign: 'left',
-                background: f.id === selectedId ? 'var(--accent-info-10)' : 'transparent',
-                color: f.id === selectedId ? 'var(--accent-info)' : 'var(--text-primary)',
-                border: 'none',
-                borderRadius: 'var(--radius-sm)',
-                padding: '7px 9px',
-                fontFamily: 'var(--font-mono)',
-                fontSize: 'var(--text-xs)',
-                cursor: 'pointer',
-              }}
-            >
-              <FeatureIdentity title={f.title} id={f.id} />
-            </button>
-          ))}
-        </div>
-      </div>
-      <div style={{ flex: 1, minWidth: 0 }}>
-        {selected ? (
-          <FeatureConfigDetail
-            feature={selected}
-            backlogSettings={state.backlogSettings}
-            onSaveConfig={(patch) => { send({ type: 'action:updateFeatureConfig', featureId: selected.id, patch }); }}
-          />
-        ) : (
-          <div style={{ color: 'var(--text-faint)', fontSize: 'var(--text-sm)' }}>No feature selected.</div>
-        )}
-      </div>
-    </div>
-  );
-}
-
 function SkillsTab({ state }: { state: MsqWebState }): React.JSX.Element {
   return (
     <Card title="Discovered skills (repo > global > external > builtin)">
@@ -226,7 +170,7 @@ function BudgetTab({ state }: { state: MsqWebState }): React.JSX.Element {
   );
 }
 
-export function ConfigPage({ state, send }: ConfigPageProps): React.JSX.Element {
+export function ConfigPage({ state }: ConfigPageProps): React.JSX.Element {
   const [tab, setTab] = useState('runtime');
 
   const content = useMemo(() => {
@@ -235,8 +179,6 @@ export function ConfigPage({ state, send }: ConfigPageProps): React.JSX.Element 
         return <RuntimeTab state={state} />;
       case 'defaults':
         return <DefaultsTab state={state} />;
-      case 'features':
-        return <FeaturesPromptsTab state={state} send={send} />;
       case 'skills':
         return <SkillsTab state={state} />;
       case 'notifications':
@@ -246,11 +188,11 @@ export function ConfigPage({ state, send }: ConfigPageProps): React.JSX.Element 
       default:
         return null;
     }
-  }, [tab, state, send]);
+  }, [tab, state]);
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
-      <PageHeader title="Settings" breadcrumb="Runtime, defaults, skills, notifications and budget — read-only except Features & Prompts" />
+      <PageHeader title="Settings" breadcrumb="Runtime, defaults, skills, notifications and budget" />
       <div style={{ padding: '0 20px' }}>
         <Tabs tabs={SUB_TABS} activeId={tab} onSelect={setTab} />
       </div>

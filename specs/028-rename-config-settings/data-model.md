@@ -16,8 +16,8 @@ the existing client-side presentation model.
 
 | Field | Value / source | Validation rule |
 |---|---|---|
-| identifiers | `runtime`, `defaults`, `features`, `skills`, `notifications`, `budget` | Remain unchanged. |
-| visible labels | Runtime, Defaults, Features & Prompts, Skills, Notifications, Budget | Set, spelling, and order remain unchanged. |
+| identifiers | `runtime`, `defaults`, `skills`, `notifications`, `budget` | Remain unchanged. |
+| visible labels | Runtime, Defaults, Skills, Notifications, Budget | Set, spelling, and order remain unchanged. |
 | selection state | local `tab` state in `ConfigPage` | Selecting a category continues to render its existing contents. |
 
 ## Relationships and state transitions

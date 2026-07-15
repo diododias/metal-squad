@@ -40,7 +40,7 @@ configuration choices.
 use the configuration area.
 
 **Independent Test**: Navigate to Settings and verify that every category that
-was available before the rename is still available and selectable.
+is currently available is still available and selectable.
 
 **Acceptance Scenarios**:
 
@@ -71,7 +71,8 @@ was available before the rename is still available and selectable.
   configuration area, with no remaining "Config" label in its navigation or
   page heading.
 - **FR-005**: The set, names, order, and selectable behavior of the existing
-  settings categories MUST remain unchanged by this feature.
+  settings categories — Runtime, Defaults, Skills, Notifications, and Budget —
+  MUST remain unchanged by this feature.
 
 ### Key Entities
 
@@ -104,6 +105,8 @@ was available before the rename is still available and selectable.
   previously shared direct links is outside this feature unless separately
   requested.
 - The existing category labels and order are the baseline to preserve.
+- The Features & Prompts category was removed by the preceding SET-10 change
+  and is not part of this rename's preservation boundary.
 
 ## Dependencies
 

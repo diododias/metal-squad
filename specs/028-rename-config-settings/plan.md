@@ -8,8 +8,8 @@
 
 Rename the web dashboard's user-facing configuration-area terminology from
 "Config" to "Settings". Keep the existing `#/config` route, `g c` shortcut,
-configuration data, and the ordered Runtime, Defaults, Features & Prompts,
-Skills, Notifications, and Budget tabs unchanged. Update the navigation label, page heading, and help
+configuration data, and the ordered Runtime, Defaults, Skills, Notifications,
+and Budget tabs unchanged. Update the navigation label, page heading, and help
 overlay language, then cover those user-visible labels with focused web-client
 tests.
 

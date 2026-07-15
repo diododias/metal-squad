@@ -65,7 +65,7 @@ description: "Actionable tasks for Rename Config to Settings"
 
 ### Tests for User Story 2
 
-- [X] T007 [US2] Extend the Settings rendering coverage to assert the Runtime, Defaults, Features & Prompts, Skills, Notifications, and Budget tab order and selectable content in tests/web/client.test.ts
+- [X] T007 [US2] Extend the Settings rendering coverage to assert the Runtime, Defaults, Skills, Notifications, and Budget tab order and selectable content in tests/web/client.test.ts
 
 ### Implementation for User Story 2
 

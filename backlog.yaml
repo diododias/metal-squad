@@ -1,9 +1,9 @@
 version: 2
 repo: metal-squad
 defaults:
-  tool: codex
-  model: gpt-5.6-terra
-  effort: high
+  tool: claude
+  model: sonnet
+  effort: medium
   skills: []
   stageSkills:
     specify:
@@ -16,6 +16,6 @@ defaults:
       - speckit-implement
       - dev-flow
 epics:
-  - id: settings-m1-feature-editing-regression
-    title: Settings — M1 (Restaurar edição de Feature)
+  - id: settings-m2-board-workflow-cleanup
+    title: Settings — M2 (Board por workflow de feature + limpeza do Config)
     features: []

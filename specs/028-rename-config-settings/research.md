@@ -41,8 +41,9 @@
 
 **Rationale**:
 
-- `ConfigPage.tsx` defines the ordered categories as Runtime, Defaults, Features
-  & Prompts, Skills, Notifications, and Budget.
+- `ConfigPage.tsx` defines the ordered categories as Runtime, Defaults, Skills,
+  Notifications, and Budget. The preceding SET-10 change already removed the
+  Features & Prompts category before this terminology rename.
 - The rename has no state, request, storage, or server behavior change, so the
   existing tab array and selected-tab state are the preservation boundary.
 

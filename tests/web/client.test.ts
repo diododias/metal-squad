@@ -96,7 +96,6 @@ describe('Settings client surfaces', () => {
     expect(Array.from(container.querySelectorAll('button')).map((button) => button.textContent)).toEqual([
       '[Runtime]',
       'Defaults',
-      'Features & Prompts',
       'Skills',
       'Notifications',
       'Budget',

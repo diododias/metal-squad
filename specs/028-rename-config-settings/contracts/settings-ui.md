@@ -13,7 +13,7 @@
 | Surface | Required observable result |
 |---|---|
 | Destination heading | Displays `Settings`. |
-| Category tabs | Displays Runtime, Defaults, Features & Prompts, Skills, Notifications, Budget in this order. |
+| Category tabs | Displays Runtime, Defaults, Skills, Notifications, Budget in this order. |
 | Category interaction | Each existing category remains selectable and renders its existing content. |
 
 ## Compatibility boundary
