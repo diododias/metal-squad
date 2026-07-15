@@ -2,7 +2,7 @@ import React, { useEffect } from 'react';
 import { Button } from '../components/core/Button.js';
 import { FeatureConfigDetail } from '../components/FeatureConfigDetail.js';
 import { PageHeader } from '../PageHeader.js';
-import type { MsqWebState, FeatureConfigPatch, TaskConfigPatch } from '../../types.js';
+import type { MsqWebState, FeatureConfigPatch, FeatureConfigSaveResult, TaskConfigPatch } from '../../types.js';
 import type { RunHistoryEntry } from '../../../db/repo.js';
 
 export interface BacklogItemDetailProps {
@@ -13,6 +13,7 @@ export interface BacklogItemDetailProps {
   onBack: () => void;
   onStart: (featureId: string) => void;
   onSaveConfig: (featureId: string, patch: FeatureConfigPatch) => void;
+  workflowSaveResult?: FeatureConfigSaveResult;
   onSaveTaskConfig: (featureId: string, taskId: string, patch: TaskConfigPatch) => void;
   onOpenRun: (featureId: string) => void;
 }
@@ -24,6 +25,7 @@ export function BacklogItemDetail({
   onBack,
   onStart,
   onSaveConfig,
+  workflowSaveResult,
 }: BacklogItemDetailProps): React.JSX.Element {
   const feature = state.featureCatalog[featureId];
   const blockedByDependencies = feature?.pendingDependencies ?? [];
@@ -77,7 +79,7 @@ export function BacklogItemDetail({
         }
       />
       <div style={{ flex: 1, overflow: 'auto', padding: 20 }}>
-        <FeatureConfigDetail feature={feature} backlogSettings={state.backlogSettings} onSaveConfig={(patch) => { onSaveConfig(featureId, patch); }} />
+        <FeatureConfigDetail feature={feature} backlogSettings={state.backlogSettings} onSaveConfig={(patch) => { onSaveConfig(featureId, patch); }} workflowSaveResult={workflowSaveResult} />
       </div>
     </div>
   );

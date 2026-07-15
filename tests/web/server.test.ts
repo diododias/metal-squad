@@ -627,6 +627,36 @@ describe('web server', () => {
     socket.close();
   });
 
+  it('acknowledges an accepted workflow patch to its initiating client before reconciling state', async () => {
+    const { createWebServer } = await import('../../src/web/server.js');
+    mocks.updateCatalogFeature.mockReturnValue({ id: 'feat1' });
+
+    server = createWebServer({ host: '127.0.0.1', port: 0, auth: 'token', token: 'secret' });
+    await new Promise<void>((resolve) => server!.server.listen(0, '127.0.0.1', resolve));
+    const address = server!.server.address() as { port: number };
+    const socket = new WebSocket(`ws://127.0.0.1:${address.port}/ws`);
+    await waitForOpen(socket);
+    socket.send(JSON.stringify({ type: 'auth', token: 'secret' }));
+    await waitForSocketMessage(socket);
+
+    const saveResult = waitForMessageType(socket, 'featureConfig:saveResult');
+    const reconciledState = waitForMessageType(socket, 'state:full');
+    socket.send(JSON.stringify({
+      type: 'action:updateFeatureConfig',
+      featureId: 'feat1',
+      patch: { workflow: { approvals: { channel: 'telegram' } } },
+    }));
+
+    expect(await saveResult).toMatchObject({
+      payload: { featureId: 'feat1', ok: true },
+    });
+    await reconciledState;
+    expect(mocks.updateCatalogFeature).toHaveBeenCalledWith('repo-1', 'feat1', {
+      workflow: { approvals: { channel: 'telegram' } },
+    });
+    socket.close();
+  });
+
   it('persists an autoStart patch through action:updateFeatureConfig', async () => {
     const { createWebServer } = await import('../../src/web/server.js');
     mocks.updateCatalogFeature.mockReturnValue({ id: 'feat1', autoStart: true });
@@ -682,6 +712,38 @@ describe('web server', () => {
     const notice = await waitForMessageType(socket, 'ui:notice');
     expect((notice as { payload: { message: string } }).payload.message).toContain('nope');
 
+    socket.close();
+  });
+
+  it('returns stable workflow issues without reconciling state when a config save is rejected', async () => {
+    const { createWebServer } = await import('../../src/web/server.js');
+    const error = Object.assign(new Error('Invalid workflow'), {
+      issues: [{ path: ['workflow', 'approvals', 'channel'], message: 'Invalid enum value.' }],
+    });
+    mocks.updateCatalogFeature.mockImplementation(() => { throw error; });
+
+    server = createWebServer({ host: '127.0.0.1', port: 0, auth: 'token', token: 'secret' });
+    await new Promise<void>((resolve) => server!.server.listen(0, '127.0.0.1', resolve));
+    const address = server!.server.address() as { port: number };
+    const socket = new WebSocket(`ws://127.0.0.1:${address.port}/ws`);
+    await waitForOpen(socket);
+    socket.send(JSON.stringify({ type: 'auth', token: 'secret' }));
+    await waitForSocketMessage(socket);
+
+    socket.send(JSON.stringify({
+      type: 'action:updateFeatureConfig',
+      featureId: 'feat1',
+      patch: { workflow: { approvals: { channel: 'telegram' } } },
+    }));
+
+    expect(await waitForMessageType(socket, 'featureConfig:saveResult')).toMatchObject({
+      payload: {
+        featureId: 'feat1',
+        ok: false,
+        issues: [{ path: 'workflow.approvals.channel', message: 'Invalid enum value.' }],
+      },
+    });
+    expect(mocks.updateCatalogFeature).toHaveBeenCalledTimes(1);
     socket.close();
   });
 

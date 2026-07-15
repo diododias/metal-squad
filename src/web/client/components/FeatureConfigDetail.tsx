@@ -5,7 +5,7 @@ import { EditableTextField } from './core/EditableTextField.js';
 import { EditableToggleField } from './core/EditableToggleField.js';
 import { Tag } from './core/Tag.js';
 import type { FeatureCatalogEntry, BacklogSettings } from '../../../ui/catalog.js';
-import type { FeatureConfigPatch, TaskConfigPatch } from '../../types.js';
+import type { FeatureConfigPatch, FeatureConfigSaveResult, TaskConfigPatch } from '../../types.js';
 
 const executionTools = ['claude', 'codex', 'opencode'] as const;
 const executionEfforts = ['low', 'medium', 'high'] as const;
@@ -18,6 +18,13 @@ interface ExecutionDraft {
   autoStart: boolean;
 }
 
+interface WorkflowDraft {
+  mode: string;
+  syncTasksToBacklog: boolean;
+  approvalChannel: string;
+  autoAdvance: boolean;
+}
+
 function executionDraftFrom(feature: FeatureCatalogEntry): ExecutionDraft {
   return {
     tool: feature.tool,
@@ -26,6 +33,22 @@ function executionDraftFrom(feature: FeatureCatalogEntry): ExecutionDraft {
     maxTokens: feature.maxTokens?.toString() ?? '',
     autoStart: feature.autoStart ?? false,
   };
+}
+
+function workflowDraftFrom(feature: FeatureCatalogEntry): WorkflowDraft {
+  return {
+    mode: feature.workflow.mode,
+    syncTasksToBacklog: feature.workflow.syncTasksToBacklog,
+    approvalChannel: feature.workflow.approvals.channel,
+    autoAdvance: feature.workflow.approvals.autoAdvance,
+  };
+}
+
+function sameWorkflowDraft(left: WorkflowDraft, right: WorkflowDraft): boolean {
+  return left.mode === right.mode
+    && left.syncTasksToBacklog === right.syncTasksToBacklog
+    && left.approvalChannel === right.approvalChannel
+    && left.autoAdvance === right.autoAdvance;
 }
 
 function ConfigCard({ title, children }: { title: string; children: React.ReactNode }): React.JSX.Element {
@@ -61,9 +84,10 @@ export interface FeatureConfigDetailProps {
   backlogSettings: BacklogSettings;
   onSaveConfig: (patch: FeatureConfigPatch) => void;
   onSaveTaskConfig?: (taskId: string, patch: TaskConfigPatch) => void;
+  workflowSaveResult?: FeatureConfigSaveResult;
 }
 
-export function FeatureConfigDetail({ feature, backlogSettings, onSaveConfig }: FeatureConfigDetailProps): React.JSX.Element {
+export function FeatureConfigDetail({ feature, backlogSettings, onSaveConfig, workflowSaveResult }: FeatureConfigDetailProps): React.JSX.Element {
   const stages = feature.workflow.stages;
   const [selectedStage, setSelectedStage] = useState(stages[0] ?? 'specify');
   const [draftPrompt, setDraftPrompt] = useState('');
@@ -71,6 +95,10 @@ export function FeatureConfigDetail({ feature, backlogSettings, onSaveConfig }: 
   const [newSkill, setNewSkill] = useState('');
   const [savedFlash, setSavedFlash] = useState(false);
   const [draftExecution, setDraftExecution] = useState<ExecutionDraft>(() => executionDraftFrom(feature));
+  const [draftWorkflow, setDraftWorkflow] = useState<WorkflowDraft>(() => workflowDraftFrom(feature));
+  const [workflowIssues, setWorkflowIssues] = useState<{ path?: string; message: string }[]>([]);
+  const [workflowSavePending, setWorkflowSavePending] = useState(false);
+  const [awaitingWorkflowRefresh, setAwaitingWorkflowRefresh] = useState<WorkflowDraft | null>(null);
 
   useEffect(() => {
     const guidance = feature.workflow.stepGuidance[selectedStage];
@@ -88,6 +116,23 @@ export function FeatureConfigDetail({ feature, backlogSettings, onSaveConfig }: 
       autoStart: feature.autoStart ?? false,
     });
   }, [feature.id, feature.tool, feature.model, feature.effort, feature.maxTokens, feature.autoStart]);
+
+  useEffect(() => {
+    if (!workflowSavePending || workflowSaveResult?.payload.featureId !== feature.id) return;
+    if (workflowSaveResult.payload.ok) {
+      setAwaitingWorkflowRefresh(draftWorkflow);
+    } else {
+      setWorkflowIssues(workflowSaveResult.payload.issues ?? [{ message: 'The workflow was not saved. Correct the issue and retry.' }]);
+    }
+    setWorkflowSavePending(false);
+  }, [draftWorkflow, feature.id, workflowSavePending, workflowSaveResult]);
+
+  useEffect(() => {
+    if (!awaitingWorkflowRefresh || !sameWorkflowDraft(workflowDraftFrom(feature), awaitingWorkflowRefresh)) return;
+    setDraftWorkflow(workflowDraftFrom(feature));
+    setWorkflowIssues([]);
+    setAwaitingWorkflowRefresh(null);
+  }, [awaitingWorkflowRefresh, feature]);
 
   function saveGuidance(): void {
     onSaveConfig({
@@ -136,6 +181,28 @@ export function FeatureConfigDetail({ feature, backlogSettings, onSaveConfig }: 
   function saveExecution(): void {
     if (!canSaveExecution || Object.keys(executionPatch).length === 0) return;
     onSaveConfig(executionPatch);
+  }
+
+  const workflowBaseline = workflowDraftFrom(feature);
+  const workflowPatch: NonNullable<FeatureConfigPatch['workflow']> = {};
+  if (draftWorkflow.mode !== workflowBaseline.mode) workflowPatch.mode = draftWorkflow.mode;
+  if (draftWorkflow.syncTasksToBacklog !== workflowBaseline.syncTasksToBacklog) workflowPatch.syncTasksToBacklog = draftWorkflow.syncTasksToBacklog;
+  const approvalPatch: { channel?: string; autoAdvance?: boolean } = {};
+  if (draftWorkflow.approvalChannel !== workflowBaseline.approvalChannel) approvalPatch.channel = draftWorkflow.approvalChannel;
+  if (draftWorkflow.autoAdvance !== workflowBaseline.autoAdvance) approvalPatch.autoAdvance = draftWorkflow.autoAdvance;
+  if (Object.keys(approvalPatch).length > 0) workflowPatch.approvals = approvalPatch;
+  const hasWorkflowChanges = Object.keys(workflowPatch).length > 0;
+  const hasUnavailableApprovalChannel = draftWorkflow.approvalChannel !== 'telegram';
+  const workflowGuidance = hasUnavailableApprovalChannel && hasWorkflowChanges
+    ? 'Choose an available approval destination before saving.'
+    : undefined;
+  const canSaveWorkflow = hasWorkflowChanges && !workflowGuidance && !workflowSavePending && !awaitingWorkflowRefresh;
+
+  function saveWorkflow(): void {
+    if (!canSaveWorkflow) return;
+    setWorkflowIssues([]);
+    setWorkflowSavePending(true);
+    onSaveConfig({ workflow: workflowPatch });
   }
 
   const resolvedStageSkills = backlogSettings.stageSkills[selectedStage] ?? [];
@@ -219,10 +286,45 @@ export function FeatureConfigDetail({ feature, backlogSettings, onSaveConfig }: 
       </ConfigCard>
 
       <ConfigCard title="Workflow">
-        <ConfigField label="mode" value={feature.workflow.mode} />
-        <ConfigField label="syncTasksToBacklog" value={feature.workflow.syncTasksToBacklog ? 'on' : 'off'} />
-        <ConfigField label="approvals.channel" value={feature.workflow.approvals.channel} />
-        <ConfigField label="approvals.autoAdvance" value={feature.workflow.approvals.autoAdvance ? 'on' : 'off'} />
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 12, marginBottom: 12 }}>
+          <EditableSelectField
+            id="workflow-mode"
+            label="mode"
+            value={draftWorkflow.mode}
+            initialValue={workflowBaseline.mode}
+            options={[{ value: 'single', label: 'single' }, { value: 'staged', label: 'staged' }]}
+            onChange={(mode) => { setDraftWorkflow((draft) => ({ ...draft, mode: mode ?? '' })); }}
+          />
+          <EditableToggleField
+            id="workflow-sync-tasks"
+            label="syncTasksToBacklog"
+            value={draftWorkflow.syncTasksToBacklog}
+            initialValue={workflowBaseline.syncTasksToBacklog}
+            onChange={(syncTasksToBacklog) => { setDraftWorkflow((draft) => ({ ...draft, syncTasksToBacklog })); }}
+          />
+          <EditableSelectField
+            id="workflow-approval-channel"
+            label="approvals.channel"
+            value={draftWorkflow.approvalChannel}
+            initialValue={workflowBaseline.approvalChannel}
+            options={[{ value: 'telegram', label: 'telegram' }]}
+            onChange={(approvalChannel) => { setDraftWorkflow((draft) => ({ ...draft, approvalChannel: approvalChannel ?? '' })); }}
+          />
+          <EditableToggleField
+            id="workflow-auto-advance"
+            label="approvals.autoAdvance (legacy)"
+            value={draftWorkflow.autoAdvance}
+            initialValue={workflowBaseline.autoAdvance}
+            onChange={(autoAdvance) => { setDraftWorkflow((draft) => ({ ...draft, autoAdvance })); }}
+          />
+          {workflowGuidance && <span style={{ color: 'var(--accent-warn)', fontSize: 'var(--text-xs)', lineHeight: 1.4 }}>{workflowGuidance}</span>}
+          {workflowIssues.map((issue, index) => (
+            <span key={`${issue.path ?? 'workflow'}-${String(index)}`} style={{ color: 'var(--accent-warn)', fontSize: 'var(--text-xs)', lineHeight: 1.4 }}>
+              {issue.path ? `${issue.path}: ${issue.message}` : issue.message}
+            </span>
+          ))}
+          {canSaveWorkflow && <div><Button variant="primary" size="sm" onClick={saveWorkflow}>save workflow</Button></div>}
+        </div>
         <ConfigField label="sessionPolicy.mode" value={feature.workflow.sessionPolicy.mode} />
       </ConfigCard>
 
