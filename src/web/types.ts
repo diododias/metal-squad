@@ -115,7 +115,7 @@ export interface FeatureConfigPatch {
     mode?: string;
     stages?: string[];
     syncTasksToBacklog?: boolean;
-    approvals?: { autoAdvance?: boolean };
+    approvals?: { channel?: string; autoAdvance?: boolean };
     stepGuidance?: Record<string, { skills?: string[]; prompt?: string }>;
   };
   retry?: { maxAttempts?: number; backoffMs?: number; onFail?: string };
@@ -127,6 +127,16 @@ export interface TaskConfigPatch {
   status?: string;
   skills?: string[];
   dependsOn?: string[];
+}
+
+export interface FeatureConfigSaveIssue {
+  path?: string;
+  message: string;
+}
+
+export interface FeatureConfigSaveResult {
+  type: 'featureConfig:saveResult';
+  payload: { featureId: string; ok: boolean; issues?: FeatureConfigSaveIssue[] };
 }
 
 export type WebSocketClientMessage =
@@ -155,6 +165,7 @@ export type WebSocketClientMessage =
 
 export type WebSocketServerMessage =
   | { type: 'state:full'; payload: MsqWebState }
+  | FeatureConfigSaveResult
   | { type: 'run:detail'; payload: { runId: number; taskRuns: TaskRun[]; breakdown: RunBreakdown | null; sessionStatus: SessionStatusSnapshot | null; statusHistory: SessionStatusSnapshot[]; toolCalls: ToolCallRecord[] } }
   | { type: 'run:history'; payload: { featureId: string; runs: RunHistoryEntry[] } }
   | { type: 'run:changes'; payload: RunChangesPayload }

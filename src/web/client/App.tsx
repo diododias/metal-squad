@@ -14,7 +14,7 @@ import { RunsPage } from './pages/RunsPage.js';
 import { GatesPage } from './pages/GatesPage.js';
 import { AnalyticsPage } from './pages/AnalyticsPage.js';
 import { ConfigPage } from './pages/ConfigPage.js';
-import type { MsqWebState, WebSocketServerMessage, FeatureConfigPatch, TaskConfigPatch } from '../types.js';
+import type { MsqWebState, WebSocketServerMessage, FeatureConfigPatch, FeatureConfigSaveResult, TaskConfigPatch } from '../types.js';
 import type { RunHistoryEntry, TaskRun } from '../../db/repo.js';
 import type { RunBreakdown } from '../../core/stats.js';
 import type { SessionStatusSnapshot, ToolCallRecord } from '../../core/adapters/types.js';
@@ -40,6 +40,7 @@ export function App(): React.JSX.Element {
   const [unread, setUnread] = useState(0);
   const [runDetails, setRunDetails] = useState<Record<number, RunDetailData>>({});
   const [runHistories, setRunHistories] = useState<Record<string, RunHistoryEntry[]>>({});
+  const [workflowSaveResults, setWorkflowSaveResults] = useState<Record<string, FeatureConfigSaveResult>>({});
   const { linesByRun, append, clear } = useLocalOutput();
   const gKeyRef = useRef(false);
   const hasReceivedStateRef = useRef(false);
@@ -91,6 +92,8 @@ export function App(): React.JSX.Element {
         }));
       } else if (message.type === 'run:history') {
         setRunHistories((current) => ({ ...current, [message.payload.featureId]: message.payload.runs }));
+      } else if (message.type === 'featureConfig:saveResult') {
+        setWorkflowSaveResults((current) => ({ ...current, [message.payload.featureId]: message }));
       }
     },
     [append],
@@ -220,7 +223,15 @@ export function App(): React.JSX.Element {
           send({ type: 'action:startFeature', featureId });
           navigate('/board');
         }}
-        onSaveConfig={(featureId: string, patch: FeatureConfigPatch) => { send({ type: 'action:updateFeatureConfig', featureId, patch }); }}
+        onSaveConfig={(featureId: string, patch: FeatureConfigPatch) => {
+          setWorkflowSaveResults((current) => {
+            return Object.fromEntries(
+              Object.entries(current).filter(([resultFeatureId]) => resultFeatureId !== featureId),
+            );
+          });
+          send({ type: 'action:updateFeatureConfig', featureId, patch });
+        }}
+        workflowSaveResult={workflowSaveResults[route.featureId]}
         onSaveTaskConfig={(featureId: string, taskId: string, patch: TaskConfigPatch) =>
           { send({ type: 'action:updateTaskConfig', featureId, taskId, patch }); }
         }

@@ -36,6 +36,8 @@ import { buildMsqWebState, appendNotification } from './state.js';
 import { createWebAuth, isAllowedHostHeader, isAllowedOrigin, timingSafeEqualStrings } from './auth.js';
 import type {
   FeatureConfigPatch,
+  FeatureConfigSaveIssue,
+  FeatureConfigSaveResult,
   RunChangesPayload,
   TaskConfigPatch,
   WebSocketClientMessage,
@@ -670,7 +672,16 @@ export function createWebServer(options: {
         break;
       }
       case 'action:updateFeatureConfig': {
-        updateFeatureConfig(message.featureId, message.patch, featureCwd);
+        const result = updateFeatureConfig(message.featureId, message.patch, featureCwd);
+        sendTo(client, result);
+        if (result.payload.ok) {
+          reconcileWebState(featureCwd);
+          msqEventBus.emit('ui:info', { message: `Saved config for ${message.featureId}.` });
+        } else {
+          msqEventBus.emit('ui:notice', {
+            message: `Could not save config for ${message.featureId}: ${result.payload.issues?.[0]?.message ?? 'Unknown error'}`,
+          });
+        }
         break;
       }
       case 'action:updateTaskConfig': {
@@ -852,7 +863,26 @@ export function createWebServer(options: {
     };
   }
 
-  function updateFeatureConfig(featureId: string, patch: FeatureConfigPatch, featureCwd: string): void {
+  function featureConfigSaveIssues(error: unknown): FeatureConfigSaveIssue[] {
+    const errorWithIssues = typeof error === 'object' && error !== null
+      ? error as { issues?: unknown }
+      : undefined;
+    if (Array.isArray(errorWithIssues?.issues)) {
+      const issues = errorWithIssues.issues.flatMap((issue): FeatureConfigSaveIssue[] => {
+        if (typeof issue !== 'object' || issue === null) return [];
+        const candidate = issue as { message?: unknown; path?: unknown };
+        if (typeof candidate.message !== 'string') return [];
+        const message = candidate.message;
+        const pathValue = Array.isArray(candidate.path) ? candidate.path.map((value) => String(value)).join('.') : undefined;
+        const path = pathValue === '' ? undefined : pathValue;
+        return [{ path, message }];
+      });
+      if (issues.length > 0) return issues;
+    }
+    return [{ message: error instanceof Error ? error.message : String(error) }];
+  }
+
+  function updateFeatureConfig(featureId: string, patch: FeatureConfigPatch, featureCwd: string): FeatureConfigSaveResult {
     try {
       console.log(`[updateFeatureConfig] featureId=${featureId}, patch=`, patch);
       assertWritableDbPath();
@@ -863,11 +893,9 @@ export function createWebServer(options: {
       const stack = error instanceof Error ? error.stack : undefined;
       console.error(`[updateFeatureConfig] error: ${message}`);
       if (stack) console.error(stack);
-      msqEventBus.emit('ui:notice', { message: `Could not save config for ${featureId}: ${message}` });
-      return;
+      return { type: 'featureConfig:saveResult', payload: { featureId, ok: false, issues: featureConfigSaveIssues(error) } };
     }
-    reconcileWebState(featureCwd);
-    msqEventBus.emit('ui:info', { message: `Saved config for ${featureId}.` });
+    return { type: 'featureConfig:saveResult', payload: { featureId, ok: true } };
   }
 
   function updateTaskConfig(featureId: string, taskId: string, patch: TaskConfigPatch, featureCwd: string): void {
