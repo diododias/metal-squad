@@ -998,6 +998,12 @@ describe('executeBacklog failure persistence', () => {
     ).resolves.toBeUndefined();
 
     expect(mockCreateRun).toHaveBeenCalledTimes(2);
+    const resumedPrompt = mockRunFeature.mock.calls[1]?.[1] ?? '';
+    expect(resumedPrompt).toContain('/speckit-specify');
+    expect(resumedPrompt).toContain('Feature summary:\nspec');
+    expect(resumedPrompt).toContain('Admin inputs already collected for this stage:\n- Nome final');
+    expect(resumedPrompt.lastIndexOf('Nome final')).toBeGreaterThan(resumedPrompt.indexOf('Feature summary:\nspec'));
+    expect(resumedPrompt.endsWith('- Nome final')).toBe(true);
     expect(mockFinishRun).toHaveBeenCalledWith(
       7,
       'blocked',

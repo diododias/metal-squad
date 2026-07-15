@@ -183,13 +183,14 @@ describe('buildPrompt — string literals and conditionals', () => {
     expect(result).toContain('\n\n---\n\n');
   });
 
-  it('truncates specFile content when maxContextChars is set', async () => {
+  it('never truncates specFile content when maxContextChars is set', async () => {
     mockExistsSync.mockReturnValue(true);
     mockReadFileSync.mockReturnValue('A'.repeat(1000));
     const { buildPrompt } = await import('../../src/core/backlog/prompt.js');
     const feature = makeFeature({ specFile: 'spec.md' });
     const result = buildPrompt(feature as never, [makeSkill('{{spec}}')], '/cwd', { maxContextChars: 50 });
-    expect(result).toContain('[truncated to respect promptContextCharLimit]');
+    expect(result).not.toContain('[truncated to respect promptContextCharLimit]');
+    expect(result).toContain('A'.repeat(1000));
   });
 
   it('does not truncate when content is within maxContextChars', async () => {
@@ -202,32 +203,32 @@ describe('buildPrompt — string literals and conditionals', () => {
     expect(result).toContain('Short content');
   });
 
-  it('omits summary from skill when inputs does not include summary', async () => {
+  it('includes summary regardless of skill metadata inputs', async () => {
     const { buildPrompt } = await import('../../src/core/backlog/prompt.js');
     const feature = makeFeature({ spec: 'My spec' });
     const skill = makeSkill('{{summary}}', ['specFile']); // no 'summary' in inputs
     const result = buildPrompt(feature as never, [skill], '/cwd');
-    expect(result).not.toContain('Feature summary:');
+    expect(result).toContain('Feature summary:');
   });
 
-  it('omits spec from skill when inputs does not include specFile', async () => {
+  it('includes spec regardless of skill metadata inputs', async () => {
     mockExistsSync.mockReturnValue(true);
     mockReadFileSync.mockReturnValue('file content');
     const { buildPrompt } = await import('../../src/core/backlog/prompt.js');
     const feature = makeFeature({ specFile: 'spec.md' });
     const skill = makeSkill('{{spec}}', ['summary']); // no 'specFile' in inputs
     const result = buildPrompt(feature as never, [skill], '/cwd');
-    expect(result).not.toContain('file content');
+    expect(result).toContain('file content');
   });
 
-  it('omits context when inputs does not include context', async () => {
+  it('includes context regardless of skill metadata inputs', async () => {
     mockExistsSync.mockReturnValue(true);
     mockReadFileSync.mockReturnValue('ctx content');
     const { buildPrompt } = await import('../../src/core/backlog/prompt.js');
     const feature = makeFeature({ context: ['ctx.ts'] });
     const skill = makeSkill('{{context}}', ['summary']); // no 'context' in inputs
     const result = buildPrompt(feature as never, [skill], '/cwd');
-    expect(result).not.toContain('ctx content');
+    expect(result).toContain('ctx content');
   });
 
   it('normalizes multiple consecutive blank lines to double newline', async () => {
@@ -266,7 +267,7 @@ describe('buildPrompt — string literals and conditionals', () => {
       },
     );
 
-    expect(result).toBe('Base prompt\n\n---\n\nStep-only prompt\n\n---\n\nDirect guidance');
+    expect(result).toBe('/dev-flow\n\n---\n\n/repo-implement-guardrails\n\n---\n\nFeature: feat-1 — My Feature\n\n---\n\nDirect guidance');
   });
 
   it('ignores whitespace-only direct step guidance prompt blocks', async () => {
@@ -289,6 +290,6 @@ describe('buildPrompt — string literals and conditionals', () => {
       activeStage: 'implement',
     });
 
-    expect(result).toBe('Base prompt');
+    expect(result).toBe('/test-skill\n\n---\n\nFeature: feat-1 — My Feature');
   });
 });
