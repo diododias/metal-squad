@@ -53,6 +53,8 @@ function Card({ title, children }: { title: string; children: React.ReactNode })
 function RuntimeTab({ state }: { state: MsqWebState }): React.JSX.Element {
   const c = state.runtimeConfig;
   const sources = state.backlogSettings.configSources;
+  const environment = state.environment;
+  const secretsStatus = c.web.auth === 'token' ? 'configured' : 'empty';
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
       <Card title="Runtime">
@@ -66,10 +68,28 @@ function RuntimeTab({ state }: { state: MsqWebState }): React.JSX.Element {
         <Row label="web.port" value={c.web.port} source="global" />
         <Row label="web.auth" value={c.web.auth} source="global" />
       </Card>
-      <Card title="Resolved sources">
+      <Card title="Environment / Sources">
         <Row label="global config" value={sources?.globalConfigPath ?? '—'} />
         <Row label="repo config" value={sources?.repoConfigPath ?? 'not found'} />
         <Row label="backlog" value={sources?.backlogPath ?? '—'} />
+        <Row
+          label="database"
+          value={`${environment.databasePath} · ${environment.dbWritable ? 'writable' : 'read-only'}`}
+          source={environment.databaseSource}
+        />
+        <Row label="data dir" value={environment.dataDir} />
+        <Row
+          label="config dir"
+          value={`${environment.configDir} · ${environment.configWritable ? 'writable' : 'read-only'}`}
+        />
+        <Row
+          label="repo"
+          value={environment.repoPath ? `${environment.repoPath} · ${environment.repoId ?? 'unknown'}` : 'not found'}
+        />
+        <Row label="catalog" value="DB (importado via backlog load)" />
+        <Row label="web" value={`${c.web.host}:${String(c.web.port)} · ${c.web.auth}`} />
+        <Row label="secrets" value={secretsStatus} />
+        <Row label="version" value={environment.version ?? '—'} />
       </Card>
     </div>
   );
