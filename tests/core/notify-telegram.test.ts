@@ -85,7 +85,7 @@ describe('TelegramChannel', () => {
     const { TelegramChannel } = await import('../../src/core/notify/telegram.js');
     const ch = new TelegramChannel('chat1');
 
-    await ch.send('hi', { featureId: 'feat-1' });
+    await ch.send('hi', { stage: 'review' });
 
     const [, opts] = mockFetch.mock.calls[0]!;
     const body = JSON.parse((opts as RequestInit).body as string);

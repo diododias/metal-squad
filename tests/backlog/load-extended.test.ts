@@ -4,19 +4,22 @@ const mockReadFileSync = vi.fn();
 const mockExistsSync = vi.fn();
 const mockParse = vi.fn();
 const mockBacklogSchemaParse = vi.fn();
+const mockBacklogV2SchemaParse = vi.fn((value: unknown) => value);
 const mockLoadRepoConfig = vi.fn(() => ({ defaults: {} }));
 
 vi.mock('node:fs', () => ({
   readFileSync: mockReadFileSync,
   existsSync: mockExistsSync,
 }));
-vi.mock('yaml', () => ({ parse: mockParse }));
+vi.mock('yaml', () => ({ parse: mockParse, stringify: vi.fn() }));
 vi.mock('../../src/config/index.js', () => ({
   loadRepoConfig: mockLoadRepoConfig,
   mergeStageSkills: (base: Record<string, string[]> = {}, overlay: Record<string, string[]> = {}) => ({ ...base, ...overlay }),
 }));
 vi.mock('../../src/core/backlog/schema.js', () => ({
   BacklogSchema: { parse: mockBacklogSchemaParse },
+  BacklogInputSchema: { parse: mockBacklogSchemaParse },
+  BacklogV2Schema: { parse: mockBacklogV2SchemaParse },
 }));
 
 beforeEach(() => {
@@ -25,6 +28,7 @@ beforeEach(() => {
   mockExistsSync.mockReset().mockReturnValue(true); // default: files exist
   mockParse.mockReset();
   mockBacklogSchemaParse.mockReset();
+  mockBacklogV2SchemaParse.mockClear();
 });
 
 // Helper to make a minimal V2 backlog parsed result

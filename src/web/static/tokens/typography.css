@@ -1,0 +1,29 @@
+/* Metal Squad — type tokens. Monospace everywhere, no display face. */
+
+:root {
+  --font-mono: 'IBM Plex Mono', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  /* display face — wordmark + page titles/headings only, never body copy */
+  --font-display: 'VT323', 'IBM Plex Mono', ui-monospace, monospace;
+
+  /* type scale — small, dense, terminal-like. Never below 12px in-app. */
+  --text-2xs: 11px;
+  --text-xs: 12px;
+  --text-sm: 13px;
+  --text-base: 14px;
+  --text-md: 15px;
+  --text-lg: 18px;
+  --text-xl: 22px;
+  --text-2xl: 28px;
+
+  --leading-tight: 1.2;
+  --leading-normal: 1.5;
+  --leading-loose: 1.7;
+
+  --tracking-wide: 0.04em;   /* uppercase labels, column headers */
+  --tracking-normal: 0;
+
+  --weight-regular: 400;
+  --weight-medium: 500;
+  --weight-semibold: 600;
+  --weight-bold: 700;
+}

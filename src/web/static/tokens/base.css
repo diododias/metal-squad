@@ -1,0 +1,27 @@
+/* Metal Squad — base resets. */
+
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  padding: 0;
+  background: var(--bg-base);
+  color: var(--text-primary);
+  font-family: var(--font-mono);
+  font-size: var(--text-base);
+  line-height: var(--leading-normal);
+  -webkit-font-smoothing: antialiased;
+}
+
+::selection {
+  background: var(--accent-info-10);
+  color: var(--text-primary);
+}
+
+* { scrollbar-width: thin; scrollbar-color: var(--border-strong) var(--bg-panel); }
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-track { background: var(--bg-panel); }
+::-webkit-scrollbar-thumb { background: var(--border-strong); border-radius: var(--radius-sm); }
+
+a { color: var(--accent-info); text-decoration: none; }
+a:hover { color: var(--gray-7); text-decoration: underline; }

@@ -48,3 +48,32 @@ export function selectFeaturePlan(backlog: Backlog, featureId: string): Feature[
   visit(featureId);
   return ordered.filter((feature) => selected.has(feature.id));
 }
+
+export interface StartableFeaturePlan {
+  target: Feature;
+  pendingDependencies: string[];
+  completedDependencies: string[];
+}
+
+/**
+ * Manual start should never re-run parent features automatically.
+ * If dependencies are already done in SQLite history, run only the target.
+ * Otherwise, block the start and require the missing dependencies first.
+ */
+export function selectStartableFeaturePlan(
+  backlog: Backlog,
+  featureId: string,
+  completedFeatureIds: ReadonlySet<string>,
+): StartableFeaturePlan {
+  const plan = selectFeaturePlan(backlog, featureId);
+  const target = plan.find((feature) => feature.id === featureId);
+  if (!target) {
+    throw new Error(`Feature not found in backlog: ${featureId}. Rode "msq backlog load" para atualizar o catalogo.`);
+  }
+  const dependencies = plan.filter((feature) => feature.id !== featureId).map((feature) => feature.id);
+  return {
+    target,
+    pendingDependencies: dependencies.filter((dependency) => !completedFeatureIds.has(dependency)),
+    completedDependencies: dependencies.filter((dependency) => completedFeatureIds.has(dependency)),
+  };
+}

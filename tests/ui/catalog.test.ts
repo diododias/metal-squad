@@ -37,6 +37,16 @@ describe('getPendingFeatures', () => {
 
     expect(pending.map((f) => f.id)).toEqual(['feat-2']);
   });
+
+  it('projects pendingDependencies for manual-start guardrails', () => {
+    const catalog = {
+      'feat-1': feature({ id: 'feat-1', dependsOn: ['feat-0'] }),
+    };
+
+    const pending = getPendingFeatures(catalog, new Set(), new Set());
+
+    expect(pending[0]?.pendingDependencies).toEqual(['feat-0']);
+  });
 });
 
 describe('autoStart projection', () => {

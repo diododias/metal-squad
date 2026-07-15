@@ -70,6 +70,24 @@ export async function getOrCreateWebToken(): Promise<string> {
 }
 
 /**
+ * Generates and persists a fresh web token, invalidating the previous one.
+ * Same storage preference as getOrCreateWebToken: keychain first, falling
+ * back to the `webToken` field in `~/.config/metal-squad/config.json`.
+ */
+export async function rotateWebToken(): Promise<string> {
+  const token = generateToken();
+  try {
+    await setSecret(TOKEN_ACCOUNT, token);
+  } catch {
+    writeFallbackToken(token);
+    return token;
+  }
+  // Keep the fallback file in sync when it already holds a (now stale) token.
+  if (readFallbackToken() !== null) writeFallbackToken(token);
+  return token;
+}
+
+/**
  * Reads the current config (creating defaults if needed) and merges any CLI/web
  * overrides. Ensures the data directory exists.
  */
@@ -77,13 +95,35 @@ export function resolveWebConfig(overrides: { host?: string; port?: number; auth
   host: string;
   port: number;
   auth: 'token' | 'none';
+  statusSpinner: boolean;
 } {
   const cfg = loadConfig();
   return {
     host: overrides.host ?? cfg.web.host,
     port: overrides.port ?? cfg.web.port,
     auth: overrides.auth ?? cfg.web.auth,
+    statusSpinner: cfg.web.statusSpinner,
   };
+}
+
+/**
+ * Resolves the secret used to log into `msq web`, in priority order:
+ *  1. `MSQ_WEB_PASSWORD` env var — set manually by the operator, never
+ *     persisted by msq. Takes precedence so the operator can rotate it
+ *     just by changing their shell/session env, no `--rotate-token` needed.
+ *  2. the auto-generated, persisted token (keychain/config.json fallback),
+ *     kept for operators who haven't set an explicit password yet.
+ */
+export async function resolveWebPassword(options: { rotate?: boolean } = {}): Promise<{
+  password: string;
+  source: 'env' | 'generated';
+}> {
+  const envPassword = process.env.MSQ_WEB_PASSWORD;
+  if (envPassword !== undefined && envPassword.length > 0) {
+    return { password: envPassword, source: 'env' };
+  }
+  const password = options.rotate === true ? await rotateWebToken() : await getOrCreateWebToken();
+  return { password, source: 'generated' };
 }
 
 export function persistWebConfig(overrides: { host?: string; port?: number; auth?: 'token' | 'none' }): void {
@@ -92,6 +132,7 @@ export function persistWebConfig(overrides: { host?: string; port?: number; auth
     host: overrides.host ?? cfg.web.host,
     port: overrides.port ?? cfg.web.port,
     auth: overrides.auth ?? cfg.web.auth,
+    statusSpinner: cfg.web.statusSpinner,
   };
   saveConfig(cfg);
 }

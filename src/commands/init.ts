@@ -16,8 +16,7 @@ epics:
   - id: epic-1
     title: First epic
     features:
-      - id: feat-1
-        title: First feature
+      - title: First feature
         tool: claude
         effort: medium
         specFile: docs/features/feat-1.md

@@ -1,9 +1,11 @@
 import { basename } from 'node:path';
 import {
   listRunsForTui,
+  listCompletedFeatureIds,
   openGates,
   listPendingStageRequests,
   listRunningTaskRuns,
+  listPendingTimeoutApprovalRequests,
   listRunsForStats,
   type GateRow,
   type StageRequestRow,
@@ -14,10 +16,12 @@ import {
 import { resolveRepo } from '../core/repo.js';
 import { getFeatureCatalog, getBacklogSettings, getPendingFeatures, type FeatureCatalogEntry } from '../ui/catalog.js';
 import { getRunGroup, sortRunsByGroup } from '../ui/dashboardGroups.js';
-import { resolveRuntimeConfig } from '../config/index.js';
+import { resolveRuntimeConfig, ConfigSchema, type Config } from '../config/index.js';
 import { resolveThemePreference } from '../ui/theme/resolve.js';
 import type { ThemeRoleName } from '../ui/theme/types.js';
-import type { MsqWebState, ThemeSnapshot, TokenStats, UiNotification } from './types.js';
+import { createSkillRegistry } from '../core/skills/registry.js';
+import type { Skill } from '../core/skills/types.js';
+import type { MsqWebState, ThemeSnapshot, TimeoutApprovalState, TokenStats, UiNotification, WebRuntimeConfig } from './types.js';
 
 const DASHBOARD_PERIODS: { label: string; days: number | null }[] = [
   { label: 'today', days: 1 },
@@ -74,10 +78,29 @@ function collectRunningTasks(): RunningTaskSummary[] {
   }
 }
 
-function collectPendingFeatures(runs: RunSummary[]): FeatureCatalogEntry[] {
+function collectTimeoutApprovals(): TimeoutApprovalState[] {
+  try {
+    return listPendingTimeoutApprovalRequests().map((request) => ({
+      requestId: request.id,
+      occurrenceId: request.timeoutOccurrenceId,
+      runId: request.runId,
+      pipelineId: request.pipelineId,
+      featureId: request.featureId,
+      stage: request.stage,
+      status: request.status,
+      notificationStatus: request.notificationStatus,
+      notificationAttempts: request.notificationAttempts,
+      createdAt: request.createdAt,
+    }));
+  } catch {
+    return [];
+  }
+}
+
+function collectPendingFeatures(runs: RunSummary[], repoId: string): FeatureCatalogEntry[] {
   try {
     const catalog = getFeatureCatalog();
-    const doneFeatureIds = new Set(runs.filter((run) => run.status === 'done').map((run) => run.featureId));
+    const doneFeatureIds = listCompletedFeatureIds(repoId);
     const activeFeatureIds = new Set(
       runs
         .filter((run) => run.status === 'running' || run.status === 'blocked' || run.status === 'done')
@@ -110,6 +133,15 @@ function collectDashboardRows(): StatsRunRow[] {
 
 const FALLBACK_ROLE_COLOR = '#e5e7eb';
 
+function normalizeFeatureCatalog(catalog: Record<string, FeatureCatalogEntry>): Record<string, FeatureCatalogEntry> {
+  return Object.fromEntries(
+    Object.entries(catalog).map(([key, feature]) => [
+      key,
+      { ...feature, persistedId: feature.persistedId ?? feature.id },
+    ]),
+  );
+}
+
 function buildThemeSnapshot(): ThemeSnapshot {
   try {
     const config = resolveRuntimeConfig(process.cwd());
@@ -138,13 +170,69 @@ function buildThemeSnapshot(): ThemeSnapshot {
   }
 }
 
+/** Strips notification credentials (Slack/Discord/webhook URLs, Telegram chat
+ * id) before the config crosses the WebSocket boundary — with auth 'none' any
+ * local process can read the state broadcast. */
+export function sanitizeRuntimeConfig(config: Config): WebRuntimeConfig {
+  const { telegramChatId: _telegramChatId, notifications, ...rest } = config;
+  return {
+    ...rest,
+    notifications: {
+      channels: notifications.channels.map((channel) => ({ type: channel.type })),
+      events: notifications.events,
+    },
+  };
+}
+
+// Config resolution re-reads config files and skill discovery walks the
+// filesystem; the web server rebuilds state every second while a client is
+// connected, so both are cached with a TTL instead of recomputed per tick.
+const CONFIG_CACHE_TTL_MS = 30_000;
+let runtimeConfigCache: { value: WebRuntimeConfig; expiresAt: number } | null = null;
+let skillsCatalogCache: { value: Skill[]; expiresAt: number } | null = null;
+
+/** Test hook: drop the runtime-config/skills caches. */
+export function resetWebStateCaches(): void {
+  runtimeConfigCache = null;
+  skillsCatalogCache = null;
+}
+
+function collectRuntimeConfig(): WebRuntimeConfig {
+  const now = Date.now();
+  if (runtimeConfigCache && runtimeConfigCache.expiresAt > now) return runtimeConfigCache.value;
+  let config: Config;
+  try {
+    config = resolveRuntimeConfig(process.cwd());
+  } catch {
+    config = ConfigSchema.parse({});
+  }
+  const value = sanitizeRuntimeConfig(config);
+  runtimeConfigCache = { value, expiresAt: now + CONFIG_CACHE_TTL_MS };
+  return value;
+}
+
+function collectSkillsCatalog(): Skill[] {
+  const now = Date.now();
+  if (skillsCatalogCache && skillsCatalogCache.expiresAt > now) return skillsCatalogCache.value;
+  let value: Skill[];
+  try {
+    value = createSkillRegistry().discover(process.cwd());
+  } catch {
+    value = [];
+  }
+  skillsCatalogCache = { value, expiresAt: now + CONFIG_CACHE_TTL_MS };
+  return value;
+}
+
 export function buildMsqWebState(): MsqWebState {
-  const repoLabel = basename(resolveRepo().path);
+  const repo = resolveRepo();
+  const repoLabel = basename(repo.path);
   const runs = collectRuns();
   const gates = collectGates();
-  const pendingFeatures = collectPendingFeatures(runs);
+  const pendingFeatures = collectPendingFeatures(runs, repo.repoId);
   const runningTasks = collectRunningTasks();
-  const featureCatalog = getFeatureCatalog();
+  const timeoutApprovals = collectTimeoutApprovals();
+  const featureCatalog = normalizeFeatureCatalog(getFeatureCatalog());
   const backlogSettings = getBacklogSettings();
   const executionRuns = runs.filter((run) => getRunGroup(run.status) === 'execution');
   const doneRuns = runs.filter((run) => run.status === 'done');
@@ -156,6 +244,7 @@ export function buildMsqWebState(): MsqWebState {
     gates,
     pendingFeatures,
     runningTasks,
+    timeoutApprovals,
     featureCatalog,
     backlogSettings,
     stats: {
@@ -171,6 +260,8 @@ export function buildMsqWebState(): MsqWebState {
     },
     notifications: [],
     theme: buildThemeSnapshot(),
+    runtimeConfig: collectRuntimeConfig(),
+    skillsCatalog: collectSkillsCatalog(),
   };
 }
 

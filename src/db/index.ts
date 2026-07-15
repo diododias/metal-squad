@@ -95,6 +95,12 @@ export function resetDb(): void {
   dbMode = null;
 }
 
+/** Runs a write callback inside the shared SQLite transaction boundary. */
+export function withTransaction<T>(callback: (database: Database.Database) => T): T {
+  const database = getDb('readwrite');
+  return database.transaction(() => callback(database))();
+}
+
 function migrate(d: Database.Database): void {
   d.exec(`
     CREATE TABLE IF NOT EXISTS repos (
@@ -118,7 +124,23 @@ function migrate(d: Database.Database): void {
       output_tokens INTEGER,
       total_tokens INTEGER,
       context_window_tokens INTEGER,
-      context_window_percent REAL
+      context_window_percent REAL,
+      publish_verified INTEGER,
+      publish_error TEXT,
+      branch_name TEXT,
+      base_branch TEXT,
+      commit_sha TEXT,
+      remote_branch TEXT,
+      pr_number INTEGER,
+      pr_url TEXT,
+      session_status TEXT,
+      session_started_at TEXT,
+      session_updated_at TEXT,
+      session_elapsed_ms INTEGER,
+      session_last_output_at TEXT,
+      session_idle_ms INTEGER,
+      session_reason TEXT,
+      session_terminal INTEGER NOT NULL DEFAULT 0
     );
 
     CREATE TABLE IF NOT EXISTS token_usage (
@@ -157,6 +179,39 @@ function migrate(d: Database.Database): void {
       source     TEXT NOT NULL,
       line       TEXT NOT NULL,
       created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+
+    CREATE TABLE IF NOT EXISTS run_tool_calls (
+      run_id       INTEGER NOT NULL REFERENCES runs(id),
+      id           TEXT NOT NULL,
+      feature_id   TEXT NOT NULL,
+      tool         TEXT NOT NULL,
+      sequence     INTEGER NOT NULL,
+      phase        TEXT NOT NULL,
+      name         TEXT NOT NULL,
+      arguments_json TEXT,
+      output       TEXT,
+      step         TEXT,
+      started_at   TEXT NOT NULL,
+      completed_at TEXT,
+      error        TEXT,
+      PRIMARY KEY (run_id, id)
+    );
+    CREATE INDEX IF NOT EXISTS idx_run_tool_calls_run_sequence ON run_tool_calls(run_id, sequence);
+
+    CREATE TABLE IF NOT EXISTS context_queries (
+      id            INTEGER PRIMARY KEY AUTOINCREMENT,
+      run_id        INTEGER NOT NULL REFERENCES runs(id),
+      feature_id    TEXT,
+      tool          TEXT,
+      query_tool    TEXT NOT NULL,
+      kind          TEXT NOT NULL,
+      target        TEXT,
+      observed_bytes INTEGER NOT NULL DEFAULT 0,
+      latency_ms    INTEGER,
+      cache_hit     INTEGER,
+      raw_line      TEXT NOT NULL,
+      created_at    TEXT NOT NULL DEFAULT (datetime('now'))
     );
 
     CREATE TABLE IF NOT EXISTS task_runs (
@@ -288,6 +343,85 @@ function migrate(d: Database.Database): void {
       updated_at  TEXT NOT NULL DEFAULT (datetime('now')),
       PRIMARY KEY (task_id, feature_id)
     );
+
+    CREATE TABLE IF NOT EXISTS feature_topic_associations (
+      chat_id          TEXT NOT NULL,
+      feature_id       TEXT NOT NULL,
+      thread_id        INTEGER,
+      title            TEXT NOT NULL,
+      state            TEXT NOT NULL DEFAULT 'creating'
+                       CHECK (state IN ('creating', 'active', 'invalid', 'error')),
+      lease_token      TEXT,
+      lease_expires_at TEXT,
+      last_error       TEXT,
+      created_at       TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at       TEXT NOT NULL DEFAULT (datetime('now')),
+      PRIMARY KEY (chat_id, feature_id),
+      CHECK (state <> 'active' OR thread_id IS NOT NULL AND thread_id > 0)
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_feature_topic_associations_state
+      ON feature_topic_associations(state, lease_expires_at);
+    CREATE INDEX IF NOT EXISTS idx_feature_topic_associations_thread
+      ON feature_topic_associations(chat_id, thread_id);
+
+    CREATE TABLE IF NOT EXISTS timeout_occurrences (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      run_id INTEGER NOT NULL UNIQUE REFERENCES runs(id),
+      pipeline_id INTEGER REFERENCES pipelines(id),
+      feature_id TEXT NOT NULL,
+      stage TEXT,
+      timeout_ms INTEGER NOT NULL CHECK (timeout_ms > 0),
+      runtime_ms INTEGER NOT NULL CHECK (runtime_ms >= 0),
+      last_progress TEXT,
+      status TEXT NOT NULL DEFAULT 'pending'
+        CHECK (status IN ('pending', 'resolved', 'cancelled', 'superseded')),
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      resolved_at TEXT
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_timeout_occurrences_pipeline
+      ON timeout_occurrences(pipeline_id, status);
+
+    CREATE TABLE IF NOT EXISTS timeout_approval_requests (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      timeout_occurrence_id INTEGER NOT NULL UNIQUE REFERENCES timeout_occurrences(id),
+      pipeline_id INTEGER REFERENCES pipelines(id),
+      run_id INTEGER NOT NULL REFERENCES runs(id),
+      feature_id TEXT NOT NULL,
+      stage TEXT,
+      status TEXT NOT NULL DEFAULT 'pending'
+        CHECK (status IN ('pending', 'approved', 'blocked', 'cancelled', 'superseded')),
+      decision TEXT CHECK (decision IN ('retry', 'keep_blocked')),
+      decision_source TEXT CHECK (decision_source IN ('telegram', 'system', 'resume')),
+      notification_status TEXT NOT NULL DEFAULT 'pending'
+        CHECK (notification_status IN ('pending', 'sent', 'failed')),
+      notification_attempts INTEGER NOT NULL DEFAULT 0 CHECK (notification_attempts >= 0),
+      last_notification_error TEXT,
+      notified_at TEXT,
+      retry_run_id INTEGER UNIQUE REFERENCES runs(id),
+      retry_claimed INTEGER NOT NULL DEFAULT 0 CHECK (retry_claimed IN (0, 1)),
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      resolved_at TEXT
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_timeout_requests_pending
+      ON timeout_approval_requests(status, feature_id);
+
+    CREATE TABLE IF NOT EXISTS recovery_decisions (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      timeout_occurrence_id INTEGER NOT NULL REFERENCES timeout_occurrences(id),
+      approval_request_id INTEGER NOT NULL REFERENCES timeout_approval_requests(id),
+      decision TEXT NOT NULL CHECK (decision IN ('retry', 'keep_blocked')),
+      source TEXT NOT NULL CHECK (source IN ('telegram', 'system', 'resume')),
+      retry_run_id INTEGER REFERENCES runs(id),
+      reason TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      UNIQUE(approval_request_id)
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_recovery_decisions_occurrence
+      ON recovery_decisions(timeout_occurrence_id);
   `);
 
   const runColumns = d
@@ -329,6 +463,20 @@ function migrate(d: Database.Database): void {
   if (!hasStage) {
     d.exec(`ALTER TABLE runs ADD COLUMN stage TEXT`);
   }
+  const ensureRunColumn = (name: string, sql: string): void => {
+    if (!runColumns.some((column) => column.name === name)) {
+      d.exec(sql);
+      runColumns.push({ name });
+    }
+  };
+  ensureRunColumn('publish_verified', `ALTER TABLE runs ADD COLUMN publish_verified INTEGER`);
+  ensureRunColumn('publish_error', `ALTER TABLE runs ADD COLUMN publish_error TEXT`);
+  ensureRunColumn('branch_name', `ALTER TABLE runs ADD COLUMN branch_name TEXT`);
+  ensureRunColumn('base_branch', `ALTER TABLE runs ADD COLUMN base_branch TEXT`);
+  ensureRunColumn('commit_sha', `ALTER TABLE runs ADD COLUMN commit_sha TEXT`);
+  ensureRunColumn('remote_branch', `ALTER TABLE runs ADD COLUMN remote_branch TEXT`);
+  ensureRunColumn('pr_number', `ALTER TABLE runs ADD COLUMN pr_number INTEGER`);
+  ensureRunColumn('pr_url', `ALTER TABLE runs ADD COLUMN pr_url TEXT`);
 
   const usageColumns = d
     .prepare(`PRAGMA table_info(token_usage)`)
@@ -371,6 +519,23 @@ function migrate(d: Database.Database): void {
   ensurePipelineColumn('requested_abort_feature_id', `ALTER TABLE pipelines ADD COLUMN requested_abort_feature_id TEXT`);
   ensurePipelineColumn('resume_count', `ALTER TABLE pipelines ADD COLUMN resume_count INTEGER NOT NULL DEFAULT 0`);
   ensurePipelineColumn('resume_summary', `ALTER TABLE pipelines ADD COLUMN resume_summary TEXT`);
+
+  const sessionColumns: [string, string][] = [
+    ['session_status', `ALTER TABLE runs ADD COLUMN session_status TEXT`],
+    ['session_started_at', `ALTER TABLE runs ADD COLUMN session_started_at TEXT`],
+    ['session_updated_at', `ALTER TABLE runs ADD COLUMN session_updated_at TEXT`],
+    ['session_elapsed_ms', `ALTER TABLE runs ADD COLUMN session_elapsed_ms INTEGER`],
+    ['session_last_output_at', `ALTER TABLE runs ADD COLUMN session_last_output_at TEXT`],
+    ['session_idle_ms', `ALTER TABLE runs ADD COLUMN session_idle_ms INTEGER`],
+    ['session_reason', `ALTER TABLE runs ADD COLUMN session_reason TEXT`],
+    ['session_terminal', `ALTER TABLE runs ADD COLUMN session_terminal INTEGER NOT NULL DEFAULT 0`],
+  ];
+  for (const [name, sql] of sessionColumns) {
+    if (!runColumns.some((column) => column.name === name)) {
+      d.exec(sql);
+      runColumns.push({ name });
+    }
+  }
 
   const retryHistoryColumns = d
     .prepare(`PRAGMA table_info(retry_history)`)
