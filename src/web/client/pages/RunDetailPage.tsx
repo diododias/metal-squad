@@ -284,14 +284,7 @@ export function RunDetailPage({
           </>
         }
       />
-      <div
-        ref={scrollRef}
-        onScroll={(e) => {
-          const el = e.currentTarget;
-          stickToBottomRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 48;
-        }}
-        style={{ flex: 1, overflow: 'auto', padding: 20 }}
-      >
+      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0, padding: 20 }}>
         {pendingPrompt && (
           <div style={{ marginBottom: 16 }}>
             <ApprovalBanner prompt={pendingPrompt} onAdvance={() => { resolveApproval('advance'); }} onHold={() => { resolveApproval('hold'); }} onRetry={() => { resolveApproval('retry'); }} />
@@ -316,7 +309,16 @@ export function RunDetailPage({
             }}
           />
         </div>
-        {tabContent[activeTab]}
+        <div
+          ref={scrollRef}
+          onScroll={(e) => {
+            const el = e.currentTarget;
+            stickToBottomRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 48;
+          }}
+          style={{ flex: 1, minHeight: 0, overflow: 'auto' }}
+        >
+          {tabContent[activeTab]}
+        </div>
       </div>
     </div>
   );
