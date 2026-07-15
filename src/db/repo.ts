@@ -641,6 +641,7 @@ export interface RunSummary {
   pendingStageRequestId: number | null;
   pendingStageRequestKind: StageRequestKind | null;
   pendingStageRequestPrompt: string | null;
+  pendingStageRequestOptions?: string[] | null;
   pendingStageRequestCreatedAt: string | null;
   sessionStatus?: SessionStatusSnapshot['status'] | null;
   sessionStartedAt?: string | null;
@@ -688,7 +689,7 @@ export function listRunsForTui(limit = 50, repoId?: string): RunSummary[] {
       .filter((name): name is string => typeof name === 'string'),
   );
 
-  return db
+  const rows = db
     .prepare(
       `WITH latest AS (
          SELECT MAX(id) AS id
@@ -772,6 +773,7 @@ export function listRunsForTui(limit = 50, repoId?: string): RunSummary[] {
          psr.id AS pendingStageRequestId,
          psr.kind AS pendingStageRequestKind,
          psr.prompt AS pendingStageRequestPrompt,
+         psr.options AS pendingStageRequestOptions,
          psr.created_at AS pendingStageRequestCreatedAt,
          r.session_status AS sessionStatus,
          r.session_started_at AS sessionStartedAt,
@@ -811,6 +813,8 @@ export function listRunsForTui(limit = 50, repoId?: string): RunSummary[] {
        LIMIT ?`,
     )
     .all(...params) as RunSummary[];
+  for (const row of rows) row.pendingStageRequestOptions = decodeStageRequestOptions(row.pendingStageRequestOptions) ?? null;
+  return rows;
 }
 
 // F34 item 1: full run history for a feature (not deduplicated to the latest

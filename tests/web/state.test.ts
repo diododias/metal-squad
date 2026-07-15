@@ -207,6 +207,40 @@ describe('buildMsqWebState pendingFeatures projection', () => {
     ]);
   });
 
+  it('carries requestKind and options through pending stage requests so the web UI can answer real questions', async () => {
+    const { buildMsqWebState } = await import('../../src/web/state.js');
+    mocks.listPendingStageRequests.mockReturnValue([
+      {
+        id: 5,
+        pipelineId: 99,
+        runId: 42,
+        featureId: 'feat-1',
+        stage: 'specify',
+        kind: 'input',
+        prompt: 'Qual estrategia de cache?',
+        options: ['Cache em memoria', 'Cache em SQLite'],
+        status: 'pending',
+        response: null,
+        source: 'manual',
+        createdAt: '2026-07-14T12:00:00.000Z',
+        resolvedAt: null,
+      },
+    ]);
+
+    expect(buildMsqWebState().gates).toEqual([
+      {
+        kind: 'stage',
+        id: 5,
+        featureId: 'feat-1',
+        repoId: '',
+        prompt: 'Qual estrategia de cache?',
+        createdAt: '2026-07-14T12:00:00.000Z',
+        requestKind: 'input',
+        options: ['Cache em memoria', 'Cache em SQLite'],
+      },
+    ]);
+  });
+
   it('removes blocked execution-owned features from pendingFeatures', async () => {
     const { buildMsqWebState } = await import('../../src/web/state.js');
     mocks.listRunsForTui.mockReturnValue([

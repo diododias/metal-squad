@@ -41,7 +41,7 @@ function gateToPendingApproval(gate: GateRow): { kind: 'gate'; id: number; featu
   };
 }
 
-function stageRequestToPendingApproval(sr: StageRequestRow): { kind: 'stage'; id: number; featureId: string; repoId: string; prompt: string; createdAt: string } {
+function stageRequestToPendingApproval(sr: StageRequestRow): { kind: 'stage'; id: number; featureId: string; repoId: string; prompt: string; createdAt: string; requestKind: 'approval' | 'input'; options?: string[] } {
   return {
     kind: 'stage' as const,
     id: sr.id,
@@ -49,6 +49,8 @@ function stageRequestToPendingApproval(sr: StageRequestRow): { kind: 'stage'; id
     repoId: '',
     prompt: sr.prompt,
     createdAt: sr.createdAt,
+    requestKind: sr.kind,
+    options: sr.options ?? undefined,
   };
 }
 

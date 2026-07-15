@@ -87,6 +87,54 @@ describe('listRunsForTui', () => {
     expect(result[0]!.status).toBe('done');
   });
 
+  it('decodes pendingStageRequestOptions JSON into a string array', async () => {
+    const row = {
+      runId: 3,
+      repoId: 'repo1',
+      featureId: 'feat-3',
+      tool: 'codex',
+      status: 'blocked',
+      startedAt: '2026-07-06T10:00:00',
+      endedAt: null,
+      totalTokens: null,
+      inputTokens: null,
+      outputTokens: null,
+      gateId: null,
+      gateDecision: null,
+      pendingStageRequestId: 5,
+      pendingStageRequestKind: 'input',
+      pendingStageRequestPrompt: 'Qual estrategia de cache?',
+      pendingStageRequestOptions: '["Cache em memoria","Cache em SQLite"]',
+      pendingStageRequestCreatedAt: '2026-07-06T10:00:00',
+    };
+    mockAll.mockReturnValue([row]);
+    const { listRunsForTui } = await import('../../src/db/repo.js');
+    const result = listRunsForTui();
+    expect(result[0]!.pendingStageRequestOptions).toEqual(['Cache em memoria', 'Cache em SQLite']);
+  });
+
+  it('returns null pendingStageRequestOptions when there is no pending question or no options', async () => {
+    const row = {
+      runId: 4,
+      repoId: 'repo1',
+      featureId: 'feat-4',
+      tool: 'codex',
+      status: 'running',
+      startedAt: '2026-07-06T10:00:00',
+      endedAt: null,
+      totalTokens: null,
+      inputTokens: null,
+      outputTokens: null,
+      gateId: null,
+      gateDecision: null,
+      pendingStageRequestOptions: null,
+    };
+    mockAll.mockReturnValue([row]);
+    const { listRunsForTui } = await import('../../src/db/repo.js');
+    const result = listRunsForTui();
+    expect(result[0]!.pendingStageRequestOptions).toBeNull();
+  });
+
   it('falls back to NULL publish metadata when the runs schema is older than the query', async () => {
     const row = {
       runId: 15,
