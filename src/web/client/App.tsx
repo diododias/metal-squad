@@ -139,6 +139,13 @@ export function App(): React.JSX.Element {
   function navigate(path: string): void {
     window.location.hash = path;
   }
+  function logout(): void {
+    fetch('/logout', { method: 'POST' })
+      .catch(() => undefined)
+      .finally(() => {
+        window.location.href = '/auth';
+      });
+  }
   function openRun(featureId: string): void {
     window.location.hash = `/runs/${featureId}`;
   }
@@ -263,6 +270,7 @@ export function App(): React.JSX.Element {
             setNotificationsOpen(true);
             setUnread(0);
           }}
+          onLogout={logout}
         />
       )}
       {isMobile && (
@@ -274,6 +282,7 @@ export function App(): React.JSX.Element {
             setNotificationsOpen(true);
             setUnread(0);
           }}
+          onLogout={logout}
         />
       )}
       <div style={{ flex: 1, minWidth: 0, minHeight: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>

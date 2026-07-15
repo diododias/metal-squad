@@ -499,6 +499,18 @@ export function createWebServer(options: {
         return;
       }
 
+      if (pathname === '/logout') {
+        if (req.method !== 'POST') {
+          res.writeHead(405, { 'Content-Type': 'text/plain', Allow: 'POST' });
+          res.end('Method not allowed');
+          return;
+        }
+        webAuth.invalidateSession(req.headers.cookie);
+        res.writeHead(302, { Location: '/auth', 'Set-Cookie': webAuth.expiredSessionCookie() });
+        res.end();
+        return;
+      }
+
       if (pathname === '/api/health') {
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ status: 'ok' }));
@@ -531,6 +543,11 @@ export function createWebServer(options: {
       }
 
       if (pathname === '/' || pathname === '/index.html') {
+        if (!isAuthenticated(req)) {
+          res.writeHead(302, { Location: '/auth' });
+          res.end();
+          return;
+        }
         serveStatic(req, res, 'index.html');
         return;
       }

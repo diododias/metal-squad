@@ -15,6 +15,7 @@ export interface SidebarProps {
   onNavigate: (path: string) => void;
   onHelp?: () => void;
   onNotifications?: () => void;
+  onLogout?: () => void;
 }
 
 export function Sidebar({
@@ -26,6 +27,7 @@ export function Sidebar({
   onNavigate,
   onHelp,
   onNotifications,
+  onLogout,
 }: SidebarProps): React.JSX.Element {
   return (
     <div
@@ -197,6 +199,33 @@ export function Sidebar({
           >
             ?
           </a>
+          {onLogout && (
+            <button
+              onClick={onLogout}
+              title="Log out"
+              style={{
+                width: 20,
+                height: 20,
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                border: '1px solid var(--border-strong)',
+                borderRadius: 'var(--radius-sm)',
+                color: 'var(--text-dim)',
+                background: 'transparent',
+                textDecoration: 'none',
+                cursor: 'pointer',
+                flexShrink: 0,
+                padding: 0,
+              }}
+            >
+              <svg width={12} height={12} viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth={1.4} strokeLinecap="round" strokeLinejoin="round">
+                <path d="M6 2H3.5A1.5 1.5 0 0 0 2 3.5v9A1.5 1.5 0 0 0 3.5 14H6" />
+                <path d="M10.5 11.5 14 8l-3.5-3.5" />
+                <path d="M14 8H6" />
+              </svg>
+            </button>
+          )}
         </div>
       </div>
     </div>

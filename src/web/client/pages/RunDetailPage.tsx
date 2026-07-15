@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Button } from '../components/core/Button.js';
 import { MetricCard } from '../components/data/MetricCard.js';
 import { WorkflowStepper } from '../components/navigation/WorkflowStepper.js';
@@ -79,6 +79,8 @@ export function RunDetailPage({
   const run = state.runs.find((r) => r.featureId === featureId);
   const feature = state.featureCatalog[featureId];
   const runId = run?.runId;
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const stickToBottomRef = useRef(true);
 
   useEffect(() => {
     if (runId == null) return undefined;
@@ -90,6 +92,13 @@ export function RunDetailPage({
   const transcript = useMemo(() => outputToTranscript(run ? (linesByRun[run.runId] ?? []) : []), [run, linesByRun]);
   const sessionStatus = detail?.sessionStatus ?? (run ? snapshotFromRun(run) : null);
   const toolCalls = detail?.toolCalls ?? [];
+
+  useEffect(() => {
+    if (activeTab !== 'output') return;
+    const el = scrollRef.current;
+    if (!el || !stickToBottomRef.current) return;
+    el.scrollTop = el.scrollHeight;
+  }, [activeTab, transcript, toolCalls.length]);
 
   if (!run) {
     return (
@@ -275,7 +284,14 @@ export function RunDetailPage({
           </>
         }
       />
-      <div style={{ flex: 1, overflow: 'auto', padding: 20 }}>
+      <div
+        ref={scrollRef}
+        onScroll={(e) => {
+          const el = e.currentTarget;
+          stickToBottomRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 48;
+        }}
+        style={{ flex: 1, overflow: 'auto', padding: 20 }}
+      >
         {pendingPrompt && (
           <div style={{ marginBottom: 16 }}>
             <ApprovalBanner prompt={pendingPrompt} onAdvance={() => { resolveApproval('advance'); }} onHold={() => { resolveApproval('hold'); }} onRetry={() => { resolveApproval('retry'); }} />
@@ -291,7 +307,14 @@ export function RunDetailPage({
           <MetricCard label="Elapsed" value={formatElapsed(run.startedAt, run.endedAt)} />
         </div>
         <div style={{ marginBottom: 16 }}>
-          <Tabs tabs={TABS} activeId={activeTab} onSelect={setActiveTab} />
+          <Tabs
+            tabs={TABS}
+            activeId={activeTab}
+            onSelect={(id) => {
+              stickToBottomRef.current = true;
+              setActiveTab(id);
+            }}
+          />
         </div>
         {tabContent[activeTab]}
       </div>
