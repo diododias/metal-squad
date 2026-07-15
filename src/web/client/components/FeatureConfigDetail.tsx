@@ -1,8 +1,32 @@
 import React, { useEffect, useState } from 'react';
 import { Button } from './core/Button.js';
+import { EditableSelectField } from './core/EditableSelectField.js';
+import { EditableTextField } from './core/EditableTextField.js';
+import { EditableToggleField } from './core/EditableToggleField.js';
 import { Tag } from './core/Tag.js';
 import type { FeatureCatalogEntry, BacklogSettings } from '../../../ui/catalog.js';
 import type { FeatureConfigPatch, TaskConfigPatch } from '../../types.js';
+
+const executionTools = ['claude', 'codex', 'opencode'] as const;
+const executionEfforts = ['low', 'medium', 'high'] as const;
+
+interface ExecutionDraft {
+  tool: string;
+  model: string;
+  effort: string;
+  maxTokens: string;
+  autoStart: boolean;
+}
+
+function executionDraftFrom(feature: FeatureCatalogEntry): ExecutionDraft {
+  return {
+    tool: feature.tool,
+    model: feature.model ?? '',
+    effort: feature.effort,
+    maxTokens: feature.maxTokens?.toString() ?? '',
+    autoStart: feature.autoStart ?? false,
+  };
+}
 
 function ConfigCard({ title, children }: { title: string; children: React.ReactNode }): React.JSX.Element {
   return (
@@ -46,6 +70,7 @@ export function FeatureConfigDetail({ feature, backlogSettings, onSaveConfig }: 
   const [draftSkills, setDraftSkills] = useState<string[]>([]);
   const [newSkill, setNewSkill] = useState('');
   const [savedFlash, setSavedFlash] = useState(false);
+  const [draftExecution, setDraftExecution] = useState<ExecutionDraft>(() => executionDraftFrom(feature));
 
   useEffect(() => {
     const guidance = feature.workflow.stepGuidance[selectedStage];
@@ -53,6 +78,16 @@ export function FeatureConfigDetail({ feature, backlogSettings, onSaveConfig }: 
     setDraftSkills(guidance?.skills ?? []);
     setNewSkill('');
   }, [feature.id, selectedStage, feature.workflow.stepGuidance]);
+
+  useEffect(() => {
+    setDraftExecution({
+      tool: feature.tool,
+      model: feature.model ?? '',
+      effort: feature.effort,
+      maxTokens: feature.maxTokens?.toString() ?? '',
+      autoStart: feature.autoStart ?? false,
+    });
+  }, [feature.id, feature.tool, feature.model, feature.effort, feature.maxTokens, feature.autoStart]);
 
   function saveGuidance(): void {
     onSaveConfig({
@@ -73,16 +108,88 @@ export function FeatureConfigDetail({ feature, backlogSettings, onSaveConfig }: 
     setDraftSkills(guidance?.skills ?? []);
   }
 
+  const executionBaseline = executionDraftFrom(feature);
+  const executionPatch: FeatureConfigPatch = {};
+  const hasChangedMaxTokens = draftExecution.maxTokens !== executionBaseline.maxTokens;
+  let maxTokensError: string | undefined;
+
+  if (draftExecution.tool !== executionBaseline.tool) executionPatch.tool = draftExecution.tool;
+  if (draftExecution.model !== executionBaseline.model) executionPatch.model = draftExecution.model;
+  if (draftExecution.effort !== executionBaseline.effort) executionPatch.effort = draftExecution.effort;
+  if (draftExecution.autoStart !== executionBaseline.autoStart) executionPatch.autoStart = draftExecution.autoStart;
+
+  if (hasChangedMaxTokens) {
+    const parsed = Number(draftExecution.maxTokens);
+    if (!Number.isInteger(parsed) || parsed <= 0) {
+      maxTokensError = 'Enter a positive whole number for maxTokens.';
+    } else {
+      executionPatch.maxTokens = parsed;
+    }
+  }
+
+  const hasUnavailableTool = !executionTools.includes(draftExecution.tool as typeof executionTools[number]);
+  const hasExecutionChanges = Object.keys(executionPatch).length > 0 || hasChangedMaxTokens;
+  const executionGuidance = maxTokensError
+    ?? (hasUnavailableTool && hasExecutionChanges ? 'Select an available tool before saving execution settings.' : undefined);
+  const canSaveExecution = hasExecutionChanges && !executionGuidance;
+
+  function saveExecution(): void {
+    if (!canSaveExecution || Object.keys(executionPatch).length === 0) return;
+    onSaveConfig(executionPatch);
+  }
+
   const resolvedStageSkills = backlogSettings.stageSkills[selectedStage] ?? [];
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
       <ConfigCard title="Execução">
-        <ConfigField label="tool" value={feature.tool} />
-        <ConfigField label="model" value={feature.model ?? '—'} />
-        <ConfigField label="effort" value={feature.effort} />
-        <ConfigField label="maxTokens (override)" value={feature.maxTokens?.toLocaleString() ?? 'none (uses perFeatureMaxTokens)'} />
-        <ConfigField label="autoStart" value={feature.autoStart ? 'on' : 'off'} />
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 12, marginBottom: 12 }}>
+          <EditableSelectField
+            id="execution-tool"
+            label="tool"
+            value={draftExecution.tool}
+            initialValue={executionBaseline.tool}
+            options={executionTools.map((tool) => ({ value: tool, label: tool }))}
+            onChange={(tool) => { setDraftExecution((draft) => ({ ...draft, tool: tool ?? '' })); }}
+          />
+          <EditableTextField
+            id="execution-model"
+            label="model"
+            value={draftExecution.model}
+            initialValue={executionBaseline.model}
+            placeholder="default model"
+            onChange={(model) => { setDraftExecution((draft) => ({ ...draft, model })); }}
+          />
+          <EditableSelectField
+            id="execution-effort"
+            label="effort"
+            value={draftExecution.effort}
+            initialValue={executionBaseline.effort}
+            options={executionEfforts.map((effort) => ({ value: effort, label: effort }))}
+            onChange={(effort) => { setDraftExecution((draft) => ({ ...draft, effort: effort ?? '' })); }}
+          />
+          <EditableTextField
+            id="execution-max-tokens"
+            label="maxTokens (override)"
+            value={draftExecution.maxTokens}
+            initialValue={executionBaseline.maxTokens}
+            placeholder="uses perFeatureMaxTokens when unset"
+            onChange={(maxTokens) => { setDraftExecution((draft) => ({ ...draft, maxTokens })); }}
+          />
+          <EditableToggleField
+            id="execution-auto-start"
+            label="autoStart"
+            value={draftExecution.autoStart}
+            initialValue={executionBaseline.autoStart}
+            onChange={(autoStart) => { setDraftExecution((draft) => ({ ...draft, autoStart })); }}
+          />
+          {executionGuidance && <span style={{ color: 'var(--accent-warn)', fontSize: 'var(--text-xs)', lineHeight: 1.4 }}>{executionGuidance}</span>}
+          {canSaveExecution && (
+            <div>
+              <Button variant="primary" size="sm" onClick={saveExecution}>save execution</Button>
+            </div>
+          )}
+        </div>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '6px 0' }}>
           <span style={{ color: 'var(--text-dim)' }}>dependsOn</span>
           <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', justifyContent: 'flex-end' }}>

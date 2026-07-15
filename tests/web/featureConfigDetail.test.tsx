@@ -1,0 +1,166 @@
+// @vitest-environment happy-dom
+
+import React, { act } from 'react';
+import { createRoot, type Root } from 'react-dom/client';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { FeatureSchema } from '../../src/core/backlog/schema.js';
+import type { BacklogSettings, FeatureCatalogEntry } from '../../src/ui/catalog.js';
+import { FeatureConfigDetail } from '../../src/web/client/components/FeatureConfigDetail.js';
+
+globalThis.IS_REACT_ACT_ENVIRONMENT = true;
+
+let roots: Root[] = [];
+
+function makeFeature(overrides: Partial<FeatureCatalogEntry> = {}): FeatureCatalogEntry {
+  return {
+    ...FeatureSchema.parse({
+    id: 'feat-1',
+    title: 'Feature One',
+    tool: 'claude',
+    model: 'sonnet',
+    effort: 'medium',
+    maxTokens: 4000,
+    autoStart: false,
+    dependsOn: [],
+    tasks: [],
+    workflow: {
+      mode: 'staged',
+      stages: ['specify'],
+      approvals: { channel: 'telegram', autoAdvance: false },
+      syncTasksToBacklog: true,
+      sessionPolicy: { mode: 'isolated', alwaysIsolatedStages: [] },
+    },
+    }),
+    skills: [],
+    pendingDependencies: [],
+    ...overrides,
+  } as FeatureCatalogEntry;
+}
+
+const backlogSettings = { stageSkills: {} } as BacklogSettings;
+
+function mount(): { container: HTMLElement; rerender: (feature: FeatureCatalogEntry, onSaveConfig: ReturnType<typeof vi.fn>) => void } {
+  const container = document.createElement('div');
+  document.body.append(container);
+  const root = createRoot(container);
+  roots.push(root);
+
+  return {
+    container,
+    rerender(feature, onSaveConfig) {
+      act(() => {
+        root.render(<FeatureConfigDetail feature={feature} backlogSettings={backlogSettings} onSaveConfig={onSaveConfig} />);
+      });
+    },
+  };
+}
+
+function dispatchChange(control: HTMLInputElement | HTMLSelectElement, value: string): void {
+  const descriptor = Object.getOwnPropertyDescriptor(Object.getPrototypeOf(control), 'value');
+  descriptor?.set?.call(control, value);
+  control.dispatchEvent(new Event('input', { bubbles: true }));
+  control.dispatchEvent(new Event('change', { bubbles: true }));
+}
+
+function executionControl(container: HTMLElement, id: string): HTMLInputElement | HTMLSelectElement {
+  const control = container.querySelector(`#${id}`);
+  if (!(control instanceof HTMLInputElement || control instanceof HTMLSelectElement)) {
+    throw new Error(`Missing execution control: ${id}`);
+  }
+  return control;
+}
+
+function saveButton(container: HTMLElement): HTMLButtonElement | undefined {
+  return Array.from(container.querySelectorAll('button')).find((button) => button.textContent === 'save execution');
+}
+
+afterEach(() => {
+  act(() => {
+    roots.forEach((root) => { root.unmount(); });
+  });
+  roots = [];
+  document.body.replaceChildren();
+});
+
+describe('FeatureConfigDetail execution card', () => {
+  it('saves only changed execution values and adopts the refreshed saved baseline', () => {
+    const onSaveConfig = vi.fn();
+    const feature = makeFeature();
+    const view = mount();
+    view.rerender(feature, onSaveConfig);
+
+    act(() => { dispatchChange(executionControl(view.container, 'execution-effort'), 'high'); });
+    expect(view.container.textContent).toContain('modified');
+
+    act(() => { saveButton(view.container)?.click(); });
+    expect(onSaveConfig).toHaveBeenCalledWith({ effort: 'high' });
+
+    view.rerender(makeFeature({ effort: 'high' }), onSaveConfig);
+    expect(view.container.textContent).not.toContain('modified');
+    expect((executionControl(view.container, 'execution-effort') as HTMLSelectElement).value).toBe('high');
+  });
+
+  it('builds sparse patches for the remaining individual execution fields', () => {
+    const scenarios: Array<{ id: string; value: string; expected: Record<string, string | number> }> = [
+      { id: 'execution-tool', value: 'codex', expected: { tool: 'codex' } },
+      { id: 'execution-model', value: 'new-model', expected: { model: 'new-model' } },
+      { id: 'execution-max-tokens', value: '5000', expected: { maxTokens: 5000 } },
+    ];
+
+    for (const scenario of scenarios) {
+      const onSaveConfig = vi.fn();
+      const view = mount();
+      view.rerender(makeFeature(), onSaveConfig);
+      act(() => { dispatchChange(executionControl(view.container, scenario.id), scenario.value); });
+      act(() => { saveButton(view.container)?.click(); });
+      expect(onSaveConfig).toHaveBeenCalledWith(scenario.expected);
+    }
+
+    const onSaveConfig = vi.fn();
+    const view = mount();
+    view.rerender(makeFeature(), onSaveConfig);
+    act(() => { (executionControl(view.container, 'execution-auto-start') as HTMLInputElement).click(); });
+    act(() => { saveButton(view.container)?.click(); });
+    expect(onSaveConfig).toHaveBeenCalledWith({ autoStart: true });
+  });
+
+  it('clears per-field pending state when a value is restored and emits no empty patch', () => {
+    const onSaveConfig = vi.fn();
+    const view = mount();
+    view.rerender(makeFeature(), onSaveConfig);
+
+    act(() => { dispatchChange(executionControl(view.container, 'execution-tool'), 'codex'); });
+    expect(view.container.textContent).toContain('modified');
+    expect(saveButton(view.container)).toBeDefined();
+
+    act(() => { dispatchChange(executionControl(view.container, 'execution-tool'), 'claude'); });
+    expect(view.container.textContent).not.toContain('modified');
+    expect(saveButton(view.container)).toBeUndefined();
+    expect(onSaveConfig).not.toHaveBeenCalled();
+  });
+
+  it('keeps invalid token drafts visible and blocks dispatch until corrected', () => {
+    for (const value of ['', 'not-a-number', '1.5', '-1']) {
+      const onSaveConfig = vi.fn();
+      const view = mount();
+      view.rerender(makeFeature(), onSaveConfig);
+
+      act(() => { dispatchChange(executionControl(view.container, 'execution-max-tokens'), value); });
+      expect(view.container.textContent).toContain('Enter a positive whole number for maxTokens.');
+      expect(saveButton(view.container)).toBeUndefined();
+      expect(onSaveConfig).not.toHaveBeenCalled();
+    }
+  });
+
+  it('keeps an unavailable saved tool understandable and blocks saving until replaced', () => {
+    const onSaveConfig = vi.fn();
+    const view = mount();
+    view.rerender(makeFeature({ tool: 'legacy-tool' as FeatureCatalogEntry['tool'] }), onSaveConfig);
+
+    expect(view.container.textContent).toContain('legacy-tool (unavailable)');
+    act(() => { dispatchChange(executionControl(view.container, 'execution-model'), 'new-model'); });
+    expect(view.container.textContent).toContain('Select an available tool before saving execution settings.');
+    expect(saveButton(view.container)).toBeUndefined();
+    expect(onSaveConfig).not.toHaveBeenCalled();
+  });
+});

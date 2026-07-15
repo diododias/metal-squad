@@ -596,9 +596,9 @@ describe('web server', () => {
     expect(json.theme.roles.error).toBeTruthy();
   });
 
-  it('persists a feature config patch and broadcasts state:full on success', async () => {
+  it('persists tool and model config patches and broadcasts state:full on success', async () => {
     const { createWebServer } = await import('../../src/web/server.js');
-    mocks.updateCatalogFeature.mockReturnValue({ id: 'feat1', effort: 'high' });
+    mocks.updateCatalogFeature.mockReturnValue({ id: 'feat1', tool: 'codex', model: 'gpt-5.6' });
 
     server = createWebServer({ host: '127.0.0.1', port: 0, auth: 'token', token: 'secret' });
     await new Promise<void>((resolve) => server!.server.listen(0, '127.0.0.1', resolve));
@@ -613,14 +613,14 @@ describe('web server', () => {
     socket.send(JSON.stringify({
       type: 'action:updateFeatureConfig',
       featureId: 'feat1',
-      patch: { effort: 'high', maxTokens: 5000 },
+      patch: { tool: 'codex', model: 'gpt-5.6' },
     }));
 
     const stateMessage = await waitForMessageType(socket, 'state:full');
     expect(mocks.updateCatalogFeature).toHaveBeenCalledWith(
       'repo-1',
       'feat1',
-      expect.objectContaining({ effort: 'high', maxTokens: 5000 }),
+      { tool: 'codex', model: 'gpt-5.6' },
     );
     expect((stateMessage as { type: string }).type).toBe('state:full');
 
