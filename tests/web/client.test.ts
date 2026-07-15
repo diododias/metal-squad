@@ -1,5 +1,8 @@
 import { describe, expect, it } from 'vitest';
+import { createElement } from 'react';
+import { renderToStaticMarkup } from 'react-dom/server';
 import { parseHash } from '../../src/web/client/lib/routes.js';
+import { BoardPage } from '../../src/web/client/pages/BoardPage.js';
 import {
   formatDurationMs,
   formatHeartbeatLine,
@@ -14,6 +17,7 @@ import { summarizeTaskRuns } from '../../src/web/client/lib/workflow.js';
 import { normalizeLegacyOpencodePayload, type OutputLine } from '../../src/web/client/hooks/useLocalOutput.js';
 import { subscriptionKey } from '../../src/web/client/hooks/useWebSocket.js';
 import type { RunSummary, TaskRun } from '../../src/db/repo.js';
+import type { MsqWebState } from '../../src/web/types.js';
 
 describe('parseHash', () => {
   it('maps hashes to routes', () => {
@@ -169,5 +173,61 @@ describe('subscriptionKey', () => {
   it('returns null for non-subscription messages', () => {
     expect(subscriptionKey({ type: 'auth', token: 't' })).toBeNull();
     expect(subscriptionKey({ type: 'action:startFeature', featureId: 'feat-1' })).toBeNull();
+  });
+});
+
+describe('BoardPage feature-specific workflows', () => {
+  it('renders each TODO and run with only the workflow configured for its feature', () => {
+    const state = {
+      runs: [
+        { runId: 1, featureId: 'feature-a', status: 'running', stage: 'implement', tool: 'codex', totalTokens: 0 },
+        { runId: 2, featureId: 'feature-b', status: 'running', stage: 'plan', tool: 'codex', totalTokens: 0 },
+      ],
+      pendingFeatures: [
+        { id: 'feature-todo', title: 'Todo workflow', tool: 'codex', effort: 'high', workflow: { stages: ['draft', 'approve'] } },
+      ],
+      featureCatalog: {
+        'feature-a': { id: 'feature-a', title: 'Feature A', workflow: { stages: ['specify', 'implement'] } },
+        'feature-b': { id: 'feature-b', title: 'Feature B', workflow: { stages: ['plan', 'validate'] } },
+        'feature-todo': { id: 'feature-todo', title: 'Todo workflow', tool: 'codex', effort: 'high', workflow: { stages: ['draft', 'approve'] } },
+      },
+    } as unknown as MsqWebState;
+
+    const html = renderToStaticMarkup(createElement(BoardPage, { state, isMobile: false, onOpenRun: () => {}, onOpenBacklogItem: () => {} }));
+
+    expect(html).toContain('✓ specify');
+    expect(html).toContain('▸ implement');
+    expect(html).toContain('▸ plan');
+    expect(html).toContain('· validate');
+    expect(html).toContain('· draft');
+    expect(html).toContain('· approve');
+  });
+
+  it('keeps unknown catalog runs usable without inventing workflow stages', () => {
+    const state = {
+      runs: [{ runId: 3, featureId: 'unknown-feature', status: 'running', stage: 'implement', tool: 'codex', totalTokens: 0 }],
+      pendingFeatures: [],
+      featureCatalog: {},
+    } as unknown as MsqWebState;
+
+    const html = renderToStaticMarkup(createElement(BoardPage, { state, isMobile: false, onOpenRun: () => {}, onOpenBacklogItem: () => {} }));
+
+    expect(html).toContain('IN PROGRESS / BLOCKED (1)');
+    expect(html).not.toContain('▸ implement');
+  });
+
+  it('preserves an explicit empty configured workflow without rendering fallback stages', () => {
+    const state = {
+      runs: [{ runId: 4, featureId: 'empty-workflow', status: 'running', stage: 'implement', tool: 'codex', totalTokens: 0 }],
+      pendingFeatures: [],
+      featureCatalog: {
+        'empty-workflow': { id: 'empty-workflow', title: 'Empty workflow', workflow: { stages: [] } },
+      },
+    } as unknown as MsqWebState;
+
+    const html = renderToStaticMarkup(createElement(BoardPage, { state, isMobile: false, onOpenRun: () => {}, onOpenBacklogItem: () => {} }));
+
+    expect(html).toContain('Empty workflow');
+    expect(html).not.toContain('▸ implement');
   });
 });

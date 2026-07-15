@@ -1,7 +1,4 @@
 import React, { useState } from 'react';
-import { Card } from '../components/core/Card.js';
-import { Tag } from '../components/core/Tag.js';
-import { FeatureIdentity } from '../components/data/FeatureIdentity.js';
 import { KanbanCard } from '../components/data/KanbanCard.js';
 import { PageHeader } from '../PageHeader.js';
 import type { MsqWebState } from '../../types.js';
@@ -135,13 +132,18 @@ export function BoardPage({ state, isMobile, onOpenRun, onOpenBacklogItem }: Boa
               {todo.length === 0 && <div style={{ color: 'var(--text-faint)', fontSize: 'var(--text-xs)', textAlign: 'center', padding: 20 }}>No pending features</div>}
               {todo.map((f) => (
                 <div key={f.id} {...cardInteraction(() => { onOpenBacklogItem(f.id); })} style={{ cursor: 'pointer' }}>
-                  <Card>
-                    <div style={{ marginBottom: 6, fontSize: 'var(--text-sm)' }}><FeatureIdentity title={f.title} id={f.id} /></div>
-                    <div style={{ display: 'flex', gap: 6 }}>
-                      <Tag>{f.tool}</Tag>
-                      <Tag>{f.effort}</Tag>
-                    </div>
-                  </Card>
+                  <KanbanCard
+                    run={{
+                      featureId: f.id,
+                      persistedId: f.persistedId,
+                      title: f.title,
+                      status: 'todo',
+                      stages: f.workflow.stages,
+                      tool: f.tool,
+                      model: f.model,
+                      effort: f.effort,
+                    }}
+                  />
                 </div>
               ))}
             </div>
@@ -186,6 +188,7 @@ export function BoardPage({ state, isMobile, onOpenRun, onOpenBacklogItem }: Boa
                         persistedId: state.featureCatalog[r.featureId]?.persistedId,
                         title: state.featureCatalog[r.featureId]?.title,
                         status: r.status,
+                        stages: state.featureCatalog[r.featureId]?.workflow.stages,
                         tool: r.tool,
                         stage: r.stage,
                         tokens: r.totalTokens,
