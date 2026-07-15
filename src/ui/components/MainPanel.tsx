@@ -150,7 +150,7 @@ function MainPanelComponent({
   selectedRunIndex: _selectedRunIndex,
   selectedFeature,
   featureCatalog = {},
-  backlogSettings = { stageSkills: {} },
+  backlogSettings = { stageSkills: {}, projectDefaults: { tool: 'claude', effort: 'medium', skills: [], stageSkills: {} } },
   activeView,
   output,
   outputPaused,
