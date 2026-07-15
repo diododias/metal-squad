@@ -46,6 +46,14 @@ const settingsState = {
     budget: { alertAtPercent: 80, lastResetDate: null },
   },
   backlogSettings: { configSources: undefined, resolvedDefaults: undefined, budget: undefined },
+  environment: {
+    databasePath: '/tmp/msq/app.db',
+    databaseSource: 'default',
+    dbWritable: true,
+    dataDir: '/tmp/msq',
+    configDir: '/tmp/config',
+    configWritable: true,
+  },
   featureCatalog: {},
   skillsCatalog: [],
 } as unknown as MsqWebState;
@@ -102,6 +110,43 @@ describe('Settings client surfaces', () => {
       'Notifications',
       'Budget',
     ]);
+    expect(container.textContent).toContain('secrets');
+    expect(container.textContent).toContain('empty');
+  });
+
+  it('renders environment diagnostics without exposing secret values', () => {
+    const state = {
+      ...settingsState,
+      runtimeConfig: {
+        ...settingsState.runtimeConfig,
+        web: { ...settingsState.runtimeConfig.web, auth: 'token' },
+      },
+      environment: {
+        databasePath: '/tmp/msq/app.db',
+        databaseSource: 'override',
+        dbWritable: false,
+        dataDir: '/tmp/msq',
+        configDir: '/tmp/config',
+        configWritable: true,
+        repoPath: '/repo/metal-squad',
+        repoId: 'repo-13',
+        version: '1.2.3',
+      },
+    } as MsqWebState;
+
+    const container = render(React.createElement(ConfigPage, { state, isMobile: false, send: () => undefined }));
+    const text = container.textContent ?? '';
+
+    expect(text).toContain('Environment / Sources');
+    expect(text).toContain('/tmp/msq/app.db · read-only');
+    expect(text).toContain('[override]');
+    expect(text).toContain('/tmp/config · writable');
+    expect(text).toContain('/repo/metal-squad · repo-13');
+    expect(text).toContain('DB (importado via backlog load)');
+    expect(text).toContain('127.0.0.1:3000 · token');
+    expect(text).toContain('secrets');
+    expect(text).toContain('configured');
+    expect(text).toContain('1.2.3');
   });
 
   it('renders Settings in the main navigation while retaining the config route', () => {
