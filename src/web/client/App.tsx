@@ -223,7 +223,14 @@ export function App(): React.JSX.Element {
           send({ type: 'action:startFeature', featureId });
           navigate('/board');
         }}
-        onSaveConfig={(featureId: string, patch: FeatureConfigPatch) => { send({ type: 'action:updateFeatureConfig', featureId, patch }); }}
+        onSaveConfig={(featureId: string, patch: FeatureConfigPatch) => {
+          setWorkflowSaveResults((current) => {
+            return Object.fromEntries(
+              Object.entries(current).filter(([resultFeatureId]) => resultFeatureId !== featureId),
+            );
+          });
+          send({ type: 'action:updateFeatureConfig', featureId, patch });
+        }}
         workflowSaveResult={workflowSaveResults[route.featureId]}
         onSaveTaskConfig={(featureId: string, taskId: string, patch: TaskConfigPatch) =>
           { send({ type: 'action:updateTaskConfig', featureId, taskId, patch }); }

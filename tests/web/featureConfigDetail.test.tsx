@@ -227,6 +227,35 @@ describe('FeatureConfigDetail workflow card', () => {
     expect((workflowControl(view.container, 'workflow-mode') as HTMLSelectElement).value).toBe('single');
   });
 
+  it('ignores a prior rejected result while a corrected retry is in flight', () => {
+    const onSaveConfig = vi.fn();
+    const feature = makeFeature();
+    const rejected: FeatureConfigSaveResult = {
+      type: 'featureConfig:saveResult',
+      payload: { featureId: 'feat-1', ok: false, issues: [{ path: 'workflow.mode', message: 'Choose a supported mode.' }] },
+    };
+    const retryRejected: FeatureConfigSaveResult = {
+      type: 'featureConfig:saveResult',
+      payload: { featureId: 'feat-1', ok: false, issues: [{ path: 'workflow.syncTasksToBacklog', message: 'Retry response.' }] },
+    };
+    const view = mount();
+    view.rerender(feature, onSaveConfig);
+
+    act(() => { dispatchChange(workflowControl(view.container, 'workflow-mode'), 'single'); });
+    act(() => { workflowSaveButton(view.container)?.click(); });
+    view.rerender(feature, onSaveConfig, rejected);
+
+    act(() => { (workflowControl(view.container, 'workflow-sync-tasks') as HTMLInputElement).click(); });
+    act(() => { workflowSaveButton(view.container)?.click(); });
+    expect(onSaveConfig).toHaveBeenLastCalledWith({
+      workflow: { mode: 'single', syncTasksToBacklog: false },
+    });
+    expect(view.container.textContent).not.toContain('Choose a supported mode.');
+
+    view.rerender(feature, onSaveConfig, retryRejected);
+    expect(view.container.textContent).toContain('Retry response.');
+  });
+
   it('resets the workflow baseline only after the accepted save receives refreshed state', () => {
     const onSaveConfig = vi.fn();
     const feature = makeFeature();

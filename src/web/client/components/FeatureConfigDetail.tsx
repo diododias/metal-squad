@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { Button } from './core/Button.js';
 import { EditableSelectField } from './core/EditableSelectField.js';
 import { EditableTextField } from './core/EditableTextField.js';
@@ -99,6 +99,7 @@ export function FeatureConfigDetail({ feature, backlogSettings, onSaveConfig, wo
   const [workflowIssues, setWorkflowIssues] = useState<{ path?: string; message: string }[]>([]);
   const [workflowSavePending, setWorkflowSavePending] = useState(false);
   const [awaitingWorkflowRefresh, setAwaitingWorkflowRefresh] = useState<WorkflowDraft | null>(null);
+  const workflowResultAtSaveStart = useRef<FeatureConfigSaveResult | undefined>(undefined);
 
   useEffect(() => {
     const guidance = feature.workflow.stepGuidance[selectedStage];
@@ -118,7 +119,11 @@ export function FeatureConfigDetail({ feature, backlogSettings, onSaveConfig, wo
   }, [feature.id, feature.tool, feature.model, feature.effort, feature.maxTokens, feature.autoStart]);
 
   useEffect(() => {
-    if (!workflowSavePending || workflowSaveResult?.payload.featureId !== feature.id) return;
+    if (
+      !workflowSavePending
+      || workflowSaveResult?.payload.featureId !== feature.id
+      || workflowSaveResult === workflowResultAtSaveStart.current
+    ) return;
     if (workflowSaveResult.payload.ok) {
       setAwaitingWorkflowRefresh(draftWorkflow);
     } else {
@@ -201,6 +206,7 @@ export function FeatureConfigDetail({ feature, backlogSettings, onSaveConfig, wo
   function saveWorkflow(): void {
     if (!canSaveWorkflow) return;
     setWorkflowIssues([]);
+    workflowResultAtSaveStart.current = workflowSaveResult;
     setWorkflowSavePending(true);
     onSaveConfig({ workflow: workflowPatch });
   }
