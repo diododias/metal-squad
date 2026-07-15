@@ -40,14 +40,14 @@ Não aplicável — nenhuma dependência nova, nenhum scaffold de projeto necess
 **⚠️ CRITICAL**: Nenhuma user story pode ser implementada no `KanbanCard` antes desta fase, pois
 US1/US2/US3 todas consomem o `WorkflowStepper` compacto.
 
-- [ ] T001 Adicionar prop `size?: 'default' | 'compact'` (default `'default'`) a
+- [X] T001 Adicionar prop `size?: 'default' | 'compact'` (default `'default'`) a
   `WorkflowStepperProps` em `src/web/client/components/navigation/WorkflowStepper.tsx`; quando
   `'compact'`, reduzir `fontSize`/`gap` do container e do separador sem alterar o cálculo de marker
   (`done`/`current`/`next`) nem o `flexWrap: 'wrap'` existente (ver data-model.md, research.md D1/D6).
-- [ ] T002 Adicionar prop `allPending?: boolean` (default `false`) a `WorkflowStepperProps` no mesmo
+- [X] T002 Adicionar prop `allPending?: boolean` (default `false`) a `WorkflowStepperProps` no mesmo
   arquivo; quando `true`, forçar `marker = 'next'` para todo `stage`, ignorando `currentStage`/índice
   (ver data-model.md § Regra de marker consolidada, research.md D3).
-- [ ] T003 Confirmar que `src/web/client/pages/RunDetailPage.tsx` (único outro consumidor de
+- [X] T003 Confirmar que `src/web/client/pages/RunDetailPage.tsx` (único outro consumidor de
   `WorkflowStepper`) continua funcionando sem passar `size`/`allPending` — defaults preservam o
   comportamento atual (verificação manual de leitura, sem mudança de código nesse arquivo).
 
@@ -66,21 +66,21 @@ lista; verificar que os steps anteriores aparecem `done`, o atual `current` e os
 
 ### Tests for User Story 1
 
-- [ ] T004 [P] [US1] Em `tests/web/kanban-card.test.tsx`, adicionar teste: card com
+- [X] T004 [P] [US1] Em `tests/web/kanban-card.test.tsx`, adicionar teste: card com
   `stages: ['plan', 'implement', 'review']` e `stage: 'implement'` renderiza a sequência com `plan`
   marcado concluído, `implement` destacado como atual e `review` como pendente (Acceptance Scenario 1
   da US1; usar os ícones/marcadores de `WorkflowStepper` como asserção via `renderToStaticMarkup`).
-- [ ] T005 [P] [US1] No mesmo arquivo, adicionar teste: card com `status: 'done'` e `stages`
+- [X] T005 [P] [US1] No mesmo arquivo, adicionar teste: card com `status: 'done'` e `stages`
   preenchido renderiza todos os steps como concluídos independentemente de `stage` (FR-004,
   Acceptance Scenario 2 da US1).
-- [ ] T006 [P] [US1] No mesmo arquivo, adicionar teste: card com `status: 'todo'` e `stages`
+- [X] T006 [P] [US1] No mesmo arquivo, adicionar teste: card com `status: 'todo'` e `stages`
   preenchido renderiza todos os steps como pendentes (FR-005, Acceptance Scenario 3 da US1).
 
 ### Implementation for User Story 1
 
-- [ ] T007 [US1] Adicionar campo opcional `stages?: string[]` à interface `KanbanCardRun` em
+- [X] T007 [US1] Adicionar campo opcional `stages?: string[]` à interface `KanbanCardRun` em
   `src/web/client/components/data/KanbanCard.tsx` (FR-001, data-model.md).
-- [ ] T008 [US1] Em `KanbanCard.tsx`, substituir o bloco `run.stage && <div>...→ {run.stage}</div>`
+- [X] T008 [US1] Em `KanbanCard.tsx`, substituir o bloco `run.stage && <div>...→ {run.stage}</div>`
   por uma renderização condicional do `WorkflowStepper` com `size="compact"`, passando
   `stages={run.stages}` e o `currentStage` efetivo derivado de `run.status`/`run.stage`: `null` quando
   `status === 'done'`, `run.stage` nos demais casos com `allPending={status === 'todo'}` (FR-002,
@@ -101,18 +101,18 @@ de erro e de seção de steps.
 
 ### Tests for User Story 2
 
-- [ ] T009 [P] [US2] Em `tests/web/kanban-card.test.tsx`, adicionar teste: card com `stages`
+- [X] T009 [P] [US2] Em `tests/web/kanban-card.test.tsx`, adicionar teste: card com `stages`
   ausente (`undefined`) renderiza sem lançar erro e sem a seção de sequência de steps (FR-006,
   Acceptance Scenario 1 da US2).
-- [ ] T010 [P] [US2] No mesmo arquivo, adicionar teste: card com `stages: []` produz o mesmo
+- [X] T010 [P] [US2] No mesmo arquivo, adicionar teste: card com `stages: []` produz o mesmo
   resultado do caso ausente — sem seção de steps (FR-006, Acceptance Scenario 2 da US2).
-- [ ] T011 [P] [US2] No mesmo arquivo, adicionar teste: card com `stages` populado mas `stage` não
+- [X] T011 [P] [US2] No mesmo arquivo, adicionar teste: card com `stages` populado mas `stage` não
   presente na lista (ex.: `stage: 'unknown'`) renderiza a sequência sem nenhum step marcado como
   atual e sem erro (FR-007, Edge Case do spec.md).
 
 ### Implementation for User Story 2
 
-- [ ] T012 [US2] Em `KanbanCard.tsx`, condicionar a renderização da seção de steps a
+- [X] T012 [US2] Em `KanbanCard.tsx`, condicionar a renderização da seção de steps a
   `run.stages && run.stages.length > 0` (FR-006, research.md D5; depende de T007/T008 — mesmo bloco
   introduzido na US1).
 
@@ -130,14 +130,14 @@ que o markup não usa `white-space: nowrap`/`overflow: hidden` bloqueando a queb
 
 ### Tests for User Story 3
 
-- [ ] T013 [P] [US3] Em `tests/web/kanban-card.test.tsx`, adicionar teste: card com 8+ `stages`
+- [X] T013 [P] [US3] Em `tests/web/kanban-card.test.tsx`, adicionar teste: card com 8+ `stages`
   renderiza todos os steps no markup (nenhum item omitido/truncado no HTML) via
   `renderToStaticMarkup`, confirmando que o `WorkflowStepper` compacto não trunca a lista (Acceptance
   Scenario da US3).
 
 ### Implementation for User Story 3
 
-- [ ] T014 [US3] Revisar `size="compact"` em `WorkflowStepper.tsx` (T001) para garantir que o
+- [X] T014 [US3] Revisar `size="compact"` em `WorkflowStepper.tsx` (T001) para garantir que o
   `flexWrap: 'wrap'` existente permanece ativo e que nenhum `fontSize`/`gap` reduzido introduz
   `overflow: hidden`/`white-space: nowrap` (research.md D6) — ajustar apenas se o teste T013 ou a
   validação manual do quickstart revelar overflow.
@@ -152,10 +152,10 @@ que o markup não usa `white-space: nowrap`/`overflow: hidden` bloqueando a queb
 
 ## Phase 6: Polish & Cross-Cutting Concerns
 
-- [ ] T016 Rodar suite focada: `rtk npx vitest run tests/web/kanban-card.test.tsx`.
-- [ ] T017 Rodar baseline completa: `rtk npm run build`, `rtk npm test`, `rtk npm run typecheck`,
+- [X] T016 Rodar suite focada: `rtk npx vitest run tests/web/kanban-card.test.tsx`.
+- [X] T017 Rodar baseline completa: `rtk npm run build`, `rtk npm test`, `rtk npm run typecheck`,
   `rtk npm run lint` (mudança em `src/`, ver testing.md).
-- [ ] T018 Confirmar que `docs/epics/epic -settings/features/SET-08-kanbancard-exibe-steps.md`
+- [X] T018 Confirmar que `docs/epics/epic -settings/features/SET-08-kanbancard-exibe-steps.md`
   continua consistente com o comportamento implementado (sem mudança de escopo em relação ao já
   documentado).
 

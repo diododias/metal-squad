@@ -3,6 +3,7 @@ import { Card } from '../core/Card.js';
 import { StatusPill, type PillStatus } from '../core/StatusPill.js';
 import { Tag } from '../core/Tag.js';
 import { FeatureIdentity } from './FeatureIdentity.js';
+import { WorkflowStepper } from '../navigation/WorkflowStepper.js';
 
 /** Deterministic 8-hex-digit short id from a feature id string, so the same
  * feature always renders the same F-XXXXXXXX badge without a backend. */
@@ -20,8 +21,9 @@ export interface KanbanCardRun {
   featureId: string;
   persistedId?: string | null;
   title?: string | null;
-  status: PillStatus;
+  status: PillStatus | (string & {});
   stage?: string | null;
+  stages?: string[];
   tool?: string | null;
   model?: string | null;
   effort?: string | null;
@@ -51,7 +53,16 @@ export function KanbanCard({ run, selected, onClick }: KanbanCardProps): React.J
         </div>
       </div>
 
-      {run.stage && <div style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', marginBottom: 8 }}><span style={{ fontSize: 'var(--text-2xs)', color: 'var(--accent-info)' }}>→ {run.stage}</span></div>}
+      {run.stages && run.stages.length > 0 && (
+        <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 8 }}>
+          <WorkflowStepper
+            stages={run.stages}
+            currentStage={run.status === 'done' ? null : (run.stage ?? null)}
+            size="compact"
+            allPending={run.status === 'todo'}
+          />
+        </div>
+      )}
 
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginBottom: 8 }}>
         {run.tool && <Tag>{run.tool}</Tag>}
