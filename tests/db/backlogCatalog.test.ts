@@ -508,4 +508,63 @@ describe('backlogCatalog upsert/diff/load', () => {
       expect(task).toMatchObject({ id: 'task-1', title: 'Renamed Task', status: 'done' });
     });
   });
+
+  describe('updateCatalogDefaults', () => {
+    it('persists a partial defaults patch without clearing untouched fields', async () => {
+      const { db, upsertBacklogCatalog, updateCatalogDefaults } = await setup();
+      upsertBacklogCatalog(
+        makeBacklog({ defaults: { tool: 'claude', model: 'sonnet-5', effort: 'medium', skills: ['review'], stageSkills: {} } }),
+        'repo-1',
+      );
+
+      const updated = updateCatalogDefaults('repo-1', { effort: 'high' });
+      expect(updated.defaults).toMatchObject({
+        tool: 'claude',
+        model: 'sonnet-5',
+        effort: 'high',
+        skills: ['review'],
+      });
+
+      const row = db
+        .prepare(`SELECT defaults_json FROM backlog_catalog_meta WHERE repo_id = 'repo-1'`)
+        .get() as { defaults_json: string };
+      const stored = JSON.parse(row.defaults_json) as { effort: string; model: string };
+      expect(stored.effort).toBe('high');
+      expect(stored.model).toBe('sonnet-5');
+    });
+
+    it('merges a budget patch onto existing budget fields without dropping siblings', async () => {
+      const { upsertBacklogCatalog, updateCatalogDefaults } = await setup();
+      upsertBacklogCatalog(makeBacklog({ budget: { maxTokens: 100000, perFeatureMaxTokens: 5000 } }), 'repo-1');
+
+      const updated = updateCatalogDefaults('repo-1', { budget: { maxTokens: 200000 } });
+      expect(updated.budget).toMatchObject({ maxTokens: 200000, perFeatureMaxTokens: 5000 });
+    });
+
+    it('sets budget from scratch when none was previously stored', async () => {
+      const { upsertBacklogCatalog, updateCatalogDefaults } = await setup();
+      upsertBacklogCatalog(makeBacklog(), 'repo-1');
+
+      const updated = updateCatalogDefaults('repo-1', { budget: { maxTokens: 50000 } });
+      expect(updated.budget).toMatchObject({ maxTokens: 50000 });
+    });
+
+    it('throws on an invalid patch and writes nothing', async () => {
+      const { db, upsertBacklogCatalog, updateCatalogDefaults } = await setup();
+      upsertBacklogCatalog(makeBacklog(), 'repo-1');
+
+      expect(() => updateCatalogDefaults('repo-1', { tool: 'legacy-tool' as never })).toThrow();
+
+      const row = db
+        .prepare(`SELECT defaults_json FROM backlog_catalog_meta WHERE repo_id = 'repo-1'`)
+        .get() as { defaults_json: string };
+      const stored = JSON.parse(row.defaults_json) as { tool: string };
+      expect(stored.tool).toBe('claude');
+    });
+
+    it('throws BacklogCatalogNotFoundError for an unknown repo', async () => {
+      const { updateCatalogDefaults } = await setup();
+      expect(() => updateCatalogDefaults('nope', { effort: 'high' })).toThrow(/not found/);
+    });
+  });
 });
