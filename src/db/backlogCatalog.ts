@@ -3,9 +3,13 @@ import type Database from 'better-sqlite3';
 import { getDb } from './index.js';
 import { resolveDbPath } from '../config/index.js';
 import {
+  BudgetSchema,
+  DefaultsSchema,
   FeatureSchema,
   TaskSchema,
   type BacklogV2,
+  type Budget,
+  type Defaults,
   type Epic,
   type Feature,
   type Retry,
@@ -637,6 +641,57 @@ export function updateCatalogTask(featureId: string, taskId: string, patch: Part
     updateFeatureRow.run(JSON.stringify(updatedFeature), featureId);
 
     return merged;
+  });
+
+  return run();
+}
+
+export type CatalogDefaultsPatch = Partial<Defaults> & {
+  budget?: Partial<Budget>;
+};
+
+export interface CatalogDefaults {
+  defaults: Defaults;
+  budget?: Budget;
+}
+
+/**
+ * Patches a project's `defaults_json`/`budget_json` in place, mirroring
+ * `updateCatalogFeature`'s merge-then-validate contract at the project level.
+ * `getDb('readwrite')` asserts the DB path is writable before any query runs.
+ */
+export function updateCatalogDefaults(repoId: string, patch: CatalogDefaultsPatch): CatalogDefaults {
+  const db = getDb('readwrite');
+
+  const getRow = db.prepare(
+    `SELECT defaults_json, budget_json FROM backlog_catalog_meta WHERE repo_id = ?`,
+  );
+  const updateRow = db.prepare(
+    `UPDATE backlog_catalog_meta SET defaults_json = ?, budget_json = ?, updated_at = datetime('now') WHERE repo_id = ?`,
+  );
+
+  const run = db.transaction((): CatalogDefaults => {
+    const row = getRow.get(repoId) as { defaults_json: string; budget_json: string | null } | undefined;
+    if (!row) {
+      throw new BacklogCatalogNotFoundError(`Catalog defaults not found for repo "${repoId}".`);
+    }
+
+    const currentDefaults = DefaultsSchema.parse(JSON.parse(row.defaults_json));
+    const currentBudget = row.budget_json ? BudgetSchema.parse(JSON.parse(row.budget_json)) : undefined;
+
+    const { budget: budgetPatch, ...defaultsPatch } = patch;
+    const mergedDefaults = DefaultsSchema.parse({ ...currentDefaults, ...defaultsPatch });
+    const mergedBudget = budgetPatch
+      ? BudgetSchema.parse({ ...currentBudget, ...budgetPatch })
+      : currentBudget;
+
+    updateRow.run(
+      JSON.stringify(mergedDefaults),
+      mergedBudget ? JSON.stringify(mergedBudget) : null,
+      repoId,
+    );
+
+    return { defaults: mergedDefaults, budget: mergedBudget };
   });
 
   return run();
