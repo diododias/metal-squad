@@ -132,6 +132,8 @@ export interface RunResult {
 }
 
 export interface ToolCapabilities {
+  model: boolean;
+  effort: boolean;
   thinking: boolean;
 }
 

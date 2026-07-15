@@ -392,6 +392,47 @@ describe('claude adapter', () => {
 });
 
 describe('opencode adapter', () => {
+  it('declares capabilities and warns when effort/thinking are requested', async () => {
+    mockRunCli.mockResolvedValue({
+      code: 0,
+      stdout: JSON.stringify({ response: 'done' }),
+      stderr: '',
+    });
+    const { opencodeAdapter } = await import('../../src/core/adapters/opencode.js');
+
+    expect(opencodeAdapter.capabilities).toEqual({ model: true, effort: false, thinking: false });
+
+    await opencodeAdapter.runFeature(
+      {
+        id: 'feat-1',
+        title: 'Feature',
+        tool: 'opencode',
+        effort: 'high',
+        thinking: 'on',
+        dependsOn: [],
+        tasks: [],
+      },
+      'test-prompt',
+      { cwd: '/repo', runId: 20 },
+    );
+
+    expect(mockEventEmit).toHaveBeenCalledWith('run:output', expect.objectContaining({
+      runId: 20,
+      featureId: 'feat-1',
+      tool: 'opencode',
+      line: 'aviso: opencode não suporta effort; opção ignorada.',
+    }));
+    expect(mockEventEmit).toHaveBeenCalledWith('run:output', expect.objectContaining({
+      runId: 20,
+      featureId: 'feat-1',
+      tool: 'opencode',
+      line: 'aviso: opencode não suporta thinking; opção ignorada.',
+    }));
+
+    const [, calledArgs] = mockRunCli.mock.calls[0] as [string, string[], unknown];
+    expect(calledArgs).not.toContain('--thinking');
+  });
+
   it('keeps effortFlag empty and handles cli failures', async () => {
     mockRunCli.mockResolvedValue({ code: 2, stdout: '', stderr: 'bad' });
     const { opencodeAdapter } = await import('../../src/core/adapters/opencode.js');

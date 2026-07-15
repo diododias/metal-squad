@@ -169,7 +169,7 @@ describe('codexAdapter timeout observability', () => {
     });
 
     const { codexAdapter } = await import('../../src/core/adapters/codex.js');
-    expect(codexAdapter.capabilities).toEqual({ thinking: false });
+    expect(codexAdapter.capabilities).toEqual({ model: true, effort: true, thinking: false });
 
     await codexAdapter.runFeature({
       id: 'feat-04',
