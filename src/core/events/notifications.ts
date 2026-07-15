@@ -15,7 +15,7 @@ export function attachEventNotifications(
         tool,
         stage,
         ...(featureName ? { featureName } : {}),
-      }).catch(() => { /* ignore dispatch errors */ });
+      }).catch((error: unknown) => { console.error('[notify] run:start dispatch failed:', error); });
     }),
     eventBus.subscribe('gate:created', ({ gateId, featureId, featureName }) => {
       const message = [
@@ -33,7 +33,7 @@ export function attachEventNotifications(
             { text: '🔄 Retry', callback_data: `gate:${String(gateId)} retry` },
           ]],
         },
-      }).catch(() => { /* ignore dispatch errors */ });
+      }).catch((error: unknown) => { console.error('[notify] gate:created dispatch failed:', error); });
     }),
     eventBus.subscribe('stage:request-created', ({ requestId, featureId, featureName, stage, kind, prompt, source, options }) => {
       if (kind === 'approval') {
@@ -49,7 +49,7 @@ export function attachEventNotifications(
             ...(featureName ? { featureName } : {}),
             stage,
             source: 'auto',
-          }).catch(() => { /* ignore dispatch errors */ });
+          }).catch((error: unknown) => { console.error('[notify] stage:approval (auto) dispatch failed:', error); });
           return;
         }
 
@@ -71,7 +71,7 @@ export function attachEventNotifications(
               { text: '⏸ Hold', callback_data: `stage:${String(requestId)} hold` },
             ]],
           },
-        }).catch(() => { /* ignore dispatch errors */ });
+        }).catch((error: unknown) => { console.error('[notify] stage:approval (manual) dispatch failed:', error); });
         return;
       }
 
@@ -95,7 +95,7 @@ export function attachEventNotifications(
               },
             }
           : {}),
-      }).catch(() => { /* ignore dispatch errors */ });
+      }).catch((error: unknown) => { console.error('[notify] stage:input dispatch failed:', error); });
     }),
     eventBus.subscribe('timeout:approval-created', (event) => {
       const stageLabel = event.stage ? `stage ${event.stage}` : 'feature run';
@@ -120,14 +120,14 @@ export function attachEventNotifications(
             { text: '⏸ Keep blocked', callback_data: `timeout:${String(event.requestId)} keep_blocked` },
           ]],
         },
-      }).catch(() => { /* ignore dispatch errors */ });
+      }).catch((error: unknown) => { console.error('[notify] timeout:approval-created dispatch failed:', error); });
     }),
     eventBus.subscribe('run:failed', ({ featureId, featureName, error }) => {
       void dispatch('run:failed', `metal-squad: ${featureId} failed — ${error}`, {
         featureId,
         ...(featureName ? { featureName } : {}),
         error,
-      }).catch(() => { /* ignore dispatch errors */ });
+      }).catch((dispatchError: unknown) => { console.error('[notify] run:failed dispatch failed:', dispatchError); });
     }),
     eventBus.subscribe('budget:alert', ({ percent, spent, limit }) => {
       const pipelineId = getPausedPipelineIdForBudget();
@@ -144,13 +144,13 @@ export function attachEventNotifications(
         spent,
         limit,
         reply_markup,
-      }).catch(() => { /* ignore dispatch errors */ });
+      }).catch((error: unknown) => { console.error('[notify] budget:alert dispatch failed:', error); });
     }),
     eventBus.subscribe('run:done', ({ featureId, featureName, result }) => {
       void dispatch('run:done', `metal-squad: ${featureId} done — ${result.summary}`, {
         featureId,
         ...(featureName ? { featureName } : {}),
-      }).catch(() => { /* ignore dispatch errors */ });
+      }).catch((error: unknown) => { console.error('[notify] run:done dispatch failed:', error); });
     }),
   ];
 

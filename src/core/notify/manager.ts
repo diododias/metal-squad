@@ -46,6 +46,11 @@ export async function dispatch(
   }
 
   const results = await Promise.allSettled(channels.map(async (ch) => ch.send(safeMessage, metadata)));
+  results.forEach((result, index) => {
+    if (result.status === 'rejected') {
+      console.error(`[notify] channel delivery failed: ${channels[index]?.name ?? 'unknown'} (${event})`, result.reason);
+    }
+  });
   if (metadata?.timeoutApprovalRequestId !== undefined) {
     const failure = results.find((result): result is PromiseRejectedResult => result.status === 'rejected');
     recordTimeoutNotificationDelivery(metadata.timeoutApprovalRequestId, failure
