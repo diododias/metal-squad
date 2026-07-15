@@ -30,7 +30,7 @@ import { loadBacklogFromCatalog } from '../core/backlog/load.js';
 import { selectStartableFeaturePlan } from '../core/orchestrator/graph.js';
 import { validateBacklogSkills } from '../core/skills/index.js';
 import { resolveRuntimeConfig } from '../config/index.js';
-import { updateCatalogFeature, updateCatalogTask, type FeaturePatch } from '../db/backlogCatalog.js';
+import { updateCatalogFeature, updateCatalogTask, updateCatalogDefaults, type FeaturePatch, type CatalogDefaultsPatch } from '../db/backlogCatalog.js';
 import type { Feature, Task } from '../core/backlog/schema.js';
 import { buildMsqWebState, appendNotification } from './state.js';
 import { createWebAuth, isAllowedHostHeader, isAllowedOrigin, timingSafeEqualStrings } from './auth.js';
@@ -38,6 +38,7 @@ import type {
   FeatureConfigPatch,
   FeatureConfigSaveIssue,
   FeatureConfigSaveResult,
+  ProjectDefaultsPatch,
   RunChangesPayload,
   TaskConfigPatch,
   WebSocketClientMessage,
@@ -705,6 +706,10 @@ export function createWebServer(options: {
         updateTaskConfig(message.featureId, message.taskId, message.patch, featureCwd);
         break;
       }
+      case 'action:updateProjectDefaults': {
+        updateProjectDefaults(message.patch, featureCwd);
+        break;
+      }
       case 'action:pausePipeline': {
         pausePipeline(message.pipelineId);
         reconcileWebState(featureCwd);
@@ -931,6 +936,24 @@ export function createWebServer(options: {
     }
     reconcileWebState(featureCwd);
     msqEventBus.emit('ui:info', { message: `Saved task ${taskId}.` });
+  }
+
+  function updateProjectDefaults(patch: ProjectDefaultsPatch, featureCwd: string): void {
+    try {
+      console.log(`[updateProjectDefaults] patch=`, patch);
+      assertWritableDbPath();
+      const { repoId } = resolveRepo(featureCwd);
+      updateCatalogDefaults(repoId, patch as CatalogDefaultsPatch);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      const stack = error instanceof Error ? error.stack : undefined;
+      console.error(`[updateProjectDefaults] error: ${message}`);
+      if (stack) console.error(stack);
+      msqEventBus.emit('ui:notice', { message: `Could not save project defaults: ${message}` });
+      return;
+    }
+    reconcileWebState(featureCwd);
+    msqEventBus.emit('ui:info', { message: 'Saved project defaults.' });
   }
 
   // Poll the DB for new output rows written by separated feature-runner
