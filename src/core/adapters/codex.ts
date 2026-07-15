@@ -60,18 +60,16 @@ export const codexAdapter: ToolAdapter = {
   },
 
   async runFeature(feature: Feature, prompt: string, opts: RunFeatureOptions): Promise<RunResult> {
-    const gitWritableArgs = resolveGitWritableArgs(opts.cwd);
     const args = opts.session?.mode === 'resume' && opts.session.handle
       ? [
           'exec',
           'resume',
           '--json',
           '--skip-git-repo-check',
-          '--sandbox', 'workspace-write',
-          ...gitWritableArgs,
           ...(feature.model ? ['-m', feature.model] : []),
           ...this.effortFlag(feature.effort),
           opts.session.handle.sessionId,
+          '--',
           prompt,
         ]
       : [
@@ -79,7 +77,7 @@ export const codexAdapter: ToolAdapter = {
           '--json',
           '--skip-git-repo-check',
           '--sandbox', 'workspace-write',
-          ...gitWritableArgs,
+          ...resolveGitWritableArgs(opts.cwd),
           ...(feature.model ? ['-m', feature.model] : []),
           ...this.effortFlag(feature.effort),
           '--',
