@@ -12,6 +12,7 @@ const mocks = vi.hoisted(() => ({
   getFeatureCatalog: vi.fn(),
   getBacklogSettings: vi.fn(),
   resolveRuntimeConfig: vi.fn(),
+  collectEnvironmentInfo: vi.fn(),
 }));
 
 vi.mock('../../src/core/repo.js', () => ({
@@ -44,6 +45,10 @@ vi.mock('../../src/config/index.js', () => ({
   resolveRuntimeConfig: mocks.resolveRuntimeConfig,
 }));
 
+vi.mock('../../src/web/environment.js', () => ({
+  collectEnvironmentInfo: mocks.collectEnvironmentInfo,
+}));
+
 describe('buildMsqWebState pendingFeatures projection', () => {
   beforeEach(async () => {
     vi.clearAllMocks();
@@ -67,6 +72,17 @@ describe('buildMsqWebState pendingFeatures projection', () => {
       },
     });
     mocks.getBacklogSettings.mockReturnValue({ stageSkills: {} });
+    mocks.collectEnvironmentInfo.mockReturnValue({
+      databasePath: '/tmp/metal-squad/app.db',
+      databaseSource: 'default',
+      dbWritable: true,
+      dataDir: '/tmp/metal-squad',
+      configDir: '/tmp/metal-squad-config',
+      configWritable: true,
+      repoPath: '/tmp/metal-squad',
+      repoId: 'repo-1',
+      version: '0.0.1',
+    });
     mocks.resolveRuntimeConfig.mockReturnValue({
       theme: undefined,
       concurrency: 3,
@@ -357,6 +373,22 @@ describe('buildMsqWebState pendingFeatures projection', () => {
 
     const state = buildMsqWebState();
     expect(state.pendingFeatures[0]?.autoStart).toBe(true);
+  });
+
+  it('exposes the backend-collected environment diagnostics in the full state', async () => {
+    const { buildMsqWebState } = await import('../../src/web/state.js');
+
+    expect(buildMsqWebState().environment).toEqual({
+      databasePath: '/tmp/metal-squad/app.db',
+      databaseSource: 'default',
+      dbWritable: true,
+      dataDir: '/tmp/metal-squad',
+      configDir: '/tmp/metal-squad-config',
+      configWritable: true,
+      repoPath: '/tmp/metal-squad',
+      repoId: 'repo-1',
+      version: '0.0.1',
+    });
   });
 
   it('strips notification credentials from runtimeConfig before broadcast', async () => {

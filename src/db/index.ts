@@ -23,16 +23,21 @@ export class DbAccessError extends Error {
   }
 }
 
-export function assertWritableDbPath(dbPath = resolveDbPath()): void {
+export function assertWritableDbPath(
+  dbPath = resolveDbPath(),
+  options: { createDataDir?: boolean } = {},
+): void {
   const dataDir = dirname(dbPath);
 
-  try {
-    ensureDataDir(dbPath);
-  } catch {
-    throw new DbAccessError(
-      dbPath,
-      `Nao foi possivel criar ou acessar o diretório do banco: ${dataDir}`,
-    );
+  if (options.createDataDir !== false) {
+    try {
+      ensureDataDir(dbPath);
+    } catch {
+      throw new DbAccessError(
+        dbPath,
+        `Nao foi possivel criar ou acessar o diretório do banco: ${dataDir}`,
+      );
+    }
   }
 
   try {

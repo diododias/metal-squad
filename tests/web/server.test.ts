@@ -61,6 +61,10 @@ vi.mock('../../src/core/skills/index.js', () => ({
 }));
 
 vi.mock('../../src/config/index.js', () => ({
+  CONFIG_DIR: '/tmp',
+  DATA_DIR: '/tmp',
+  DB_PATH_ENV: 'MSQ_DB_PATH',
+  resolveDbPath: () => '/tmp/metal-squad-web-test.db',
   resolveRuntimeConfig: mocks.resolveRuntimeConfig,
 }));
 
