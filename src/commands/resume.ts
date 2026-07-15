@@ -1,6 +1,6 @@
 import { Option, type Command } from 'commander';
 import { loadBacklogFromCatalog } from '../core/backlog/load.js';
-import { executeBacklog } from '../core/runner/execute.js';
+import { executeBacklog, rehydrateBacklogWorkflowRevisions } from '../core/runner/execute.js';
 import { validateBacklogSkills } from '../core/skills/index.js';
 import { resolveRuntimeConfig } from '../config/index.js';
 import { findResumablePipeline, getPipelineSnapshot } from '../db/repo.js';
@@ -59,7 +59,7 @@ export function registerResume(program: Command): void {
         );
       }
 
-      const backlog = loadBacklogFromCatalog(pipeline.repoId);
+      const backlog = rehydrateBacklogWorkflowRevisions(loadBacklogFromCatalog(pipeline.repoId), snapshot.workflowRevisions);
       validateBacklogSkills(backlog, pipeline.cwd);
       const concurrency = opts.concurrency
         ? Number(opts.concurrency)

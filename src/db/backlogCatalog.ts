@@ -522,6 +522,13 @@ function mergeFeaturePatch(current: Feature, patch: FeaturePatch): unknown {
   };
 }
 
+function isPermutation(current: readonly string[], candidate: readonly string[]): boolean {
+  return current.length === candidate.length
+    && new Set(current).size === current.length
+    && new Set(candidate).size === candidate.length
+    && candidate.every((stage) => current.includes(stage));
+}
+
 /**
  * Patches a single feature's `data_json` in place, re-validating through
  * `FeatureSchema` so an invalid patch throws instead of writing a corrupt
@@ -547,6 +554,13 @@ export function updateCatalogFeature(repoId: string, featureId: string, patch: F
       );
     }
     const current = FeatureSchema.parse(JSON.parse(row.data_json));
+    const reorderedStages = patch.workflow?.stages;
+    const isStagesOnlyPatch = reorderedStages !== undefined
+      && patch.workflow?.stepGuidance === undefined
+      && patch.workflow?.sessionPolicy === undefined;
+    if (isStagesOnlyPatch && !isPermutation(current.workflow.stages, reorderedStages)) {
+      throw new Error('A stages-only workflow patch must be a permutation of the saved stages.');
+    }
     const merged = FeatureSchema.parse(mergeFeaturePatch(current, patch));
 
     updateRow.run(

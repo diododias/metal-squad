@@ -111,6 +111,7 @@ describe('getDb migration — column checks', () => {
     pragmaPipelinesColumns = [
       { name: 'cwd' }, { name: 'plan_json' }, { name: 'done_json' },
       { name: 'pending_json' }, { name: 'active_json' }, { name: 'aborted_json' },
+      { name: 'workflow_snapshot_json' },
       { name: 'requested_abort_feature_id' }, { name: 'resume_count' }, { name: 'resume_summary' },
     ];
 

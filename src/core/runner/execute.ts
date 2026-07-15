@@ -45,6 +45,7 @@ import {
   updateRunTool,
   updateStageTransitionDecisionNextSessionId,
   type PipelineStatus,
+  type PipelineWorkflowRevisions,
   type StageRequestRow,
 } from '../../db/repo.js';
 import { getCatalogFeature } from '../../db/backlogCatalog.js';
@@ -88,6 +89,55 @@ export interface ExecuteOptions {
   autoAdvanceStages?: boolean;
   resumePipelineId?: number;
   resumeOverride?: ResumeOverride;
+}
+
+function captureWorkflowRevisions(features: Feature[]): PipelineWorkflowRevisions {
+  return Object.fromEntries(features.map((feature) => [feature.id, {
+    mode: feature.workflow.mode,
+    stages: [...feature.workflow.stages],
+    syncTasksToBacklog: feature.workflow.syncTasksToBacklog,
+    sessionPolicy: {
+      ...feature.workflow.sessionPolicy,
+      alwaysIsolatedStages: [...feature.workflow.sessionPolicy.alwaysIsolatedStages],
+    },
+    stepGuidance: Object.fromEntries(Object.entries(
+      Object.hasOwn(feature.workflow, 'stepGuidance') ? feature.workflow.stepGuidance : {},
+    ).map(([stage, guidance]) => [stage, {
+      ...guidance,
+      ...(guidance.skills ? { skills: [...guidance.skills] } : {}),
+    }])),
+  }]));
+}
+
+function applyWorkflowRevisions(features: Feature[], revisions: PipelineWorkflowRevisions | undefined): Feature[] {
+  if (!revisions || Object.keys(revisions).length === 0) return features;
+  return features.map((feature) => {
+    const revision = revisions[feature.id];
+    if (!revision) return feature;
+    return {
+      ...feature,
+      workflow: {
+        ...revision,
+        // Approval transitions are intentionally resolved from the current
+        // catalog, even when the structural workflow is frozen for resume.
+        approvals: feature.workflow.approvals,
+      },
+    };
+  });
+}
+
+export function rehydrateBacklogWorkflowRevisions<T extends Backlog>(
+  backlog: T,
+  revisions: PipelineWorkflowRevisions | undefined,
+): T {
+  if (!revisions || Object.keys(revisions).length === 0) return backlog;
+  return {
+    ...backlog,
+    epics: backlog.epics.map((epic) => ({
+      ...epic,
+      features: applyWorkflowRevisions(epic.features, revisions),
+    })),
+  };
 }
 
 export async function executeBacklog(
@@ -140,6 +190,7 @@ export async function executeBacklog(
     pending: resolvedPlan.map((feature) => feature.id),
     active: [] as string[],
     aborted: [] as string[],
+    workflowRevisions: captureWorkflowRevisions(resolvedPlan),
   };
 
   const pipelineId = opts.resumePipelineId
@@ -166,7 +217,10 @@ export async function executeBacklog(
     ...persistedSnapshot.active,
     ...persistedSnapshot.aborted,
   ]);
-  const ordered = resolvedPlan.filter((feature) => remainingIds.has(feature.id));
+  const ordered = applyWorkflowRevisions(
+    resolvedPlan.filter((feature) => remainingIds.has(feature.id)),
+    persistedSnapshot.workflowRevisions,
+  );
 
   const registry = createSkillRegistry();
   const detachPersistence = attachRunPersistence();

@@ -263,16 +263,39 @@ describe('backlogCatalog upsert/diff/load', () => {
       });
     });
 
-    it('deep-merges workflow so patching only stages preserves approvals', async () => {
+    it('deep-merges a stages-only reorder while preserving approvals', async () => {
       const { upsertBacklogCatalog, updateCatalogFeature } = await setup();
       upsertBacklogCatalog(makeBacklog(), 'repo-1');
 
       const updated = updateCatalogFeature('repo-1', 'feat-1', {
-        workflow: { stages: ['plan', 'implement'] },
+        workflow: { stages: ['plan', 'specify', 'tasks', 'implement', 'validate'] },
       });
-      expect(updated.workflow.stages).toEqual(['plan', 'implement']);
+      expect(updated.workflow.stages).toEqual(['plan', 'specify', 'tasks', 'implement', 'validate']);
       expect(updated.workflow.approvals).toEqual({ channel: 'telegram', autoAdvance: false });
       expect(updated.workflow.syncTasksToBacklog).toBe(true);
+    });
+
+    it('persists a complete reordered stages array without changing guidance or isolation', async () => {
+      const { db, upsertBacklogCatalog, updateCatalogFeature } = await setup();
+      const workflow = {
+        mode: 'staged' as const,
+        stages: ['specify', 'plan', 'implement'],
+        approvals: { channel: 'telegram' as const, autoAdvance: false },
+        syncTasksToBacklog: true,
+        sessionPolicy: { mode: 'isolated' as const, alwaysIsolatedStages: ['plan'] },
+        stepGuidance: { plan: { skills: ['planner'], prompt: 'Plan carefully.' } },
+      };
+      upsertBacklogCatalog(makeBacklog({ epics: [{ id: 'epic-1', title: 'Epic One', features: [{ ...makeBacklog().epics[0]!.features[0]!, workflow }] }] }), 'repo-1');
+
+      const updated = updateCatalogFeature('repo-1', 'feat-1', {
+        workflow: { stages: ['plan', 'specify', 'implement'] },
+      });
+      const stored = JSON.parse((db.prepare(`SELECT data_json FROM backlog_features WHERE feature_id = 'feat-1'`).get() as { data_json: string }).data_json) as { workflow: typeof workflow };
+
+      expect(updated.workflow.stages).toEqual(['plan', 'specify', 'implement']);
+      expect(updated.workflow.stepGuidance).toEqual(workflow.stepGuidance);
+      expect(updated.workflow.sessionPolicy).toEqual(workflow.sessionPolicy);
+      expect(stored.workflow).toEqual(updated.workflow);
     });
 
     it('deep-merges workflow.approvals so patching only autoAdvance preserves channel', async () => {
@@ -332,6 +355,35 @@ describe('backlogCatalog upsert/diff/load', () => {
       });
     });
 
+    it('persists one valid removal patch that clears only the removed stage references', async () => {
+      const { upsertBacklogCatalog, updateCatalogFeature } = await setup();
+      const workflow = {
+        mode: 'staged' as const,
+        stages: ['specify', 'implement', 'validate'],
+        approvals: { channel: 'telegram' as const, autoAdvance: false },
+        syncTasksToBacklog: true,
+        sessionPolicy: { mode: 'isolated' as const, alwaysIsolatedStages: ['implement', 'validate'] },
+        stepGuidance: {
+          specify: { prompt: 'Keep this.' },
+          implement: { prompt: 'Remove this.' },
+          validate: { prompt: 'Keep this too.' },
+        },
+      };
+      upsertBacklogCatalog(makeBacklog({ epics: [{ id: 'epic-1', title: 'Epic One', features: [{ ...makeBacklog().epics[0]!.features[0]!, workflow }] }] }), 'repo-1');
+
+      const updated = updateCatalogFeature('repo-1', 'feat-1', {
+        workflow: {
+          stages: ['specify', 'validate'],
+          stepGuidance: { specify: { prompt: 'Keep this.' }, validate: { prompt: 'Keep this too.' } },
+          sessionPolicy: { alwaysIsolatedStages: ['validate'] },
+        },
+      });
+
+      expect(updated.workflow.stages).toEqual(['specify', 'validate']);
+      expect(updated.workflow.stepGuidance).toEqual({ specify: { prompt: 'Keep this.' }, validate: { prompt: 'Keep this too.' } });
+      expect(updated.workflow.sessionPolicy).toEqual({ mode: 'isolated', alwaysIsolatedStages: ['validate'] });
+    });
+
     it('throws on an invalid patch and writes nothing', async () => {
       const { db, upsertBacklogCatalog, updateCatalogFeature } = await setup();
       upsertBacklogCatalog(makeBacklog(), 'repo-1');
@@ -359,9 +411,26 @@ describe('backlogCatalog upsert/diff/load', () => {
       upsertBacklogCatalog(makeBacklog({ epics: [{ id: 'epic-1', title: 'Epic One', features: [{ ...makeBacklog().epics[0]!.features[0]!, workflow }] }] }), 'repo-1');
       const before = db.prepare(`SELECT data_json, updated_at FROM backlog_features WHERE feature_id = 'feat-1'`).get();
 
-      expect(() => updateCatalogFeature('repo-1', 'feat-1', { workflow: { stages: ['plan'] } })).toThrow(/must exist/);
+      expect(() => updateCatalogFeature('repo-1', 'feat-1', { workflow: { stages: ['plan'] } })).toThrow(/permutation/);
 
       expect(db.prepare(`SELECT data_json, updated_at FROM backlog_features WHERE feature_id = 'feat-1'`).get()).toEqual(before);
+    });
+
+    it('rejects a non-permutation stages-only reorder without changing the catalog revision', async () => {
+      const { db, upsertBacklogCatalog, updateCatalogFeature } = await setup();
+      const workflow = {
+        mode: 'staged' as const,
+        stages: ['specify', 'plan', 'implement'],
+        approvals: { channel: 'telegram' as const, autoAdvance: false },
+        syncTasksToBacklog: true,
+        sessionPolicy: { mode: 'isolated' as const, alwaysIsolatedStages: [] },
+      };
+      upsertBacklogCatalog(makeBacklog({ epics: [{ id: 'epic-1', title: 'Epic One', features: [{ ...makeBacklog().epics[0]!.features[0]!, workflow }] }] }), 'repo-1');
+      const before = db.prepare(`SELECT data_json FROM backlog_features WHERE feature_id = 'feat-1'`).get();
+
+      expect(() => updateCatalogFeature('repo-1', 'feat-1', { workflow: { stages: ['plan', 'specify', 'plan'] } })).toThrow(/permutation/);
+
+      expect(db.prepare(`SELECT data_json FROM backlog_features WHERE feature_id = 'feat-1'`).get()).toEqual(before);
     });
 
     it('rejects unsupported tools atomically', async () => {

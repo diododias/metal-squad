@@ -627,7 +627,7 @@ describe('web server', () => {
     socket.close();
   });
 
-  it('acknowledges an accepted workflow patch to its initiating client before reconciling state', async () => {
+  it('acknowledges an accepted stages-only workflow reorder patch to its initiating client before reconciling state', async () => {
     const { createWebServer } = await import('../../src/web/server.js');
     mocks.updateCatalogFeature.mockReturnValue({ id: 'feat1' });
 
@@ -644,7 +644,7 @@ describe('web server', () => {
     socket.send(JSON.stringify({
       type: 'action:updateFeatureConfig',
       featureId: 'feat1',
-      patch: { workflow: { approvals: { channel: 'telegram' } } },
+      patch: { workflow: { stages: ['plan', 'specify', 'implement'] } },
     }));
 
     expect(await saveResult).toMatchObject({
@@ -652,7 +652,43 @@ describe('web server', () => {
     });
     await reconciledState;
     expect(mocks.updateCatalogFeature).toHaveBeenCalledWith('repo-1', 'feat1', {
-      workflow: { approvals: { channel: 'telegram' } },
+      workflow: { stages: ['plan', 'specify', 'implement'] },
+    });
+    socket.close();
+  });
+
+  it('forwards a workflow isolation cleanup patch through the narrow config action', async () => {
+    const { createWebServer } = await import('../../src/web/server.js');
+    mocks.updateCatalogFeature.mockReturnValue({ id: 'feat1' });
+
+    server = createWebServer({ host: '127.0.0.1', port: 0, auth: 'token', token: 'secret' });
+    await new Promise<void>((resolve) => server!.server.listen(0, '127.0.0.1', resolve));
+    const address = server!.server.address() as { port: number };
+    const socket = new WebSocket(`ws://127.0.0.1:${address.port}/ws`);
+    await waitForOpen(socket);
+    socket.send(JSON.stringify({ type: 'auth', token: 'secret' }));
+    await waitForSocketMessage(socket);
+
+    const saveResult = waitForMessageType(socket, 'featureConfig:saveResult');
+    socket.send(JSON.stringify({
+      type: 'action:updateFeatureConfig',
+      featureId: 'feat1',
+      patch: {
+        workflow: {
+          stages: ['specify', 'validate'],
+          stepGuidance: { validate: { prompt: 'Keep this.' } },
+          sessionPolicy: { alwaysIsolatedStages: ['validate'] },
+        },
+      },
+    }));
+
+    expect(await saveResult).toMatchObject({ payload: { featureId: 'feat1', ok: true } });
+    expect(mocks.updateCatalogFeature).toHaveBeenCalledWith('repo-1', 'feat1', {
+      workflow: {
+        stages: ['specify', 'validate'],
+        stepGuidance: { validate: { prompt: 'Keep this.' } },
+        sessionPolicy: { alwaysIsolatedStages: ['validate'] },
+      },
     });
     socket.close();
   });

@@ -117,6 +117,7 @@ export interface FeatureConfigPatch {
     syncTasksToBacklog?: boolean;
     approvals?: { channel?: string; autoAdvance?: boolean };
     stepGuidance?: Record<string, { skills?: string[]; prompt?: string }>;
+    sessionPolicy?: { alwaysIsolatedStages?: string[] };
   };
   retry?: { maxAttempts?: number; backoffMs?: number; onFail?: string };
 }

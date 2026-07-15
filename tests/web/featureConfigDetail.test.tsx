@@ -83,6 +83,38 @@ function workflowSaveButton(container: HTMLElement): HTMLButtonElement | undefin
   return Array.from(container.querySelectorAll('button')).find((button) => button.textContent === 'save workflow');
 }
 
+function stepControl(container: HTMLElement, id: string): HTMLInputElement {
+  const control = container.querySelector(`#${id}`);
+  if (!(control instanceof HTMLInputElement)) {
+    throw new Error(`Missing step control: ${id}`);
+  }
+  return control;
+}
+
+function addStepButton(container: HTMLElement): HTMLButtonElement | undefined {
+  return Array.from(container.querySelectorAll('button')).find((button) => button.textContent === 'add step');
+}
+
+function removeStepButton(container: HTMLElement, stage: string): HTMLButtonElement {
+  const control = container.querySelector(`button[aria-label="Remove ${stage}"]`);
+  if (!(control instanceof HTMLButtonElement)) {
+    throw new Error(`Missing remove control for step: ${stage}`);
+  }
+  return control;
+}
+
+function moveStepButton(container: HTMLElement, stage: string, direction: 'up' | 'down'): HTMLButtonElement {
+  const control = container.querySelector(`button[aria-label="Move ${stage} ${direction}"]`);
+  if (!(control instanceof HTMLButtonElement)) {
+    throw new Error(`Missing move-${direction} control for step: ${stage}`);
+  }
+  return control;
+}
+
+function stepOrderSaveButton(container: HTMLElement): HTMLButtonElement | undefined {
+  return Array.from(container.querySelectorAll('button')).find((button) => button.textContent === 'save step order');
+}
+
 afterEach(() => {
   act(() => {
     roots.forEach((root) => { root.unmount(); });
@@ -280,5 +312,175 @@ describe('FeatureConfigDetail workflow card', () => {
     act(() => { dispatchChange(workflowControl(view.container, 'workflow-mode'), 'single'); });
     act(() => { workflowSaveButton(view.container)?.click(); });
     expect(onSaveConfig).toHaveBeenCalledWith({ workflow: { mode: 'single' } });
+  });
+});
+
+describe('FeatureConfigDetail steps', () => {
+  it('previews adjacent reordering, disables boundary controls, and saves only a changed complete stages permutation', () => {
+    const onSaveConfig = vi.fn();
+    const feature = makeFeature({
+      workflow: {
+        ...makeFeature().workflow,
+        stages: ['specify', 'plan', 'implement'],
+      },
+    });
+    const view = mount();
+    view.rerender(feature, onSaveConfig);
+
+    expect(moveStepButton(view.container, 'specify', 'up').disabled).toBe(true);
+    expect(moveStepButton(view.container, 'implement', 'down').disabled).toBe(true);
+    expect(stepOrderSaveButton(view.container)).toBeUndefined();
+
+    act(() => { moveStepButton(view.container, 'plan', 'up').click(); });
+    expect(view.container.textContent).toContain('Proposed order: plan → specify → implement');
+    expect(onSaveConfig).not.toHaveBeenCalled();
+
+    act(() => { stepOrderSaveButton(view.container)?.click(); });
+    expect(onSaveConfig).toHaveBeenCalledWith({ workflow: { stages: ['plan', 'specify', 'implement'] } });
+    expect(moveStepButton(view.container, 'plan', 'up').disabled).toBe(true);
+
+    const accepted: FeatureConfigSaveResult = { type: 'featureConfig:saveResult', payload: { featureId: 'feat-1', ok: true } };
+    view.rerender(feature, onSaveConfig, accepted);
+    view.rerender(makeFeature({
+      workflow: { ...feature.workflow, stages: ['plan', 'specify', 'implement'] },
+    }), onSaveConfig, accepted);
+    expect(stepOrderSaveButton(view.container)).toBeUndefined();
+  });
+
+  it('retains a reordered draft and shows actionable feedback when saving fails', () => {
+    const onSaveConfig = vi.fn();
+    const feature = makeFeature({
+      workflow: {
+        ...makeFeature().workflow,
+        stages: ['specify', 'plan', 'implement'],
+      },
+    });
+    const view = mount();
+    view.rerender(feature, onSaveConfig);
+
+    act(() => { moveStepButton(view.container, 'plan', 'up').click(); });
+    act(() => { stepOrderSaveButton(view.container)?.click(); });
+
+    const rejected: FeatureConfigSaveResult = {
+      type: 'featureConfig:saveResult',
+      payload: { featureId: 'feat-1', ok: false, issues: [{ path: 'workflow.stages', message: 'Keep each step exactly once.' }] },
+    };
+    view.rerender(feature, onSaveConfig, rejected);
+
+    expect(view.container.textContent).toContain('Proposed order: plan → specify → implement');
+    expect(view.container.textContent).toContain('workflow.stages: Keep each step exactly once.');
+    expect(stepOrderSaveButton(view.container)).toBeDefined();
+  });
+
+  it('adds a step and optional guidance skill in one workflow patch', () => {
+    const onSaveConfig = vi.fn();
+    const feature = makeFeature();
+    const view = mount();
+    view.rerender(feature, onSaveConfig);
+
+    act(() => {
+      dispatchChange(stepControl(view.container, 'new-step-name'), ' review ');
+      dispatchChange(stepControl(view.container, 'new-step-guidance-skill'), ' review-skill ');
+      addStepButton(view.container)?.click();
+    });
+
+    expect(onSaveConfig).toHaveBeenCalledWith({
+      workflow: {
+        stages: ['specify', 'review'],
+        stepGuidance: { review: { skills: ['review-skill'] } },
+      },
+    });
+
+    view.rerender(makeFeature({
+      workflow: { ...feature.workflow, stages: ['specify', 'review'], stepGuidance: { review: { skills: ['review-skill'] } } },
+    }), onSaveConfig);
+    expect(Array.from(view.container.querySelectorAll('button')).some((button) => button.textContent === 'review')).toBe(true);
+  });
+
+  it('adds an unguided step without creating step guidance', () => {
+    const onSaveConfig = vi.fn();
+    const view = mount();
+    view.rerender(makeFeature(), onSaveConfig);
+
+    act(() => {
+      dispatchChange(stepControl(view.container, 'new-step-name'), 'verify');
+      addStepButton(view.container)?.click();
+    });
+
+    expect(onSaveConfig).toHaveBeenCalledWith({
+      workflow: { stages: ['specify', 'verify'], stepGuidance: {} },
+    });
+  });
+
+  it('rejects blank and duplicate step names with feedback', () => {
+    const onSaveConfig = vi.fn();
+    const view = mount();
+    view.rerender(makeFeature(), onSaveConfig);
+
+    act(() => {
+      dispatchChange(stepControl(view.container, 'new-step-name'), '   ');
+      addStepButton(view.container)?.click();
+    });
+    expect(view.container.textContent).toContain('Enter a step name.');
+
+    act(() => {
+      dispatchChange(stepControl(view.container, 'new-step-name'), 'specify');
+      addStepButton(view.container)?.click();
+    });
+    expect(view.container.textContent).toContain('Step "specify" already exists.');
+    expect(onSaveConfig).not.toHaveBeenCalled();
+  });
+
+  it('removes one stage with its guidance and isolation in one composed patch', () => {
+    const onSaveConfig = vi.fn();
+    const feature = makeFeature({
+      workflow: {
+        ...makeFeature().workflow,
+        stages: ['specify', 'implement', 'validate'],
+        stepGuidance: {
+          specify: { prompt: 'Keep this.' },
+          implement: { skills: ['implement-skill'], prompt: 'Remove this.' },
+          validate: { skills: ['validate-skill'] },
+        },
+        sessionPolicy: { mode: 'isolated', alwaysIsolatedStages: ['implement', 'validate'] },
+      },
+    });
+    const view = mount();
+    view.rerender(feature, onSaveConfig);
+
+    act(() => { removeStepButton(view.container, 'implement').click(); });
+
+    expect(onSaveConfig).toHaveBeenCalledWith({
+      workflow: {
+        stages: ['specify', 'validate'],
+        stepGuidance: {
+          specify: { prompt: 'Keep this.' },
+          validate: { skills: ['validate-skill'] },
+        },
+        sessionPolicy: { alwaysIsolatedStages: ['validate'] },
+      },
+    });
+
+    const accepted: FeatureConfigSaveResult = { type: 'featureConfig:saveResult', payload: { featureId: 'feat-1', ok: true } };
+    view.rerender(feature, onSaveConfig, accepted);
+    view.rerender(makeFeature({
+      workflow: {
+        ...feature.workflow,
+        stages: ['specify', 'validate'],
+        stepGuidance: { specify: { prompt: 'Keep this.' }, validate: { skills: ['validate-skill'] } },
+        sessionPolicy: { mode: 'isolated', alwaysIsolatedStages: ['validate'] },
+      },
+    }), onSaveConfig, accepted);
+    expect(view.container.textContent).toContain('Resolved skills (validate)');
+  });
+
+  it('disables the final step removal control without dispatching a patch', () => {
+    const onSaveConfig = vi.fn();
+    const view = mount();
+    view.rerender(makeFeature(), onSaveConfig);
+
+    expect(removeStepButton(view.container, 'specify').disabled).toBe(true);
+    expect(view.container.textContent).toContain('A workflow must keep at least one step.');
+    expect(onSaveConfig).not.toHaveBeenCalled();
   });
 });
