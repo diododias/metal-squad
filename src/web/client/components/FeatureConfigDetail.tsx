@@ -93,6 +93,10 @@ export function FeatureConfigDetail({ feature, backlogSettings, onSaveConfig, wo
   const [draftPrompt, setDraftPrompt] = useState('');
   const [draftSkills, setDraftSkills] = useState<string[]>([]);
   const [newSkill, setNewSkill] = useState('');
+  const [newStage, setNewStage] = useState('');
+  const [newStageSkill, setNewStageSkill] = useState('');
+  const [newStageIssue, setNewStageIssue] = useState<string | null>(null);
+  const [pendingAddedStage, setPendingAddedStage] = useState<string | null>(null);
   const [savedFlash, setSavedFlash] = useState(false);
   const [draftExecution, setDraftExecution] = useState<ExecutionDraft>(() => executionDraftFrom(feature));
   const [draftWorkflow, setDraftWorkflow] = useState<WorkflowDraft>(() => workflowDraftFrom(feature));
@@ -107,6 +111,12 @@ export function FeatureConfigDetail({ feature, backlogSettings, onSaveConfig, wo
     setDraftSkills(guidance?.skills ?? []);
     setNewSkill('');
   }, [feature.id, selectedStage, feature.workflow.stepGuidance]);
+
+  useEffect(() => {
+    if (!pendingAddedStage || !stages.includes(pendingAddedStage)) return;
+    setSelectedStage(pendingAddedStage);
+    setPendingAddedStage(null);
+  }, [pendingAddedStage, stages]);
 
   useEffect(() => {
     setDraftExecution({
@@ -156,6 +166,32 @@ export function FeatureConfigDetail({ feature, backlogSettings, onSaveConfig, wo
     const guidance = feature.workflow.stepGuidance[selectedStage];
     setDraftPrompt(guidance?.prompt ?? '');
     setDraftSkills(guidance?.skills ?? []);
+  }
+
+  function addStage(): void {
+    const stage = newStage.trim();
+    if (!stage) {
+      setNewStageIssue('Enter a step name.');
+      return;
+    }
+    if (stages.includes(stage)) {
+      setNewStageIssue(`Step "${stage}" already exists.`);
+      return;
+    }
+
+    const skill = newStageSkill.trim();
+    onSaveConfig({
+      workflow: {
+        stages: [...stages, stage],
+        stepGuidance: skill
+          ? { ...feature.workflow.stepGuidance, [stage]: { skills: [skill] } }
+          : feature.workflow.stepGuidance,
+      },
+    });
+    setNewStage('');
+    setNewStageSkill('');
+    setNewStageIssue(null);
+    setPendingAddedStage(stage);
   }
 
   const executionBaseline = executionDraftFrom(feature);
@@ -347,6 +383,25 @@ export function FeatureConfigDetail({ feature, backlogSettings, onSaveConfig, wo
       )}
 
       <ConfigCard title="Steps — prompt and skills per stage">
+        <SubHeading>Add step</SubHeading>
+        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 8 }}>
+          <input
+            id="new-step-name"
+            value={newStage}
+            onChange={(e) => { setNewStage(e.target.value); setNewStageIssue(null); }}
+            placeholder="step name…"
+            style={{ flex: 1, minWidth: 140, background: 'var(--bg-sunken)', border: '1px solid var(--border-dim)', borderRadius: 'var(--radius-sm)', color: 'var(--text-primary)', fontFamily: 'var(--font-mono)', fontSize: 'var(--text-xs)', padding: '6px 9px' }}
+          />
+          <input
+            id="new-step-guidance-skill"
+            value={newStageSkill}
+            onChange={(e) => { setNewStageSkill(e.target.value); }}
+            placeholder="guidance skill (optional)…"
+            style={{ flex: 1, minWidth: 180, background: 'var(--bg-sunken)', border: '1px solid var(--border-dim)', borderRadius: 'var(--radius-sm)', color: 'var(--text-primary)', fontFamily: 'var(--font-mono)', fontSize: 'var(--text-xs)', padding: '6px 9px' }}
+          />
+          <Button variant="neutral" size="sm" onClick={addStage}>add step</Button>
+        </div>
+        {newStageIssue && <div role="alert" style={{ color: 'var(--accent-warn)', fontSize: 'var(--text-xs)', marginBottom: 8 }}>{newStageIssue}</div>}
         <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 4 }}>
           {stages.map((s) => (
             <button

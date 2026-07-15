@@ -83,6 +83,18 @@ function workflowSaveButton(container: HTMLElement): HTMLButtonElement | undefin
   return Array.from(container.querySelectorAll('button')).find((button) => button.textContent === 'save workflow');
 }
 
+function stepControl(container: HTMLElement, id: string): HTMLInputElement {
+  const control = container.querySelector(`#${id}`);
+  if (!(control instanceof HTMLInputElement)) {
+    throw new Error(`Missing step control: ${id}`);
+  }
+  return control;
+}
+
+function addStepButton(container: HTMLElement): HTMLButtonElement | undefined {
+  return Array.from(container.querySelectorAll('button')).find((button) => button.textContent === 'add step');
+}
+
 afterEach(() => {
   act(() => {
     roots.forEach((root) => { root.unmount(); });
@@ -280,5 +292,66 @@ describe('FeatureConfigDetail workflow card', () => {
     act(() => { dispatchChange(workflowControl(view.container, 'workflow-mode'), 'single'); });
     act(() => { workflowSaveButton(view.container)?.click(); });
     expect(onSaveConfig).toHaveBeenCalledWith({ workflow: { mode: 'single' } });
+  });
+});
+
+describe('FeatureConfigDetail steps', () => {
+  it('adds a step and optional guidance skill in one workflow patch', () => {
+    const onSaveConfig = vi.fn();
+    const feature = makeFeature();
+    const view = mount();
+    view.rerender(feature, onSaveConfig);
+
+    act(() => {
+      dispatchChange(stepControl(view.container, 'new-step-name'), ' review ');
+      dispatchChange(stepControl(view.container, 'new-step-guidance-skill'), ' review-skill ');
+      addStepButton(view.container)?.click();
+    });
+
+    expect(onSaveConfig).toHaveBeenCalledWith({
+      workflow: {
+        stages: ['specify', 'review'],
+        stepGuidance: { review: { skills: ['review-skill'] } },
+      },
+    });
+
+    view.rerender(makeFeature({
+      workflow: { ...feature.workflow, stages: ['specify', 'review'], stepGuidance: { review: { skills: ['review-skill'] } } },
+    }), onSaveConfig);
+    expect(Array.from(view.container.querySelectorAll('button')).some((button) => button.textContent === 'review')).toBe(true);
+  });
+
+  it('adds an unguided step without creating step guidance', () => {
+    const onSaveConfig = vi.fn();
+    const view = mount();
+    view.rerender(makeFeature(), onSaveConfig);
+
+    act(() => {
+      dispatchChange(stepControl(view.container, 'new-step-name'), 'verify');
+      addStepButton(view.container)?.click();
+    });
+
+    expect(onSaveConfig).toHaveBeenCalledWith({
+      workflow: { stages: ['specify', 'verify'], stepGuidance: {} },
+    });
+  });
+
+  it('rejects blank and duplicate step names with feedback', () => {
+    const onSaveConfig = vi.fn();
+    const view = mount();
+    view.rerender(makeFeature(), onSaveConfig);
+
+    act(() => {
+      dispatchChange(stepControl(view.container, 'new-step-name'), '   ');
+      addStepButton(view.container)?.click();
+    });
+    expect(view.container.textContent).toContain('Enter a step name.');
+
+    act(() => {
+      dispatchChange(stepControl(view.container, 'new-step-name'), 'specify');
+      addStepButton(view.container)?.click();
+    });
+    expect(view.container.textContent).toContain('Step "specify" already exists.');
+    expect(onSaveConfig).not.toHaveBeenCalled();
   });
 });
