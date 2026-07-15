@@ -7,8 +7,6 @@ import { PageHeader } from '../PageHeader.js';
 import type { MsqWebState } from '../../types.js';
 import type { RunSummary } from '../../../db/repo.js';
 
-const WORKFLOW_STAGES = ['specify', 'plan', 'tasks', 'implement', 'validate'];
-
 export interface BoardPageProps {
   state: MsqWebState;
   isMobile: boolean;
@@ -42,7 +40,6 @@ interface Column {
 export function BoardPage({ state, isMobile, onOpenRun, onOpenBacklogItem }: BoardPageProps): React.JSX.Element {
   const [query, setQuery] = useState('');
   const [toolFilter, setToolFilter] = useState('all');
-  const [viewMode, setViewMode] = useState<'status' | 'workflow'>('status');
 
   const q = query.trim().toLowerCase();
   const matches = (title: string | null | undefined, id: string): boolean =>
@@ -53,26 +50,11 @@ export function BoardPage({ state, isMobile, onOpenRun, onOpenBacklogItem }: Boa
 
   const todo = state.pendingFeatures.filter((f) => matches(f.title, f.id) && (toolFilter === 'all' || f.tool === toolFilter));
 
-  let columns: Column[];
-  if (viewMode === 'status') {
-    columns = [
-      { key: 'progress', label: 'IN PROGRESS / BLOCKED', items: state.runs.filter((r) => (r.status === 'running' || r.status === 'blocked') && matchesRun(r)), empty: 'No active runs' },
-      { key: 'done', label: 'DONE', items: state.runs.filter((r) => r.status === 'done' && matchesRun(r)), empty: 'No completed runs' },
-      { key: 'failed', label: 'FALHA / CANCELED', items: state.runs.filter((r) => (r.status === 'failed' || r.status === 'aborted') && matchesRun(r)), empty: 'No failed runs' },
-    ];
-  } else {
-    const active = state.runs.filter((r) => r.status !== 'done' && matchesRun(r));
-    const done = state.runs.filter((r) => r.status === 'done' && matchesRun(r));
-    columns = [
-      ...WORKFLOW_STAGES.map((stage) => ({
-        key: stage,
-        label: stage.toUpperCase(),
-        items: active.filter((r) => (r.stage ?? 'implement') === stage),
-        empty: 'No runs at this stage',
-      })),
-      { key: 'done', label: 'DONE', items: done, empty: 'No completed runs' },
-    ];
-  }
+  const columns: Column[] = [
+    { key: 'progress', label: 'IN PROGRESS / BLOCKED', items: state.runs.filter((r) => (r.status === 'running' || r.status === 'blocked') && matchesRun(r)), empty: 'No active runs' },
+    { key: 'done', label: 'DONE', items: state.runs.filter((r) => r.status === 'done' && matchesRun(r)), empty: 'No completed runs' },
+    { key: 'failed', label: 'FALHA / CANCELED', items: state.runs.filter((r) => (r.status === 'failed' || r.status === 'aborted') && matchesRun(r)), empty: 'No failed runs' },
+  ];
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
@@ -114,26 +96,6 @@ export function BoardPage({ state, isMobile, onOpenRun, onOpenBacklogItem }: Boa
               <option value="codex">codex</option>
               <option value="opencode">opencode</option>
             </select>
-            <div style={{ display: 'flex', border: '1px solid var(--border-dim)', borderRadius: 'var(--radius-sm)', overflow: 'hidden', marginLeft: 4 }}>
-              {(['status', 'workflow'] as const).map((opt) => (
-                <button
-                  key={opt}
-                  onClick={() => { setViewMode(opt); }}
-                  style={{
-                    fontFamily: 'var(--font-mono)',
-                    fontSize: 'var(--text-xs)',
-                    padding: '7px 12px',
-                    border: 'none',
-                    cursor: 'pointer',
-                    background: viewMode === opt ? 'var(--accent-info-10)' : 'transparent',
-                    color: viewMode === opt ? 'var(--accent-info)' : 'var(--text-dim)',
-                    fontWeight: viewMode === opt ? 600 : 400,
-                  }}
-                >
-                  {opt === 'status' ? 'by status' : 'by workflow stage'}
-                </button>
-              ))}
-            </div>
           </div>
         }
       />
