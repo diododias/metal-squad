@@ -854,7 +854,7 @@ describe('executeBacklog failure persistence', () => {
     expect(mockFinishPipeline).toHaveBeenCalledWith(9, 'done');
   });
 
-  it('rehydrates a stored structural workflow revision while retaining live approvals', async () => {
+  it('rehydrates the pre-save workflow order while retaining live approvals after a later reorder', async () => {
     const backlog: Backlog = {
       version: 2,
       repo: 'repo',
@@ -865,7 +865,7 @@ describe('executeBacklog failure persistence', () => {
         features: [{
           id: 'feat-27', title: 'Feature', spec: 'spec', tasks: [], tool: 'codex', effort: 'medium', dependsOn: [],
           workflow: {
-            mode: 'staged', stages: ['specify', 'validate'], approvals: { channel: 'telegram', autoAdvance: true },
+            mode: 'staged', stages: ['plan', 'specify', 'implement'], approvals: { channel: 'telegram', autoAdvance: true },
             syncTasksToBacklog: false, sessionPolicy: { mode: 'adaptive', alwaysIsolatedStages: [] },
           },
         }],

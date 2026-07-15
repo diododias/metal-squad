@@ -51,6 +51,10 @@ function sameWorkflowDraft(left: WorkflowDraft, right: WorkflowDraft): boolean {
     && left.autoAdvance === right.autoAdvance;
 }
 
+function sameStageOrder(left: readonly string[], right: readonly string[]): boolean {
+  return left.length === right.length && left.every((stage, index) => stage === right[index]);
+}
+
 function ConfigCard({ title, children }: { title: string; children: React.ReactNode }): React.JSX.Element {
   return (
     <div style={{ background: 'var(--bg-panel)', border: '1px solid var(--border-dim)', borderRadius: 'var(--radius-md)', padding: 14 }}>
@@ -96,9 +100,13 @@ export function FeatureConfigDetail({ feature, backlogSettings, onSaveConfig, wo
   const [newStage, setNewStage] = useState('');
   const [newStageSkill, setNewStageSkill] = useState('');
   const [newStageIssue, setNewStageIssue] = useState<string | null>(null);
+  const [draftStages, setDraftStages] = useState<string[]>(() => [...stages]);
+  const [stageOrderBaseline, setStageOrderBaseline] = useState<string[]>(() => [...stages]);
   const [pendingAddedStage, setPendingAddedStage] = useState<string | null>(null);
   const [pendingRemovedStage, setPendingRemovedStage] = useState<{ stage: string; nextStage: string } | null>(null);
   const [awaitingRemovedStageRefresh, setAwaitingRemovedStageRefresh] = useState<{ stage: string; nextStage: string } | null>(null);
+  const [pendingStageOrder, setPendingStageOrder] = useState<string[] | null>(null);
+  const [awaitingStageOrderRefresh, setAwaitingStageOrderRefresh] = useState<string[] | null>(null);
   const [savedFlash, setSavedFlash] = useState(false);
   const [draftExecution, setDraftExecution] = useState<ExecutionDraft>(() => executionDraftFrom(feature));
   const [draftWorkflow, setDraftWorkflow] = useState<WorkflowDraft>(() => workflowDraftFrom(feature));
@@ -106,6 +114,20 @@ export function FeatureConfigDetail({ feature, backlogSettings, onSaveConfig, wo
   const [workflowSavePending, setWorkflowSavePending] = useState(false);
   const [awaitingWorkflowRefresh, setAwaitingWorkflowRefresh] = useState<WorkflowDraft | null>(null);
   const workflowResultAtSaveStart = useRef<FeatureConfigSaveResult | undefined>(undefined);
+  const stageOrderFeatureId = useRef(feature.id);
+
+  useEffect(() => {
+    if (stageOrderFeatureId.current === feature.id) return;
+    stageOrderFeatureId.current = feature.id;
+    setDraftStages([...stages]);
+    setStageOrderBaseline([...stages]);
+  }, [feature.id, stages]);
+
+  useEffect(() => {
+    if (!sameStageOrder(draftStages, stageOrderBaseline) || sameStageOrder(stageOrderBaseline, stages)) return;
+    setDraftStages([...stages]);
+    setStageOrderBaseline([...stages]);
+  }, [draftStages, stageOrderBaseline, stages]);
 
   useEffect(() => {
     const guidance = feature.workflow.stepGuidance[selectedStage];
@@ -140,15 +162,19 @@ export function FeatureConfigDetail({ feature, backlogSettings, onSaveConfig, wo
       if (pendingRemovedStage) {
         setAwaitingRemovedStageRefresh(pendingRemovedStage);
         setPendingRemovedStage(null);
+      } else if (pendingStageOrder) {
+        setAwaitingStageOrderRefresh(pendingStageOrder);
+        setPendingStageOrder(null);
       } else {
         setAwaitingWorkflowRefresh(draftWorkflow);
       }
     } else {
       setWorkflowIssues(workflowSaveResult.payload.issues ?? [{ message: 'The workflow was not saved. Correct the issue and retry.' }]);
       setPendingRemovedStage(null);
+      setPendingStageOrder(null);
     }
     setWorkflowSavePending(false);
-  }, [draftWorkflow, feature.id, pendingRemovedStage, workflowSavePending, workflowSaveResult]);
+  }, [draftWorkflow, feature.id, pendingRemovedStage, pendingStageOrder, workflowSavePending, workflowSaveResult]);
 
   useEffect(() => {
     if (!awaitingWorkflowRefresh || !sameWorkflowDraft(workflowDraftFrom(feature), awaitingWorkflowRefresh)) return;
@@ -164,6 +190,14 @@ export function FeatureConfigDetail({ feature, backlogSettings, onSaveConfig, wo
       : (stages[0] ?? 'specify'));
     setAwaitingRemovedStageRefresh(null);
   }, [awaitingRemovedStageRefresh, stages]);
+
+  useEffect(() => {
+    if (!awaitingStageOrderRefresh || !sameStageOrder(stages, awaitingStageOrderRefresh)) return;
+    setDraftStages([...stages]);
+    setStageOrderBaseline([...stages]);
+    setWorkflowIssues([]);
+    setAwaitingStageOrderRefresh(null);
+  }, [awaitingStageOrderRefresh, stages]);
 
   function saveGuidance(): void {
     onSaveConfig({
@@ -234,6 +268,33 @@ export function FeatureConfigDetail({ feature, backlogSettings, onSaveConfig, wo
         },
       },
     });
+  }
+
+  const hasStageOrderChanges = !sameStageOrder(draftStages, stageOrderBaseline);
+  const isStageOrderBusy = workflowSavePending || awaitingStageOrderRefresh !== null;
+
+  function moveStage(stage: string, direction: 'up' | 'down'): void {
+    if (isStageOrderBusy) return;
+    setDraftStages((current) => {
+      const index = current.indexOf(stage);
+      const targetIndex = direction === 'up' ? index - 1 : index + 1;
+      if (index < 0 || targetIndex < 0 || targetIndex >= current.length) return current;
+      const next = [...current];
+      const currentStage = next[index];
+      const targetStage = next[targetIndex];
+      if (currentStage === undefined || targetStage === undefined) return current;
+      [next[index], next[targetIndex]] = [targetStage, currentStage];
+      return next;
+    });
+  }
+
+  function saveStageOrder(): void {
+    if (!hasStageOrderChanges || isStageOrderBusy) return;
+    setWorkflowIssues([]);
+    workflowResultAtSaveStart.current = workflowSaveResult;
+    setPendingStageOrder(draftStages);
+    setWorkflowSavePending(true);
+    onSaveConfig({ workflow: { stages: draftStages } });
   }
 
   const executionBaseline = executionDraftFrom(feature);
@@ -445,7 +506,7 @@ export function FeatureConfigDetail({ feature, backlogSettings, onSaveConfig, wo
         </div>
         {newStageIssue && <div role="alert" style={{ color: 'var(--accent-warn)', fontSize: 'var(--text-xs)', marginBottom: 8 }}>{newStageIssue}</div>}
         <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 4 }}>
-          {stages.map((s) => (
+          {draftStages.map((s, index) => (
             <div key={s} style={{ display: 'flex', alignItems: 'center', border: `1px solid ${selectedStage === s ? 'var(--accent-info)' : 'var(--border-strong)'}`, borderRadius: 'var(--radius-pill)', background: selectedStage === s ? 'var(--accent-info-10)' : 'transparent' }}>
               <button
                 onClick={() => { setSelectedStage(s); }}
@@ -455,16 +516,40 @@ export function FeatureConfigDetail({ feature, backlogSettings, onSaveConfig, wo
               </button>
               <button
                 type="button"
+                aria-label={`Move ${s} up`}
+                disabled={index === 0 || isStageOrderBusy}
+                onClick={() => { moveStage(s, 'up'); }}
+                style={{ border: 0, borderLeft: '1px solid var(--border-dim)', padding: '4px 6px', background: 'transparent', color: 'var(--text-dim)', cursor: index === 0 || isStageOrderBusy ? 'not-allowed' : 'pointer' }}
+              >
+                ↑
+              </button>
+              <button
+                type="button"
+                aria-label={`Move ${s} down`}
+                disabled={index === draftStages.length - 1 || isStageOrderBusy}
+                onClick={() => { moveStage(s, 'down'); }}
+                style={{ border: 0, borderLeft: '1px solid var(--border-dim)', padding: '4px 6px', background: 'transparent', color: 'var(--text-dim)', cursor: index === draftStages.length - 1 || isStageOrderBusy ? 'not-allowed' : 'pointer' }}
+              >
+                ↓
+              </button>
+              <button
+                type="button"
                 aria-label={`Remove ${s}`}
-                disabled={stages.length <= 1 || workflowSavePending || awaitingRemovedStageRefresh !== null}
+                disabled={stages.length <= 1 || workflowSavePending || awaitingRemovedStageRefresh !== null || hasStageOrderChanges}
                 onClick={() => { removeStage(s); }}
-                style={{ border: 0, borderLeft: '1px solid var(--border-dim)', padding: '4px 8px', background: 'transparent', color: 'var(--text-dim)', cursor: stages.length <= 1 ? 'not-allowed' : 'pointer' }}
+                style={{ border: 0, borderLeft: '1px solid var(--border-dim)', padding: '4px 8px', background: 'transparent', color: 'var(--text-dim)', cursor: stages.length <= 1 || hasStageOrderChanges ? 'not-allowed' : 'pointer' }}
               >
                 ×
               </button>
             </div>
           ))}
         </div>
+        {hasStageOrderChanges && (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', marginBottom: 8 }}>
+            <span aria-live="polite" style={{ color: 'var(--text-dim)', fontSize: 'var(--text-xs)' }}>Proposed order: {draftStages.join(' → ')}</span>
+            <Button variant="primary" size="sm" onClick={saveStageOrder} disabled={isStageOrderBusy}>save step order</Button>
+          </div>
+        )}
         {stages.length <= 1 && <div style={{ color: 'var(--text-faint)', fontSize: 'var(--text-xs)', marginBottom: 8 }}>A workflow must keep at least one step.</div>}
 
         <SubHeading>Resolved skills ({selectedStage}) — global, via stageSkills</SubHeading>

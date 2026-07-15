@@ -103,6 +103,18 @@ function removeStepButton(container: HTMLElement, stage: string): HTMLButtonElem
   return control;
 }
 
+function moveStepButton(container: HTMLElement, stage: string, direction: 'up' | 'down'): HTMLButtonElement {
+  const control = container.querySelector(`button[aria-label="Move ${stage} ${direction}"]`);
+  if (!(control instanceof HTMLButtonElement)) {
+    throw new Error(`Missing move-${direction} control for step: ${stage}`);
+  }
+  return control;
+}
+
+function stepOrderSaveButton(container: HTMLElement): HTMLButtonElement | undefined {
+  return Array.from(container.querySelectorAll('button')).find((button) => button.textContent === 'save step order');
+}
+
 afterEach(() => {
   act(() => {
     roots.forEach((root) => { root.unmount(); });
@@ -304,6 +316,62 @@ describe('FeatureConfigDetail workflow card', () => {
 });
 
 describe('FeatureConfigDetail steps', () => {
+  it('previews adjacent reordering, disables boundary controls, and saves only a changed complete stages permutation', () => {
+    const onSaveConfig = vi.fn();
+    const feature = makeFeature({
+      workflow: {
+        ...makeFeature().workflow,
+        stages: ['specify', 'plan', 'implement'],
+      },
+    });
+    const view = mount();
+    view.rerender(feature, onSaveConfig);
+
+    expect(moveStepButton(view.container, 'specify', 'up').disabled).toBe(true);
+    expect(moveStepButton(view.container, 'implement', 'down').disabled).toBe(true);
+    expect(stepOrderSaveButton(view.container)).toBeUndefined();
+
+    act(() => { moveStepButton(view.container, 'plan', 'up').click(); });
+    expect(view.container.textContent).toContain('Proposed order: plan → specify → implement');
+    expect(onSaveConfig).not.toHaveBeenCalled();
+
+    act(() => { stepOrderSaveButton(view.container)?.click(); });
+    expect(onSaveConfig).toHaveBeenCalledWith({ workflow: { stages: ['plan', 'specify', 'implement'] } });
+    expect(moveStepButton(view.container, 'plan', 'up').disabled).toBe(true);
+
+    const accepted: FeatureConfigSaveResult = { type: 'featureConfig:saveResult', payload: { featureId: 'feat-1', ok: true } };
+    view.rerender(feature, onSaveConfig, accepted);
+    view.rerender(makeFeature({
+      workflow: { ...feature.workflow, stages: ['plan', 'specify', 'implement'] },
+    }), onSaveConfig, accepted);
+    expect(stepOrderSaveButton(view.container)).toBeUndefined();
+  });
+
+  it('retains a reordered draft and shows actionable feedback when saving fails', () => {
+    const onSaveConfig = vi.fn();
+    const feature = makeFeature({
+      workflow: {
+        ...makeFeature().workflow,
+        stages: ['specify', 'plan', 'implement'],
+      },
+    });
+    const view = mount();
+    view.rerender(feature, onSaveConfig);
+
+    act(() => { moveStepButton(view.container, 'plan', 'up').click(); });
+    act(() => { stepOrderSaveButton(view.container)?.click(); });
+
+    const rejected: FeatureConfigSaveResult = {
+      type: 'featureConfig:saveResult',
+      payload: { featureId: 'feat-1', ok: false, issues: [{ path: 'workflow.stages', message: 'Keep each step exactly once.' }] },
+    };
+    view.rerender(feature, onSaveConfig, rejected);
+
+    expect(view.container.textContent).toContain('Proposed order: plan → specify → implement');
+    expect(view.container.textContent).toContain('workflow.stages: Keep each step exactly once.');
+    expect(stepOrderSaveButton(view.container)).toBeDefined();
+  });
+
   it('adds a step and optional guidance skill in one workflow patch', () => {
     const onSaveConfig = vi.fn();
     const feature = makeFeature();

@@ -627,7 +627,7 @@ describe('web server', () => {
     socket.close();
   });
 
-  it('acknowledges an accepted workflow patch to its initiating client before reconciling state', async () => {
+  it('acknowledges an accepted stages-only workflow reorder patch to its initiating client before reconciling state', async () => {
     const { createWebServer } = await import('../../src/web/server.js');
     mocks.updateCatalogFeature.mockReturnValue({ id: 'feat1' });
 
@@ -644,7 +644,7 @@ describe('web server', () => {
     socket.send(JSON.stringify({
       type: 'action:updateFeatureConfig',
       featureId: 'feat1',
-      patch: { workflow: { approvals: { channel: 'telegram' } } },
+      patch: { workflow: { stages: ['plan', 'specify', 'implement'] } },
     }));
 
     expect(await saveResult).toMatchObject({
@@ -652,7 +652,7 @@ describe('web server', () => {
     });
     await reconciledState;
     expect(mocks.updateCatalogFeature).toHaveBeenCalledWith('repo-1', 'feat1', {
-      workflow: { approvals: { channel: 'telegram' } },
+      workflow: { stages: ['plan', 'specify', 'implement'] },
     });
     socket.close();
   });
