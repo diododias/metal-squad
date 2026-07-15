@@ -2,7 +2,7 @@ version: 2
 repo: metal-squad
 defaults:
   tool: codex
-  model: gpt-5.6-luna
+  model: gpt-5.6-terra
   effort: high
   skills: []
   stageSkills:
@@ -16,6 +16,6 @@ defaults:
       - speckit-implement
       - dev-flow
 epics:
-  - id: v1-foundation-quick-wins
-    title: V1 — Marco 1 (Fundação + Quick Wins)
+  - id: settings-m1-feature-editing-regression
+    title: Settings — M1 (Restaurar edição de Feature)
     features: []
