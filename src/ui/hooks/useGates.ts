@@ -19,6 +19,13 @@ export interface PendingApproval {
   repoId: string;
   prompt: string;
   createdAt: string;
+  // Only set when `kind === 'stage'`: the underlying stage_requests row kind
+  // ('input' = a genuine AI question with content, 'approval' = a stage-advance
+  // gate) and, for 'input' with discrete options, the option labels the AI
+  // presented — lets the web UI answer with real content instead of
+  // advance/hold/retry semantics.
+  requestKind?: 'approval' | 'input';
+  options?: string[];
 }
 
 export type ResolveApprovalFn = (approval: PendingApproval, decision: GateDecision | 'advance' | 'hold') => void;

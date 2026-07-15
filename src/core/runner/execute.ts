@@ -918,6 +918,22 @@ async function executeStagedFeature(
       );
       const response = await waitForStageRequestResponse(requestId, config.workflow.pollIntervalMs);
       stageInputs.set(stage, [...(stageInputs.get(stage) ?? []), response]);
+      // Reuse the same resume-vs-new-session policy as a normal stage
+      // transition instead of always forcing a fresh session — a needs_input
+      // retry is answering the same stage, not moving to a new one, so
+      // discarding `res.session` here would burn tokens re-deriving context
+      // the adapter already paid for just to receive the human's answer.
+      const retryPlan = decideStageTransition({
+        policy: sessionPolicy,
+        telemetry: getRunContextTelemetry(runId),
+        nextStage: stage,
+        expectedTool: resolvePrimaryTool(
+          feature,
+          opts.resumeOverride?.featureId === feature.id ? opts.resumeOverride : undefined,
+        ),
+        previousSession: res.session,
+      });
+      nextStageSession = retryPlan.session.mode === 'resume' ? retryPlan.session : undefined;
       index -= 1;
       continue;
     }

@@ -1074,6 +1074,80 @@ describe('executeBacklog failure persistence', () => {
     );
   });
 
+  it('resumes the previous adapter session when retrying a stage after needs_input is answered', async () => {
+    const backlog: Backlog = {
+      version: 2,
+      repo: 'repo',
+      defaults: { tool: 'codex', effort: 'medium', skills: ['implement'], stageSkills: {} },
+      epics: [
+        {
+          id: 'epic-1',
+          title: 'Epic',
+          features: [
+            {
+              id: 'feat-27',
+              title: 'Feature',
+              spec: 'spec',
+              tasks: [],
+              tool: 'codex',
+              effort: 'medium',
+              dependsOn: [],
+              workflow: {
+                mode: 'staged',
+                stages: ['specify'],
+                approvals: { channel: 'telegram', autoAdvance: false },
+                syncTasksToBacklog: false,
+                sessionPolicy: { mode: 'adaptive', alwaysIsolatedStages: [] },
+              },
+            },
+          ],
+        },
+      ],
+    };
+
+    mockRunFeature
+      .mockResolvedValueOnce({
+        ok: true,
+        summary: 'MSQ_INPUT_REQUIRED: Qual o nome da feature?',
+        control: { type: 'needs_input', prompt: 'Qual o nome da feature?' },
+        session: {
+          tool: 'codex',
+          sessionId: 'thread_q',
+          capturedFromRunId: 7,
+          capturedAt: '2026-07-11T11:00:00Z',
+        },
+      })
+      .mockResolvedValueOnce({ ok: true, summary: 'spec ok' });
+    mockGetStageRequest.mockReturnValue({ status: 'resolved', response: 'Nome final' });
+    mockGetRunContextTelemetry.mockReturnValue({
+      runId: 7,
+      stage: 'specify',
+      contextWindowPercent: 20,
+      reliable: true,
+    });
+
+    const { executeBacklog } = await import('../../src/core/runner/execute.js');
+
+    await expect(
+      executeBacklog(backlog, { cwd: '/repo', concurrency: 1 }),
+    ).resolves.toBeUndefined();
+
+    expect(mockRunFeature.mock.calls[1]?.[2]).toEqual({
+      cwd: '/repo',
+      runId: 7,
+      signal: expect.any(AbortSignal),
+      session: {
+        mode: 'resume',
+        handle: {
+          tool: 'codex',
+          sessionId: 'thread_q',
+          capturedFromRunId: 7,
+          capturedAt: '2026-07-11T11:00:00Z',
+        },
+      },
+    });
+  });
+
   it('resumes a staged workflow from the next stage after an approved checkpoint', async () => {
     const backlog: Backlog = {
       version: 2,

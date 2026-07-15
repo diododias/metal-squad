@@ -4,6 +4,7 @@ import { MetricCard } from '../components/data/MetricCard.js';
 import { WorkflowStepper } from '../components/navigation/WorkflowStepper.js';
 import { Tabs } from '../components/navigation/Tabs.js';
 import { ApprovalBanner } from '../components/feedback/ApprovalBanner.js';
+import { QuestionBanner } from '../components/feedback/QuestionBanner.js';
 import { AgentTranscript, type TranscriptEntry } from '../components/transcript/AgentTranscript.js';
 import { ToolCallGroup } from '../components/transcript/ToolCallGroup.js';
 import { RunStatusIndicator } from '../components/status/RunStatusIndicator.js';
@@ -131,6 +132,11 @@ export function RunDetailPage({
       const decision = response === 'advance' ? 'approved' : response === 'retry' ? 'retried' : 'skipped';
       send({ type: 'action:resolveGate', gateId: run.gateId, decision });
     }
+  }
+
+  function resolveQuestion(response: string): void {
+    if (run?.pendingStageRequestId == null) return;
+    send({ type: 'action:resolveStageRequest', requestId: run.pendingStageRequestId, response });
   }
 
   function saveConfig(patch: FeatureConfigPatch): void {
@@ -287,7 +293,11 @@ export function RunDetailPage({
       <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0, padding: 20 }}>
         {pendingPrompt && (
           <div style={{ marginBottom: 16 }}>
-            <ApprovalBanner prompt={pendingPrompt} onAdvance={() => { resolveApproval('advance'); }} onHold={() => { resolveApproval('hold'); }} onRetry={() => { resolveApproval('retry'); }} />
+            {run.pendingStageRequestKind === 'input' ? (
+              <QuestionBanner prompt={pendingPrompt} options={run.pendingStageRequestOptions ?? undefined} onAnswer={resolveQuestion} />
+            ) : (
+              <ApprovalBanner prompt={pendingPrompt} onAdvance={() => { resolveApproval('advance'); }} onHold={() => { resolveApproval('hold'); }} onRetry={() => { resolveApproval('retry'); }} />
+            )}
           </div>
         )}
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(120px, 1fr))', gap: 8, marginBottom: 16 }}>
