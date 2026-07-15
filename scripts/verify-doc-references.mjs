@@ -14,7 +14,7 @@ const checks = [
     ],
   },
   {
-    path: 'docs/ROADMAP.md',
+    path: 'docs/epics/epic - one/ROADMAP.md',
     forbidden: [
       '/Users/luizdiodo/Library/Mobile Documents/iCloud~md~obsidian/Documents/default/metal-squad/project/docs/ROADMAP.md',
       '/Users/luizdiodo/Library/Mobile Documents/iCloud~md~obsidian/Documents/default/metal-squad/project/docs/HISTORICO.md',
