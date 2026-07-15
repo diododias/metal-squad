@@ -7,11 +7,12 @@ import { msqEventBus } from '../events/index.js';
 import { parseControlSignal } from './control.js';
 import { resolveRuntimeConfig } from '../../config/index.js';
 
-// Sem flag nativa de "effort": mapeia para o tier de modelo.
-const EFFORT_MODEL: Record<Effort, string> = {
-  low: 'haiku',
-  medium: 'sonnet',
-  high: 'opus',
+// Sem flag nativa de "effort": mapeia para orcamento de thinking tokens.
+// TODO(SET-29): migra para o registro de tools.
+const THINKING_BUDGET: Record<Effort, number> = {
+  low: 4_000,
+  medium: 10_000,
+  high: 24_000,
 };
 
 type ContentBlock =
@@ -39,8 +40,8 @@ interface StreamJsonEvent {
 export const claudeAdapter: ToolAdapter = {
   tool: 'claude',
 
-  effortFlag(effort: Effort): string[] {
-    return ['--model', EFFORT_MODEL[effort]];
+  effortFlag(_effort: Effort): string[] {
+    return [];
   },
 
   isAvailable(): boolean {
@@ -53,7 +54,8 @@ export const claudeAdapter: ToolAdapter = {
   },
 
   async runFeature(feature: Feature, prompt: string, opts: RunFeatureOptions): Promise<RunResult> {
-    const model = feature.model ? ['--model', feature.model] : this.effortFlag(feature.effort);
+    const model = feature.model ? ['--model', feature.model] : [];
+    const maxThinkingTokens = feature.thinking === 'on' ? THINKING_BUDGET[feature.effort] : 0;
     const assignedSessionId = opts.session?.mode === 'resume'
       ? opts.session.handle?.sessionId ?? null
       : randomUUID();
@@ -85,6 +87,7 @@ export const claudeAdapter: ToolAdapter = {
     try {
       ({ code, stdout, stderr } = await runCli('claude', args, {
         cwd: opts.cwd,
+        env: { MAX_THINKING_TOKENS: String(maxThinkingTokens) },
         idleThresholdMs: resolveRuntimeConfig(opts.cwd).idleThresholdMs,
         runId: opts.runId,
         featureId: feature.id,

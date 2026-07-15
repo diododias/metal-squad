@@ -46,12 +46,12 @@ describe('adapter registry', () => {
 });
 
 describe('claude adapter', () => {
-  it('maps effort tiers to models', async () => {
+  it('keeps effortFlag empty since effort no longer selects a model tier', async () => {
     const { claudeAdapter } = await import('../../src/core/adapters/claude.js');
 
-    expect(claudeAdapter.effortFlag('low')).toEqual(['--model', 'haiku']);
-    expect(claudeAdapter.effortFlag('medium')).toEqual(['--model', 'sonnet']);
-    expect(claudeAdapter.effortFlag('high')).toEqual(['--model', 'opus']);
+    expect(claudeAdapter.effortFlag('low')).toEqual([]);
+    expect(claudeAdapter.effortFlag('medium')).toEqual([]);
+    expect(claudeAdapter.effortFlag('high')).toEqual([]);
   });
 
   it('returns failed result when cli exits with non-zero code', async () => {
@@ -95,6 +95,7 @@ describe('claude adapter', () => {
           title: 'Feature',
           tool: 'claude',
           effort: 'medium',
+          thinking: 'off',
           model: 'custom',
           dependsOn: [],
           tasks: [],
@@ -116,6 +117,7 @@ describe('claude adapter', () => {
       expect.arrayContaining(['--print', '--output-format', 'stream-json', '--verbose', '--dangerously-skip-permissions', '--model', 'custom', '--', 'PROMPT']),
       expect.objectContaining({
         cwd: '/repo',
+        env: { MAX_THINKING_TOKENS: '0' },
         idleThresholdMs: 30_000,
         onStatus: expect.any(Function),
         onStdoutLine: expect.any(Function),
@@ -132,6 +134,42 @@ describe('claude adapter', () => {
       output: 3,
       total: 5,
     });
+  });
+
+  it('coexists model, effort and thinking=on in the spawn', async () => {
+    const resultLine = JSON.stringify({
+      type: 'result',
+      subtype: 'success',
+      result: 'done',
+      usage: { input_tokens: 2, output_tokens: 3 },
+    });
+    mockRunCli.mockResolvedValue({
+      code: 0,
+      stdout: resultLine,
+      stderr: '',
+    });
+    const { claudeAdapter } = await import('../../src/core/adapters/claude.js');
+
+    await claudeAdapter.runFeature(
+      {
+        id: 'feat-1',
+        title: 'Feature',
+        tool: 'claude',
+        effort: 'high',
+        thinking: 'on',
+        model: 'custom',
+        dependsOn: [],
+        tasks: [],
+      },
+      'PROMPT',
+      { cwd: '/repo', runId: 4 },
+    );
+
+    expect(mockRunCli).toHaveBeenCalledWith(
+      'claude',
+      expect.arrayContaining(['--model', 'custom']),
+      expect.objectContaining({ env: { MAX_THINKING_TOKENS: '24000' } }),
+    );
   });
 
   it('handles malformed JSON and max-turn errors', async () => {
