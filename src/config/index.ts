@@ -108,9 +108,9 @@ const ToolRegistryEntrySchema = z.object({
   baseArgs: z.array(z.string()).default([]),
   env: z.record(z.string(), z.string()).default({}),
   versionCheck: z.array(z.string()).min(1).default(['--version']),
-  capabilities: ToolCapabilitiesConfig,
-  thinkingBudget: ThinkingBudgetConfig,
-  minTimeoutMs: z.number().int().nonnegative(),
+  capabilities: ToolCapabilitiesConfig.optional(),
+  thinkingBudget: ThinkingBudgetConfig.optional(),
+  minTimeoutMs: z.number().int().nonnegative().optional(),
 }).strict();
 
 export const DEFAULT_TOOL_REGISTRY: z.input<typeof ToolRegistryEntrySchema>[] = [

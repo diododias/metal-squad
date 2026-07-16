@@ -1,7 +1,6 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { mergeExecutionDefaults, resolveConfigSnapshot, type ResolvedConfigSources, type ResolvedExecutionDefaults } from '../config/index.js';
-import { getAdapter } from '../core/adapters/index.js';
 import type { ToolCapabilities } from '../core/adapters/types.js';
 import { loadBacklogFromCatalog } from '../core/backlog/load.js';
 import { resolveRepo } from '../core/repo.js';
@@ -63,9 +62,9 @@ export interface BacklogSettings {
 }
 
 const DEFAULT_TOOL_CAPABILITIES: Record<string, ToolCapabilities> = {
-  claude: getAdapter('claude').capabilities ?? { model: true, effort: true, thinking: true },
-  codex: getAdapter('codex').capabilities ?? { model: true, effort: true, thinking: true },
-  opencode: getAdapter('opencode').capabilities ?? { model: true, effort: true, thinking: true },
+  claude: { model: true, effort: true, thinking: true },
+  codex: { model: true, effort: true, thinking: false },
+  opencode: { model: true, effort: false, thinking: false },
 };
 
 const DEFAULT_BACKLOG_SETTINGS: BacklogSettings = {

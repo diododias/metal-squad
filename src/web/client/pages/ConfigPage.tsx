@@ -318,8 +318,17 @@ function listFromCsv(value: string): string[] {
   return value.split(',').map((item) => item.trim()).filter(Boolean);
 }
 
+type ToolDraft = ToolRegistryEntry & {
+  capabilities: { model: boolean; effort: boolean; thinking: boolean };
+  thinkingBudget: { low: number; medium: number; high: number };
+};
+
 function ToolEditor({ tool, idReadOnly = false, onSave, onCancel }: { tool: ToolRegistryEntry; idReadOnly?: boolean; onSave: (tool: ToolRegistryEntry) => void; onCancel: () => void }): React.JSX.Element {
-  const [draft, setDraft] = useState<ToolRegistryEntry>(tool);
+  const [draft, setDraft] = useState<ToolDraft>({
+    ...tool,
+    capabilities: tool.capabilities ?? { model: true, effort: true, thinking: true },
+    thinkingBudget: tool.thinkingBudget ?? { low: 0, medium: 0, high: 0 },
+  });
   const [baseArgs, setBaseArgs] = useState(tool.baseArgs.join(', '));
   const [versionCheck, setVersionCheck] = useState(tool.versionCheck.join(', '));
   const [env, setEnv] = useState(JSON.stringify(tool.env));

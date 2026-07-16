@@ -7,14 +7,6 @@ import { msqEventBus } from '../events/index.js';
 import { parseControlSignal } from './control.js';
 import { resolveRuntimeConfig } from '../../config/index.js';
 
-// Sem flag nativa de "effort": mapeia para orcamento de thinking tokens.
-// TODO(SET-29): migra para o registro de tools.
-const THINKING_BUDGET: Record<Effort, number> = {
-  low: 4_000,
-  medium: 10_000,
-  high: 24_000,
-};
-
 type ContentBlock =
   | { type: 'text'; text: string }
   | { type: 'thinking'; thinking: string }
@@ -40,12 +32,6 @@ interface StreamJsonEvent {
 export const claudeAdapter: ToolAdapter = {
   tool: 'claude',
 
-  capabilities: {
-    model: true,
-    effort: true,
-    thinking: true,
-  },
-
   effortFlag(_effort: Effort): string[] {
     return [];
   },
@@ -63,7 +49,7 @@ export const claudeAdapter: ToolAdapter = {
   async runFeature(feature: Feature, prompt: string, opts: RunFeatureOptions): Promise<RunResult> {
     const invocation = resolveToolInvocation(feature.tool, opts.cwd);
     const model = feature.model ? ['--model', feature.model] : [];
-    const maxThinkingTokens = feature.thinking === 'on' ? THINKING_BUDGET[feature.effort] : 0;
+    const maxThinkingTokens = feature.thinking === 'on' ? invocation.thinkingBudget[feature.effort] : 0;
     const assignedSessionId = opts.session?.mode === 'resume'
       ? opts.session.handle?.sessionId ?? null
       : randomUUID();
