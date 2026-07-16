@@ -44,9 +44,17 @@ export interface ThemeSnapshot {
 
 export interface WebNotificationChannel {
   type: NotificationChannelConfig['type'];
+  /** Whether the channel has the credential material it needs, never the material itself. */
+  configured: boolean;
+}
+
+export interface RuntimeConfigWritability {
+  dbWritable: boolean;
+  configWritable: boolean;
 }
 
 export type WebRuntimeConfig = Omit<Config, 'notifications' | 'telegramChatId'> & {
+  writability: RuntimeConfigWritability;
   notifications: {
     channels: WebNotificationChannel[];
     events: Config['notifications']['events'];
