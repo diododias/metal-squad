@@ -1,11 +1,14 @@
 import { readFileSync, existsSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { resolve, dirname, isAbsolute } from 'node:path';
 import { parse, stringify } from 'yaml';
-import { loadRepoConfig, mergeStageSkills } from '../../config/index.js';
-import { DEFAULT_PROJECT_TEMPLATE } from '../workflow/stageSkills.js';
+import { resolveRuntimeConfig } from '../../config/index.js';
 import {
   BacklogInputSchema,
+  BacklogV2InputSchema,
   BacklogV2Schema,
+  BudgetSchema,
+  createRegisteredToolSchema,
+  DefaultsSchema,
   type BacklogV1Input,
   type BacklogV2,
   type BacklogV2Input,
@@ -16,74 +19,47 @@ import {
 import type { FeatureRegistrationResult } from './featureId.js';
 import { getCatalogMeta, listCatalogEpics, listCatalogFeatures, listOccupiedFeatureIds } from '../../db/backlogCatalog.js';
 import { registerBacklogFeatures } from './featureId.js';
+import { resolveRepo } from '../repo.js';
 
 export const BACKLOG_FILE = 'backlog.yaml';
 
 type RawYamlMap = Record<string, unknown>;
 
-function normalizeV1(backlog: BacklogV1Input, repoDefaults: ReturnType<typeof loadRepoConfig>['defaults'] = {}): BacklogV2Input {
-  const defaults: Defaults = {
-    tool: repoDefaults.tool ?? 'claude',
-    ...(repoDefaults.model ? { model: repoDefaults.model } : {}),
-    effort: repoDefaults.effort ?? 'medium',
-    thinking: repoDefaults.thinking ?? 'off',
-    skills: repoDefaults.skills ?? [],
-    stageSkills: mergeStageSkills(DEFAULT_PROJECT_TEMPLATE.stageSkills, repoDefaults.stageSkills),
-    workflow: {
-      mode: 'staged',
-      stages: [...DEFAULT_PROJECT_TEMPLATE.stages],
-      approvals: { channel: 'telegram', autoAdvance: false },
-      syncTasksToBacklog: true,
-      sessionPolicy: { mode: 'isolated', alwaysIsolatedStages: [] },
-      stepGuidance: {},
-    },
-  };
+function isRecord(value: unknown): value is RawYamlMap {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function normalizeV1(backlog: BacklogV1Input): BacklogV2Input {
   return {
     version: 2,
     repo: backlog.repo,
-    defaults,
-    ...(backlog.budget ? { budget: backlog.budget } : {}),
-    epics: backlog.epics.map((epic) => ({
-      ...epic,
-      features: epic.features.map((feature) => ({
-        ...feature,
-        skills: feature.skills ?? defaults.skills,
-        tasks: feature.tasks.map((task) => ({
-          ...task,
-          skills: task.skills ?? defaults.skills,
-        })),
-      })),
-    })),
+    epics: backlog.epics,
   };
 }
 
-function propagateDefaults(backlog: BacklogV2Input, repoDefaults: ReturnType<typeof loadRepoConfig>['defaults'] = {}): BacklogV2Input {
-  const defaults: Defaults = {
-    ...backlog.defaults,
-    tool: backlog.defaults.tool,
-    model: backlog.defaults.model ?? repoDefaults.model,
-    effort: backlog.defaults.effort,
-    thinking: backlog.defaults.thinking,
-    skills: backlog.defaults.skills,
-    stageSkills: mergeStageSkills(
-      mergeStageSkills(DEFAULT_PROJECT_TEMPLATE.stageSkills, repoDefaults.stageSkills),
-      backlog.defaults.stageSkills,
-    ),
-    workflow: backlog.defaults.workflow,
-    ...(backlog.defaults.maxTokens !== undefined ? { maxTokens: backlog.defaults.maxTokens } : {}),
-  };
+function applyProjectDefaults(raw: BacklogV2Input, defaults: Defaults, budget?: unknown): unknown {
   return {
-    ...backlog,
+    version: 2,
+    repo: raw.repo,
     defaults,
-    epics: backlog.epics.map((epic) => ({
+    ...(budget === undefined ? {} : { budget }),
+    epics: raw.epics.map((epic) => ({
       ...epic,
-      features: epic.features.map((feature) => ({
+      features: epic.features.map((feature): unknown => ({
         ...feature,
-        skills: feature.skills ?? defaults.skills,
-        tasks: feature.tasks.map((task) => ({
+        tool: feature.tool ?? defaults.tool,
+        ...(feature.model === undefined ? (defaults.model === undefined ? {} : { model: defaults.model }) : {}),
+        effort: feature.effort ?? defaults.effort,
+        thinking: feature.thinking ?? defaults.thinking,
+        dependsOn: feature.dependsOn ?? [],
+        tasks: (feature.tasks ?? []).map((task) => ({
           ...task,
           skills: task.skills ?? defaults.skills,
         })),
+        skills: feature.skills ?? defaults.skills,
+        workflow: feature.workflow ?? defaults.workflow,
+        ...(feature.maxTokens === undefined ? (defaults.maxTokens === undefined ? {} : { maxTokens: defaults.maxTokens }) : {}),
+        autoStart: feature.autoStart ?? false,
       })),
     })),
   };
@@ -110,64 +86,32 @@ function validateFiles(backlog: BacklogV2, root: string): void {
   }
 }
 
-function applyDefaultsBeforeParse(
-  raw: unknown,
-  repoDefaults: ReturnType<typeof loadRepoConfig>['defaults'] = {},
-): unknown {
-  if (!isRecord(raw) || raw.version !== 2) return raw;
-
-  const defaults = isRecord(raw.defaults) ? raw.defaults : {};
-  const defaultTool = typeof defaults.tool === 'string' ? defaults.tool : repoDefaults.tool;
-  const defaultModel = typeof defaults.model === 'string' ? defaults.model : repoDefaults.model;
-  const defaultEffort = typeof defaults.effort === 'string' ? defaults.effort : repoDefaults.effort;
-  const defaultThinking = typeof defaults.thinking === 'string' ? defaults.thinking : repoDefaults.thinking;
-  const defaultMaxTokens = typeof defaults.maxTokens === 'number' ? defaults.maxTokens : undefined;
-  const defaultSkills: unknown[] | undefined = Array.isArray(defaults.skills) ? defaults.skills : repoDefaults.skills;
-  const defaultStageSkills = isRecord(defaults.stageSkills)
-    ? defaults.stageSkills
-    : repoDefaults.stageSkills;
-  const epics = Array.isArray(raw.epics) ? raw.epics : [];
-
-  return {
-    ...raw,
-    defaults: {
-      ...repoDefaults,
-      ...defaults,
-      ...(defaultStageSkills ? { stageSkills: { ...defaultStageSkills, ...(isRecord(defaults.stageSkills) ? defaults.stageSkills : {}) } } : {}),
-    },
-    epics: epics.map((epic): unknown => {
-      if (!isRecord(epic)) return epic;
-      const features: unknown[] = Array.isArray(epic.features) ? epic.features : [];
-      return {
-        ...epic,
-        features: features.map((feature) => {
-          if (!isRecord(feature)) return feature;
-          const tasks: unknown[] = Array.isArray(feature.tasks) ? feature.tasks : [];
-          return {
-            ...feature,
-            ...(feature.tool === undefined && defaultTool ? { tool: defaultTool } : {}),
-            ...(feature.model === undefined && defaultModel ? { model: defaultModel } : {}),
-            ...(feature.effort === undefined && defaultEffort ? { effort: defaultEffort } : {}),
-            ...(feature.thinking === undefined && defaultThinking ? { thinking: defaultThinking } : {}),
-            ...(feature.workflow === undefined && isRecord(defaults.workflow) ? { workflow: defaults.workflow } : {}),
-            ...(feature.maxTokens === undefined && defaultMaxTokens !== undefined ? { maxTokens: defaultMaxTokens } : {}),
-            ...(feature.skills === undefined && defaultSkills ? { skills: [...defaultSkills] } : {}),
-            tasks: tasks.map((task) => {
-              if (!isRecord(task)) return task;
-              return {
-                ...task,
-                ...(task.skills === undefined && defaultSkills ? { skills: [...defaultSkills] } : {}),
-              };
-            }),
-          };
-        }),
-      };
-    }),
+function validateToolReferences(backlog: BacklogV2, cwd: string): void {
+  const registeredTool = createRegisteredToolSchema(resolveRuntimeConfig(cwd).tools.map((entry) => entry.id));
+  const validate = (tool: string, path: string): void => {
+    const result = registeredTool.safeParse(tool);
+    if (!result.success) {
+      throw new Error(`Invalid ${path}: ${result.error.issues[0]?.message ?? 'unregistered tool.'}`);
+    }
   };
+
+  validate(backlog.defaults.tool, 'defaults.tool');
+  for (const epic of backlog.epics) {
+    for (const feature of epic.features) {
+      validate(feature.tool, `feature "${feature.id}".tool`);
+      for (const [index, fallback] of feature.retry?.fallback.entries() ?? []) {
+        validate(fallback.tool, `feature "${feature.id}".retry.fallback[${String(index)}].tool`);
+      }
+    }
+  }
 }
 
-function isRecord(value: unknown): value is RawYamlMap {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
+function projectSettings(cwd: string): { defaults: Defaults; budget?: unknown } {
+  const meta = getCatalogMeta(resolveRepo(cwd).repoId);
+  return {
+    defaults: meta ? DefaultsSchema.parse(JSON.parse(meta.defaults_json)) : DefaultsSchema.parse({}),
+    ...(meta?.budget_json ? { budget: BudgetSchema.parse(JSON.parse(meta.budget_json)) } : {}),
+  };
 }
 
 function occupiedFeatureIds(): Set<string> {
@@ -190,21 +134,29 @@ export interface LoadedBacklog {
 export function loadBacklogWithRegistration(path = BACKLOG_FILE, cwd = process.cwd()): LoadedBacklog {
   const absPath = isAbsolute(path) ? path : resolve(cwd, path);
   const root = dirname(absPath);
-  const raw = readFileSync(absPath, 'utf8');
-  const repoDefaults = loadRepoConfig(cwd).defaults;
-  const parsed = BacklogInputSchema.parse(applyDefaultsBeforeParse(parse(raw), repoDefaults));
+  const raw: unknown = parse(readFileSync(absPath, 'utf8'));
+  const parsed = BacklogInputSchema.parse(raw);
+  const settings = projectSettings(cwd);
 
   let v2Input: BacklogV2Input;
   if (parsed.version === 1) {
     console.warn('[msq] backlog.yaml is in v1 format — consider upgrading to version: 2');
-    v2Input = normalizeV1(parsed, repoDefaults);
+    v2Input = normalizeV1(parsed);
   } else {
-    v2Input = propagateDefaults(parsed, repoDefaults);
+    if ('defaults' in parsed && parsed.defaults !== undefined) {
+      console.warn('[msq] backlog.yaml defaults are ignored; configure defaults in the Projeto settings.');
+    }
+    if ('budget' in parsed && parsed.budget !== undefined) {
+      console.warn('[msq] backlog.yaml budget is ignored; configure it in the Projeto settings.');
+    }
+    v2Input = parsed;
   }
 
-  const registration = registerBacklogFeatures(v2Input, occupiedFeatureIds());
+  const resolved = BacklogV2InputSchema.parse(applyProjectDefaults(v2Input, settings.defaults, settings.budget));
+  const registration = registerBacklogFeatures(resolved, occupiedFeatureIds());
   const { backlog: v2 } = registration;
   const normalized = BacklogV2Schema.parse(v2);
+  validateToolReferences(normalized, cwd);
   validateFiles(normalized, root);
   return { backlog: normalized, registrations: registration.registrations };
 }
@@ -279,7 +231,7 @@ export function stageBacklogFile(path = BACKLOG_FILE, cwd = process.cwd(), backl
  * (populated by `msq backlog load`), instead of reading backlog.yaml.
  * This is the runtime source of truth after F35 — see docs/features/F35-backlog-catalog-import.md.
  */
-export function loadBacklogFromCatalog(repoId: string, cwd = process.cwd()): BacklogV2 {
+export function loadBacklogFromCatalog(repoId: string, _cwd = process.cwd()): BacklogV2 {
   const meta = getCatalogMeta(repoId);
   const epicRows = listCatalogEpics(repoId);
 
@@ -303,13 +255,17 @@ export function loadBacklogFromCatalog(repoId: string, cwd = process.cwd()): Bac
     return { ...epic, features: featuresByEpic.get(row.epic_id) ?? [] };
   });
 
-  const raw = {
+  const raw: BacklogV2Input = BacklogV2Schema.parse({
     version: 2 as const,
     repo: meta.repo,
     defaults: JSON.parse(meta.defaults_json) as Defaults,
     ...(meta.budget_json ? { budget: JSON.parse(meta.budget_json) as unknown } : {}),
     epics,
-  };
+  });
 
-  return BacklogV2Schema.parse(propagateDefaults(BacklogV2Schema.parse(raw), loadRepoConfig(cwd).defaults));
+  return BacklogV2Schema.parse(applyProjectDefaults(
+    raw,
+    DefaultsSchema.parse(JSON.parse(meta.defaults_json)),
+    meta.budget_json ? BudgetSchema.parse(JSON.parse(meta.budget_json)) : undefined,
+  ));
 }

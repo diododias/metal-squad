@@ -35,7 +35,7 @@ export function attachEventNotifications(
         },
       }).catch((error: unknown) => { console.error('[notify] gate:created dispatch failed:', error); });
     }),
-    eventBus.subscribe('stage:request-created', ({ requestId, featureId, featureName, stage, kind, prompt, source, options }) => {
+    eventBus.subscribe('stage:request-created', ({ requestId, featureId, featureName, stage, kind, prompt, source, approvalChannel, options }) => {
       if (kind === 'approval') {
         if (source === 'auto') {
           const message = [
@@ -43,13 +43,17 @@ export function attachEventNotifications(
             prompt,
             `Auto-advance registered to proceed after ${stage}.`,
           ].join('\n');
-          void dispatch('stage:approval', message, {
+          const metadata = {
             requestId,
             featureId,
             ...(featureName ? { featureName } : {}),
             stage,
             source: 'auto',
-          }).catch((error: unknown) => { console.error('[notify] stage:approval (auto) dispatch failed:', error); });
+          };
+          void (approvalChannel
+            ? dispatch('stage:approval', message, metadata, approvalChannel)
+            : dispatch('stage:approval', message, metadata)
+          ).catch((error: unknown) => { console.error('[notify] stage:approval (auto) dispatch failed:', error); });
           return;
         }
 
@@ -58,7 +62,7 @@ export function attachEventNotifications(
           prompt,
           `Or reply: stage:${String(requestId)} advance | stage:${String(requestId)} retry | stage:${String(requestId)} hold`,
         ].join('\n');
-        void dispatch('stage:approval', message, {
+        const metadata = {
           requestId,
           featureId,
           ...(featureName ? { featureName } : {}),
@@ -71,7 +75,11 @@ export function attachEventNotifications(
               { text: '⏸ Hold', callback_data: `stage:${String(requestId)} hold` },
             ]],
           },
-        }).catch((error: unknown) => { console.error('[notify] stage:approval (manual) dispatch failed:', error); });
+        };
+        void (approvalChannel
+          ? dispatch('stage:approval', message, metadata, approvalChannel)
+          : dispatch('stage:approval', message, metadata)
+        ).catch((error: unknown) => { console.error('[notify] stage:approval (manual) dispatch failed:', error); });
         return;
       }
 

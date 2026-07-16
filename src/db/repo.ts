@@ -1918,6 +1918,7 @@ export function createStageRequest(
     runId?: number;
     response?: string;
     source?: 'manual' | 'auto';
+    approvalChannel?: string;
     options?: string[];
   } = {},
 ): number {
@@ -1951,6 +1952,7 @@ export function createStageRequest(
     kind,
     prompt,
     source: opts.source ?? 'manual',
+    approvalChannel: opts.approvalChannel,
     options: opts.options,
   });
   return requestId;

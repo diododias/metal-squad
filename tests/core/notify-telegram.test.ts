@@ -172,7 +172,7 @@ describe('TelegramChannel', () => {
 describe('notify (deprecated)', () => {
   it('does nothing when token is falsy', async () => {
     mockGetSecret.mockResolvedValue(undefined);
-    mockResolveRuntimeConfig.mockReturnValue({ telegramChatId: 'chat1' });
+    mockResolveRuntimeConfig.mockReturnValue({ notifications: { channels: [{ type: 'telegram', chatId: 'chat1' }] } });
     const { notify } = await import('../../src/core/notify/telegram.js');
 
     await notify('hello');
@@ -182,7 +182,7 @@ describe('notify (deprecated)', () => {
 
   it('does nothing when chatId is falsy', async () => {
     mockGetSecret.mockResolvedValue('TOKEN');
-    mockResolveRuntimeConfig.mockReturnValue({ telegramChatId: undefined });
+    mockResolveRuntimeConfig.mockReturnValue({ notifications: { channels: [] } });
     const { notify } = await import('../../src/core/notify/telegram.js');
 
     await notify('hello');
@@ -192,7 +192,7 @@ describe('notify (deprecated)', () => {
 
   it('posts message when both token and chatId are present', async () => {
     mockGetSecret.mockResolvedValue('TOKEN');
-    mockResolveRuntimeConfig.mockReturnValue({ telegramChatId: 'chat99' });
+    mockResolveRuntimeConfig.mockReturnValue({ notifications: { channels: [{ type: 'telegram', chatId: 'chat99' }] } });
     const { notify } = await import('../../src/core/notify/telegram.js');
 
     await notify('deprecation test');

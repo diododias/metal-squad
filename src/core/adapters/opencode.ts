@@ -1,10 +1,10 @@
 import { execFileSync } from 'node:child_process';
 import { sanitizeToolCallRecord, type SessionHandle, type ToolAdapter, type RunResult, type RunFeatureOptions, type TokenUsage, type ToolCallRecord } from './types.js';
 import type { Effort, Feature } from '../backlog/schema.js';
-import { CliAbortError, runCli } from './spawn.js';
+import { CliAbortError, resolveToolInvocation, runCli } from './spawn.js';
 import { msqEventBus } from '../events/index.js';
 import { parseControlSignal } from './control.js';
-import { getToolRegistration, resolveRuntimeConfig } from '../../config/index.js';
+import { resolveRuntimeConfig } from '../../config/index.js';
 
 interface OpenCodeUsage {
   input?: number;
@@ -56,20 +56,14 @@ interface OpenCodeResponse {
 export const opencodeAdapter: ToolAdapter = {
   tool: 'opencode',
 
-  capabilities: {
-    model: true,
-    effort: false,
-    thinking: false,
-  },
-
   effortFlag(_effort: Effort): string[] {
     return [];
   },
 
   isAvailable(): boolean {
-    const registration = getToolRegistration('opencode');
     try {
-      execFileSync(registration.command, registration.versionCheck, { stdio: 'ignore', env: { ...process.env, ...registration.env } });
+      const invocation = resolveToolInvocation('opencode');
+      execFileSync(invocation.command, invocation.versionCheck, { stdio: 'ignore' });
       return true;
     } catch {
       return false;
@@ -77,7 +71,8 @@ export const opencodeAdapter: ToolAdapter = {
   },
 
   async runFeature(feature: Feature, prompt: string, opts: RunFeatureOptions): Promise<RunResult> {
-    if (feature.effort !== 'medium') {
+    const invocation = resolveToolInvocation(feature.tool, opts.cwd);
+    if (feature.effort !== 'medium' && !invocation.capabilities.effort) {
       emitRunOutput(
         opts.runId,
         feature,
@@ -86,7 +81,7 @@ export const opencodeAdapter: ToolAdapter = {
         'heartbeat',
       );
     }
-    if (feature.thinking === 'on') {
+    if (feature.thinking === 'on' && !invocation.capabilities.thinking) {
       emitRunOutput(
         opts.runId,
         feature,
@@ -97,6 +92,7 @@ export const opencodeAdapter: ToolAdapter = {
     }
 
     const args = [
+      ...invocation.baseArgs,
       'run',
       '--format', 'json',
       ...(opts.session?.mode === 'resume' && opts.session.handle ? ['--session', opts.session.handle.sessionId] : []),
@@ -124,8 +120,9 @@ export const opencodeAdapter: ToolAdapter = {
       },
     );
     try {
-      ({ code, stdout, stderr } = await runCli('opencode', args, {
+      ({ code, stdout, stderr } = await runCli(invocation.command, args, {
         cwd: opts.cwd,
+        env: invocation.env,
         signal: opts.signal,
         heartbeatMs: resolveRuntimeConfig(opts.cwd).heartbeatMs,
         logLabel: `opencode ${feature.id}`,

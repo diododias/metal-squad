@@ -1,5 +1,4 @@
 import type { BacklogV2 } from '../backlog/schema.js';
-import { resolveRuntimeConfig } from '../../config/index.js';
 import { createSkillRegistry } from './registry.js';
 import { collectEffectiveStageSkills } from '../workflow/stageSkills.js';
 
@@ -38,10 +37,9 @@ export function collectBacklogSkillNames(
 }
 
 export function validateBacklogSkills(backlog: BacklogV2, cwd: string): void {
-  const config = resolveRuntimeConfig(process.cwd());
   const registry = createSkillRegistry();
   // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- defaults set by Zod, but callers may pass raw objects
-  const stageSkills = collectEffectiveStageSkills(backlog.defaults?.stageSkills ?? {}, config.stageSkills);
+  const stageSkills = collectEffectiveStageSkills(backlog.defaults?.stageSkills ?? {});
   const names = collectBacklogSkillNames(backlog, stageSkills);
   const result = registry.validate(names, cwd);
 

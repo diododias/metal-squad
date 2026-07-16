@@ -36,7 +36,14 @@ const mocks = vi.hoisted(() => ({
   updateCatalogDefaults: vi.fn(),
   loadBacklogFromCatalog: vi.fn(),
   validateBacklogSkills: vi.fn(),
+  loadConfig: vi.fn(),
   resolveRuntimeConfig: vi.fn(),
+  saveConfig: vi.fn(),
+  saveNotificationsPatch: vi.fn(),
+  saveAppConfigPatch: vi.fn(),
+  setSecret: vi.fn(),
+  clearSecret: vi.fn(),
+  parseConfig: vi.fn((value) => value),
   spawn: vi.fn(),
   getPipeline: vi.fn(),
   getAdapter: vi.fn(),
@@ -69,7 +76,17 @@ vi.mock('../../src/config/index.js', () => ({
   DATA_DIR: '/tmp',
   DB_PATH_ENV: 'MSQ_DB_PATH',
   resolveDbPath: () => '/tmp/metal-squad-web-test.db',
+  loadConfig: mocks.loadConfig,
   resolveRuntimeConfig: mocks.resolveRuntimeConfig,
+  saveConfig: mocks.saveConfig,
+  saveNotificationsPatch: mocks.saveNotificationsPatch,
+  saveAppConfigPatch: mocks.saveAppConfigPatch,
+  ConfigSchema: { parse: mocks.parseConfig },
+}));
+
+vi.mock('../../src/security/secrets.js', () => ({
+  setSecret: mocks.setSecret,
+  clearSecret: mocks.clearSecret,
 }));
 
 vi.mock('node:child_process', async () => {
@@ -225,6 +242,18 @@ describe('web server', () => {
     mocks.getBacklogSettings.mockReturnValue({ stageSkills: {} });
     mocks.loadBacklogFromCatalog.mockReturnValue({ epics: [] });
     mocks.validateBacklogSkills.mockReturnValue(undefined);
+    mocks.loadConfig.mockReturnValue({
+      concurrency: 3,
+      staleRunThresholdMinutes: 120,
+      toolTimeoutMs: 600_000,
+      idleThresholdMs: 30_000,
+      promptContextCharLimit: 20_000,
+      stageSkills: {},
+      notifications: { channels: [], events: [] },
+      workflow: { autoAdvanceStages: false, pollIntervalMs: 2_000 },
+      budget: { alertAtPercent: 80 },
+      web: { host: '127.0.0.1', port: 8743, auth: 'token' },
+    });
     mocks.resolveRuntimeConfig.mockReturnValue({
       concurrency: 3,
       staleRunThresholdMinutes: 120,
@@ -817,10 +846,10 @@ describe('web server', () => {
       payload: {
         featureId: 'feat1',
         ok: false,
-        issues: [{ path: 'workflow.approvals.channel', message: 'Invalid enum value.' }],
+        issues: [{ message: 'Approval channel "telegram" is not configured or has no credentials.' }],
       },
     });
-    expect(mocks.updateCatalogFeature).toHaveBeenCalledTimes(1);
+    expect(mocks.updateCatalogFeature).not.toHaveBeenCalled();
     socket.close();
   });
 
@@ -931,6 +960,88 @@ describe('web server', () => {
     const notice = await waitForMessageType(socket, 'ui:notice');
     expect((notice as { payload: { message: string } }).payload.message).toContain('repo-1');
 
+    socket.close();
+  });
+
+  it('persists a valid App budget alert to global config.json', async () => {
+    const { createWebServer } = await import('../../src/web/server.js');
+    server = createWebServer({ host: '127.0.0.1', port: 0, auth: 'token', token: 'secret' });
+    await new Promise<void>((resolve) => server!.server.listen(0, '127.0.0.1', resolve));
+    const address = server!.server.address() as { port: number };
+    const socket = new WebSocket(`ws://127.0.0.1:${address.port}/ws`);
+    await waitForOpen(socket);
+    socket.send(JSON.stringify({ type: 'auth', token: 'secret' }));
+    await waitForSocketMessage(socket);
+
+    socket.send(JSON.stringify({ type: 'action:updateBudgetConfig', patch: { alertAtPercent: 0 } }));
+
+    await waitForMessageType(socket, 'state:full');
+    expect(mocks.saveConfig).toHaveBeenCalledWith(expect.objectContaining({ budget: { alertAtPercent: 0 } }));
+    socket.close();
+  });
+
+  it('rejects an invalid App budget alert without writing global config.json', async () => {
+    const { createWebServer } = await import('../../src/web/server.js');
+    server = createWebServer({ host: '127.0.0.1', port: 0, auth: 'token', token: 'secret' });
+    await new Promise<void>((resolve) => server!.server.listen(0, '127.0.0.1', resolve));
+    const address = server!.server.address() as { port: number };
+    const socket = new WebSocket(`ws://127.0.0.1:${address.port}/ws`);
+    await waitForOpen(socket);
+    socket.send(JSON.stringify({ type: 'auth', token: 'secret' }));
+    await waitForSocketMessage(socket);
+
+    socket.send(JSON.stringify({ type: 'action:updateBudgetConfig', patch: { alertAtPercent: 101 } }));
+
+    const notice = await waitForMessageType(socket, 'ui:notice');
+    expect((notice as { payload: { message: string } }).payload.message).toContain('whole number between 0 and 100');
+    expect(mocks.saveConfig).not.toHaveBeenCalled();
+    socket.close();
+  });
+
+  it('persists a write-only notification patch and refreshes state', async () => {
+    const { createWebServer } = await import('../../src/web/server.js');
+    server = createWebServer({ host: '127.0.0.1', port: 0, auth: 'token', token: 'secret' });
+    await new Promise<void>((resolve) => server!.server.listen(0, '127.0.0.1', resolve));
+    const address = server!.server.address() as { port: number };
+    const socket = new WebSocket(`ws://127.0.0.1:${address.port}/ws`);
+    await waitForOpen(socket);
+    socket.send(JSON.stringify({ type: 'auth', token: 'secret' }));
+    await waitForSocketMessage(socket);
+
+    socket.send(JSON.stringify({
+      type: 'action:updateNotifications',
+      patch: { channels: [{ type: 'webhook', url: 'https://example.test/new-secret' }], events: ['run:done'] },
+    }));
+
+    await waitForMessageType(socket, 'state:full');
+    expect(mocks.saveNotificationsPatch).toHaveBeenCalledWith({
+      channels: [{ type: 'webhook', url: 'https://example.test/new-secret' }],
+      events: ['run:done'],
+    });
+    socket.close();
+  });
+
+  it('persists a complete App tool registry and broadcasts refreshed state', async () => {
+    const { createWebServer } = await import('../../src/web/server.js');
+    const tool = {
+      id: 'codex-canary', adapter: 'codex', command: 'codex-canary', baseArgs: [], env: {}, versionCheck: ['--version'],
+      capabilities: { model: true, effort: true, thinking: false }, thinkingBudget: { low: 0, medium: 0, high: 0 }, minTimeoutMs: 0,
+    };
+    mocks.loadConfig.mockReturnValue({ concurrency: 3 });
+
+    server = createWebServer({ host: '127.0.0.1', port: 0, auth: 'token', token: 'secret' });
+    await new Promise<void>((resolve) => server!.server.listen(0, '127.0.0.1', resolve));
+    const address = server!.server.address() as { port: number };
+    const socket = new WebSocket(`ws://127.0.0.1:${address.port}/ws`);
+    await waitForOpen(socket);
+    socket.send(JSON.stringify({ type: 'auth', token: 'secret' }));
+    await waitForSocketMessage(socket);
+
+    socket.send(JSON.stringify({ type: 'action:updateToolsRegistry', tools: [tool] }));
+
+    const stateMessage = await waitForMessageType(socket, 'state:full');
+    expect(mocks.saveConfig).toHaveBeenCalledWith({ concurrency: 3, tools: [tool] });
+    expect((stateMessage as { type: string }).type).toBe('state:full');
     socket.close();
   });
 
@@ -1671,6 +1782,49 @@ describe('web server', () => {
     const message = await waitForSocketMessage(socket);
     expect((message as { type: string }).type).toBe('state:full');
     socket.close();
+  });
+
+  it('saves App config and write-only secrets through authenticated WebSocket actions', async () => {
+    const { createWebServer } = await import('../../src/web/server.js');
+    server = createWebServer({ host: '127.0.0.1', port: 0, auth: 'token', token: 'secret' });
+    await new Promise<void>((resolve) => server!.server.listen(0, '127.0.0.1', resolve));
+    const address = server!.server.address() as { port: number };
+    const socket = new WebSocket(`ws://127.0.0.1:${address.port}/ws`);
+    await waitForOpen(socket);
+    socket.send(JSON.stringify({ type: 'auth', token: 'secret' }));
+    await waitForSocketMessage(socket);
+
+    socket.send(JSON.stringify({ type: 'action:updateAppConfig', patch: { concurrency: 5 } }));
+    await waitForMatchingMessage(socket, (message) => message.type === 'ui:info' && JSON.stringify(message).includes('Saved App config.'));
+    expect(mocks.saveAppConfigPatch).toHaveBeenCalledWith({ concurrency: 5 });
+
+    socket.send(JSON.stringify({
+      type: 'action:setSecret',
+      patch: { account: 'telegram-bot-token', value: 'never-return-this-value' },
+    }));
+    const saved = await waitForMatchingMessage(socket, (message) => message.type === 'ui:info' && JSON.stringify(message).includes('Saved secret'));
+    expect(mocks.setSecret).toHaveBeenCalledWith('telegram-bot-token', 'never-return-this-value');
+    expect(JSON.stringify(saved)).not.toContain('never-return-this-value');
+
+    socket.send(JSON.stringify({ type: 'action:clearSecret', account: 'telegram-bot-token' }));
+    await waitForMatchingMessage(socket, (message) => message.type === 'ui:info' && JSON.stringify(message).includes('Cleared secret'));
+    expect(mocks.clearSecret).toHaveBeenCalledWith('telegram-bot-token');
+    socket.close();
+  });
+
+  it('rejects sensitive WebSocket actions without authentication', async () => {
+    const { createWebServer } = await import('../../src/web/server.js');
+    server = createWebServer({ host: '127.0.0.1', port: 0, auth: 'token', token: 'secret' });
+    await new Promise<void>((resolve) => server!.server.listen(0, '127.0.0.1', resolve));
+    const address = server!.server.address() as { port: number };
+    const socket = new WebSocket(`ws://127.0.0.1:${address.port}/ws`);
+    await waitForOpen(socket);
+    socket.send(JSON.stringify({
+      type: 'action:setSecret',
+      patch: { account: 'telegram-bot-token', value: 'never-return-this-value' },
+    }));
+    await waitForClose(socket);
+    expect(mocks.setSecret).not.toHaveBeenCalled();
   });
 
   it('rejects HTTP requests with a foreign Host header', async () => {

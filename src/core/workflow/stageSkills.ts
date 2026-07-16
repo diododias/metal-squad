@@ -15,6 +15,7 @@ export function collectEffectiveStageSkills(
   configStageSkills: Record<string, string[]> = {},
 ): Record<string, string[]> {
   return {
+    ...DEFAULT_PROJECT_TEMPLATE.stageSkills,
     ...configStageSkills,
     ...repoStageSkills,
   };

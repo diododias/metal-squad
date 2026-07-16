@@ -18,8 +18,7 @@ interface ConfigShowPayload {
   };
   runtime: ReturnType<typeof resolveConfigSnapshot>['runtime'];
   defaults: {
-    repo: ReturnType<typeof resolveConfigSnapshot>['repoDefaults'];
-    backlog?: BacklogV2['defaults'];
+    project?: BacklogV2['defaults'];
     effective?: ResolvedExecutionDefaults;
   };
   feature?: {
@@ -68,12 +67,7 @@ function buildPayload(
   featureId?: string,
 ): ConfigShowPayload {
   const baseDefaults: ResolvedExecutionDefaults = {
-    tool: snapshot.repoDefaults.tool ?? 'claude',
-    model: snapshot.repoDefaults.model,
-    effort: snapshot.repoDefaults.effort ?? 'medium',
-    thinking: snapshot.repoDefaults.thinking ?? 'off',
-    skills: snapshot.repoDefaults.skills ?? [],
-    stageSkills: snapshot.repoDefaults.stageSkills ?? {},
+    tool: 'claude', effort: 'medium', thinking: 'off', skills: [], stageSkills: {},
   };
   const effectiveDefaults = backlog
     ? mergeExecutionDefaults(baseDefaults, backlog.defaults)
@@ -89,8 +83,7 @@ function buildPayload(
     },
     runtime: snapshot.runtime,
     defaults: {
-      repo: snapshot.repoDefaults,
-      ...(backlog ? { backlog: backlog.defaults, effective: effectiveDefaults } : {}),
+      ...(backlog ? { project: backlog.defaults, effective: effectiveDefaults } : {}),
     },
     ...(feature
       ? {

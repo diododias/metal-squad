@@ -43,7 +43,7 @@ function makeState(run: RunSummary): MsqWebState {
   return {
     runs: [run],
     featureCatalog: {},
-    runtimeConfig: { web: { statusSpinner: false } },
+    runtimeConfig: { web: { statusSpinner: false }, tools: [{ id: 'claude' }, { id: 'codex' }, { id: 'opencode' }] },
   } as unknown as MsqWebState;
 }
 
