@@ -1,10 +1,11 @@
 import { readFileSync, existsSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { resolve, dirname, isAbsolute } from 'node:path';
 import { parse, stringify } from 'yaml';
-import { loadRepoConfig, mergeStageSkills } from '../../config/index.js';
+import { loadRepoConfig, mergeStageSkills, resolveRuntimeConfig } from '../../config/index.js';
 import {
   BacklogInputSchema,
   BacklogV2Schema,
+  createRegisteredToolSchema,
   type BacklogV1Input,
   type BacklogV2,
   type BacklogV2Input,
@@ -106,6 +107,26 @@ function validateFiles(backlog: BacklogV2, root: string): void {
   }
 }
 
+function validateToolReferences(backlog: BacklogV2, cwd: string): void {
+  const registeredTool = createRegisteredToolSchema(resolveRuntimeConfig(cwd).tools.map((entry) => entry.id));
+  const validate = (tool: string, path: string): void => {
+    const result = registeredTool.safeParse(tool);
+    if (!result.success) {
+      throw new Error(`Invalid ${path}: ${result.error.issues[0]?.message ?? 'unregistered tool.'}`);
+    }
+  };
+
+  validate(backlog.defaults.tool, 'defaults.tool');
+  for (const epic of backlog.epics) {
+    for (const feature of epic.features) {
+      validate(feature.tool, `feature "${feature.id}".tool`);
+      for (const [index, fallback] of feature.retry?.fallback.entries() ?? []) {
+        validate(fallback.tool, `feature "${feature.id}".retry.fallback[${String(index)}].tool`);
+      }
+    }
+  }
+}
+
 function applyDefaultsBeforeParse(
   raw: unknown,
   repoDefaults: ReturnType<typeof loadRepoConfig>['defaults'] = {},
@@ -201,6 +222,7 @@ export function loadBacklogWithRegistration(path = BACKLOG_FILE, cwd = process.c
   const registration = registerBacklogFeatures(v2Input, occupiedFeatureIds());
   const { backlog: v2 } = registration;
   const normalized = BacklogV2Schema.parse(v2);
+  validateToolReferences(normalized, cwd);
   validateFiles(normalized, root);
   return { backlog: normalized, registrations: registration.registrations };
 }
