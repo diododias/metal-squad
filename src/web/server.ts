@@ -31,10 +31,10 @@ import { resolveRepo } from '../core/repo.js';
 import { loadBacklogFromCatalog } from '../core/backlog/load.js';
 import { selectStartableFeaturePlan } from '../core/orchestrator/graph.js';
 import { validateBacklogSkills } from '../core/skills/index.js';
-import { resolveRuntimeConfig } from '../config/index.js';
+import { ConfigSchema, loadConfig, resolveRuntimeConfig, saveConfig, type ToolRegistryEntry } from '../config/index.js';
 import { updateCatalogFeature, updateCatalogTask, updateCatalogDefaults, type FeaturePatch, type CatalogDefaultsPatch } from '../db/backlogCatalog.js';
 import type { Feature, Task, Tool } from '../core/backlog/schema.js';
-import { buildMsqWebState, appendNotification } from './state.js';
+import { buildMsqWebState, appendNotification, resetWebStateCaches } from './state.js';
 import { createWebAuth, isAllowedHostHeader, isAllowedOrigin, timingSafeEqualStrings } from './auth.js';
 import type {
   FeatureConfigPatch,
@@ -712,6 +712,10 @@ export function createWebServer(options: {
         updateProjectDefaults(message.patch, featureCwd);
         break;
       }
+      case 'action:updateToolsRegistry': {
+        updateToolsRegistry(message.tools, featureCwd);
+        break;
+      }
       case 'action:pausePipeline': {
         pausePipeline(message.pipelineId);
         reconcileWebState(featureCwd);
@@ -1015,6 +1019,23 @@ export function createWebServer(options: {
     }
     reconcileWebState(featureCwd);
     msqEventBus.emit('ui:info', { message: 'Saved project defaults.' });
+  }
+
+  function updateToolsRegistry(tools: ToolRegistryEntry[], featureCwd: string): void {
+    try {
+      console.log(`[updateToolsRegistry] tools=${tools.map((tool) => tool.id).join(',')}`);
+      // loadConfig + saveConfig are intentional here: this is App-level state,
+      // not catalog state, and ConfigSchema owns duplicate-id/full-entry validation.
+      saveConfig(ConfigSchema.parse({ ...loadConfig(), tools }));
+      resetWebStateCaches();
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      console.error(`[updateToolsRegistry] error: ${message}`);
+      msqEventBus.emit('ui:notice', { message: `Could not save tools registry: ${message}` });
+      return;
+    }
+    reconcileWebState(featureCwd);
+    msqEventBus.emit('ui:info', { message: 'Saved tools registry.' });
   }
 
   // Poll the DB for new output rows written by separated feature-runner
