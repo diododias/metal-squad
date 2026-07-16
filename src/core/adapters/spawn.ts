@@ -1,6 +1,6 @@
 import { spawn } from 'node:child_process';
-import type { SessionStatus, SessionStatusCallback } from './types.js';
-import type { Tool } from '../backlog/schema.js';
+import type { SessionStatus, SessionStatusCallback, ToolCapabilities } from './types.js';
+import type { Effort, Tool } from '../backlog/schema.js';
 import { DEFAULT_TOOL_REGISTRY, resolveRuntimeConfig, type ToolRegistryEntry } from '../../config/index.js';
 
 export interface SpawnResult {
@@ -15,6 +15,9 @@ export interface ToolInvocation {
   baseArgs: string[];
   env: Record<string, string>;
   versionCheck: string[];
+  capabilities: ToolCapabilities;
+  thinkingBudget: Record<Effort, number>;
+  minTimeoutMs: number;
 }
 
 /**
@@ -36,11 +39,25 @@ export function resolveToolInvocation(tool: Tool, cwd = process.cwd()): ToolInvo
 }
 
 function pickInvocation(entry: ToolRegistryEntry | (typeof DEFAULT_TOOL_REGISTRY)[number]): ToolInvocation {
+  const adapterDefaults = DEFAULT_TOOL_REGISTRY.find((defaultEntry) => defaultEntry.adapter === entry.adapter);
+  if (!adapterDefaults) {
+    throw new Error(`No defaults registered for adapter "${entry.adapter}".`);
+  }
+  const capabilities = entry.capabilities ?? adapterDefaults.capabilities;
+  const thinkingBudget = entry.thinkingBudget ?? adapterDefaults.thinkingBudget;
+  const minTimeoutMs = entry.minTimeoutMs ?? adapterDefaults.minTimeoutMs;
+  if (!capabilities || !thinkingBudget || minTimeoutMs === undefined) {
+    throw new Error(`Incomplete runtime defaults for adapter "${entry.adapter}".`);
+  }
+
   return {
     command: entry.command,
     baseArgs: [...(entry.baseArgs ?? [])],
     env: { ...(entry.env ?? {}) },
     versionCheck: [...(entry.versionCheck ?? ['--version'])],
+    capabilities,
+    thinkingBudget,
+    minTimeoutMs,
   };
 }
 

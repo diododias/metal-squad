@@ -63,6 +63,16 @@ describe('adapter registry', () => {
 });
 
 describe('tool registry spawn resolution', () => {
+  it('uses adapter defaults when a legacy registry entry omits runtime settings', async () => {
+    const { resolveToolInvocation } = await import('../../src/core/adapters/spawn.js');
+
+    expect(resolveToolInvocation('codex', '/repo')).toMatchObject({
+      capabilities: { model: true, effort: true, thinking: false },
+      thinkingBudget: { low: 0, medium: 0, high: 0 },
+      minTimeoutMs: 1_800_000,
+    });
+  });
+
   it('launches the configured command with baseArgs and merged env', async () => {
     mockResolveRuntimeConfig.mockReturnValue({
       toolTimeoutMs: 600_000,
@@ -75,6 +85,7 @@ describe('tool registry spawn resolution', () => {
           baseArgs: ['--registry-flag'],
           env: { CODEX_CHANNEL: 'canary' },
           versionCheck: ['version', '--json'],
+          minTimeoutMs: 1_900_000,
         },
         DEFAULT_TOOLS[2],
       ],
@@ -91,7 +102,7 @@ describe('tool registry spawn resolution', () => {
     expect(mockRunCli).toHaveBeenCalledWith(
       'codex-canary',
       expect.arrayContaining(['--registry-flag', 'exec']),
-      expect.objectContaining({ env: { CODEX_CHANNEL: 'canary' } }),
+      expect.objectContaining({ env: { CODEX_CHANNEL: 'canary' }, timeoutMs: 1_900_000 }),
     );
 
     codexAdapter.isAvailable?.();
@@ -195,6 +206,15 @@ describe('claude adapter', () => {
   });
 
   it('coexists model, effort and thinking=on in the spawn', async () => {
+    mockResolveRuntimeConfig.mockReturnValue({
+      toolTimeoutMs: 600_000,
+      idleThresholdMs: 30_000,
+      tools: [
+        { ...DEFAULT_TOOLS[0], thinkingBudget: { low: 1_234, medium: 5_678, high: 9_876 } },
+        DEFAULT_TOOLS[1],
+        DEFAULT_TOOLS[2],
+      ],
+    });
     const resultLine = JSON.stringify({
       type: 'result',
       subtype: 'success',
@@ -226,7 +246,7 @@ describe('claude adapter', () => {
     expect(mockRunCli).toHaveBeenCalledWith(
       'claude',
       expect.arrayContaining(['--model', 'custom']),
-      expect.objectContaining({ env: { MAX_THINKING_TOKENS: '24000' } }),
+      expect.objectContaining({ env: { MAX_THINKING_TOKENS: '9876' } }),
     );
   });
 
@@ -450,15 +470,13 @@ describe('claude adapter', () => {
 });
 
 describe('opencode adapter', () => {
-  it('declares capabilities and warns when effort/thinking are requested', async () => {
+  it('reads capabilities from the resolved registry entry', async () => {
     mockRunCli.mockResolvedValue({
       code: 0,
       stdout: JSON.stringify({ response: 'done' }),
       stderr: '',
     });
     const { opencodeAdapter } = await import('../../src/core/adapters/opencode.js');
-
-    expect(opencodeAdapter.capabilities).toEqual({ model: true, effort: false, thinking: false });
 
     await opencodeAdapter.runFeature(
       {

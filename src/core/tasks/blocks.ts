@@ -95,9 +95,8 @@ export function resolveContextWindow(input: { model?: string; tool?: Tool }): nu
       if (model.includes(key)) return window;
     }
   }
-  const toolContextWindow = input.tool ? TOOL_CONTEXT_WINDOWS[input.tool] : undefined;
-  if (toolContextWindow !== undefined) {
-    return toolContextWindow;
+  if (input.tool) {
+    return TOOL_CONTEXT_WINDOWS[input.tool] ?? DEFAULT_CONTEXT_WINDOW;
   }
   return DEFAULT_CONTEXT_WINDOW;
 }
