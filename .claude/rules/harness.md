@@ -38,6 +38,20 @@ Os hooks e a bateria de qualidade nunca tocam o catalogo real:
 
 `scripts/gate.mjs full` se recusa a rodar sem `MSQ_DB_PATH` definido — nunca contorne isso apontando para o banco global. Nao use `--no-verify`: hook falhou, nao publica. Os contratos dessa protecao vivem em `tests/harness/`.
 
+## Fixtures deterministicas (E2E/Web)
+
+Fixtures sao um recurso separado do gate: o gate usa banco **vazio**; dados mockados existem apenas para fluxos E2E/Web que precisem deles.
+
+- `npm run db:fixture -- --scenario settings` semeia o cenario deterministico de settings (defaults de projeto + feature com overrides completos + tasks com dependsOn) definido em `tests/fixtures/scenarios/settings.backlog.yaml`.
+- A logica vive em `src/db/fixtures.ts` e **recusa o banco global**: exige `MSQ_DB_PATH` sandbox. Exemplo de uso combinado:
+
+```bash
+rtk node scripts/with-sandbox-db.mjs npm run db:fixture -- --scenario settings
+```
+
+- Ids de features da fixture sao manuais e estaveis (`fix-set-*`); a aplicacao e idempotente.
+- Factories de teste continuam criando dados por teste; nenhum script de teste copia ou le `~/.local/share/metal-squad/app.db`.
+
 ## Anti-recursao
 
 Dentro de uma sessao ja spawnada pelo `msq`, e proibido:
