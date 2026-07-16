@@ -66,11 +66,14 @@ function buildPayload(
   backlog: BacklogV2 | null,
   featureId?: string,
 ): ConfigShowPayload {
+  const baseDefaults: ResolvedExecutionDefaults = {
+    tool: 'claude', effort: 'medium', thinking: 'off', skills: [], stageSkills: {},
+  };
   const effectiveDefaults = backlog
-    ? mergeExecutionDefaults(backlog.defaults)
-    : undefined;
+    ? mergeExecutionDefaults(baseDefaults, backlog.defaults)
+    : baseDefaults;
   const feature = featureId && backlog ? findFeature(backlog, featureId) : null;
-  const featureEffective = feature && effectiveDefaults
+  const featureEffective = feature
     ? mergeExecutionDefaults(effectiveDefaults, feature)
     : undefined;
   if (featureId && !feature) {

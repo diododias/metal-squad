@@ -7,7 +7,6 @@ const DEFAULT_NOTIFICATIONS = {
   channels: [],
   events: ['run:start', 'gate:created', 'run:failed', 'run:done', 'stage:approval', 'stage:input'],
 };
-const DEFAULT_WORKFLOW = { pollIntervalMs: 2_000 };
 const DEFAULT_BUDGET = { alertAtPercent: 80 };
 const DEFAULT_WEB = { host: '127.0.0.1', port: 8_743, auth: 'token', statusSpinner: true };
 const DEFAULT_TOOLS = [
@@ -29,6 +28,12 @@ const DEFAULT_TOOLS = [
 ];
 
 describe('config', () => {
+  it('accepts a zero-percent budget alert threshold', async () => {
+    const { ConfigSchema } = await import('../../src/config/index.js');
+
+    expect(ConfigSchema.parse({ budget: { alertAtPercent: 0 } }).budget.alertAtPercent).toBe(0);
+  });
+
   const previousHome = process.env.HOME;
   let home = '';
 
@@ -53,16 +58,14 @@ describe('config', () => {
 
     const { loadConfig } = await import('../../src/config/index.js');
 
-    expect(loadConfig()).toEqual({
+    expect(loadConfig()).toMatchObject({
       concurrency: 3,
       toolTimeoutMs: 600_000,
+      heartbeatMs: 30_000,
       staleRunThresholdMinutes: 120,
       idleThresholdMs: 30_000,
       promptContextCharLimit: 20_000,
-      theme: undefined,
-      stageSkills: {},
       notifications: DEFAULT_NOTIFICATIONS,
-      workflow: DEFAULT_WORKFLOW,
       budget: DEFAULT_BUDGET,
       web: DEFAULT_WEB,
       tools: DEFAULT_TOOLS,
@@ -119,15 +122,13 @@ describe('config', () => {
     saveConfig({
       concurrency: 5,
       toolTimeoutMs: 1_000,
+      heartbeatMs: 30_000,
       staleRunThresholdMinutes: 30,
       idleThresholdMs: 30_000,
       promptContextCharLimit: 10_000,
-      theme: 'dark',
-      telegramChatId: '123',
       notifications: DEFAULT_NOTIFICATIONS,
-      workflow: DEFAULT_WORKFLOW,
       budget: DEFAULT_BUDGET,
-      stageSkills: {},
+      web: DEFAULT_WEB,
       tools: DEFAULT_TOOLS,
     });
 
@@ -135,17 +136,39 @@ describe('config', () => {
     expect(JSON.parse(readFileSync(CONFIG_PATH, 'utf8'))).toEqual({
       concurrency: 5,
       toolTimeoutMs: 1_000,
+      heartbeatMs: 30_000,
       staleRunThresholdMinutes: 30,
       idleThresholdMs: 30_000,
       promptContextCharLimit: 10_000,
-      theme: 'dark',
-      telegramChatId: '123',
       notifications: DEFAULT_NOTIFICATIONS,
-      workflow: DEFAULT_WORKFLOW,
       budget: DEFAULT_BUDGET,
-      stageSkills: {},
+      web: DEFAULT_WEB,
       tools: DEFAULT_TOOLS,
     });
+  });
+
+  it('preserves omitted notification credentials while updating events and removes them with a channel', async () => {
+    home = mkdtempSync(join(tmpdir(), 'msq-config-'));
+    process.env.HOME = home;
+
+    const { ConfigSchema, saveConfig, saveNotificationsPatch } = await import('../../src/config/index.js');
+    saveConfig(ConfigSchema.parse({
+      notifications: {
+        channels: [{ type: 'webhook', url: 'https://example.test/secret' }],
+        events: ['run:start'],
+      },
+    }));
+
+    const preserved = saveNotificationsPatch({
+      channels: [{ type: 'webhook' }],
+      events: ['run:done'],
+    });
+    expect(preserved.notifications).toEqual({
+      channels: [{ type: 'webhook', url: 'https://example.test/secret' }],
+      events: ['run:done'],
+    });
+
+    expect(saveNotificationsPatch({ channels: [] }).notifications.channels).toEqual([]);
   });
 
   it('saves an App config patch without replacing untouched sections', async () => {
@@ -157,27 +180,20 @@ describe('config', () => {
       ...ConfigSchema.parse({}),
       concurrency: 2,
       web: { ...DEFAULT_WEB, port: 9_001 },
-      workflow: { ...DEFAULT_WORKFLOW, autoAdvanceStages: true },
-      stageSkills: { implement: ['speckit-implement'] },
     });
 
     const saved = saveAppConfigPatch({
       concurrency: 5,
       web: { port: 9_002 },
-      stageSkills: { validate: ['dev-flow'] },
     });
 
     expect(saved).toMatchObject({
       concurrency: 5,
       web: { ...DEFAULT_WEB, port: 9_002 },
-      workflow: { ...DEFAULT_WORKFLOW, autoAdvanceStages: true },
-      stageSkills: { implement: ['speckit-implement'], validate: ['dev-flow'] },
     });
     expect(JSON.parse(readFileSync(CONFIG_PATH, 'utf8'))).toMatchObject({
       concurrency: 5,
       web: { ...DEFAULT_WEB, port: 9_002 },
-      workflow: { ...DEFAULT_WORKFLOW, autoAdvanceStages: true },
-      stageSkills: { implement: ['speckit-implement'], validate: ['dev-flow'] },
     });
   });
 
@@ -218,27 +234,24 @@ describe('config', () => {
     saveConfig({
       concurrency: 2,
       toolTimeoutMs: 999,
+      heartbeatMs: 30_000,
       staleRunThresholdMinutes: 45,
       idleThresholdMs: 30_000,
       promptContextCharLimit: 15_000,
-      theme: 'minimal',
       notifications: DEFAULT_NOTIFICATIONS,
-      workflow: DEFAULT_WORKFLOW,
       budget: DEFAULT_BUDGET,
-      stageSkills: {},
+      web: DEFAULT_WEB,
     });
     ensureDataDir();
 
-    expect(loadConfig()).toEqual({
+    expect(loadConfig()).toMatchObject({
       concurrency: 2,
       toolTimeoutMs: 999,
+      heartbeatMs: 30_000,
       staleRunThresholdMinutes: 45,
       idleThresholdMs: 30_000,
       promptContextCharLimit: 15_000,
-      theme: 'minimal',
-      stageSkills: {},
       notifications: DEFAULT_NOTIFICATIONS,
-      workflow: DEFAULT_WORKFLOW,
       budget: DEFAULT_BUDGET,
       web: DEFAULT_WEB,
       tools: DEFAULT_TOOLS,
@@ -292,42 +305,30 @@ describe('config', () => {
     expect(loadConfig().notifications.events).toEqual(DEFAULT_NOTIFICATIONS.events);
   });
 
-  it('keeps theme undefined when the preference is missing', async () => {
-    home = mkdtempSync(join(tmpdir(), 'msq-config-'));
-    process.env.HOME = home;
-
-    const { loadConfig } = await import('../../src/config/index.js');
-
-    expect(loadConfig().theme).toBeUndefined();
-  });
-
-  it('loads a valid persisted theme preference', async () => {
+  it('discards retired fields and migrates a legacy Telegram chat to notifications', async () => {
     home = mkdtempSync(join(tmpdir(), 'msq-config-'));
     process.env.HOME = home;
 
     const { CONFIG_PATH, loadConfig } = await import('../../src/config/index.js');
     await import('node:fs').then(({ mkdirSync, writeFileSync }) => {
       mkdirSync(join(home, '.config', 'metal-squad'), { recursive: true });
-      writeFileSync(CONFIG_PATH, JSON.stringify({ theme: 'dark' }));
+      writeFileSync(CONFIG_PATH, JSON.stringify({
+        theme: 'dark',
+        telegramChatId: '123',
+        stageSkills: { implement: ['speckit-implement'] },
+        workflow: { autoAdvanceStages: true },
+      }));
     });
 
-    expect(loadConfig().theme).toBe('dark');
+    const config = loadConfig();
+    expect(config.notifications.channels).toEqual([{ type: 'telegram', chatId: '123' }]);
+    expect(config).not.toHaveProperty('theme');
+    expect(config).not.toHaveProperty('telegramChatId');
+    expect(config).not.toHaveProperty('stageSkills');
+    expect(config).not.toHaveProperty('workflow');
   });
 
-  it('preserves an unknown theme preference so startup can fall back safely', async () => {
-    home = mkdtempSync(join(tmpdir(), 'msq-config-'));
-    process.env.HOME = home;
-
-    const { CONFIG_PATH, loadConfig } = await import('../../src/config/index.js');
-    await import('node:fs').then(({ mkdirSync, writeFileSync }) => {
-      mkdirSync(join(home, '.config', 'metal-squad'), { recursive: true });
-      writeFileSync(CONFIG_PATH, JSON.stringify({ theme: 'solarized' }));
-    });
-
-    expect(loadConfig().theme).toBe('solarized');
-  });
-
-  it('loads repo runtime overrides and env interpolation from .msq/config.yaml', async () => {
+  it('loads repo runtime overrides but ignores legacy defaults from .msq/config.yaml', async () => {
     home = mkdtempSync(join(tmpdir(), 'msq-config-'));
     process.env.HOME = home;
     process.env.SLACK_WEBHOOK_URL = 'https://example.test/hook';
@@ -355,12 +356,10 @@ describe('config', () => {
     const repoConfig = loadRepoConfig(join(home, 'repo'));
     const runtime = resolveRuntimeConfig(join(home, 'repo'));
 
-    expect(repoConfig.defaults).toEqual({
-      tool: 'codex',
-      model: 'gpt-5.4',
-      effort: 'high',
-      stageSkills: { plan: ['speckit-plan'] },
-    });
+    expect(repoConfig).toEqual({ runtime: {
+      concurrency: 5,
+      notifications: { channels: [{ type: 'slack', webhookUrl: 'https://example.test/hook' }] },
+    } });
     expect(runtime.concurrency).toBe(5);
     expect(runtime.notifications.channels).toEqual([
       { type: 'slack', webhookUrl: 'https://example.test/hook' },

@@ -99,7 +99,14 @@ export function BacklogItemDetail({
             style={{ width: '100%', minHeight: 280, boxSizing: 'border-box', resize: 'vertical', background: 'var(--bg-sunken)', border: '1px solid var(--border-dim)', borderRadius: 'var(--radius-sm)', color: 'var(--text-primary)', fontFamily: 'var(--font-mono)', fontSize: 'var(--text-sm)', lineHeight: 1.5, padding: 12 }}
           />
         </section>
-        <FeatureConfigDetail feature={feature} backlogSettings={state.backlogSettings} toolIds={state.runtimeConfig.tools.map((tool) => tool.id)} onSaveConfig={(patch) => { onSaveConfig(featureId, patch); }} workflowSaveResult={workflowSaveResult} />
+        <FeatureConfigDetail
+          feature={feature}
+          backlogSettings={state.backlogSettings}
+          approvalChannels={state.runtimeConfig.notifications.channels.map((channel) => channel.type)}
+          toolIds={state.runtimeConfig.tools.map((tool) => tool.id)}
+          onSaveConfig={(patch) => { onSaveConfig(featureId, patch); }}
+          workflowSaveResult={workflowSaveResult}
+        />
       </div>
     </div>
   );

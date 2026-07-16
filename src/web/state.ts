@@ -147,8 +147,7 @@ function normalizeFeatureCatalog(catalog: Record<string, FeatureCatalogEntry>): 
 
 function buildThemeSnapshot(): ThemeSnapshot {
   try {
-    const config = resolveRuntimeConfig(process.cwd());
-    const resolution = resolveThemePreference(config.theme);
+    const resolution = resolveThemePreference(undefined);
     const textColor = resolution.profile.roles.text.color ?? FALLBACK_ROLE_COLOR;
     const roles = Object.fromEntries(
       (Object.entries(resolution.profile.roles) as [ThemeRoleName, { color?: string }][]).map(
@@ -190,7 +189,7 @@ export function sanitizeRuntimeConfig(
   config: Config,
   writability: WebRuntimeConfig['writability'],
 ): WebRuntimeConfig {
-  const { telegramChatId: _telegramChatId, notifications, ...rest } = config;
+  const { notifications, ...rest } = config;
   return {
     ...rest,
     writability,

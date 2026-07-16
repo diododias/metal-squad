@@ -1,4 +1,6 @@
 import { z } from 'zod';
+import { DEFAULT_PROJECT_TEMPLATE } from '../workflow/stageSkills.js';
+export { DEFAULT_PROJECT_TEMPLATE } from '../workflow/stageSkills.js';
 
 export const AdapterSchema = z.enum(['claude', 'codex', 'opencode']);
 export const ToolSchema = z.string().trim().min(1).regex(
@@ -26,7 +28,10 @@ export function createRegisteredToolSchema(registeredToolIds: readonly string[])
 export const EffortSchema = z.enum(['low', 'medium', 'high']);
 export const ThinkingSchema = z.enum(['on', 'off']);
 export const WorkflowModeSchema = z.enum(['single', 'staged']);
-export const WorkflowApprovalChannelSchema = z.enum(['telegram']);
+/** A configured notification channel type (for example `slack` or `desktop`).
+ * Availability and credentials are validated against the runtime notification
+ * config when the workflow is saved or an approval is dispatched. */
+export const WorkflowApprovalChannelSchema = z.string().trim().min(1);
 export const OnFailSchema = z.enum(['stop', 'continue', 'gate']);
 export const SessionPolicyModeSchema = z.enum(['isolated', 'adaptive']);
 export const FallbackAlternativeSchema = z.object({
@@ -71,7 +76,7 @@ export const StepGuidanceSchema = z.object({
 
 const WorkflowSchemaShape = z.object({
   mode: WorkflowModeSchema.default('staged'),
-  stages: z.array(z.string()).min(1).default(['specify', 'plan', 'tasks', 'implement', 'validate']),
+  stages: z.array(z.string()).min(1).default([...DEFAULT_PROJECT_TEMPLATE.stages]),
   approvals: WorkflowApprovalsSchema.default({}),
   autoAdvance: z.boolean().default(false),
   syncTasksToBacklog: z.boolean().default(true),
@@ -155,9 +160,28 @@ export const FeatureSchema = z.object({
   autoStart: z.boolean().default(false),
 });
 
-/** Authoring shape accepted by backlog.yaml before registration assigns an id. */
-export const FeatureInputSchema = FeatureSchema.extend({
+/**
+ * Authoring shape accepted from the YAML asset. Execution fields deliberately
+ * remain optional here: project defaults are applied from the catalog, not
+ * from values embedded in backlog.yaml.
+ */
+export const FeatureInputSchema = z.object({
   id: z.string().optional(),
+  title: z.string(),
+  spec: z.string().optional(),
+  tool: ToolSchema.optional(),
+  model: z.string().optional(),
+  effort: EffortSchema.optional(),
+  thinking: ThinkingSchema.optional(),
+  dependsOn: z.array(z.string()).optional(),
+  tasks: z.array(TaskSchema).optional(),
+  skills: z.array(z.string()).optional(),
+  specFile: z.string().optional(),
+  context: z.array(z.string()).optional(),
+  workflow: WorkflowSchema.optional(),
+  retry: RetrySchema.optional(),
+  maxTokens: z.number().int().positive().optional(),
+  autoStart: z.boolean().optional(),
 });
 
 export const EpicSchema = z.object({
@@ -197,7 +221,8 @@ export const BacklogV2Schema = z.object({
 export const BacklogV2InputSchema = z.object({
   version: z.literal(2),
   repo: z.string(),
-  defaults: DefaultsSchema.default({}),
+  /** Legacy input is accepted and discarded by the loader with a warning. */
+  defaults: DefaultsSchema.optional(),
   budget: BudgetSchema.optional(),
   epics: z.array(EpicInputSchema).default([]),
 });

@@ -79,6 +79,7 @@ export interface StageRequestCreatedEvent {
   kind: StageRequestKind;
   prompt: string;
   source?: 'manual' | 'auto';
+  approvalChannel?: string;
   options?: string[];
   featureName?: string;
 }

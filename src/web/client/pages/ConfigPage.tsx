@@ -6,8 +6,8 @@ import { EditableToggleField } from '../components/core/EditableToggleField.js';
 import { Tabs } from '../components/navigation/Tabs.js';
 import { Tag } from '../components/core/Tag.js';
 import { PageHeader } from '../PageHeader.js';
-import type { MsqWebState, ProjectDefaultsPatch, WebSocketClientMessage } from '../../types.js';
-import type { ToolRegistryEntry } from '../../../config/index.js';
+import type { AppConfigPatch, MsqWebState, ProjectDefaultsPatch, WebSocketClientMessage } from '../../types.js';
+import type { NotificationsPatch, ToolRegistryEntry } from '../../../config/index.js';
 
 export interface ConfigPageProps {
   state: MsqWebState;
@@ -56,22 +56,96 @@ function Card({ title, children }: { title: string; children: React.ReactNode })
   );
 }
 
-function RuntimeTab({ state }: { state: MsqWebState }): React.JSX.Element {
+interface RuntimeDraft {
+  concurrency: string;
+  toolTimeoutMs: string;
+  heartbeatMs: string;
+  staleRunThresholdMinutes: string;
+  promptContextCharLimit: string;
+  webHost: string;
+  webPort: string;
+  webAuth: 'token' | 'none';
+}
+
+function runtimeDraftFrom(config: MsqWebState['runtimeConfig']): RuntimeDraft {
+  return {
+    concurrency: String(config.concurrency),
+    toolTimeoutMs: String(config.toolTimeoutMs),
+    heartbeatMs: String(config.heartbeatMs),
+    staleRunThresholdMinutes: String(config.staleRunThresholdMinutes),
+    promptContextCharLimit: String(config.promptContextCharLimit),
+    webHost: config.web.host,
+    webPort: String(config.web.port),
+    webAuth: config.web.auth,
+  };
+}
+
+function positiveWholeNumber(value: string, max?: number): number | undefined {
+  const number = Number(value);
+  return Number.isInteger(number) && number > 0 && (max === undefined || number <= max) ? number : undefined;
+}
+
+function RuntimeTab({ state, send }: { state: MsqWebState; send: ConfigPageProps['send'] }): React.JSX.Element {
   const c = state.runtimeConfig;
   const sources = state.backlogSettings.configSources;
   const environment = state.environment;
   const secretsStatus = c.web.auth === 'token' ? 'configured' : 'empty';
+  const baseline = useMemo(() => runtimeDraftFrom(c), [c]);
+  const [draft, setDraft] = useState<RuntimeDraft>(baseline);
+  const writable = c.writability.configWritable;
+
+  useEffect(() => {
+    setDraft(baseline);
+  }, [baseline]);
+
+  const concurrency = positiveWholeNumber(draft.concurrency);
+  const toolTimeoutMs = positiveWholeNumber(draft.toolTimeoutMs);
+  const heartbeatMs = positiveWholeNumber(draft.heartbeatMs);
+  const staleRunThresholdMinutes = positiveWholeNumber(draft.staleRunThresholdMinutes);
+  const promptContextCharLimit = positiveWholeNumber(draft.promptContextCharLimit);
+  const webPort = positiveWholeNumber(draft.webPort, 65_535);
+  const isValid = concurrency !== undefined
+    && toolTimeoutMs !== undefined
+    && heartbeatMs !== undefined
+    && staleRunThresholdMinutes !== undefined
+    && promptContextCharLimit !== undefined
+    && webPort !== undefined
+    && draft.webHost.trim().length > 0;
+  const patch: AppConfigPatch = {};
+  if (concurrency !== undefined && draft.concurrency !== baseline.concurrency) patch.concurrency = concurrency;
+  if (toolTimeoutMs !== undefined && draft.toolTimeoutMs !== baseline.toolTimeoutMs) patch.toolTimeoutMs = toolTimeoutMs;
+  if (heartbeatMs !== undefined && draft.heartbeatMs !== baseline.heartbeatMs) patch.heartbeatMs = heartbeatMs;
+  if (staleRunThresholdMinutes !== undefined && draft.staleRunThresholdMinutes !== baseline.staleRunThresholdMinutes) patch.staleRunThresholdMinutes = staleRunThresholdMinutes;
+  if (promptContextCharLimit !== undefined && draft.promptContextCharLimit !== baseline.promptContextCharLimit) patch.promptContextCharLimit = promptContextCharLimit;
+  if (draft.webHost.trim() && draft.webHost !== baseline.webHost) patch.web = { ...patch.web, host: draft.webHost.trim() };
+  if (webPort !== undefined && draft.webPort !== baseline.webPort) patch.web = { ...patch.web, port: webPort };
+  if (draft.webAuth !== baseline.webAuth) patch.web = { ...patch.web, auth: draft.webAuth };
+  const canSave = writable && isValid && Object.keys(patch).length > 0;
+
+  function updateField<Key extends keyof RuntimeDraft>(key: Key, value: RuntimeDraft[Key]): void {
+    setDraft((current) => ({ ...current, [key]: value }));
+  }
+
+  function save(): void {
+    if (canSave) send({ type: 'action:updateAppConfig', patch });
+  }
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
       <Card title="Runtime">
-        <Row label="concurrency" value={c.concurrency} source="global" />
-        <Row label="toolTimeoutMs" value={c.toolTimeoutMs.toLocaleString()} source="global" />
-        <Row label="staleRunThresholdMinutes" value={c.staleRunThresholdMinutes} source="global" />
-        <Row label="promptContextCharLimit" value={c.promptContextCharLimit.toLocaleString()} source="global" />
-        <Row label="workflow.pollIntervalMs" value={c.workflow.pollIntervalMs} source="global" />
-        <Row label="web.host" value={c.web.host} source="global" />
-        <Row label="web.port" value={c.web.port} source="global" />
-        <Row label="web.auth" value={c.web.auth} source="global" />
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+          <EditableTextField id="runtime-concurrency" label="concurrency" value={draft.concurrency} initialValue={baseline.concurrency} disabled={!writable} onChange={(value) => { updateField('concurrency', value); }} />
+          <EditableTextField id="runtime-tool-timeout" label="toolTimeoutMs" value={draft.toolTimeoutMs} initialValue={baseline.toolTimeoutMs} disabled={!writable} onChange={(value) => { updateField('toolTimeoutMs', value); }} />
+          <EditableTextField id="runtime-heartbeat" label="heartbeatMs" value={draft.heartbeatMs} initialValue={baseline.heartbeatMs} disabled={!writable} onChange={(value) => { updateField('heartbeatMs', value); }} />
+          <EditableTextField id="runtime-stale-threshold" label="staleRunThresholdMinutes" value={draft.staleRunThresholdMinutes} initialValue={baseline.staleRunThresholdMinutes} disabled={!writable} onChange={(value) => { updateField('staleRunThresholdMinutes', value); }} />
+          <EditableTextField id="runtime-prompt-limit" label="promptContextCharLimit" value={draft.promptContextCharLimit} initialValue={baseline.promptContextCharLimit} disabled={!writable} onChange={(value) => { updateField('promptContextCharLimit', value); }} />
+          <EditableTextField id="runtime-web-host" label="web.host" value={draft.webHost} initialValue={baseline.webHost} disabled={!writable} onChange={(value) => { updateField('webHost', value); }} />
+          <EditableTextField id="runtime-web-port" label="web.port" value={draft.webPort} initialValue={baseline.webPort} disabled={!writable} onChange={(value) => { updateField('webPort', value); }} />
+          <EditableSelectField id="runtime-web-auth" label="web.auth" value={draft.webAuth} initialValue={baseline.webAuth} disabled={!writable} options={[{ value: 'token', label: 'token' }, { value: 'none', label: 'none' }]} onChange={(value) => { updateField('webAuth', value === 'none' ? 'none' : 'token'); }} />
+          {!writable && <span style={{ color: 'var(--accent-warn)', fontSize: 'var(--text-xs)', lineHeight: 1.4 }}>config.json is read-only; runtime settings cannot be changed.</span>}
+          {!isValid && <span style={{ color: 'var(--accent-warn)', fontSize: 'var(--text-xs)', lineHeight: 1.4 }}>Enter positive whole numbers; web.port must be between 1 and 65535.</span>}
+          <div><Button variant="primary" size="sm" onClick={save} disabled={!canSave}>save runtime</Button></div>
+        </div>
       </Card>
       <Card title="Environment / Sources">
         <Row label="global config" value={sources?.globalConfigPath ?? '—'} />
@@ -287,7 +361,7 @@ function DefaultsTab({ state, send }: { state: MsqWebState; send: ConfigPageProp
             label="workflow.approvals.channel"
             value={draft.approvalChannel}
             initialValue={baseline.approvalChannel}
-            options={[{ value: 'telegram', label: 'telegram' }]}
+            options={Array.from(new Set([...state.runtimeConfig.notifications.channels.map((channel) => channel.type), baseline.approvalChannel])).map((channel) => ({ value: channel, label: channel }))}
             onChange={(approvalChannel) => { setDraft((current) => ({ ...current, approvalChannel: approvalChannel ?? '' })); }}
           />
           <EditableToggleField
@@ -317,8 +391,17 @@ function listFromCsv(value: string): string[] {
   return value.split(',').map((item) => item.trim()).filter(Boolean);
 }
 
+type ToolDraft = ToolRegistryEntry & {
+  capabilities: { model: boolean; effort: boolean; thinking: boolean };
+  thinkingBudget: { low: number; medium: number; high: number };
+};
+
 function ToolEditor({ tool, idReadOnly = false, onSave, onCancel }: { tool: ToolRegistryEntry; idReadOnly?: boolean; onSave: (tool: ToolRegistryEntry) => void; onCancel: () => void }): React.JSX.Element {
-  const [draft, setDraft] = useState<ToolRegistryEntry>(tool);
+  const [draft, setDraft] = useState<ToolDraft>({
+    ...tool,
+    capabilities: tool.capabilities ?? { model: true, effort: true, thinking: true },
+    thinkingBudget: tool.thinkingBudget ?? { low: 0, medium: 0, high: 0 },
+  });
   const [baseArgs, setBaseArgs] = useState(tool.baseArgs.join(', '));
   const [versionCheck, setVersionCheck] = useState(tool.versionCheck.join(', '));
   const [env, setEnv] = useState(JSON.stringify(tool.env));
@@ -403,43 +486,120 @@ function SkillsTab({ state }: { state: MsqWebState }): React.JSX.Element {
   );
 }
 
-function NotificationsTab({ state }: { state: MsqWebState }): React.JSX.Element {
-  const n = state.runtimeConfig.notifications;
+const NOTIFICATION_EVENTS = ['run:start', 'gate:created', 'run:failed', 'budget:alert', 'run:done', 'stage:approval', 'stage:input', 'timeout:approval-created'] as const;
+const CHANNEL_TYPES = ['telegram', 'slack', 'discord', 'webhook', 'desktop'] as const;
+type ChannelType = (typeof CHANNEL_TYPES)[number];
+
+interface NotificationChannelDraft {
+  type: ChannelType;
+  configured: boolean;
+  credential: string;
+}
+
+function notificationsDraftFrom(config: MsqWebState['runtimeConfig']['notifications']): NotificationChannelDraft[] {
+  return config.channels.map((channel) => ({ type: channel.type, configured: channel.configured, credential: '' }));
+}
+
+function credentialLabel(type: ChannelType): string | undefined {
+  switch (type) {
+    case 'telegram': return 'chatId';
+    case 'slack':
+    case 'discord': return 'webhook URL';
+    case 'webhook': return 'webhook URL';
+    case 'desktop': return undefined;
+  }
+}
+
+function NotificationsTab({ state, send }: { state: MsqWebState; send: ConfigPageProps['send'] }): React.JSX.Element {
+  const baseline = useMemo(() => notificationsDraftFrom(state.runtimeConfig.notifications), [state.runtimeConfig.notifications]);
+  const [channels, setChannels] = useState<NotificationChannelDraft[]>(baseline);
+  const [events, setEvents] = useState<string[]>(state.runtimeConfig.notifications.events);
+
+  useEffect(() => {
+    setChannels(baseline);
+    setEvents(state.runtimeConfig.notifications.events);
+  }, [baseline, state.runtimeConfig.notifications.events]);
+
+  const channelsValid = channels.every((channel) => channel.type === 'desktop' || channel.configured || channel.credential.trim().length > 0);
+  const patch: NotificationsPatch = {
+    channels: channels.map((channel) => {
+      const credential = channel.credential.trim();
+      switch (channel.type) {
+        case 'telegram': return { type: channel.type, ...(credential ? { chatId: credential } : {}) };
+        case 'slack':
+        case 'discord': return { type: channel.type, ...(credential ? { webhookUrl: credential } : {}) };
+        case 'webhook': return { type: channel.type, ...(credential ? { url: credential } : {}) };
+        case 'desktop': return channel;
+      }
+    }),
+    events: events as NotificationsPatch['events'],
+  };
+  const changed = !sameJson(channels.map(({ type }) => type), baseline.map(({ type }) => type))
+    || !sameJson(events, state.runtimeConfig.notifications.events)
+    || channels.some((channel) => channel.credential.trim().length > 0);
+  const canSave = channelsValid && changed;
+
+  function updateChannel(index: number, update: Partial<NotificationChannelDraft>): void {
+    setChannels((current) => current.map((channel, currentIndex) => currentIndex === index ? { ...channel, ...update } : channel));
+  }
+
+  function toggleEvent(event: string, enabled: boolean): void {
+    setEvents((current) => enabled ? [...current, event] : current.filter((value) => value !== event));
+  }
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
       <Card title="Channels">
-        {n.channels.length ? (
-          n.channels.map((c, i) => (
-            <div key={i} style={{ padding: '6px 0', borderBottom: '1px solid var(--border-dim)', fontSize: 'var(--text-sm)' }}>
-              <Tag>{c.type}</Tag>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+          {channels.map((channel, index) => (
+            <div key={index} style={{ borderBottom: '1px solid var(--border-dim)', paddingBottom: 12 }}>
+              <EditableSelectField id={`notification-channel-${String(index)}-type`} label="type" value={channel.type} initialValue={baseline[index]?.type} options={CHANNEL_TYPES.map((type) => ({ value: type, label: type }))} onChange={(value) => { updateChannel(index, { type: (value ?? 'desktop') as ChannelType, configured: false, credential: '' }); }} />
+              {credentialLabel(channel.type) && <EditableTextField id={`notification-channel-${String(index)}-credential`} label={credentialLabel(channel.type) ?? ''} value={channel.credential} initialValue="" placeholder={channel.configured ? 'configured — leave blank to keep' : 'required'} onChange={(value) => { updateChannel(index, { credential: value }); }} />}
+              {channel.configured && channel.type !== 'desktop' && <div style={{ color: 'var(--accent-info)', fontSize: 'var(--text-xs)', marginTop: 6 }}>configured</div>}
+              <div style={{ marginTop: 8 }}><Button size="sm" onClick={() => { setChannels((current) => current.filter((_, currentIndex) => currentIndex !== index)); }}>remove channel</Button></div>
             </div>
-          ))
-        ) : (
-          <div style={{ color: 'var(--text-faint)', fontSize: 'var(--text-sm)' }}>No channels configured.</div>
-        )}
+          ))}
+          {channels.length === 0 && <div style={{ color: 'var(--text-faint)', fontSize: 'var(--text-sm)' }}>No channels configured.</div>}
+          <div><Button size="sm" onClick={() => { setChannels((current) => [...current, { type: 'webhook', configured: false, credential: '' }]); }}>add channel</Button></div>
+        </div>
       </Card>
       <Card title="Events">
-        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
-          {n.events.map((e) => (
-            <Tag key={e} tone="accent">
-              {e}
-            </Tag>
-          ))}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+          {NOTIFICATION_EVENTS.map((event) => <EditableToggleField key={event} id={`notification-event-${event}`} label={event} value={events.includes(event)} initialValue={state.runtimeConfig.notifications.events.includes(event)} onChange={(enabled) => { toggleEvent(event, enabled); }} />)}
         </div>
+        {!channelsValid && <div style={{ color: 'var(--accent-warn)', fontSize: 'var(--text-xs)', marginTop: 10 }}>Enter a credential for every new channel.</div>}
+        <div style={{ marginTop: 12 }}><Button variant="primary" size="sm" onClick={() => { if (canSave) send({ type: 'action:updateNotifications', patch }); }} disabled={!canSave}>save notifications</Button></div>
       </Card>
     </div>
   );
 }
 
-function BudgetTab({ state }: { state: MsqWebState }): React.JSX.Element {
-  const budget = state.backlogSettings.budget;
-  const runtimeBudget = state.runtimeConfig.budget;
+function BudgetTab({ state, send }: { state: MsqWebState; send: ConfigPageProps['send'] }): React.JSX.Element {
+  const baseline = String(state.runtimeConfig.budget.alertAtPercent);
+  const [draft, setDraft] = useState(baseline);
+
+  useEffect(() => {
+    setDraft(baseline);
+  }, [baseline]);
+
+  const alertAtPercent = Number(draft);
+  const isValid = Number.isInteger(alertAtPercent) && alertAtPercent >= 0 && alertAtPercent <= 100;
+  const canSave = draft !== baseline && isValid;
+
   return (
     <Card title="Budget">
-      <Row label="maxTokens (backlog)" value={budget?.maxTokens?.toLocaleString() ?? '—'} source="backlog" />
-      <Row label="perFeatureMaxTokens (backlog)" value={budget?.perFeatureMaxTokens?.toLocaleString() ?? '—'} source="backlog" />
-      <Row label="alertAtPercent" value={`${String(runtimeBudget.alertAtPercent)}%`} source="global" />
-      <Row label="lastResetDate" value={runtimeBudget.lastResetDate ?? '—'} source="global" />
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+        <EditableTextField
+          id="budget-alert-at-percent"
+          label="alertAtPercent"
+          value={draft}
+          initialValue={baseline}
+          placeholder="whole number from 0 to 100"
+          onChange={setDraft}
+        />
+        {!isValid && <span style={{ color: 'var(--accent-warn)', fontSize: 'var(--text-xs)', lineHeight: 1.4 }}>Enter a whole number from 0 to 100.</span>}
+        <div><Button variant="primary" size="sm" onClick={() => { if (canSave) send({ type: 'action:updateBudgetConfig', patch: { alertAtPercent } }); }} disabled={!canSave}>save budget</Button></div>
+      </div>
     </Card>
   );
 }
@@ -450,7 +610,7 @@ export function ConfigPage({ state, send }: ConfigPageProps): React.JSX.Element 
   const content = useMemo(() => {
     switch (tab) {
       case 'runtime':
-        return <RuntimeTab state={state} />;
+        return <RuntimeTab state={state} send={send} />;
       case 'defaults':
         return <DefaultsTab state={state} send={send} />;
       case 'tools':
@@ -458,9 +618,9 @@ export function ConfigPage({ state, send }: ConfigPageProps): React.JSX.Element 
       case 'skills':
         return <SkillsTab state={state} />;
       case 'notifications':
-        return <NotificationsTab state={state} />;
+        return <NotificationsTab state={state} send={send} />;
       case 'budget':
-        return <BudgetTab state={state} />;
+        return <BudgetTab state={state} send={send} />;
       default:
         return null;
     }

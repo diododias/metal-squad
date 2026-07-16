@@ -84,7 +84,6 @@ describe('buildMsqWebState pendingFeatures projection', () => {
       version: '0.0.1',
     });
     mocks.resolveRuntimeConfig.mockReturnValue({
-      theme: undefined,
       concurrency: 3,
       staleRunThresholdMinutes: 120,
       toolTimeoutMs: 600_000,
@@ -400,8 +399,6 @@ describe('buildMsqWebState pendingFeatures projection', () => {
       staleRunThresholdMinutes: 120,
       toolTimeoutMs: 600_000,
       promptContextCharLimit: 20_000,
-      stageSkills: {},
-      telegramChatId: '123456',
       notifications: {
         channels: [
           { type: 'slack', webhookUrl: 'https://hooks.slack.com/services/T00/B00/secret' },
@@ -411,7 +408,6 @@ describe('buildMsqWebState pendingFeatures projection', () => {
         ],
         events: ['run:start', 'run:done'],
       },
-      workflow: { autoAdvanceStages: false, pollIntervalMs: 2_000 },
       budget: { alertAtPercent: 80 },
       web: { host: '127.0.0.1', port: 8743, auth: 'token' },
     });

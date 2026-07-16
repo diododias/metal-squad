@@ -31,7 +31,8 @@ import { resolveRepo } from '../core/repo.js';
 import { loadBacklogFromCatalog } from '../core/backlog/load.js';
 import { selectStartableFeaturePlan } from '../core/orchestrator/graph.js';
 import { validateBacklogSkills } from '../core/skills/index.js';
-import { ConfigSchema, loadConfig, resolveRuntimeConfig, saveAppConfigPatch, saveConfig, type ToolRegistryEntry } from '../config/index.js';
+import { ConfigSchema, loadConfig, resolveRuntimeConfig, saveAppConfigPatch, saveConfig, saveNotificationsPatch, type NotificationsPatch, type ToolRegistryEntry } from '../config/index.js';
+import { assertConfiguredNotificationChannel } from '../core/notify/manager.js';
 import { clearSecret, setSecret } from '../security/secrets.js';
 import { updateCatalogFeature, updateCatalogTask, updateCatalogDefaults, type FeaturePatch, type CatalogDefaultsPatch } from '../db/backlogCatalog.js';
 import type { Feature, Task } from '../core/backlog/schema.js';
@@ -42,6 +43,7 @@ import type {
   FeatureConfigPatch,
   FeatureConfigSaveIssue,
   FeatureConfigSaveResult,
+  BudgetConfigPatch,
   ProjectDefaultsPatch,
   RunChangesPayload,
   SecretPatch,
@@ -717,8 +719,12 @@ export function createWebServer(options: {
         updateProjectDefaults(message.patch, featureCwd);
         break;
       }
-      case 'action:updateToolsRegistry': {
-        updateToolsRegistry(message.tools, featureCwd);
+      case 'action:updateBudgetConfig': {
+        updateBudgetConfig(message.patch, featureCwd);
+        break;
+      }
+      case 'action:updateNotifications': {
+        updateNotifications(message.patch, featureCwd);
         break;
       }
       case 'action:updateAppConfig': {
@@ -731,6 +737,10 @@ export function createWebServer(options: {
       }
       case 'action:clearSecret': {
         await removeSecret(message.account, featureCwd);
+        break;
+      }
+      case 'action:updateToolsRegistry': {
+        updateToolsRegistry(message.tools, featureCwd);
         break;
       }
       case 'action:pausePipeline': {
@@ -1011,6 +1021,9 @@ export function createWebServer(options: {
     try {
       console.log(`[updateFeatureConfig] featureId=${featureId}, patch=`, patch);
       assertWritableDbPath();
+      if (patch.workflow?.approvals?.channel !== undefined) {
+        assertConfiguredNotificationChannel(patch.workflow.approvals.channel);
+      }
       const { repoId } = resolveRepo(featureCwd);
       updateCatalogFeature(repoId, featureId, toFeaturePatch(patch));
     } catch (error) {
@@ -1045,6 +1058,9 @@ export function createWebServer(options: {
     try {
       console.log(`[updateProjectDefaults] patch=`, patch);
       assertWritableDbPath();
+      if (patch.workflow?.approvals?.channel !== undefined) {
+        assertConfiguredNotificationChannel(patch.workflow.approvals.channel);
+      }
       const { repoId } = resolveRepo(featureCwd);
       updateCatalogDefaults(repoId, patch as CatalogDefaultsPatch);
     } catch (error) {
@@ -1057,6 +1073,39 @@ export function createWebServer(options: {
     }
     reconcileWebState(featureCwd);
     msqEventBus.emit('ui:info', { message: 'Saved project defaults.' });
+  }
+
+  function updateBudgetConfig(patch: BudgetConfigPatch, featureCwd: string): void {
+    try {
+      if (!Number.isInteger(patch.alertAtPercent) || patch.alertAtPercent < 0 || patch.alertAtPercent > 100) {
+        throw new Error('alertAtPercent must be a whole number between 0 and 100.');
+      }
+      const config = loadConfig();
+      saveConfig({
+        ...config,
+        budget: { ...config.budget, alertAtPercent: patch.alertAtPercent },
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      console.error(`[updateBudgetConfig] error: ${message}`);
+      msqEventBus.emit('ui:notice', { message: `Could not save budget settings: ${message}` });
+      return;
+    }
+    reconcileWebState(featureCwd);
+    msqEventBus.emit('ui:info', { message: 'Saved budget settings.' });
+  }
+
+  function updateNotifications(patch: NotificationsPatch, featureCwd: string): void {
+    try {
+      saveNotificationsPatch(patch);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      msqEventBus.emit('ui:notice', { message: `Could not save notifications: ${message}` });
+      return;
+    }
+    resetWebStateCaches();
+    reconcileWebState(featureCwd);
+    msqEventBus.emit('ui:info', { message: 'Saved notifications.' });
   }
 
   function updateToolsRegistry(tools: ToolRegistryEntry[], featureCwd: string): void {

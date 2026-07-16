@@ -56,6 +56,7 @@ import { buildPrompt } from '../backlog/prompt.js';
 import { createSkillRegistry } from '../skills/index.js';
 import { syncFeatureTasksToBacklog } from '../backlog/sync.js';
 import type { Skill } from '../skills/types.js';
+import { collectEffectiveStageSkills } from '../workflow/stageSkills.js';
 import { decideStageTransition } from '../workflow/sessionPolicy.js';
 import {
   createBudgetTracker,
@@ -168,7 +169,8 @@ export async function executeBacklog(
   let budgetPauseTriggered = false;
   let autoPilotProtectiveStop = false;
 
-  const effectiveStageSkills = backlog.version === 2 ? backlog.defaults.stageSkills : {};
+  const repoStageSkills = backlog.version === 2 ? backlog.defaults.stageSkills : {};
+  const effectiveStageSkills = collectEffectiveStageSkills(repoStageSkills);
   const completedFeatureIds = listCompletedFeatureIds(repoId);
 
   const resolvedPlan = opts.featureId
@@ -303,6 +305,7 @@ export async function executeBacklog(
         signal: abortSignal,
         session,
         resumeOverride: opts.resumeOverride?.featureId === feature.id ? opts.resumeOverride : undefined,
+        stageSkills: effectiveStageSkills,
       });
       const res = applyImplementPublishGate(initialRes, stage, opts.cwd);
       if (res.usage) {
@@ -738,6 +741,7 @@ interface RetryRunOptions {
   signal?: AbortSignal;
   session?: RunFeatureOptions['session'];
   resumeOverride?: ResumeOverride;
+  stageSkills?: Record<string, string[]>;
 }
 
 interface RetryCandidate {
@@ -797,6 +801,7 @@ async function runWithRetry(
         runId: opts.runId,
         signal: opts.signal,
         session,
+        ...(opts.stageSkills && Object.keys(opts.stageSkills).length > 0 ? { stageSkills: opts.stageSkills } : {}),
       });
 
       if (res.ok || res.control?.type === 'needs_input') {
@@ -913,7 +918,7 @@ async function executeStagedFeature(
         res.control.prompt,
         { runId, options: res.control.options },
       );
-      const response = await waitForStageRequestResponse(requestId, config.workflow.pollIntervalMs);
+      const response = await waitForStageRequestResponse(requestId, 2_000);
       stageInputs.set(stage, [...(stageInputs.get(stage) ?? []), response]);
       // Reuse the same resume-vs-new-session policy as a normal stage
       // transition instead of always forcing a fresh session — a needs_input
@@ -994,6 +999,7 @@ async function executeStagedFeature(
           runId,
           response: 'advance',
           source: 'auto',
+          approvalChannel: workflow.approvals.channel,
         },
       );
       continue;
@@ -1005,7 +1011,7 @@ async function executeStagedFeature(
       stage,
       'approval',
       `Advance to stage ${nextStage}?`,
-      { runId },
+      { runId, approvalChannel: workflow.approvals.channel },
     );
     const decision = await waitForStageApproval(
       requestId,
@@ -1013,8 +1019,9 @@ async function executeStagedFeature(
       feature.id,
       stage,
       nextStage,
-      config.workflow.pollIntervalMs,
+      2_000,
       runId,
+      workflow.approvals.channel,
     );
     if (decision === 'retry') {
       pendingTransitionDecisionId = null;
@@ -1193,6 +1200,7 @@ async function waitForStageApproval(
   nextStage: string,
   pollIntervalMs: number,
   runId: number,
+  approvalChannel: string,
 ): Promise<'advance' | 'retry'> {
   let pendingRequestId = requestId;
 
@@ -1205,7 +1213,7 @@ async function waitForStageApproval(
       stage,
       'approval',
       `Stage ${stage} still pending. Advance to ${nextStage}?`,
-      { runId },
+      { runId, approvalChannel },
     );
   }
 }

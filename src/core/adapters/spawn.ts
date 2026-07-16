@@ -43,9 +43,12 @@ function pickInvocation(entry: ToolRegistryEntry | (typeof DEFAULT_TOOL_REGISTRY
   if (!adapterDefaults) {
     throw new Error(`No defaults registered for adapter "${entry.adapter}".`);
   }
-  const capabilities = entry.capabilities;
-  const thinkingBudget = entry.thinkingBudget;
-  const minTimeoutMs = entry.minTimeoutMs;
+  const capabilities = entry.capabilities ?? adapterDefaults.capabilities;
+  const thinkingBudget = entry.thinkingBudget ?? adapterDefaults.thinkingBudget;
+  const minTimeoutMs = entry.minTimeoutMs ?? adapterDefaults.minTimeoutMs;
+  if (!capabilities || !thinkingBudget || minTimeoutMs === undefined) {
+    throw new Error(`Incomplete runtime defaults for adapter "${entry.adapter}".`);
+  }
 
   return {
     command: entry.command,
