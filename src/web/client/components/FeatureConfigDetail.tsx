@@ -7,7 +7,6 @@ import { Tag } from './core/Tag.js';
 import type { FeatureCatalogEntry, BacklogSettings } from '../../../ui/catalog.js';
 import type { FeatureConfigPatch, FeatureConfigSaveResult, TaskConfigPatch } from '../../types.js';
 
-const executionTools = ['claude', 'codex', 'opencode'] as const;
 const executionEfforts = ['low', 'medium', 'high'] as const;
 
 interface ExecutionDraft {
@@ -91,9 +90,10 @@ export interface FeatureConfigDetailProps {
   onSaveConfig: (patch: FeatureConfigPatch) => void;
   onSaveTaskConfig?: (taskId: string, patch: TaskConfigPatch) => void;
   workflowSaveResult?: FeatureConfigSaveResult;
+  toolIds?: string[];
 }
 
-export function FeatureConfigDetail({ feature, backlogSettings, onSaveConfig, workflowSaveResult }: FeatureConfigDetailProps): React.JSX.Element {
+export function FeatureConfigDetail({ feature, backlogSettings, onSaveConfig, workflowSaveResult, toolIds = ['claude', 'codex', 'opencode'] }: FeatureConfigDetailProps): React.JSX.Element {
   const stages = feature.workflow.stages;
   const [selectedStage, setSelectedStage] = useState(stages[0] ?? 'specify');
   const [draftPrompt, setDraftPrompt] = useState('');
@@ -325,7 +325,7 @@ export function FeatureConfigDetail({ feature, backlogSettings, onSaveConfig, wo
     }
   }
 
-  const hasUnavailableTool = !executionTools.includes(draftExecution.tool as typeof executionTools[number]);
+  const hasUnavailableTool = !toolIds.includes(draftExecution.tool);
   const hasExecutionChanges = Object.keys(executionPatch).length > 0 || hasChangedMaxTokens;
   const unsupportedExecutionWarnings = configuredCapabilities ? [
     !executionCapabilities.model ? `${draftExecution.tool} does not support model; it will be ignored.` : undefined,
@@ -375,7 +375,7 @@ export function FeatureConfigDetail({ feature, backlogSettings, onSaveConfig, wo
             label="tool"
             value={draftExecution.tool}
             initialValue={executionBaseline.tool}
-            options={executionTools.map((tool) => ({ value: tool, label: tool }))}
+            options={toolIds.map((tool) => ({ value: tool, label: tool }))}
             onChange={(tool) => { setDraftExecution((draft) => ({ ...draft, tool: tool ?? '' })); }}
           />
           <EditableTextField
