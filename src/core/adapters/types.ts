@@ -116,6 +116,7 @@ export interface RunFeatureOptions {
   };
   onStatus?: SessionStatusCallback;
   onToolCall?: ToolCallCallback;
+  stageSkills?: Record<string, string[]>;
 }
 
 export interface RunResult {

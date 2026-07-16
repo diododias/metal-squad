@@ -2,6 +2,7 @@ import { readFileSync, existsSync, renameSync, rmSync, writeFileSync } from 'nod
 import { resolve, dirname, isAbsolute } from 'node:path';
 import { parse, stringify } from 'yaml';
 import { loadRepoConfig, mergeStageSkills } from '../../config/index.js';
+import { DEFAULT_PROJECT_TEMPLATE } from '../workflow/stageSkills.js';
 import {
   BacklogInputSchema,
   BacklogV2Schema,
@@ -27,10 +28,10 @@ function normalizeV1(backlog: BacklogV1Input, repoDefaults: ReturnType<typeof lo
     effort: repoDefaults.effort ?? 'medium',
     thinking: repoDefaults.thinking ?? 'off',
     skills: repoDefaults.skills ?? [],
-    stageSkills: repoDefaults.stageSkills ?? {},
+    stageSkills: mergeStageSkills(DEFAULT_PROJECT_TEMPLATE.stageSkills, repoDefaults.stageSkills),
     workflow: {
       mode: 'staged',
-      stages: ['specify', 'plan', 'tasks', 'implement', 'validate'],
+      stages: [...DEFAULT_PROJECT_TEMPLATE.stages],
       approvals: { channel: 'telegram', autoAdvance: false },
       syncTasksToBacklog: true,
       sessionPolicy: { mode: 'isolated', alwaysIsolatedStages: [] },
@@ -64,7 +65,10 @@ function propagateDefaults(backlog: BacklogV2Input, repoDefaults: ReturnType<typ
     effort: backlog.defaults.effort,
     thinking: backlog.defaults.thinking,
     skills: backlog.defaults.skills,
-    stageSkills: mergeStageSkills(repoDefaults.stageSkills, backlog.defaults.stageSkills),
+    stageSkills: mergeStageSkills(
+      mergeStageSkills(DEFAULT_PROJECT_TEMPLATE.stageSkills, repoDefaults.stageSkills),
+      backlog.defaults.stageSkills,
+    ),
     workflow: backlog.defaults.workflow,
     ...(backlog.defaults.maxTokens !== undefined ? { maxTokens: backlog.defaults.maxTokens } : {}),
   };

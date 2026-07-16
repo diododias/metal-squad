@@ -1,9 +1,13 @@
-export const SYSTEM_STAGE_SKILLS: Record<string, string[]> = {
-  specify: ['speckit-specify'],
-  plan: ['speckit-plan'],
-  tasks: ['speckit-tasks'],
-  implement: ['speckit-implement', 'dev-flow'],
-  validate: ['review'],
+/** Project-owned defaults retained for existing Spec Kit projects. */
+export const DEFAULT_PROJECT_TEMPLATE: { stages: string[]; stageSkills: Record<string, string[]> } = {
+  stages: ['specify', 'plan', 'tasks', 'implement', 'validate'],
+  stageSkills: {
+    specify: ['speckit-specify'],
+    plan: ['speckit-plan'],
+    tasks: ['speckit-tasks'],
+    implement: ['speckit-implement', 'dev-flow'],
+    validate: ['review'],
+  },
 };
 
 export function collectEffectiveStageSkills(
@@ -11,7 +15,6 @@ export function collectEffectiveStageSkills(
   configStageSkills: Record<string, string[]> = {},
 ): Record<string, string[]> {
   return {
-    ...SYSTEM_STAGE_SKILLS,
     ...configStageSkills,
     ...repoStageSkills,
   };

@@ -4,7 +4,7 @@ import type { Effort, Feature } from '../backlog/schema.js';
 import { CliAbortError, runCli } from './spawn.js';
 import { msqEventBus } from '../events/index.js';
 import { parseControlSignal } from './control.js';
-import { resolveRuntimeConfig } from '../../config/index.js';
+import { getToolRegistration, resolveRuntimeConfig } from '../../config/index.js';
 
 interface OpenCodeUsage {
   input?: number;
@@ -67,8 +67,9 @@ export const opencodeAdapter: ToolAdapter = {
   },
 
   isAvailable(): boolean {
+    const registration = getToolRegistration('opencode');
     try {
-      execFileSync('opencode', ['--version'], { stdio: 'ignore' });
+      execFileSync(registration.command, registration.versionCheck, { stdio: 'ignore', env: { ...process.env, ...registration.env } });
       return true;
     } catch {
       return false;
@@ -126,7 +127,7 @@ export const opencodeAdapter: ToolAdapter = {
       ({ code, stdout, stderr } = await runCli('opencode', args, {
         cwd: opts.cwd,
         signal: opts.signal,
-        heartbeatMs: 30_000,
+        heartbeatMs: resolveRuntimeConfig(opts.cwd).heartbeatMs,
         logLabel: `opencode ${feature.id}`,
         heartbeatSuffix: () => progress.heartbeatSuffix(),
         progressSnapshot: () => progress.heartbeatSuffix(),

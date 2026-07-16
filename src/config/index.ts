@@ -92,6 +92,7 @@ const WebConfig = z.object({
 const RuntimeConfigOverrideSchema = z.object({
   concurrency: z.number().int().positive().optional(),
   toolTimeoutMs: z.number().int().positive().optional(),
+  heartbeatMs: z.number().int().nonnegative().optional(),
   staleRunThresholdMinutes: z.number().int().positive().optional(),
   idleThresholdMs: z.number().int().positive().optional(),
   promptContextCharLimit: z.number().int().positive().optional(),
@@ -102,6 +103,39 @@ const RuntimeConfigOverrideSchema = z.object({
   budget: BudgetConfig.partial().optional(),
   web: WebConfig.partial().optional(),
   stageSkills: z.record(z.string(), z.array(z.string())).optional(),
+});
+
+const ToolCapabilitiesSchema = z.object({
+  model: z.boolean(),
+  effort: z.boolean(),
+  thinking: z.boolean(),
+});
+
+export const ToolRegistrationSchema = z.object({
+  id: ToolSchema,
+  adapter: ToolSchema,
+  command: z.string().trim().min(1),
+  baseArgs: z.array(z.string()).default([]),
+  env: z.record(z.string(), z.string()).default({}),
+  versionCheck: z.array(z.string()).min(1),
+  capabilities: ToolCapabilitiesSchema,
+  thinkingBudget: z.record(EffortSchema, z.number().int().nonnegative()).default({}),
+  minTimeoutMs: z.number().int().positive().default(1),
+});
+export type ToolRegistration = z.infer<typeof ToolRegistrationSchema>;
+
+export const DEFAULT_TOOL_REGISTRATIONS: ToolRegistration[] = [
+  { id: 'claude', adapter: 'claude', command: 'claude', baseArgs: [], env: {}, versionCheck: ['--version'], capabilities: { model: true, effort: true, thinking: true }, thinkingBudget: { low: 4_000, medium: 10_000, high: 24_000 }, minTimeoutMs: 1 },
+  { id: 'codex', adapter: 'codex', command: 'codex', baseArgs: [], env: {}, versionCheck: ['--version'], capabilities: { model: true, effort: true, thinking: false }, thinkingBudget: {}, minTimeoutMs: 1_800_000 },
+  { id: 'opencode', adapter: 'opencode', command: 'opencode', baseArgs: [], env: {}, versionCheck: ['--version'], capabilities: { model: true, effort: false, thinking: false }, thinkingBudget: {}, minTimeoutMs: 1 },
+];
+
+const ToolRegistrationsSchema = z.array(ToolRegistrationSchema).superRefine((tools, ctx) => {
+  const ids = new Set<string>();
+  for (const [index, tool] of tools.entries()) {
+    if (ids.has(tool.id)) ctx.addIssue({ code: z.ZodIssueCode.custom, path: [index, 'id'], message: `Tool id "${tool.id}" is duplicated.` });
+    ids.add(tool.id);
+  }
 });
 
 const RepoDefaultsSchema = z.object({
@@ -119,6 +153,7 @@ export const REPO_CONFIG_ABS_PATH = (cwd = process.cwd()): string => resolve(cwd
 export const ConfigSchema = z.object({
   concurrency: z.number().int().positive().default(3),
   toolTimeoutMs: z.number().int().positive().default(600_000),
+  heartbeatMs: z.number().int().nonnegative().default(30_000),
   staleRunThresholdMinutes: z.number().int().positive().default(120),
   idleThresholdMs: z.number().int().positive().default(30_000),
   promptContextCharLimit: z.number().int().positive().default(20_000),
@@ -129,6 +164,7 @@ export const ConfigSchema = z.object({
   budget: BudgetConfig.default({}),
   web: WebConfig.default({}),
   stageSkills: z.record(z.string(), z.array(z.string())).default({}),
+  tools: ToolRegistrationsSchema.default(DEFAULT_TOOL_REGISTRATIONS),
 });
 export type Config = z.infer<typeof ConfigSchema>;
 export type WebConfig = z.infer<typeof WebConfig>;
@@ -196,6 +232,12 @@ export function resolveRuntimeConfig(cwd = process.cwd()): Config {
   const globalConfig = loadConfig();
   const repoConfig = loadRepoConfig(cwd);
   return mergeRuntimeConfig(globalConfig, repoConfig.runtime);
+}
+
+export function getToolRegistration(id: z.infer<typeof ToolSchema>, cwd = process.cwd()): ToolRegistration {
+  const tool = resolveRuntimeConfig(cwd).tools.find((entry) => entry.id === id);
+  if (!tool) throw new Error(`Tool "${id}" is not registered in the App config.`);
+  return tool;
 }
 
 export function resolveConfigSnapshot(cwd = process.cwd()): ResolvedConfigSnapshot {

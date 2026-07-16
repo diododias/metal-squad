@@ -1,9 +1,9 @@
+import { execFileSync } from 'node:child_process';
 import { sanitizeToolCallRecord, type SessionHandle, type ToolAdapter, type RunResult, type RunFeatureOptions, type TokenUsage, type ToolCallRecord } from './types.js';
 import type { Effort, Feature } from '../backlog/schema.js';
-import { execFileSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
-import { resolveRuntimeConfig } from '../../config/index.js';
+import { getToolRegistration, resolveRuntimeConfig } from '../../config/index.js';
 import { CliAbortError, CliTimeoutError, runCli } from './spawn.js';
 import { msqEventBus } from '../events/index.js';
 import { parseControlSignal } from './control.js';
@@ -43,9 +43,6 @@ const EFFORT: Record<Effort, string> = {
   high: 'high',
 };
 
-/** Piso mínimo de timeout para runs do codex, independente do valor configurado. */
-const CODEX_MIN_TIMEOUT_MS = 1_800_000;
-
 export const codexAdapter: ToolAdapter = {
   tool: 'codex',
 
@@ -60,8 +57,9 @@ export const codexAdapter: ToolAdapter = {
   },
 
   isAvailable(): boolean {
+    const registration = getToolRegistration('codex');
     try {
-      execFileSync('codex', ['--version'], { stdio: 'ignore' });
+      execFileSync(registration.command, registration.versionCheck, { stdio: 'ignore', env: { ...process.env, ...registration.env } });
       return true;
     } catch {
       return false;
@@ -103,7 +101,8 @@ export const codexAdapter: ToolAdapter = {
           prompt,
         ];
 
-    const timeoutMs = Math.max(resolveRuntimeConfig(process.cwd()).toolTimeoutMs, CODEX_MIN_TIMEOUT_MS);
+    const runtime = resolveRuntimeConfig(opts.cwd);
+    const timeoutMs = Math.max(runtime.toolTimeoutMs, getToolRegistration('codex', opts.cwd).minTimeoutMs);
     let code: number;
     let stdout: string;
     let stderr: string;
@@ -115,7 +114,8 @@ export const codexAdapter: ToolAdapter = {
         cwd: opts.cwd,
         timeoutMs,
         signal: opts.signal,
-        idleThresholdMs: resolveRuntimeConfig(opts.cwd).idleThresholdMs,
+        idleThresholdMs: runtime.idleThresholdMs,
+        heartbeatMs: runtime.heartbeatMs,
         runId: opts.runId,
         featureId: feature.id,
         tool: feature.tool,

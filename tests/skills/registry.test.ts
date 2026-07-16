@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { collectBacklogSkillNames, formatSkillList, validateBacklogSkills } from '../../src/core/skills/index.js';
 import { createSkillRegistry } from '../../src/core/skills/registry.js';
-import type { BacklogV2 } from '../../src/core/backlog/schema.js';
+import { DEFAULT_PROJECT_TEMPLATE, type BacklogV2 } from '../../src/core/backlog/schema.js';
 
 function createSkillDir(
   root: string,
@@ -180,7 +180,7 @@ describe('backlog skill validation', () => {
   });
 
   it('collects distinct skill names from defaults, features, and tasks', () => {
-    expect(collectBacklogSkillNames(backlog).sort()).toEqual([
+    expect(collectBacklogSkillNames(backlog, DEFAULT_PROJECT_TEMPLATE.stageSkills).sort()).toEqual([
       'implement',
       'plan',
       'review',

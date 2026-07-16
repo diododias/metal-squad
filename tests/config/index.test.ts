@@ -34,32 +34,34 @@ describe('config', () => {
     home = mkdtempSync(join(tmpdir(), 'msq-config-'));
     process.env.HOME = home;
 
-    const { loadConfig } = await import('../../src/config/index.js');
+    const { DEFAULT_TOOL_REGISTRATIONS, loadConfig } = await import('../../src/config/index.js');
 
-    expect(loadConfig()).toEqual({
+    expect(loadConfig()).toMatchObject({
       concurrency: 3,
       toolTimeoutMs: 600_000,
+      heartbeatMs: 30_000,
       staleRunThresholdMinutes: 120,
       idleThresholdMs: 30_000,
       promptContextCharLimit: 20_000,
-      theme: undefined,
       stageSkills: {},
       notifications: DEFAULT_NOTIFICATIONS,
       workflow: DEFAULT_WORKFLOW,
       budget: DEFAULT_BUDGET,
       web: DEFAULT_WEB,
     });
+    expect(loadConfig().tools).toEqual(DEFAULT_TOOL_REGISTRATIONS);
   });
 
   it('saves config and creates the config directory', async () => {
     home = mkdtempSync(join(tmpdir(), 'msq-config-'));
     process.env.HOME = home;
 
-    const { CONFIG_PATH, saveConfig } = await import('../../src/config/index.js');
+    const { CONFIG_PATH, DEFAULT_TOOL_REGISTRATIONS, saveConfig } = await import('../../src/config/index.js');
 
     saveConfig({
       concurrency: 5,
       toolTimeoutMs: 1_000,
+      heartbeatMs: 30_000,
       staleRunThresholdMinutes: 30,
       idleThresholdMs: 30_000,
       promptContextCharLimit: 10_000,
@@ -69,12 +71,14 @@ describe('config', () => {
       workflow: DEFAULT_WORKFLOW,
       budget: DEFAULT_BUDGET,
       stageSkills: {},
+      tools: DEFAULT_TOOL_REGISTRATIONS,
     });
 
     expect(existsSync(CONFIG_PATH)).toBe(true);
     expect(JSON.parse(readFileSync(CONFIG_PATH, 'utf8'))).toEqual({
       concurrency: 5,
       toolTimeoutMs: 1_000,
+      heartbeatMs: 30_000,
       staleRunThresholdMinutes: 30,
       idleThresholdMs: 30_000,
       promptContextCharLimit: 10_000,
@@ -84,6 +88,7 @@ describe('config', () => {
       workflow: DEFAULT_WORKFLOW,
       budget: DEFAULT_BUDGET,
       stageSkills: {},
+      tools: DEFAULT_TOOL_REGISTRATIONS,
     });
   });
 
@@ -91,11 +96,12 @@ describe('config', () => {
     home = mkdtempSync(join(tmpdir(), 'msq-config-'));
     process.env.HOME = home;
 
-    const { DB_PATH, ensureDataDir, loadConfig, saveConfig } = await import('../../src/config/index.js');
+    const { DB_PATH, DEFAULT_TOOL_REGISTRATIONS, ensureDataDir, loadConfig, saveConfig } = await import('../../src/config/index.js');
 
     saveConfig({
       concurrency: 2,
       toolTimeoutMs: 999,
+      heartbeatMs: 30_000,
       staleRunThresholdMinutes: 45,
       idleThresholdMs: 30_000,
       promptContextCharLimit: 15_000,
@@ -104,12 +110,14 @@ describe('config', () => {
       workflow: DEFAULT_WORKFLOW,
       budget: DEFAULT_BUDGET,
       stageSkills: {},
+      tools: DEFAULT_TOOL_REGISTRATIONS,
     });
     ensureDataDir();
 
-    expect(loadConfig()).toEqual({
+    expect(loadConfig()).toMatchObject({
       concurrency: 2,
       toolTimeoutMs: 999,
+      heartbeatMs: 30_000,
       staleRunThresholdMinutes: 45,
       idleThresholdMs: 30_000,
       promptContextCharLimit: 15_000,
@@ -120,6 +128,7 @@ describe('config', () => {
       budget: DEFAULT_BUDGET,
       web: DEFAULT_WEB,
     });
+    expect(loadConfig().tools).toEqual(DEFAULT_TOOL_REGISTRATIONS);
     expect(existsSync(DB_PATH.replace(/\/app\.db$/, ''))).toBe(true);
   });
 
