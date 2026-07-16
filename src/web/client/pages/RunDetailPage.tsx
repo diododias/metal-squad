@@ -142,13 +142,13 @@ export function RunDetailPage({
     && (run.pipelineStatus === 'paused' || run.pipelineStatus === 'aborted');
   const pendingPrompt = run.pendingStageRequestPrompt;
 
-  function resumeWithOverride(): void {
+  function resumeWithOverride(tool?: string): void {
     if (run?.pipelineId == null) return;
     send({
       type: 'action:resumeWithOverride',
       pipelineId: run.pipelineId,
       featureId,
-      tool: overrideTool || undefined,
+      tool: tool ?? overrideTool,
       model: overrideModel || undefined,
       effort: overrideEffort || undefined,
     });
@@ -326,7 +326,13 @@ export function RunDetailPage({
             {run.pendingStageRequestKind === 'input' ? (
               <QuestionBanner prompt={pendingPrompt} options={run.pendingStageRequestOptions ?? undefined} onAnswer={resolveQuestion} />
             ) : (
-              <ApprovalBanner prompt={pendingPrompt} onAdvance={() => { resolveApproval('advance'); }} onHold={() => { resolveApproval('hold'); }} onRetry={() => { resolveApproval('retry'); }} />
+              <ApprovalBanner
+                prompt={pendingPrompt}
+                onAdvance={() => { resolveApproval('advance'); }}
+                onAdvanceWithTool={(tool) => { resumeWithOverride(tool); }}
+                onHold={() => { resolveApproval('hold'); }}
+                onRetry={() => { resolveApproval('retry'); }}
+              />
             )}
           </div>
         )}
@@ -374,7 +380,7 @@ export function RunDetailPage({
                 <option key={effort} value={effort}>{effort}</option>
               ))}
             </select>
-            <Button variant="ok" size="sm" onClick={resumeWithOverride}>
+            <Button variant="ok" size="sm" onClick={() => { resumeWithOverride(); }}>
               resume with override
             </Button>
           </div>

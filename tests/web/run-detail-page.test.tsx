@@ -111,6 +111,47 @@ describe('RunDetailPage resume with override', () => {
     });
   });
 
+  it('approves a pending stage and resumes with the selected tool', () => {
+    const send = vi.fn<(message: WebSocketClientMessage) => void>();
+    const container = renderPage(makeRun({
+      pendingStageRequestId: 22,
+      pendingStageRequestKind: 'approval',
+      pendingStageRequestPrompt: 'Approve implementation?',
+    }), send);
+
+    const tool = container.querySelector('[aria-label="Approval tool override"]') as HTMLSelectElement;
+    act(() => { setControlValue(tool, 'claude'); });
+
+    const button = Array.from(container.querySelectorAll('button')).find((item) => item.textContent === 'approve + continue');
+    expect(button).toBeDefined();
+    act(() => { button?.click(); });
+
+    expect(send).toHaveBeenCalledWith({
+      type: 'action:resumeWithOverride',
+      pipelineId: 7,
+      featureId: 'feat-1',
+      tool: 'claude',
+      model: undefined,
+      effort: undefined,
+    });
+    expect(send).not.toHaveBeenCalledWith({ type: 'action:resolveStageRequest', requestId: 22, response: 'advance' });
+  });
+
+  it('keeps the original approval action when no override is selected', () => {
+    const send = vi.fn<(message: WebSocketClientMessage) => void>();
+    const container = renderPage(makeRun({
+      pendingStageRequestId: 22,
+      pendingStageRequestKind: 'approval',
+      pendingStageRequestPrompt: 'Approve implementation?',
+    }), send);
+
+    const button = Array.from(container.querySelectorAll('button')).find((item) => item.textContent === 'advance');
+    expect(button).toBeDefined();
+    act(() => { button?.click(); });
+
+    expect(send).toHaveBeenCalledWith({ type: 'action:resolveStageRequest', requestId: 22, response: 'advance' });
+  });
+
   it.each([
     ['running', { pipelineStatus: 'running' as const }],
     ['aborting', { pipelineStatus: 'aborting' as const }],
