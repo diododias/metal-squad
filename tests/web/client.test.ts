@@ -9,7 +9,7 @@ import { parseHash } from '../../src/web/client/lib/routes.js';
 import { HelpOverlay } from '../../src/web/client/HelpOverlay.js';
 import { ConfigPage } from '../../src/web/client/pages/ConfigPage.js';
 import { BoardPage } from '../../src/web/client/pages/BoardPage.js';
-import type { MsqWebState } from '../../src/web/types.js';
+import type { MsqWebState, WebSocketClientMessage } from '../../src/web/types.js';
 import {
   formatDurationMs,
   formatHeartbeatLine,
@@ -45,7 +45,26 @@ const settingsState = {
     notifications: { channels: [], events: [] },
     budget: { alertAtPercent: 80, lastResetDate: null },
   },
-  backlogSettings: { configSources: undefined, resolvedDefaults: undefined, budget: undefined },
+  backlogSettings: {
+    configSources: undefined,
+    resolvedDefaults: undefined,
+    budget: undefined,
+    projectDefaults: {
+      tool: 'claude',
+      effort: 'medium',
+      thinking: 'off',
+      skills: ['speckit-specify'],
+      stageSkills: { specify: ['speckit-specify'] },
+      workflow: {
+        mode: 'staged',
+        stages: ['specify', 'plan'],
+        approvals: { channel: 'telegram', autoAdvance: false },
+        syncTasksToBacklog: true,
+        sessionPolicy: { mode: 'isolated', alwaysIsolatedStages: [] },
+        stepGuidance: {},
+      },
+    },
+  },
   environment: {
     databasePath: '/tmp/msq/app.db',
     databaseSource: 'default',
@@ -149,26 +168,27 @@ describe('Settings client surfaces', () => {
     expect(text).toContain('1.2.3');
   });
 
-  it('renders the effective thinking toggle with a capability warning', () => {
-    const state = {
-      ...settingsState,
-      backlogSettings: {
-        resolvedDefaults: { tool: 'codex', model: undefined, effort: 'high', thinking: 'on', skills: [], stageSkills: {} },
-        toolCapabilities: {
-          claude: { model: true, effort: true, thinking: true },
-          codex: { model: true, effort: true, thinking: false },
-          opencode: { model: true, effort: false, thinking: false },
-        },
-      },
-    } as MsqWebState;
-    const container = render(React.createElement(ConfigPage, { state, isMobile: false, send: () => undefined }));
+  it('saves only the changed project default through the websocket action', () => {
+    const messages: WebSocketClientMessage[] = [];
+    const container = render(React.createElement(ConfigPage, {
+      state: settingsState,
+      isMobile: false,
+      send: (message: WebSocketClientMessage) => { messages.push(message); },
+    }));
 
-    act(() => { Array.from(container.querySelectorAll('button')).find((button) => button.textContent === 'Defaults')?.click(); });
+    act(() => {
+      Array.from(container.querySelectorAll('button')).find((button) => button.textContent === 'Defaults')?.click();
+    });
+    const effort = container.querySelector('#defaults-effort') as HTMLSelectElement;
+    act(() => {
+      effort.value = 'high';
+      effort.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+    act(() => {
+      Array.from(container.querySelectorAll('button')).find((button) => button.textContent === 'save defaults')?.click();
+    });
 
-    const thinking = container.querySelector('#defaults-thinking') as HTMLInputElement;
-    expect(thinking.checked).toBe(true);
-    expect(thinking.disabled).toBe(true);
-    expect(container.textContent).toContain('codex does not support thinking; it will be ignored.');
+    expect(messages).toEqual([{ type: 'action:updateProjectDefaults', patch: { effort: 'high' } }]);
   });
 
   it('renders Settings in the main navigation while retaining the config route', () => {

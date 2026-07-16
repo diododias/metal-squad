@@ -8,7 +8,21 @@ function makeBacklog(overrides: Partial<BacklogV2> = {}): BacklogV2 {
   return {
     version: 2,
     repo: 'demo',
-    defaults: { tool: 'claude', effort: 'medium', skills: [], stageSkills: {} },
+    defaults: {
+      tool: 'claude',
+      effort: 'medium',
+      thinking: 'off',
+      skills: [],
+      stageSkills: {},
+      workflow: {
+        mode: 'staged',
+        stages: ['specify', 'plan', 'tasks', 'implement', 'validate'],
+        approvals: { channel: 'telegram', autoAdvance: false },
+        syncTasksToBacklog: true,
+        sessionPolicy: { mode: 'isolated', alwaysIsolatedStages: [] },
+        stepGuidance: {},
+      },
+    },
     epics: [
       {
         id: 'epic-1',
@@ -513,7 +527,24 @@ describe('backlogCatalog upsert/diff/load', () => {
     it('persists a partial defaults patch without clearing untouched fields', async () => {
       const { db, upsertBacklogCatalog, updateCatalogDefaults } = await setup();
       upsertBacklogCatalog(
-        makeBacklog({ defaults: { tool: 'claude', model: 'sonnet-5', effort: 'medium', skills: ['review'], stageSkills: {} } }),
+        makeBacklog({
+          defaults: {
+            tool: 'claude',
+            model: 'sonnet-5',
+            effort: 'medium',
+            thinking: 'off',
+            skills: ['review'],
+            stageSkills: {},
+            workflow: {
+              mode: 'staged',
+              stages: ['specify', 'plan', 'tasks', 'implement', 'validate'],
+              approvals: { channel: 'telegram', autoAdvance: false },
+              syncTasksToBacklog: true,
+              sessionPolicy: { mode: 'isolated', alwaysIsolatedStages: [] },
+              stepGuidance: {},
+            },
+          },
+        }),
         'repo-1',
       );
 
@@ -531,6 +562,29 @@ describe('backlogCatalog upsert/diff/load', () => {
       const stored = JSON.parse(row.defaults_json) as { effort: string; model: string };
       expect(stored.effort).toBe('high');
       expect(stored.model).toBe('sonnet-5');
+    });
+
+    it('updates inherited feature values while preserving workflow siblings', async () => {
+      const { upsertBacklogCatalog, updateCatalogDefaults } = await setup();
+      const { loadBacklogFromCatalog } = await import('../../src/core/backlog/load.js');
+      upsertBacklogCatalog(makeBacklog(), 'repo-1');
+
+      updateCatalogDefaults('repo-1', {
+        effort: 'high',
+        workflow: { mode: 'single' },
+        maxTokens: 9000,
+      });
+
+      const feature = loadBacklogFromCatalog('repo-1').epics[0]?.features[0];
+      expect(feature).toMatchObject({
+        effort: 'high',
+        maxTokens: 9000,
+        workflow: {
+          mode: 'single',
+          stages: ['specify', 'plan', 'tasks', 'implement', 'validate'],
+          syncTasksToBacklog: true,
+        },
+      });
     });
 
     it('merges a budget patch onto existing budget fields without dropping siblings', async () => {

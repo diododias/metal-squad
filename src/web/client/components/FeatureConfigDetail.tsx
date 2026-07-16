@@ -306,7 +306,7 @@ export function FeatureConfigDetail({ feature, backlogSettings, onSaveConfig, wo
   let maxTokensError: string | undefined;
 
   if (draftExecution.tool !== executionBaseline.tool) executionPatch.tool = draftExecution.tool;
-  const configuredCapabilities = backlogSettings.toolCapabilities?.[draftExecution.tool as keyof typeof backlogSettings.toolCapabilities];
+  const configuredCapabilities = backlogSettings.toolCapabilities?.[draftExecution.tool];
   // Preserve correction of legacy/unavailable saved tools: capabilities only
   // constrain tools known by the registry, while the existing unavailable-tool
   // guard still blocks the save until the user selects a valid tool.

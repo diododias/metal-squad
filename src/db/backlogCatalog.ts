@@ -646,13 +646,35 @@ export function updateCatalogTask(featureId: string, taskId: string, patch: Part
   return run();
 }
 
-export type CatalogDefaultsPatch = Partial<Defaults> & {
+export type CatalogDefaultsPatch = Omit<Partial<Defaults>, 'workflow'> & {
+  workflow?: Partial<Omit<Workflow, 'approvals' | 'sessionPolicy'>> & {
+    approvals?: Partial<Workflow['approvals']>;
+    sessionPolicy?: Partial<Workflow['sessionPolicy']>;
+  };
   budget?: Partial<Budget>;
 };
 
 export interface CatalogDefaults {
   defaults: Defaults;
   budget?: Budget;
+}
+
+function sameJsonValue(left: unknown, right: unknown): boolean {
+  return JSON.stringify(left) === JSON.stringify(right);
+}
+
+function inheritWorkflowDefaults(current: Workflow, previous: Workflow, next: Workflow): Workflow {
+  const inherited = { ...current };
+  if (sameJsonValue(current.mode, previous.mode)) inherited.mode = next.mode;
+  if (sameJsonValue(current.stages, previous.stages)) inherited.stages = [...next.stages];
+  if (sameJsonValue(current.syncTasksToBacklog, previous.syncTasksToBacklog)) inherited.syncTasksToBacklog = next.syncTasksToBacklog;
+  if (sameJsonValue(current.approvals, previous.approvals)) inherited.approvals = next.approvals;
+  else {
+    inherited.approvals = { ...current.approvals };
+    if (sameJsonValue(current.approvals.channel, previous.approvals.channel)) inherited.approvals.channel = next.approvals.channel;
+    if (sameJsonValue(current.approvals.autoAdvance, previous.approvals.autoAdvance)) inherited.approvals.autoAdvance = next.approvals.autoAdvance;
+  }
+  return inherited;
 }
 
 /**
@@ -669,6 +691,12 @@ export function updateCatalogDefaults(repoId: string, patch: CatalogDefaultsPatc
   const updateRow = db.prepare(
     `UPDATE backlog_catalog_meta SET defaults_json = ?, budget_json = ?, updated_at = datetime('now') WHERE repo_id = ?`,
   );
+  const featureRows = db.prepare(
+    `SELECT feature_id, data_json FROM backlog_features WHERE repo_id = ? AND archived_at IS NULL`,
+  );
+  const updateFeatureRow = db.prepare(
+    `UPDATE backlog_features SET data_json = ?, updated_at = datetime('now') WHERE feature_id = ? AND repo_id = ?`,
+  );
 
   const run = db.transaction((): CatalogDefaults => {
     const row = getRow.get(repoId) as { defaults_json: string; budget_json: string | null } | undefined;
@@ -679,11 +707,46 @@ export function updateCatalogDefaults(repoId: string, patch: CatalogDefaultsPatc
     const currentDefaults = DefaultsSchema.parse(JSON.parse(row.defaults_json));
     const currentBudget = row.budget_json ? BudgetSchema.parse(JSON.parse(row.budget_json)) : undefined;
 
-    const { budget: budgetPatch, ...defaultsPatch } = patch;
-    const mergedDefaults = DefaultsSchema.parse({ ...currentDefaults, ...defaultsPatch });
+    const { budget: budgetPatch, workflow: workflowPatch, ...defaultsPatch } = patch;
+    const mergedDefaults = DefaultsSchema.parse({
+      ...currentDefaults,
+      ...defaultsPatch,
+      ...(workflowPatch
+        ? {
+            workflow: {
+              ...currentDefaults.workflow,
+              ...workflowPatch,
+              approvals: workflowPatch.approvals
+                ? { ...currentDefaults.workflow.approvals, ...workflowPatch.approvals }
+                : currentDefaults.workflow.approvals,
+              sessionPolicy: workflowPatch.sessionPolicy
+                ? { ...currentDefaults.workflow.sessionPolicy, ...workflowPatch.sessionPolicy }
+                : currentDefaults.workflow.sessionPolicy,
+            },
+          }
+        : {}),
+    });
     const mergedBudget = budgetPatch
       ? BudgetSchema.parse({ ...currentBudget, ...budgetPatch })
       : currentBudget;
+
+    for (const row of featureRows.all(repoId) as { feature_id: string; data_json: string }[]) {
+      const currentFeature = FeatureSchema.parse(JSON.parse(row.data_json));
+      const inheritedFeature = {
+        ...currentFeature,
+        ...(sameJsonValue(currentFeature.tool, currentDefaults.tool) ? { tool: mergedDefaults.tool } : {}),
+        ...(sameJsonValue(currentFeature.model, currentDefaults.model) ? { model: mergedDefaults.model } : {}),
+        ...(sameJsonValue(currentFeature.effort, currentDefaults.effort) ? { effort: mergedDefaults.effort } : {}),
+        ...(sameJsonValue(currentFeature.thinking, currentDefaults.thinking) ? { thinking: mergedDefaults.thinking } : {}),
+        ...(sameJsonValue(currentFeature.skills ?? [], currentDefaults.skills) ? { skills: mergedDefaults.skills } : {}),
+        ...(sameJsonValue(currentFeature.maxTokens, currentDefaults.maxTokens) ? { maxTokens: mergedDefaults.maxTokens } : {}),
+        workflow: inheritWorkflowDefaults(currentFeature.workflow, currentDefaults.workflow, mergedDefaults.workflow),
+      };
+      const validatedFeature = FeatureSchema.parse(inheritedFeature);
+      if (!sameJsonValue(validatedFeature, currentFeature)) {
+        updateFeatureRow.run(JSON.stringify(validatedFeature), row.feature_id, repoId);
+      }
+    }
 
     updateRow.run(
       JSON.stringify(mergedDefaults),

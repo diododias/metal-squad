@@ -24,16 +24,6 @@ export const BudgetSchema = z.object({
   maxTokens: z.number().int().positive().optional(),
   perFeatureMaxTokens: z.number().int().positive().optional(),
 });
-
-export const DefaultsSchema = z.object({
-  tool: ToolSchema.default('claude'),
-  model: z.string().trim().min(1).optional(),
-  effort: EffortSchema.default('medium'),
-  thinking: ThinkingSchema.default('off'),
-  skills: z.array(z.string()).default([]),
-  stageSkills: z.record(z.string(), z.array(z.string())).default({}),
-});
-
 export const TaskSchema = z.object({
   id: z.string(),
   title: z.string(),
@@ -97,6 +87,17 @@ export const WorkflowSchema = z.object({
       continue;
     }
   }
+});
+
+export const DefaultsSchema = z.object({
+  tool: ToolSchema.default('claude'),
+  model: z.string().trim().min(1).optional(),
+  effort: EffortSchema.default('medium'),
+  thinking: ThinkingSchema.default('off'),
+  skills: z.array(z.string()).default([]),
+  stageSkills: z.record(z.string(), z.array(z.string())).default({}),
+  workflow: WorkflowSchema.default({}),
+  maxTokens: z.number().int().positive().optional(),
 });
 
 export const FeatureSchema = z.object({

@@ -6,7 +6,21 @@ function makeBacklog(overrides: Partial<BacklogV2> = {}): BacklogV2 {
   return {
     version: 2,
     repo: 'test-repo',
-    defaults: { tool: 'claude', effort: 'medium', skills: [], stageSkills: {} },
+    defaults: {
+      tool: 'claude',
+      effort: 'medium',
+      thinking: 'off',
+      skills: [],
+      stageSkills: {},
+      workflow: {
+        mode: 'staged',
+        stages: ['specify', 'plan', 'tasks', 'implement', 'validate'],
+        approvals: { channel: 'telegram', autoAdvance: false },
+        syncTasksToBacklog: true,
+        sessionPolicy: { mode: 'isolated', alwaysIsolatedStages: [] },
+        stepGuidance: {},
+      },
+    },
     epics: [],
     ...overrides,
   };
@@ -20,7 +34,21 @@ describe('collectBacklogSkillNames', () => {
 
   it('includes default skills', () => {
     const backlog = makeBacklog({
-      defaults: { tool: 'claude', effort: 'medium', skills: ['implement', 'test'] },
+      defaults: {
+        tool: 'claude',
+        effort: 'medium',
+        thinking: 'off',
+        skills: ['implement', 'test'],
+        stageSkills: {},
+        workflow: {
+          mode: 'staged',
+          stages: ['specify', 'plan', 'tasks', 'implement', 'validate'],
+          approvals: { channel: 'telegram', autoAdvance: false },
+          syncTasksToBacklog: true,
+          sessionPolicy: { mode: 'isolated', alwaysIsolatedStages: [] },
+          stepGuidance: {},
+        },
+      },
     });
     const names = collectBacklogSkillNames(backlog);
     expect(names).toContain('implement');
@@ -120,7 +148,21 @@ describe('collectBacklogSkillNames', () => {
 
   it('deduplicates skill names across all sources', () => {
     const backlog = makeBacklog({
-      defaults: { tool: 'claude', effort: 'medium', skills: ['implement'] },
+      defaults: {
+        tool: 'claude',
+        effort: 'medium',
+        thinking: 'off',
+        skills: ['implement'],
+        stageSkills: {},
+        workflow: {
+          mode: 'staged',
+          stages: ['specify', 'plan', 'tasks', 'implement', 'validate'],
+          approvals: { channel: 'telegram', autoAdvance: false },
+          syncTasksToBacklog: true,
+          sessionPolicy: { mode: 'isolated', alwaysIsolatedStages: [] },
+          stepGuidance: {},
+        },
+      },
       epics: [{
         id: 'epic-1',
         title: 'Epic',
@@ -195,7 +237,21 @@ describe('collectBacklogSkillNames', () => {
 
   it('handles null/undefined skills gracefully', () => {
     const backlog = makeBacklog({
-      defaults: { tool: 'claude', effort: 'medium', skills: undefined },
+      defaults: {
+        tool: 'claude',
+        effort: 'medium',
+        thinking: 'off',
+        skills: undefined,
+        stageSkills: {},
+        workflow: {
+          mode: 'staged',
+          stages: ['specify', 'plan', 'tasks', 'implement', 'validate'],
+          approvals: { channel: 'telegram', autoAdvance: false },
+          syncTasksToBacklog: true,
+          sessionPolicy: { mode: 'isolated', alwaysIsolatedStages: [] },
+          stepGuidance: {},
+        },
+      },
     });
     // Should not throw
     expect(() => collectBacklogSkillNames(backlog)).not.toThrow();
@@ -218,7 +274,21 @@ describe('validateBacklogSkills via doMock', () => {
 
     const { validateBacklogSkills } = await import('../../src/core/skills/backlog.js');
     const backlog = makeBacklog({
-      defaults: { tool: 'claude', effort: 'medium', skills: ['unknown-skill'] },
+      defaults: {
+        tool: 'claude',
+        effort: 'medium',
+        thinking: 'off',
+        skills: ['unknown-skill'],
+        stageSkills: {},
+        workflow: {
+          mode: 'staged',
+          stages: ['specify', 'plan', 'tasks', 'implement', 'validate'],
+          approvals: { channel: 'telegram', autoAdvance: false },
+          syncTasksToBacklog: true,
+          sessionPolicy: { mode: 'isolated', alwaysIsolatedStages: [] },
+          stepGuidance: {},
+        },
+      },
     });
 
     expect(() => validateBacklogSkills(backlog, '/cwd')).toThrow(
@@ -237,7 +307,21 @@ describe('validateBacklogSkills via doMock', () => {
 
     const { validateBacklogSkills } = await import('../../src/core/skills/backlog.js');
     const backlog = makeBacklog({
-      defaults: { tool: 'claude', effort: 'medium', skills: ['implement'] },
+      defaults: {
+        tool: 'claude',
+        effort: 'medium',
+        thinking: 'off',
+        skills: ['implement'],
+        stageSkills: {},
+        workflow: {
+          mode: 'staged',
+          stages: ['specify', 'plan', 'tasks', 'implement', 'validate'],
+          approvals: { channel: 'telegram', autoAdvance: false },
+          syncTasksToBacklog: true,
+          sessionPolicy: { mode: 'isolated', alwaysIsolatedStages: [] },
+          stepGuidance: {},
+        },
+      },
     });
 
     expect(() => validateBacklogSkills(backlog, '/cwd')).not.toThrow();

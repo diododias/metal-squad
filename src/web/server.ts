@@ -33,7 +33,7 @@ import { selectStartableFeaturePlan } from '../core/orchestrator/graph.js';
 import { validateBacklogSkills } from '../core/skills/index.js';
 import { resolveRuntimeConfig } from '../config/index.js';
 import { updateCatalogFeature, updateCatalogTask, updateCatalogDefaults, type FeaturePatch, type CatalogDefaultsPatch } from '../db/backlogCatalog.js';
-import type { Feature, Task } from '../core/backlog/schema.js';
+import type { Feature, Task, Tool } from '../core/backlog/schema.js';
 import { buildMsqWebState, appendNotification } from './state.js';
 import { createWebAuth, isAllowedHostHeader, isAllowedOrigin, timingSafeEqualStrings } from './auth.js';
 import type {

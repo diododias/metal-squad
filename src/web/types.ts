@@ -152,8 +152,16 @@ export interface ProjectDefaultsPatch {
   tool?: string;
   model?: string;
   effort?: string;
+  thinking?: string;
   skills?: string[];
   stageSkills?: Record<string, string[]>;
+  workflow?: {
+    mode?: string;
+    stages?: string[];
+    syncTasksToBacklog?: boolean;
+    approvals?: { channel?: string; autoAdvance?: boolean };
+  };
+  maxTokens?: number;
   budget?: { maxTokens?: number; perFeatureMaxTokens?: number };
 }
 

@@ -1,9 +1,12 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
+import { Button } from '../components/core/Button.js';
+import { EditableSelectField } from '../components/core/EditableSelectField.js';
+import { EditableTextField } from '../components/core/EditableTextField.js';
+import { EditableToggleField } from '../components/core/EditableToggleField.js';
 import { Tabs } from '../components/navigation/Tabs.js';
 import { Tag } from '../components/core/Tag.js';
-import { EditableToggleField } from '../components/core/EditableToggleField.js';
 import { PageHeader } from '../PageHeader.js';
-import type { MsqWebState, WebSocketClientMessage } from '../../types.js';
+import type { MsqWebState, ProjectDefaultsPatch, WebSocketClientMessage } from '../../types.js';
 
 export interface ConfigPageProps {
   state: MsqWebState;
@@ -96,54 +99,208 @@ function RuntimeTab({ state }: { state: MsqWebState }): React.JSX.Element {
   );
 }
 
-function DefaultsTab({ state }: { state: MsqWebState }): React.JSX.Element {
-  const defaults = state.backlogSettings.resolvedDefaults;
-  const capabilities = defaults
-    ? state.backlogSettings.toolCapabilities?.[defaults.tool] ?? { model: false, effort: false, thinking: false }
+interface DefaultsDraft {
+  tool: string;
+  model: string;
+  effort: string;
+  thinking: string;
+  skills: string;
+  stageSkills: Record<string, string>;
+  workflowMode: string;
+  workflowStages: string;
+  syncTasksToBacklog: boolean;
+  approvalChannel: string;
+  autoAdvance: boolean;
+  maxTokens: string;
+}
+
+function defaultsDraftFrom(defaults: NonNullable<MsqWebState['backlogSettings']['projectDefaults']>): DefaultsDraft {
+  return {
+    tool: defaults.tool,
+    model: defaults.model ?? '',
+    effort: defaults.effort,
+    thinking: defaults.thinking,
+    skills: defaults.skills.join(', '),
+    stageSkills: Object.fromEntries(Object.entries(defaults.stageSkills).map(([stage, skills]) => [stage, skills.join(', ')])),
+    workflowMode: defaults.workflow.mode,
+    workflowStages: defaults.workflow.stages.join(', '),
+    syncTasksToBacklog: defaults.workflow.syncTasksToBacklog,
+    approvalChannel: defaults.workflow.approvals.channel,
+    autoAdvance: defaults.workflow.approvals.autoAdvance,
+    maxTokens: defaults.maxTokens?.toString() ?? '',
+  };
+}
+
+function csvList(value: string): string[] {
+  return value.split(',').map((item) => item.trim()).filter(Boolean);
+}
+
+function sameJson(left: unknown, right: unknown): boolean {
+  return JSON.stringify(left) === JSON.stringify(right);
+}
+
+function DefaultsTab({ state, send }: { state: MsqWebState; send: ConfigPageProps['send'] }): React.JSX.Element {
+  const defaults = state.backlogSettings.projectDefaults;
+  const baseline = useMemo(() => defaultsDraftFrom(defaults), [defaults]);
+  const [draft, setDraft] = useState<DefaultsDraft>(baseline);
+  const capabilities = state.backlogSettings.toolCapabilities?.[draft.tool] ?? { model: true, effort: true, thinking: true };
+
+  useEffect(() => {
+    setDraft(baseline);
+  }, [baseline]);
+
+  const stages = csvList(draft.workflowStages);
+  const stageOrderIsValid = stages.length > 0 && new Set(stages).size === stages.length;
+  const maxTokens = draft.maxTokens === '' ? undefined : Number(draft.maxTokens);
+  const maxTokensIsValid = maxTokens === undefined || (Number.isInteger(maxTokens) && maxTokens > 0);
+  const thinkingWarning = draft.thinking === 'on' && !capabilities.thinking
+    ? `${draft.tool} does not support thinking; it will be ignored.`
     : undefined;
+  const guidance = !stageOrderIsValid
+    ? 'Workflow stages must contain at least one unique stage.'
+    : !maxTokensIsValid
+      ? 'Enter a positive whole number for maxTokens.'
+      : undefined;
+  const stageSkills = Object.fromEntries(
+    Object.entries(draft.stageSkills).map(([stage, skills]) => [stage, csvList(skills)]),
+  );
+  const patch: ProjectDefaultsPatch = {};
+  if (draft.tool !== baseline.tool) patch.tool = draft.tool;
+  if (draft.model !== baseline.model && draft.model.trim()) patch.model = draft.model.trim();
+  if (draft.effort !== baseline.effort) patch.effort = draft.effort;
+  if (draft.thinking !== baseline.thinking) patch.thinking = draft.thinking;
+  if (!sameJson(csvList(draft.skills), csvList(baseline.skills))) patch.skills = csvList(draft.skills);
+  if (!sameJson(stageSkills, Object.fromEntries(Object.entries(baseline.stageSkills).map(([stage, skills]) => [stage, csvList(skills)])))) {
+    patch.stageSkills = stageSkills;
+  }
+  const workflowPatch: NonNullable<ProjectDefaultsPatch['workflow']> = {};
+  if (draft.workflowMode !== baseline.workflowMode) workflowPatch.mode = draft.workflowMode;
+  if (!sameJson(stages, csvList(baseline.workflowStages))) workflowPatch.stages = stages;
+  if (draft.syncTasksToBacklog !== baseline.syncTasksToBacklog) workflowPatch.syncTasksToBacklog = draft.syncTasksToBacklog;
+  if (draft.approvalChannel !== baseline.approvalChannel || draft.autoAdvance !== baseline.autoAdvance) {
+    workflowPatch.approvals = {};
+    if (draft.approvalChannel !== baseline.approvalChannel) workflowPatch.approvals.channel = draft.approvalChannel;
+    if (draft.autoAdvance !== baseline.autoAdvance) workflowPatch.approvals.autoAdvance = draft.autoAdvance;
+  }
+  if (Object.keys(workflowPatch).length > 0) patch.workflow = workflowPatch;
+  if (draft.maxTokens !== baseline.maxTokens && maxTokens !== undefined && maxTokensIsValid) patch.maxTokens = maxTokens;
+
+  const canSave = Object.keys(patch).length > 0 && guidance === undefined;
+  function save(): void {
+    if (canSave) send({ type: 'action:updateProjectDefaults', patch });
+  }
+
   return (
-    <Card title="Effective defaults (resolved)">
-      {defaults ? (
-        <>
-          <Row label="tool" value={defaults.tool} />
-          <Row label="model" value={defaults.model ?? '—'} />
-          <Row label="effort" value={defaults.effort} />
-          <EditableToggleField
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+      <Card title="Project defaults">
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+          <EditableSelectField
+            id="defaults-tool"
+            label="tool"
+            value={draft.tool}
+            initialValue={baseline.tool}
+            options={['claude', 'codex', 'opencode'].map((tool) => ({ value: tool, label: tool }))}
+            onChange={(tool) => { setDraft((current) => ({ ...current, tool: tool ?? '' })); }}
+          />
+          <EditableTextField
+            id="defaults-model"
+            label="model"
+            value={draft.model}
+            initialValue={baseline.model}
+            placeholder="default model"
+            onChange={(model) => { setDraft((current) => ({ ...current, model })); }}
+          />
+          <EditableSelectField
+            id="defaults-effort"
+            label="effort"
+            value={draft.effort}
+            initialValue={baseline.effort}
+            options={['low', 'medium', 'high'].map((effort) => ({ value: effort, label: effort }))}
+            onChange={(effort) => { setDraft((current) => ({ ...current, effort: effort ?? '' })); }}
+          />
+          <EditableSelectField
             id="defaults-thinking"
             label="thinking"
-            value={defaults.thinking === 'on'}
-            initialValue={defaults.thinking === 'on'}
-            disabled
-            onChange={() => undefined}
+            value={draft.thinking}
+            initialValue={baseline.thinking}
+            options={[{ value: 'on', label: 'on' }, { value: 'off', label: 'off' }]}
+            onChange={(thinking) => { setDraft((current) => ({ ...current, thinking: thinking ?? 'off' })); }}
           />
-          {capabilities && !capabilities.thinking && (
-            <div style={{ color: 'var(--accent-warn)', fontSize: 'var(--text-xs)', lineHeight: 1.4, padding: '4px 0 8px' }}>
-              {defaults.tool} does not support thinking; it will be ignored.
-            </div>
-          )}
-          <div style={{ display: 'flex', justifyContent: 'space-between', padding: '6px 0' }}>
-            <span style={{ color: 'var(--text-dim)' }}>skills</span>
-            <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
-              {defaults.skills.map((s) => (
-                <Tag key={s}>{s}</Tag>
-              ))}
-            </div>
-          </div>
-          {Object.entries(defaults.stageSkills).map(([stage, skills]) => (
-            <div key={stage} style={{ display: 'flex', justifyContent: 'space-between', padding: '6px 0', fontSize: 'var(--text-sm)' }}>
-              <span style={{ color: 'var(--text-dim)' }}>stageSkills.{stage}</span>
-              <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
-                {skills.map((s) => (
-                  <Tag key={s}>{s}</Tag>
-                ))}
-              </div>
-            </div>
+          {thinkingWarning && <span style={{ color: 'var(--accent-warn)', fontSize: 'var(--text-xs)', lineHeight: 1.4 }}>{thinkingWarning}</span>}
+          <EditableTextField
+            id="defaults-skills"
+            label="skills (comma-separated)"
+            value={draft.skills}
+            initialValue={baseline.skills}
+            placeholder="skill-a, skill-b"
+            onChange={(skills) => { setDraft((current) => ({ ...current, skills })); }}
+          />
+          <EditableTextField
+            id="defaults-max-tokens"
+            label="maxTokens"
+            value={draft.maxTokens}
+            initialValue={baseline.maxTokens}
+            placeholder="optional positive whole number"
+            onChange={(maxTokens) => { setDraft((current) => ({ ...current, maxTokens })); }}
+          />
+        </div>
+      </Card>
+
+      <Card title="Workflow defaults">
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+          <EditableSelectField
+            id="defaults-workflow-mode"
+            label="workflow.mode"
+            value={draft.workflowMode}
+            initialValue={baseline.workflowMode}
+            options={[{ value: 'single', label: 'single' }, { value: 'staged', label: 'staged' }]}
+            onChange={(mode) => { setDraft((current) => ({ ...current, workflowMode: mode ?? '' })); }}
+          />
+          <EditableTextField
+            id="defaults-workflow-stages"
+            label="workflow.stages (comma-separated)"
+            value={draft.workflowStages}
+            initialValue={baseline.workflowStages}
+            onChange={(workflowStages) => { setDraft((current) => ({ ...current, workflowStages })); }}
+          />
+          {stages.map((stage) => (
+            <EditableTextField
+              key={stage}
+              id={`defaults-stage-skills-${stage}`}
+              label={`stageSkills.${stage} (comma-separated)`}
+              value={draft.stageSkills[stage] ?? ''}
+              initialValue={baseline.stageSkills[stage] ?? ''}
+              placeholder="stage skill-a, stage skill-b"
+              onChange={(skills) => { setDraft((current) => ({ ...current, stageSkills: { ...current.stageSkills, [stage]: skills } })); }}
+            />
           ))}
-        </>
-      ) : (
-        <div style={{ color: 'var(--text-faint)', fontSize: 'var(--text-sm)' }}>No resolved defaults available.</div>
-      )}
-    </Card>
+          <EditableToggleField
+            id="defaults-workflow-sync"
+            label="workflow.syncTasksToBacklog"
+            value={draft.syncTasksToBacklog}
+            initialValue={baseline.syncTasksToBacklog}
+            onChange={(syncTasksToBacklog) => { setDraft((current) => ({ ...current, syncTasksToBacklog })); }}
+          />
+          <EditableSelectField
+            id="defaults-workflow-approval-channel"
+            label="workflow.approvals.channel"
+            value={draft.approvalChannel}
+            initialValue={baseline.approvalChannel}
+            options={[{ value: 'telegram', label: 'telegram' }]}
+            onChange={(approvalChannel) => { setDraft((current) => ({ ...current, approvalChannel: approvalChannel ?? '' })); }}
+          />
+          <EditableToggleField
+            id="defaults-workflow-auto-advance"
+            label="workflow.approvals.autoAdvance"
+            value={draft.autoAdvance}
+            initialValue={baseline.autoAdvance}
+            onChange={(autoAdvance) => { setDraft((current) => ({ ...current, autoAdvance })); }}
+          />
+          {guidance && <span style={{ color: 'var(--accent-warn)', fontSize: 'var(--text-xs)', lineHeight: 1.4 }}>{guidance}</span>}
+          <div><Button variant="primary" size="sm" onClick={save} disabled={!canSave}>save defaults</Button></div>
+        </div>
+      </Card>
+    </div>
   );
 }
 
@@ -207,7 +364,7 @@ function BudgetTab({ state }: { state: MsqWebState }): React.JSX.Element {
   );
 }
 
-export function ConfigPage({ state }: ConfigPageProps): React.JSX.Element {
+export function ConfigPage({ state, send }: ConfigPageProps): React.JSX.Element {
   const [tab, setTab] = useState('runtime');
 
   const content = useMemo(() => {
@@ -215,7 +372,7 @@ export function ConfigPage({ state }: ConfigPageProps): React.JSX.Element {
       case 'runtime':
         return <RuntimeTab state={state} />;
       case 'defaults':
-        return <DefaultsTab state={state} />;
+        return <DefaultsTab state={state} send={send} />;
       case 'skills':
         return <SkillsTab state={state} />;
       case 'notifications':
@@ -225,7 +382,7 @@ export function ConfigPage({ state }: ConfigPageProps): React.JSX.Element {
       default:
         return null;
     }
-  }, [tab, state]);
+  }, [tab, state, send]);
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>

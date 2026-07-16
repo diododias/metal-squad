@@ -28,6 +28,14 @@ function normalizeV1(backlog: BacklogV1Input, repoDefaults: ReturnType<typeof lo
     thinking: repoDefaults.thinking ?? 'off',
     skills: repoDefaults.skills ?? [],
     stageSkills: repoDefaults.stageSkills ?? {},
+    workflow: {
+      mode: 'staged',
+      stages: ['specify', 'plan', 'tasks', 'implement', 'validate'],
+      approvals: { channel: 'telegram', autoAdvance: false },
+      syncTasksToBacklog: true,
+      sessionPolicy: { mode: 'isolated', alwaysIsolatedStages: [] },
+      stepGuidance: {},
+    },
   };
   return {
     version: 2,
@@ -54,8 +62,11 @@ function propagateDefaults(backlog: BacklogV2Input, repoDefaults: ReturnType<typ
     tool: backlog.defaults.tool,
     model: backlog.defaults.model ?? repoDefaults.model,
     effort: backlog.defaults.effort,
+    thinking: backlog.defaults.thinking,
     skills: backlog.defaults.skills,
     stageSkills: mergeStageSkills(repoDefaults.stageSkills, backlog.defaults.stageSkills),
+    workflow: backlog.defaults.workflow,
+    ...(backlog.defaults.maxTokens !== undefined ? { maxTokens: backlog.defaults.maxTokens } : {}),
   };
   return {
     ...backlog,
@@ -105,6 +116,8 @@ function applyDefaultsBeforeParse(
   const defaultTool = typeof defaults.tool === 'string' ? defaults.tool : repoDefaults.tool;
   const defaultModel = typeof defaults.model === 'string' ? defaults.model : repoDefaults.model;
   const defaultEffort = typeof defaults.effort === 'string' ? defaults.effort : repoDefaults.effort;
+  const defaultThinking = typeof defaults.thinking === 'string' ? defaults.thinking : repoDefaults.thinking;
+  const defaultMaxTokens = typeof defaults.maxTokens === 'number' ? defaults.maxTokens : undefined;
   const defaultSkills: unknown[] | undefined = Array.isArray(defaults.skills) ? defaults.skills : repoDefaults.skills;
   const defaultStageSkills = isRecord(defaults.stageSkills)
     ? defaults.stageSkills
@@ -131,6 +144,9 @@ function applyDefaultsBeforeParse(
             ...(feature.tool === undefined && defaultTool ? { tool: defaultTool } : {}),
             ...(feature.model === undefined && defaultModel ? { model: defaultModel } : {}),
             ...(feature.effort === undefined && defaultEffort ? { effort: defaultEffort } : {}),
+            ...(feature.thinking === undefined && defaultThinking ? { thinking: defaultThinking } : {}),
+            ...(feature.workflow === undefined && isRecord(defaults.workflow) ? { workflow: defaults.workflow } : {}),
+            ...(feature.maxTokens === undefined && defaultMaxTokens !== undefined ? { maxTokens: defaultMaxTokens } : {}),
             ...(feature.skills === undefined && defaultSkills ? { skills: [...defaultSkills] } : {}),
             tasks: tasks.map((task) => {
               if (!isRecord(task)) return task;

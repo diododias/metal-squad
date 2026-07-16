@@ -82,7 +82,21 @@ function makeBacklog(overrides: Partial<BacklogV2> = {}): BacklogV2 {
   return {
     version: 2,
     repo: 'demo',
-    defaults: { tool: 'claude', effort: 'medium', skills: [], stageSkills: {} },
+    defaults: {
+      tool: 'claude',
+      effort: 'medium',
+      thinking: 'off',
+      skills: [],
+      stageSkills: {},
+      workflow: {
+        mode: 'staged',
+        stages: ['specify', 'plan', 'tasks', 'implement', 'validate'],
+        approvals: { channel: 'telegram', autoAdvance: false },
+        syncTasksToBacklog: true,
+        sessionPolicy: { mode: 'isolated', alwaysIsolatedStages: [] },
+        stepGuidance: {},
+      },
+    },
     epics: [
       {
         id: 'epic-1',
@@ -148,7 +162,24 @@ describe('getBacklogSettings projectDefaults (SET-16)', () => {
     try {
       const { repoId, upsertBacklogCatalog, getBacklogSettings } = await setup(cwd);
       upsertBacklogCatalog(
-        makeBacklog({ defaults: { tool: 'claude', model: 'sonnet-5', effort: 'medium', skills: ['review'], stageSkills: {} } }),
+        makeBacklog({
+          defaults: {
+            tool: 'claude',
+            model: 'sonnet-5',
+            effort: 'medium',
+            thinking: 'off',
+            skills: ['review'],
+            stageSkills: {},
+            workflow: {
+              mode: 'staged',
+              stages: ['specify', 'plan', 'tasks', 'implement', 'validate'],
+              approvals: { channel: 'telegram', autoAdvance: false },
+              syncTasksToBacklog: true,
+              sessionPolicy: { mode: 'isolated', alwaysIsolatedStages: [] },
+              stepGuidance: {},
+            },
+          },
+        }),
         repoId,
       );
 
@@ -167,7 +198,21 @@ describe('getBacklogSettings projectDefaults (SET-16)', () => {
     try {
       const { getBacklogSettings } = await setup(cwd);
       const settings = getBacklogSettings(cwd);
-      expect(settings.projectDefaults).toEqual({ tool: 'claude', effort: 'medium', skills: [], stageSkills: {} });
+      expect(settings.projectDefaults).toEqual({
+        tool: 'claude',
+        effort: 'medium',
+        thinking: 'off',
+        skills: [],
+        stageSkills: {},
+        workflow: {
+          mode: 'staged',
+          stages: ['specify', 'plan', 'tasks', 'implement', 'validate'],
+          approvals: { channel: 'telegram', autoAdvance: false },
+          syncTasksToBacklog: true,
+          sessionPolicy: { mode: 'isolated', alwaysIsolatedStages: [] },
+          stepGuidance: {},
+        },
+      });
     } finally {
       rmSync(cwd, { recursive: true, force: true });
     }

@@ -36,7 +36,21 @@ function makeV2Backlog(overrides: Record<string, unknown> = {}) {
   return {
     version: 2,
     repo: 'my-repo',
-    defaults: { tool: 'claude', effort: 'medium', skills: [], stageSkills: {} },
+    defaults: {
+      tool: 'claude',
+      effort: 'medium',
+      thinking: 'off',
+      skills: [],
+      stageSkills: {},
+      workflow: {
+        mode: 'staged',
+        stages: ['specify', 'plan', 'tasks', 'implement', 'validate'],
+        approvals: { channel: 'telegram', autoAdvance: false },
+        syncTasksToBacklog: true,
+        sessionPolicy: { mode: 'isolated', alwaysIsolatedStages: [] },
+        stepGuidance: {},
+      },
+    },
     epics: [],
     ...overrides,
   };
@@ -66,7 +80,21 @@ describe('loadBacklog — version 2 default propagation', () => {
     mockParse.mockReturnValue(rawV2);
 
     const parsedResult = makeV2Backlog({
-      defaults: { tool: 'codex', effort: 'high', skills: ['implement'], stageSkills: {} },
+      defaults: {
+        tool: 'codex',
+        effort: 'high',
+        thinking: 'off',
+        skills: ['implement'],
+        stageSkills: {},
+        workflow: {
+          mode: 'staged',
+          stages: ['specify', 'plan', 'tasks', 'implement', 'validate'],
+          approvals: { channel: 'telegram', autoAdvance: false },
+          syncTasksToBacklog: true,
+          sessionPolicy: { mode: 'isolated', alwaysIsolatedStages: [] },
+          stepGuidance: {},
+        },
+      },
       epics: [{
         id: 'e1', title: 'Epic', features: [{
           id: 'feat-1', title: 'F', tool: 'codex', effort: 'high', skills: ['implement'],
@@ -95,7 +123,21 @@ describe('loadBacklog — version 2 default propagation', () => {
     mockParse.mockReturnValue(rawV2);
 
     const parsedResult = makeV2Backlog({
-      defaults: { tool: 'codex', effort: 'high', skills: [], stageSkills: {} },
+      defaults: {
+        tool: 'codex',
+        effort: 'high',
+        thinking: 'off',
+        skills: [],
+        stageSkills: {},
+        workflow: {
+          mode: 'staged',
+          stages: ['specify', 'plan', 'tasks', 'implement', 'validate'],
+          approvals: { channel: 'telegram', autoAdvance: false },
+          syncTasksToBacklog: true,
+          sessionPolicy: { mode: 'isolated', alwaysIsolatedStages: [] },
+          stepGuidance: {},
+        },
+      },
       epics: [{
         id: 'e1', title: 'Epic', features: [{
           id: 'feat-1', title: 'F', tool: 'claude', effort: 'high', skills: [],

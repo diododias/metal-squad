@@ -4,6 +4,7 @@ import type { RunningTaskSummary, RunOutputRow, RunSummary, TaskRun } from '../.
 import type { PendingApproval } from '../hooks/useGates.js';
 import type { NotificationEntry } from '../hooks/useNotifications.js';
 import type { BacklogSettings, FeatureCatalogEntry } from '../catalog.js';
+import { DefaultsSchema } from '../../core/backlog/schema.js';
 import type { LayoutMode, VerticalBudget } from '../format.js';
 import {
   STATUS_ICON,
@@ -150,7 +151,7 @@ function MainPanelComponent({
   selectedRunIndex: _selectedRunIndex,
   selectedFeature,
   featureCatalog = {},
-  backlogSettings = { stageSkills: {}, projectDefaults: { tool: 'claude', effort: 'medium', skills: [], stageSkills: {} } },
+  backlogSettings = { stageSkills: {}, projectDefaults: DefaultsSchema.parse({}) },
   activeView,
   output,
   outputPaused,
