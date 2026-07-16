@@ -84,7 +84,6 @@ describe('buildMsqWebState pendingFeatures projection', () => {
       version: '0.0.1',
     });
     mocks.resolveRuntimeConfig.mockReturnValue({
-      theme: undefined,
       concurrency: 3,
       staleRunThresholdMinutes: 120,
       toolTimeoutMs: 600_000,
@@ -400,17 +399,15 @@ describe('buildMsqWebState pendingFeatures projection', () => {
       staleRunThresholdMinutes: 120,
       toolTimeoutMs: 600_000,
       promptContextCharLimit: 20_000,
-      stageSkills: {},
-      telegramChatId: '123456',
       notifications: {
         channels: [
           { type: 'slack', webhookUrl: 'https://hooks.slack.com/services/T00/B00/secret' },
           { type: 'telegram', chatId: '123456' },
           { type: 'desktop' },
+          { type: 'webhook', url: '' },
         ],
         events: ['run:start', 'run:done'],
       },
-      workflow: { autoAdvanceStages: false, pollIntervalMs: 2_000 },
       budget: { alertAtPercent: 80 },
       web: { host: '127.0.0.1', port: 8743, auth: 'token' },
     });
@@ -418,18 +415,20 @@ describe('buildMsqWebState pendingFeatures projection', () => {
     const state = buildMsqWebState();
 
     expect(state.runtimeConfig.notifications.channels).toEqual([
-      { type: 'slack' },
-      { type: 'telegram' },
-      { type: 'desktop' },
+      { type: 'slack', configured: true },
+      { type: 'telegram', configured: true },
+      { type: 'desktop', configured: true },
+      { type: 'webhook', configured: false },
     ]);
     expect(state.runtimeConfig.notifications.events).toEqual(['run:start', 'run:done']);
+    expect(state.runtimeConfig.writability).toEqual({ dbWritable: true, configWritable: true });
     expect(JSON.stringify(state.runtimeConfig)).not.toContain('secret');
     expect(JSON.stringify(state.runtimeConfig)).not.toContain('123456');
     expect(state.runtimeConfig).not.toHaveProperty('telegramChatId');
   });
 
-  it('caches runtime config between builds until the caches are reset', async () => {
-    const { buildMsqWebState, resetWebStateCaches } = await import('../../src/web/state.js');
+  it('invalidates cached runtime config after a settings write', async () => {
+    const { buildMsqWebState, invalidateRuntimeConfigCache } = await import('../../src/web/state.js');
     mocks.listRunsForTui.mockReturnValue([]);
 
     expect(buildMsqWebState().runtimeConfig.concurrency).toBe(3);
@@ -438,7 +437,7 @@ describe('buildMsqWebState pendingFeatures projection', () => {
     mocks.resolveRuntimeConfig.mockReturnValue(changed);
     expect(buildMsqWebState().runtimeConfig.concurrency).toBe(3);
 
-    resetWebStateCaches();
+    invalidateRuntimeConfigCache();
     expect(buildMsqWebState().runtimeConfig.concurrency).toBe(9);
   });
 });

@@ -1,0 +1,64 @@
+# Cenario deterministico para E2E/Web de settings.
+# Consumido por `npm run db:fixture -- --scenario settings` e por tests/harness/db-fixture.test.ts.
+# Nunca aplicado ao banco global: src/db/fixtures.ts exige MSQ_DB_PATH sandbox.
+version: 2
+repo: msq-fixture-settings
+defaults:
+  tool: codex
+  model: gpt-5.6-terra
+  effort: high
+  thinking: "off"
+  skills:
+    - dev-flow
+  stageSkills:
+    implement:
+      - dev-flow
+epics:
+  - id: fix-settings
+    title: Settings fixture — resolucao de defaults e overrides
+    features:
+      - id: fix-set-inherit
+        title: Feature que usa os defaults do projeto
+        # Valores explicitos identicos aos defaults: mesmo shape que o loader
+        # real produz apos a propagacao de defaults para o catalogo.
+        tool: codex
+        model: gpt-5.6-terra
+        effort: high
+        thinking: "off"
+        skills:
+          - dev-flow
+        tasks:
+          - id: fix-set-inherit-t1
+            title: Task unica herdando workflow padrao
+      - id: fix-set-override
+        title: Feature com overrides completos de execucao
+        tool: claude
+        model: claude-opus-4-8
+        effort: low
+        thinking: "on"
+        skills: []
+        dependsOn:
+          - fix-set-inherit
+        workflow:
+          mode: staged
+          stages:
+            - specify
+            - implement
+            - validate
+          approvals:
+            channel: telegram
+            autoAdvance: true
+          sessionPolicy:
+            mode: isolated
+            alwaysIsolatedStages:
+              - validate
+          stepGuidance:
+            implement:
+              prompt: Guidance deterministica para o step implement.
+        tasks:
+          - id: fix-set-override-t1
+            title: Primeira task
+          - id: fix-set-override-t2
+            title: Segunda task dependente
+            dependsOn:
+              - fix-set-override-t1

@@ -274,19 +274,6 @@ prints a warning and normalizes it to v2 shape.
 ```yaml
 version: 2
 repo: metal-squad
-defaults:
-  tool: codex
-  effort: high
-  skills: [implement]
-  stageSkills:
-    specify: [speckit-specify]
-    plan: [speckit-plan, speckit-tasks]
-    implement: [speckit-implement, dev-flow]
-    validate: [reviewr]
-budget:
-  maxTokens: 5000000
-  maxCostUsd: 100
-  perFeatureMaxTokens: 500000
 epics:
   - id: e02-modern-tui
     title: E02 - Modern TUI
@@ -299,22 +286,11 @@ Top level:
 
 - `version`
 - `repo`
-- `defaults`
-- `budget`
 - `epics`
 
-`defaults`:
-
-- `tool`: `claude | codex | opencode`
-- `effort`: `low | medium | high`
-- `skills`: default skills list for features/tasks
-- `stageSkills`: maps workflow stage names to skill names
-
-`budget`:
-
-- `maxTokens`
-- `maxCostUsd`
-- `perFeatureMaxTokens`
+Defaults e budget sao configurados no Projeto (catalogo SQLite). O
+`backlog.yaml` e um asset de importacao somente de epics e features. Backlogs
+legados com `defaults` continuam carregando, mas o bloco e ignorado com aviso.
 
 `feature`:
 
@@ -339,7 +315,7 @@ Top level:
 - `mode`: `single | staged`
 - `stages`
 - `approvals.channel`: currently `telegram`
-- `approvals.autoAdvance`
+- `autoAdvance`
 - `syncTasksToBacklog`
 
 `retry`:
@@ -390,15 +366,13 @@ Only the *automatic* continuation is opt-in.
 
 `metal-squad` applies defaults in this order:
 
-1. Schema defaults
-2. `backlog.yaml` `defaults`
-3. Feature-level explicit values
+1. Defaults do Projeto (DB)
+2. Valores explicitos da feature
 
 Current propagation behavior:
 
-- `defaults.tool` propagates to features that omit `tool`
-- `defaults.effort` propagates to features that omit `effort`
-- `defaults.skills` propagates to features and tasks that omit `skills`
+- Defaults do Projeto propagam para features que omitem valores de execucao.
+- Valores explicitos da feature continuam tendo precedencia.
 
 ### File Validation
 
@@ -443,7 +417,7 @@ Stage skill precedence is:
 
 1. System defaults
 2. Global config `stageSkills`
-3. `backlog.yaml` `defaults.stageSkills`
+3. Projeto (catalogo SQLite) `stageSkills`
 
 If a stage has no explicit mapping, the registry tries to resolve a skill with
 the same name as the stage itself.
@@ -636,7 +610,6 @@ It is created automatically on first run.
     ]
   },
   "workflow": {
-    "autoAdvanceStages": false,
     "pollIntervalMs": 2000
   },
   "budget": {
@@ -667,7 +640,7 @@ It is created automatically on first run.
 - `telegramChatId`: legacy shortcut for a Telegram notification destination
 - `notifications.channels`: preferred notification routing
 - `notifications.events`: which events should be emitted
-- `workflow.autoAdvanceStages`: global default for staged auto-advance
+- `workflow.autoAdvance`: project default with per-feature override for staged auto-advance
 - `workflow.pollIntervalMs`: polling interval for stage request resolution
 - `budget.defaultMaxCostUsd`: fallback cost cap when backlog has no `budget.maxCostUsd`
 - `budget.alertAtPercent`: alert threshold percentage
@@ -682,13 +655,12 @@ For stage skill mapping:
 
 1. system mapping
 2. global config `stageSkills`
-3. backlog `defaults.stageSkills`
+3. Projeto `stageSkills` (catalogo SQLite)
 
 For feature execution values:
 
-1. schema defaults
-2. backlog `defaults`
-3. feature fields
+1. defaults do Projeto (catalogo SQLite)
+2. campos da feature
 
 ## Notifications and Telegram
 

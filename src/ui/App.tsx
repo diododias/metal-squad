@@ -141,8 +141,7 @@ function launchFeatureRun(featureId: string): void {
 }
 
 export function App(): React.ReactElement {
-  const config = useMemo(() => resolveRuntimeConfig(process.cwd()), []);
-  const themeResolution = useMemo(() => resolveThemePreference(config.theme), [config.theme]);
+  const themeResolution = useMemo(() => resolveThemePreference(undefined), []);
   const repoLabel = useMemo(() => basename(resolveRepo().path), []);
   const tokenStats = useTokenStats(7);
   const rawRuns = useRuns(2000);
