@@ -73,6 +73,9 @@ function buildPayload(
     ? mergeExecutionDefaults(baseDefaults, backlog.defaults)
     : baseDefaults;
   const feature = featureId && backlog ? findFeature(backlog, featureId) : null;
+  const featureEffective = feature
+    ? mergeExecutionDefaults(effectiveDefaults, feature)
+    : undefined;
   if (featureId && !feature) {
     throw new Error(`Unknown feature "${featureId}".`);
   }
@@ -85,12 +88,12 @@ function buildPayload(
     defaults: {
       ...(backlog ? { project: backlog.defaults, effective: effectiveDefaults } : {}),
     },
-    ...(feature
+    ...(feature && featureEffective
       ? {
           feature: {
             id: feature.id,
             title: feature.title,
-            effective: mergeExecutionDefaults(effectiveDefaults, feature),
+            effective: featureEffective,
           },
         }
       : {}),
