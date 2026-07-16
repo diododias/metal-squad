@@ -5,6 +5,7 @@ const mockExecFileSync = vi.fn();
 const mockEventEmit = vi.fn();
 const mockParseControlSignal = vi.fn();
 const mockExistsSync = vi.fn();
+const mockResolveToolInvocation = vi.fn(() => ({ command: 'codex', baseArgs: [], env: {}, versionCheck: ['--version'] }));
 
 class MockCliTimeoutError extends Error {
   readonly stdout: string;
@@ -42,6 +43,7 @@ vi.mock('../../src/config/index.js', () => ({
 
 vi.mock('../../src/core/adapters/spawn.js', () => ({
   runCli: mockRunCli,
+  resolveToolInvocation: mockResolveToolInvocation,
   CliTimeoutError: MockCliTimeoutError,
   CliAbortError: MockCliAbortError,
 }));
@@ -77,6 +79,7 @@ beforeEach(() => {
   mockEventEmit.mockReset();
   mockParseControlSignal.mockReset().mockReturnValue(null);
   mockExistsSync.mockReset().mockReturnValue(false);
+  mockResolveToolInvocation.mockReturnValue({ command: 'codex', baseArgs: [], env: {}, versionCheck: ['--version'] });
 });
 
 describe('codexAdapter.effortFlag', () => {

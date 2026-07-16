@@ -5,6 +5,18 @@ const mockRunCli = vi.fn();
 const mockSpawn = vi.fn();
 const mockExecFileSync = vi.fn();
 const mockEventEmit = vi.fn();
+const mockResolveRuntimeConfig = vi.fn();
+
+const DEFAULT_TOOLS = [
+  { id: 'claude', adapter: 'claude', command: 'claude', baseArgs: [], env: {}, versionCheck: ['--version'] },
+  { id: 'codex', adapter: 'codex', command: 'codex', baseArgs: [], env: {}, versionCheck: ['--version'] },
+  { id: 'opencode', adapter: 'opencode', command: 'opencode', baseArgs: [], env: {}, versionCheck: ['--version'] },
+];
+
+vi.mock('../../src/config/index.js', async () => {
+  const actual = await vi.importActual<typeof import('../../src/config/index.js')>('../../src/config/index.js');
+  return { ...actual, resolveRuntimeConfig: mockResolveRuntimeConfig };
+});
 
 vi.mock('../../src/core/adapters/spawn.js', async () => {
   const actual = await vi.importActual<typeof import('../../src/core/adapters/spawn.js')>('../../src/core/adapters/spawn.js');
@@ -27,6 +39,11 @@ vi.mock('../../src/core/events/index.js', () => ({
 
 beforeEach(() => {
   vi.clearAllMocks();
+  mockResolveRuntimeConfig.mockReturnValue({
+    toolTimeoutMs: 600_000,
+    idleThresholdMs: 30_000,
+    tools: DEFAULT_TOOLS,
+  });
   mockExecFileSync.mockReset();
   mockEventEmit.mockReset();
 });
@@ -42,6 +59,47 @@ describe('adapter registry', () => {
     expect(getAdapter('claude').tool).toBe('claude');
     expect(getAdapter('codex').tool).toBe('codex');
     expect(getAdapter('opencode').tool).toBe('opencode');
+  });
+});
+
+describe('tool registry spawn resolution', () => {
+  it('launches the configured command with baseArgs and merged env', async () => {
+    mockResolveRuntimeConfig.mockReturnValue({
+      toolTimeoutMs: 600_000,
+      idleThresholdMs: 30_000,
+      tools: [
+        DEFAULT_TOOLS[0],
+        {
+          ...DEFAULT_TOOLS[1],
+          command: 'codex-canary',
+          baseArgs: ['--registry-flag'],
+          env: { CODEX_CHANNEL: 'canary' },
+          versionCheck: ['version', '--json'],
+        },
+        DEFAULT_TOOLS[2],
+      ],
+    });
+    mockRunCli.mockResolvedValue({ code: 0, stdout: '', stderr: '' });
+    const { codexAdapter } = await import('../../src/core/adapters/codex.js');
+
+    await codexAdapter.runFeature(
+      { id: 'feat-1', title: 'Feature', tool: 'codex', effort: 'medium', dependsOn: [], tasks: [] },
+      'PROMPT',
+      { cwd: '/repo', runId: 1 },
+    );
+
+    expect(mockRunCli).toHaveBeenCalledWith(
+      'codex-canary',
+      expect.arrayContaining(['--registry-flag', 'exec']),
+      expect.objectContaining({ env: { CODEX_CHANNEL: 'canary' } }),
+    );
+
+    codexAdapter.isAvailable?.();
+    expect(mockExecFileSync).toHaveBeenCalledWith(
+      'codex-canary',
+      ['version', '--json'],
+      { stdio: 'ignore' },
+    );
   });
 });
 
