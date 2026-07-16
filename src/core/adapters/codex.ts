@@ -43,8 +43,17 @@ const EFFORT: Record<Effort, string> = {
   high: 'high',
 };
 
+/** Piso mínimo de timeout para runs do codex, independente do valor configurado. */
+const CODEX_MIN_TIMEOUT_MS = 1_800_000;
+
 export const codexAdapter: ToolAdapter = {
   tool: 'codex',
+
+  capabilities: {
+    model: true,
+    effort: true,
+    thinking: false,
+  },
 
   effortFlag(effort: Effort): string[] {
     return ['-c', `model_reasoning_effort="${EFFORT[effort]}"`];
@@ -60,6 +69,16 @@ export const codexAdapter: ToolAdapter = {
   },
 
   async runFeature(feature: Feature, prompt: string, opts: RunFeatureOptions): Promise<RunResult> {
+    if (feature.thinking === 'on') {
+      emitRunOutput(
+        opts.runId,
+        feature,
+        'aviso: codex não suporta thinking; opção ignorada.',
+        'stderr',
+        'heartbeat',
+      );
+    }
+
     const args = opts.session?.mode === 'resume' && opts.session.handle
       ? [
           'exec',
@@ -84,7 +103,7 @@ export const codexAdapter: ToolAdapter = {
           prompt,
         ];
 
-    const timeoutMs = Math.max(resolveRuntimeConfig(process.cwd()).toolTimeoutMs, 1_800_000);
+    const timeoutMs = Math.max(resolveRuntimeConfig(process.cwd()).toolTimeoutMs, CODEX_MIN_TIMEOUT_MS);
     let code: number;
     let stdout: string;
     let stderr: string;

@@ -25,6 +25,7 @@ function normalizeV1(backlog: BacklogV1Input, repoDefaults: ReturnType<typeof lo
     tool: repoDefaults.tool ?? 'claude',
     ...(repoDefaults.model ? { model: repoDefaults.model } : {}),
     effort: repoDefaults.effort ?? 'medium',
+    thinking: repoDefaults.thinking ?? 'off',
     skills: repoDefaults.skills ?? [],
     stageSkills: repoDefaults.stageSkills ?? {},
   };

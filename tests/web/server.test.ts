@@ -33,6 +33,7 @@ const mocks = vi.hoisted(() => ({
   assertWritableDbPath: vi.fn(),
   updateCatalogFeature: vi.fn(),
   updateCatalogTask: vi.fn(),
+  updateCatalogDefaults: vi.fn(),
   loadBacklogFromCatalog: vi.fn(),
   validateBacklogSkills: vi.fn(),
   resolveRuntimeConfig: vi.fn(),
@@ -52,6 +53,7 @@ vi.mock('../../src/db/index.js', () => ({
 vi.mock('../../src/db/backlogCatalog.js', () => ({
   updateCatalogFeature: mocks.updateCatalogFeature,
   updateCatalogTask: mocks.updateCatalogTask,
+  updateCatalogDefaults: mocks.updateCatalogDefaults,
 }));
 
 vi.mock('../../src/core/backlog/load.js', () => ({
@@ -847,6 +849,59 @@ describe('web server', () => {
 
     const notice = await waitForMessageType(socket, 'ui:notice');
     expect((notice as { payload: { message: string } }).payload.message).toContain('nope');
+
+    socket.close();
+  });
+
+  it('persists a project defaults patch and broadcasts state:full on success', async () => {
+    const { createWebServer } = await import('../../src/web/server.js');
+    mocks.updateCatalogDefaults.mockReturnValue({ defaults: { tool: 'codex', effort: 'high', skills: [], stageSkills: {} } });
+
+    server = createWebServer({ host: '127.0.0.1', port: 0, auth: 'token', token: 'secret' });
+    await new Promise<void>((resolve) => server!.server.listen(0, '127.0.0.1', resolve));
+    const address = server!.server.address() as { port: number };
+    const wsUrl = `ws://127.0.0.1:${address.port}/ws`;
+
+    const socket = new WebSocket(wsUrl);
+    await waitForOpen(socket);
+    socket.send(JSON.stringify({ type: 'auth', token: 'secret' }));
+    await waitForSocketMessage(socket); // state:full
+
+    socket.send(JSON.stringify({
+      type: 'action:updateProjectDefaults',
+      patch: { tool: 'codex', effort: 'high' },
+    }));
+
+    const stateMessage = await waitForMessageType(socket, 'state:full');
+    expect(mocks.updateCatalogDefaults).toHaveBeenCalledWith('repo-1', { tool: 'codex', effort: 'high' });
+    expect((stateMessage as { type: string }).type).toBe('state:full');
+
+    socket.close();
+  });
+
+  it('emits ui:notice without throwing when the project defaults patch fails', async () => {
+    const { createWebServer } = await import('../../src/web/server.js');
+    mocks.updateCatalogDefaults.mockImplementation(() => {
+      throw new Error('Catalog defaults not found for repo "repo-1".');
+    });
+
+    server = createWebServer({ host: '127.0.0.1', port: 0, auth: 'token', token: 'secret' });
+    await new Promise<void>((resolve) => server!.server.listen(0, '127.0.0.1', resolve));
+    const address = server!.server.address() as { port: number };
+    const wsUrl = `ws://127.0.0.1:${address.port}/ws`;
+
+    const socket = new WebSocket(wsUrl);
+    await waitForOpen(socket);
+    socket.send(JSON.stringify({ type: 'auth', token: 'secret' }));
+    await waitForSocketMessage(socket); // state:full
+
+    socket.send(JSON.stringify({
+      type: 'action:updateProjectDefaults',
+      patch: { tool: 'codex' },
+    }));
+
+    const notice = await waitForMessageType(socket, 'ui:notice');
+    expect((notice as { payload: { message: string } }).payload.message).toContain('repo-1');
 
     socket.close();
   });
