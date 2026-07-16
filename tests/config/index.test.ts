@@ -39,6 +39,7 @@ describe('config', () => {
     expect(loadConfig()).toEqual({
       concurrency: 3,
       toolTimeoutMs: 600_000,
+      heartbeatMs: 30_000,
       staleRunThresholdMinutes: 120,
       idleThresholdMs: 30_000,
       promptContextCharLimit: 20_000,
@@ -157,6 +158,7 @@ describe('config', () => {
     saveConfig({
       concurrency: 2,
       toolTimeoutMs: 999,
+      heartbeatMs: 30_000,
       staleRunThresholdMinutes: 45,
       idleThresholdMs: 30_000,
       promptContextCharLimit: 15_000,
@@ -171,6 +173,7 @@ describe('config', () => {
     expect(loadConfig()).toEqual({
       concurrency: 2,
       toolTimeoutMs: 999,
+      heartbeatMs: 30_000,
       staleRunThresholdMinutes: 45,
       idleThresholdMs: 30_000,
       promptContextCharLimit: 15_000,
