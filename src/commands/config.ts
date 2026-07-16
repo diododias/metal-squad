@@ -90,7 +90,7 @@ function buildPayload(
           feature: {
             id: feature.id,
             title: feature.title,
-            effective: mergeExecutionDefaults(effectiveDefaults!, feature),
+            effective: mergeExecutionDefaults(effectiveDefaults, feature),
           },
         }
       : {}),
