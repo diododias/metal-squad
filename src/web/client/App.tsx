@@ -2,7 +2,6 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Sidebar, type SidebarNavItem } from './components/navigation/Sidebar.js';
 import { Modal } from './components/feedback/Modal.js';
 import { NotificationList, type NotificationListItem } from './components/feedback/NotificationList.js';
-import { HelpOverlay } from './HelpOverlay.js';
 import { useIsMobile, MobileTopBar, MobileTabBar } from './Responsive.js';
 import { useWebSocket } from './hooks/useWebSocket.js';
 import { useLocalOutput, type OutputLine } from './hooks/useLocalOutput.js';
@@ -34,7 +33,7 @@ function notificationTone(type: 'info' | 'notice'): NotificationListItem['tone']
 export function App(): React.JSX.Element {
   const isMobile = useIsMobile(860);
   const [route, setRoute] = useState<Route>(parseHash(window.location.hash));
-  const [helpOpen, setHelpOpen] = useState(false);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [notificationsOpen, setNotificationsOpen] = useState(false);
   const [state, setState] = useState<MsqWebState | null>(null);
   const [unread, setUnread] = useState(0);
@@ -42,7 +41,6 @@ export function App(): React.JSX.Element {
   const [runHistories, setRunHistories] = useState<Record<string, RunHistoryEntry[]>>({});
   const [workflowSaveResults, setWorkflowSaveResults] = useState<Record<string, FeatureConfigSaveResult>>({});
   const { linesByRun, append, clear } = useLocalOutput();
-  const gKeyRef = useRef(false);
   const hasReceivedStateRef = useRef(false);
 
   useEffect(() => {
@@ -100,41 +98,6 @@ export function App(): React.JSX.Element {
   );
 
   const { send, error: connectionError } = useWebSocket(onMessage);
-
-  useEffect(() => {
-    function onKeyDown(e: KeyboardEvent): void {
-      const tag = (e.target as HTMLElement | null)?.tagName ?? '';
-      if (tag === 'INPUT' || tag === 'SELECT' || tag === 'TEXTAREA') return;
-      if (e.key === '?') {
-        setHelpOpen((o) => !o);
-        return;
-      }
-      if (e.key === 'Escape') {
-        setHelpOpen(false);
-        setNotificationsOpen(false);
-        return;
-      }
-      if (e.key === 'g') {
-        gKeyRef.current = true;
-        setTimeout(() => {
-          gKeyRef.current = false;
-        }, 600);
-        return;
-      }
-      if (gKeyRef.current) {
-        const map: Record<string, string> = { b: '/board', r: '/runs', g: '/gates', a: '/analytics', c: '/config' };
-        const target = map[e.key];
-        if (target) {
-          window.location.hash = target;
-          gKeyRef.current = false;
-        }
-      }
-    }
-    window.addEventListener('keydown', onKeyDown);
-    return (): void => {
-      window.removeEventListener('keydown', onKeyDown);
-    };
-  }, []);
 
   function navigate(path: string): void {
     window.location.hash = path;
@@ -265,7 +228,8 @@ export function App(): React.JSX.Element {
           live={runningCount > 0}
           notificationCount={unread}
           onNavigate={navigate}
-          onHelp={() => { setHelpOpen(true); }}
+          collapsed={sidebarCollapsed}
+          onToggleCollapsed={() => { setSidebarCollapsed((collapsed) => !collapsed); }}
           onNotifications={() => {
             setNotificationsOpen(true);
             setUnread(0);
@@ -277,7 +241,6 @@ export function App(): React.JSX.Element {
         <MobileTopBar
           live={runningCount > 0}
           notificationCount={unread}
-          onHelp={() => { setHelpOpen(true); }}
           onNotifications={() => {
             setNotificationsOpen(true);
             setUnread(0);
@@ -293,7 +256,6 @@ export function App(): React.JSX.Element {
         )}
       </div>
       {isMobile && <MobileTabBar items={navItems} activePath={activePathPrefix} onNavigate={navigate} />}
-      <HelpOverlay open={helpOpen} onClose={() => { setHelpOpen(false); }} />
       <Modal open={notificationsOpen} onClose={() => { setNotificationsOpen(false); }} width={isMobile ? 320 : 440}>
         <div style={{ padding: 18 }}>
           <h2 style={{ margin: '0 0 4px', fontSize: '26px', fontFamily: 'var(--font-display)', fontWeight: 400, letterSpacing: '0.02em' }}>Notifications</h2>

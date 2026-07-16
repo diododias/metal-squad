@@ -119,6 +119,7 @@ export interface RunChangesPayload {
  * `Partial<Feature>`, so the wire contract can't smuggle in `id`/`tasks`
  * reshaping from an untrusted client. */
 export interface FeatureConfigPatch {
+  spec?: string;
   tool?: string;
   model?: string;
   effort?: string;

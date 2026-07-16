@@ -736,6 +736,34 @@ describe('web server', () => {
     socket.close();
   });
 
+  it('persists a specification patch through action:updateFeatureConfig', async () => {
+    const { createWebServer } = await import('../../src/web/server.js');
+    mocks.updateCatalogFeature.mockReturnValue({ id: 'feat1', spec: '# Updated specification' });
+
+    server = createWebServer({ host: '127.0.0.1', port: 0, auth: 'token', token: 'secret' });
+    await new Promise<void>((resolve) => server!.server.listen(0, '127.0.0.1', resolve));
+    const address = server!.server.address() as { port: number };
+    const socket = new WebSocket(`ws://127.0.0.1:${address.port}/ws`);
+    await waitForOpen(socket);
+    socket.send(JSON.stringify({ type: 'auth', token: 'secret' }));
+    await waitForSocketMessage(socket);
+
+    socket.send(JSON.stringify({
+      type: 'action:updateFeatureConfig',
+      featureId: 'feat1',
+      patch: { spec: '# Updated specification' },
+    }));
+
+    await waitForMessageType(socket, 'state:full');
+    expect(mocks.updateCatalogFeature).toHaveBeenCalledWith(
+      'repo-1',
+      'feat1',
+      expect.objectContaining({ spec: '# Updated specification' }),
+    );
+
+    socket.close();
+  });
+
   it('emits ui:notice without throwing when the feature config patch fails', async () => {
     const { createWebServer } = await import('../../src/web/server.js');
     mocks.updateCatalogFeature.mockImplementation(() => {

@@ -176,9 +176,6 @@ export function RunDetailPage({
   const tabContent: Record<string, React.ReactNode> = {
     summary: (
       <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-        <div>
-          <RunStatusIndicator status={sessionStatus} fallbackStatus={run.status} spinnerEnabled={state.runtimeConfig.web.statusSpinner} />
-        </div>
         <WorkflowStepper stages={stages} currentStage={run.pipelineCurrentStage ?? run.stage} />
         <div style={{ marginTop: 14, display: 'flex', flexDirection: 'column', gap: 6 }}>
           {stageGroups.map((g) => (
@@ -386,7 +383,11 @@ export function RunDetailPage({
           </div>
         )}
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(120px, 1fr))', gap: 8, marginBottom: 16 }}>
-          <MetricCard label="Status" value={sessionStatus?.status ?? getRunStatusLabel(run)} status={run.status} />
+          <MetricCard
+            label="Status"
+            value={<RunStatusIndicator status={sessionStatus} fallbackStatus={run.status} spinnerEnabled={state.runtimeConfig.web.statusSpinner} />}
+            status={run.status}
+          />
           <MetricCard label="Tool" value={run.tool} />
           <MetricCard label="Model" value={feature?.model ?? '—'} />
           <MetricCard label="Publish" value={getPublishStatusLabel(run)} />

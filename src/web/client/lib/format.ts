@@ -52,7 +52,7 @@ export function formatPublishTarget(run: RunSummary): string {
 
 export function formatTokens(total: number | null | undefined): string {
   if (total === null || total === undefined) return '—';
-  if (total >= 1000) return `${(total / 1000).toFixed(1)}k`;
+  if (total >= 1000) return `${String(Number((total / 1000).toFixed(1)))}k`;
   return String(total);
 }
 
