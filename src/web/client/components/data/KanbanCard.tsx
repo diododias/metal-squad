@@ -16,6 +16,12 @@ export function toShortFeatureId(featureId: string): string {
   return `F-${hex}`;
 }
 
+/** Short display label for a model id (`claude-sonnet-4-5` → `sonnet-4-5`);
+ * the full value stays available via the cell's hover title. */
+export function toShortModelLabel(model: string): string {
+  return model.replace(/^claude-/, '');
+}
+
 export interface KanbanCardRun {
   featureId: string;
   persistedId?: string | null;
@@ -42,22 +48,36 @@ export interface KanbanCardProps {
   onClick?: () => void;
 }
 
-const mutedLineStyle: React.CSSProperties = {
+const mutedTextStyle: React.CSSProperties = {
   fontSize: 'var(--text-2xs)',
   color: 'var(--text-faint)',
   fontFamily: 'var(--font-mono)',
   lineHeight: 1.3,
-  overflow: 'hidden',
-  textOverflow: 'ellipsis',
-  whiteSpace: 'nowrap',
 };
+
+interface ToolRailCell {
+  key: string;
+  icon: string;
+  label: string;
+  title: string;
+  color?: string;
+}
+
+function buildToolRailCells(run: KanbanCardRun): ToolRailCell[] {
+  const cells: ToolRailCell[] = [];
+  if (run.tool) cells.push({ key: 'tool', icon: '◷', label: run.tool, title: `tool: ${run.tool}` });
+  if (run.model) cells.push({ key: 'model', icon: '⚙', label: toShortModelLabel(run.model), title: `model: ${run.model}` });
+  if (run.effort) cells.push({ key: 'effort', icon: '▁▃▅', label: run.effort, title: `effort: ${run.effort}` });
+  if (run.autoAdvance) cells.push({ key: 'auto', icon: '≫', label: 'auto', title: 'auto-advance', color: 'var(--accent-ok)' });
+  return cells;
+}
 
 export function KanbanCard({ run, selected, onClick }: KanbanCardProps): React.JSX.Element {
   const tasksLabel = run.tasksTotal != null ? `${String(run.tasksDone ?? 0)}/${String(run.tasksTotal)} tasks` : null;
   const isDone = run.status === 'done';
   const displayId = run.persistedId ?? toShortFeatureId(run.featureId);
   const displayTitle = run.title?.trim();
-  const toolLine = [run.tool, run.model, run.effort].filter(Boolean).join(' · ');
+  const railCells = buildToolRailCells(run);
 
   return (
     <Card
@@ -65,9 +85,16 @@ export function KanbanCard({ run, selected, onClick }: KanbanCardProps): React.J
       onClick={onClick}
       style={isDone ? { borderLeft: '3px solid var(--accent-ok)' } : undefined}
     >
-      {/* Muted context line: epic title · feature id */}
-      <div style={{ ...mutedLineStyle, marginBottom: 4 }}>
-        {run.epicTitle ? `${run.epicTitle} · ${displayId}` : displayId}
+      {/* Muted context header: epic title truncates on its own line; the
+        * feature id never truncates — it wraps to the line below whenever
+        * the epic title leaves no room next to it. */}
+      <div style={{ display: 'flex', flexWrap: 'wrap', columnGap: 8, rowGap: 2, marginBottom: 4, ...mutedTextStyle }}>
+        {run.epicTitle && (
+          <span style={{ flexShrink: 0, maxWidth: '100%', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+            {run.epicTitle}
+          </span>
+        )}
+        <span style={{ flexShrink: 0, whiteSpace: 'nowrap' }}>{displayId}</span>
       </div>
 
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 8, marginBottom: 6 }}>
@@ -88,16 +115,7 @@ export function KanbanCard({ run, selected, onClick }: KanbanCardProps): React.J
             </div>
           )}
         </div>
-        <div style={{ flexShrink: 0, display: 'flex', alignItems: 'center', gap: 5 }}>
-          {run.autoAdvance && (
-            <span
-              title="auto-advance"
-              aria-label="Auto-advance enabled"
-              style={{ fontSize: 'var(--text-2xs)', color: 'var(--text-dim)', fontFamily: 'var(--font-mono)', whiteSpace: 'nowrap' }}
-            >
-              ⏩ auto
-            </span>
-          )}
+        <div style={{ flexShrink: 0 }}>
           <StatusPill status={run.status} />
         </div>
       </div>
@@ -127,8 +145,44 @@ export function KanbanCard({ run, selected, onClick }: KanbanCardProps): React.J
         )
       )}
 
-      {toolLine && (
-        <div style={{ ...mutedLineStyle, color: 'var(--text-dim)', marginBottom: 8 }}>{toolLine}</div>
+      {/* Tool rail: tool / model / effort / auto as bordered icon cells;
+        * hover shows the full value. */}
+      {railCells.length > 0 && (
+        <div
+          style={{
+            display: 'flex',
+            maxWidth: '100%',
+            width: 'fit-content',
+            border: '1px solid var(--border-dim)',
+            borderRadius: 'var(--radius-sm)',
+            overflow: 'hidden',
+            marginBottom: 8,
+          }}
+        >
+          {railCells.map((cell, i) => (
+            <span
+              key={cell.key}
+              title={cell.title}
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 5,
+                padding: '4px 9px',
+                fontSize: 'var(--text-2xs)',
+                fontFamily: 'var(--font-mono)',
+                color: cell.color ?? 'var(--text-dim)',
+                borderLeft: i > 0 ? '1px solid var(--border-dim)' : 'none',
+                minWidth: 0,
+                overflow: 'hidden',
+                textOverflow: 'ellipsis',
+                whiteSpace: 'nowrap',
+              }}
+            >
+              <span aria-hidden="true">{cell.icon}</span>
+              {cell.label}
+            </span>
+          ))}
+        </div>
       )}
 
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: '2px 10px', fontSize: 'var(--text-2xs)', color: 'var(--text-dim)' }}>

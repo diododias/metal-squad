@@ -1,7 +1,7 @@
 import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
-import { KanbanCard, toShortFeatureId } from '../../src/web/client/components/data/KanbanCard.js';
+import { KanbanCard, toShortFeatureId, toShortModelLabel } from '../../src/web/client/components/data/KanbanCard.js';
 
 const run = {
   featureId: 'feat-52',
@@ -21,29 +21,52 @@ describe('KanbanCard persisted identity', () => {
     expect(html).toContain(toShortFeatureId(run.featureId));
   });
 
-  it('shows the muted epic title next to the feature id at the top', () => {
+  it('shows the muted epic title with the feature id always rendered beside or below it', () => {
     const html = renderToStaticMarkup(
       <KanbanCard run={{ ...run, persistedId: 'F-23456789', epicTitle: 'Web Dashboard' }} />,
     );
-    expect(html).toContain('Web Dashboard · F-23456789');
+    expect(html).toContain('Web Dashboard');
+    expect(html).toContain('F-23456789');
     expect(html.indexOf('Web Dashboard')).toBeLessThan(html.indexOf('Legacy feature'));
+  });
+
+  it('keeps the feature id in the markup even when the epic title is long', () => {
+    const html = renderToStaticMarkup(
+      <KanbanCard run={{ ...run, persistedId: 'SET-44', epicTitle: 'Settings — M9 (Consolidacao, limpeza e docs finais do modulo)' }} />,
+    );
+    expect(html).toContain('SET-44');
   });
 });
 
-describe('KanbanCard unified tool line', () => {
-  it('renders tool, model and effort as a single muted line', () => {
+describe('KanbanCard tool rail', () => {
+  it('renders tool, model and effort as bordered cells with hover titles', () => {
     const html = renderToStaticMarkup(
-      <KanbanCard run={{ ...run, status: 'running', tool: 'claude', model: 'sonnet-4-5', effort: 'high' }} />,
+      <KanbanCard run={{ ...run, status: 'running', tool: 'claude', model: 'claude-sonnet-4-5', effort: 'high' }} />,
     );
-    expect(html).toContain('claude · sonnet-4-5 · high');
+    expect(html).toContain('title="tool: claude"');
+    expect(html).toContain('title="model: claude-sonnet-4-5"');
+    expect(html).toContain('title="effort: high"');
+    // Short model label in the cell, full value only in the hover title.
+    expect(html).toContain('sonnet-4-5');
   });
 
-  it('omits missing tool fields from the line', () => {
+  it('omits missing tool fields from the rail', () => {
     const html = renderToStaticMarkup(
       <KanbanCard run={{ ...run, status: 'running', tool: 'claude' }} />,
     );
-    expect(html).toContain('claude');
-    expect(html).not.toContain('claude ·');
+    expect(html).toContain('title="tool: claude"');
+    expect(html).not.toContain('title="model:');
+    expect(html).not.toContain('title="effort:');
+  });
+
+  it('renders no rail when no tool data is present', () => {
+    const html = renderToStaticMarkup(<KanbanCard run={{ ...run, status: 'running' }} />);
+    expect(html).not.toContain('title="tool:');
+  });
+
+  it('shortens claude model ids for display', () => {
+    expect(toShortModelLabel('claude-sonnet-4-5')).toBe('sonnet-4-5');
+    expect(toShortModelLabel('gpt-5.6-terra')).toBe('gpt-5.6-terra');
   });
 });
 
@@ -56,16 +79,18 @@ describe('KanbanCard status and indicators', () => {
     expect(html).toContain('1000k tok');
   });
 
-  it('shows the auto-advance indicator when the workflow auto-advances', () => {
+  it('shows the auto-advance cell in the tool rail when the workflow auto-advances', () => {
     const html = renderToStaticMarkup(
-      <KanbanCard run={{ ...run, status: 'running', autoAdvance: true }} />,
+      <KanbanCard run={{ ...run, status: 'running', tool: 'claude', autoAdvance: true }} />,
     );
-    expect(html).toContain('⏩ auto');
+    expect(html).toContain('title="auto-advance"');
+    expect(html).toContain('≫');
+    expect(html).toContain('auto');
   });
 
-  it('hides the auto-advance indicator by default', () => {
-    const html = renderToStaticMarkup(<KanbanCard run={{ ...run, status: 'running' }} />);
-    expect(html).not.toContain('⏩ auto');
+  it('hides the auto-advance cell by default', () => {
+    const html = renderToStaticMarkup(<KanbanCard run={{ ...run, status: 'running', tool: 'claude' }} />);
+    expect(html).not.toContain('title="auto-advance"');
   });
 
   it('shows the elapsed time lapse in the footer', () => {
