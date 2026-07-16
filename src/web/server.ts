@@ -31,7 +31,7 @@ import { resolveRepo } from '../core/repo.js';
 import { loadBacklogFromCatalog } from '../core/backlog/load.js';
 import { selectStartableFeaturePlan } from '../core/orchestrator/graph.js';
 import { validateBacklogSkills } from '../core/skills/index.js';
-import { ConfigSchema, loadConfig, resolveRuntimeConfig, saveAppConfigPatch, saveConfig, type ToolRegistryEntry } from '../config/index.js';
+import { ConfigSchema, loadConfig, resolveRuntimeConfig, saveAppConfigPatch, saveConfig, saveNotificationsPatch, type NotificationsPatch, type ToolRegistryEntry } from '../config/index.js';
 import { clearSecret, setSecret } from '../security/secrets.js';
 import { updateCatalogFeature, updateCatalogTask, updateCatalogDefaults, type FeaturePatch, type CatalogDefaultsPatch } from '../db/backlogCatalog.js';
 import type { Feature, Task } from '../core/backlog/schema.js';
@@ -717,6 +717,10 @@ export function createWebServer(options: {
         updateProjectDefaults(message.patch, featureCwd);
         break;
       }
+      case 'action:updateNotifications': {
+        updateNotifications(message.patch, featureCwd);
+        break;
+      }
       case 'action:updateAppConfig': {
         updateAppConfig(message.patch, featureCwd);
         break;
@@ -1057,6 +1061,19 @@ export function createWebServer(options: {
     }
     reconcileWebState(featureCwd);
     msqEventBus.emit('ui:info', { message: 'Saved project defaults.' });
+  }
+
+  function updateNotifications(patch: NotificationsPatch, featureCwd: string): void {
+    try {
+      saveNotificationsPatch(patch);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      msqEventBus.emit('ui:notice', { message: `Could not save notifications: ${message}` });
+      return;
+    }
+    resetWebStateCaches();
+    reconcileWebState(featureCwd);
+    msqEventBus.emit('ui:info', { message: 'Saved notifications.' });
   }
 
   function updateToolsRegistry(tools: ToolRegistryEntry[], featureCwd: string): void {

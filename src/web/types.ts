@@ -5,7 +5,7 @@ import type { PendingApproval } from '../ui/hooks/useGates.js';
 import type { FeatureCatalogEntry, BacklogSettings } from '../ui/catalog.js';
 import type { RunBreakdown } from '../core/stats.js';
 import type { ThemeRoleName } from '../ui/theme/types.js';
-import type { AppConfigPatch as ConfigAppConfigPatch, Config, NotificationChannelConfig, ToolRegistryEntry } from '../config/index.js';
+import type { AppConfigPatch as ConfigAppConfigPatch, Config, NotificationChannelConfig, NotificationsPatch, ToolRegistryEntry } from '../config/index.js';
 import type { Skill } from '../core/skills/types.js';
 
 export interface TokenStats {
@@ -209,6 +209,7 @@ export type WebSocketClientMessage =
   | { type: 'action:updateFeatureConfig'; featureId: string; patch: FeatureConfigPatch }
   | { type: 'action:updateTaskConfig'; featureId: string; taskId: string; patch: TaskConfigPatch }
   | { type: 'action:updateProjectDefaults'; patch: ProjectDefaultsPatch }
+  | { type: 'action:updateNotifications'; patch: NotificationsPatch }
   | { type: 'action:updateAppConfig'; patch: AppConfigPatch }
   | { type: 'action:setSecret'; patch: SecretPatch }
   | { type: 'action:clearSecret'; account: string }

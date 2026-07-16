@@ -198,6 +198,42 @@ describe('Settings client surfaces', () => {
     expect(messages).toEqual([{ type: 'action:updateProjectDefaults', patch: { effort: 'high' } }]);
   });
 
+  it('saves editable notification channels without reading configured credentials', () => {
+    const messages: WebSocketClientMessage[] = [];
+    const state = {
+      ...settingsState,
+      runtimeConfig: {
+        ...settingsState.runtimeConfig,
+        notifications: {
+          channels: [{ type: 'webhook', configured: true }],
+          events: ['run:start'],
+        },
+      },
+    } as MsqWebState;
+    const container = render(React.createElement(ConfigPage, {
+      state,
+      isMobile: false,
+      send: (message: WebSocketClientMessage) => { messages.push(message); },
+    }));
+
+    act(() => {
+      Array.from(container.querySelectorAll('button')).find((button) => button.textContent === 'Notifications')?.click();
+    });
+    expect(container.textContent).toContain('configured');
+    expect((container.querySelector('#notification-channel-0-credential') as HTMLInputElement).value).toBe('');
+
+    const done = container.querySelector('[id="notification-event-run:done"]') as HTMLInputElement;
+    act(() => {
+      done.click();
+      Array.from(container.querySelectorAll('button')).find((button) => button.textContent === 'save notifications')?.click();
+    });
+
+    expect(messages).toEqual([{
+      type: 'action:updateNotifications',
+      patch: { channels: [{ type: 'webhook' }], events: ['run:start', 'run:done'] },
+    }]);
+  });
+
   it('saves changed App runtime settings and removes global workflow controls', () => {
     const messages: WebSocketClientMessage[] = [];
     const container = render(React.createElement(ConfigPage, {
