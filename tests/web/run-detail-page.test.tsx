@@ -170,3 +170,51 @@ describe('RunDetailPage resume with override', () => {
     expect(container.textContent).not.toContain('resume with override');
   });
 });
+
+describe('RunDetailPage mobile close control', () => {
+  afterEach(() => {
+    window.history.replaceState(null, '', '/');
+  });
+
+  it('replaces the header close button with a compact top-right ✕ on mobile', () => {
+    window.history.replaceState(null, '', '/?mobile=1');
+    const container = renderPage(makeRun(), vi.fn());
+
+    const closeIcon = container.querySelector('[aria-label="Close run detail"]');
+    expect(closeIcon).not.toBeNull();
+    expect(Array.from(container.querySelectorAll('button')).some((b) => b.textContent === 'close')).toBe(false);
+  });
+
+  it('dispatches onBack when the mobile ✕ is clicked', () => {
+    window.history.replaceState(null, '', '/?mobile=1');
+    const onBack = vi.fn();
+    const container = document.createElement('div');
+    document.body.append(container);
+    const root = createRoot(container);
+    roots.push(root);
+    act(() => {
+      root.render(
+        <RunDetailPage
+          state={makeState(makeRun())}
+          featureId="feat-1"
+          runDetails={{}}
+          linesByRun={{}}
+          onSubscribeRun={() => () => undefined}
+          onBack={onBack}
+          send={vi.fn()}
+        />,
+      );
+    });
+
+    const closeIcon = container.querySelector('[aria-label="Close run detail"]') as HTMLButtonElement;
+    act(() => { closeIcon.click(); });
+    expect(onBack).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps the regular close button in the header actions on desktop', () => {
+    const container = renderPage(makeRun(), vi.fn());
+
+    expect(Array.from(container.querySelectorAll('button')).some((b) => b.textContent === 'close')).toBe(true);
+    expect(container.querySelector('[aria-label="Close run detail"]')).toBeNull();
+  });
+});
