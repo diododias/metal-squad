@@ -1,6 +1,7 @@
 import React, { useMemo, useState } from 'react';
 import { Tabs } from '../components/navigation/Tabs.js';
 import { Tag } from '../components/core/Tag.js';
+import { EditableToggleField } from '../components/core/EditableToggleField.js';
 import { PageHeader } from '../PageHeader.js';
 import type { MsqWebState, WebSocketClientMessage } from '../../types.js';
 
@@ -97,6 +98,9 @@ function RuntimeTab({ state }: { state: MsqWebState }): React.JSX.Element {
 
 function DefaultsTab({ state }: { state: MsqWebState }): React.JSX.Element {
   const defaults = state.backlogSettings.resolvedDefaults;
+  const capabilities = defaults
+    ? state.backlogSettings.toolCapabilities?.[defaults.tool] ?? { model: false, effort: false, thinking: false }
+    : undefined;
   return (
     <Card title="Effective defaults (resolved)">
       {defaults ? (
@@ -104,6 +108,19 @@ function DefaultsTab({ state }: { state: MsqWebState }): React.JSX.Element {
           <Row label="tool" value={defaults.tool} />
           <Row label="model" value={defaults.model ?? '—'} />
           <Row label="effort" value={defaults.effort} />
+          <EditableToggleField
+            id="defaults-thinking"
+            label="thinking"
+            value={defaults.thinking === 'on'}
+            initialValue={defaults.thinking === 'on'}
+            disabled
+            onChange={() => undefined}
+          />
+          {capabilities && !capabilities.thinking && (
+            <div style={{ color: 'var(--accent-warn)', fontSize: 'var(--text-xs)', lineHeight: 1.4, padding: '4px 0 8px' }}>
+              {defaults.tool} does not support thinking; it will be ignored.
+            </div>
+          )}
           <div style={{ display: 'flex', justifyContent: 'space-between', padding: '6px 0' }}>
             <span style={{ color: 'var(--text-dim)' }}>skills</span>
             <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', justifyContent: 'flex-end' }}>

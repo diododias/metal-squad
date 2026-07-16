@@ -17,6 +17,7 @@ export interface FeatureCatalogEntry {
   tool: string;
   model?: string;
   effort: string;
+  thinking?: string;
   /** Full spec/feature description (D2): inline `spec` summary, or the
    * content of `specFile` when no inline summary is declared. Truncated to
    * DESCRIPTION_CHAR_LIMIT so it stays readable inside the Ink detail view. */
@@ -116,6 +117,7 @@ function loadCatalogAndSettings(cwd: string): void {
             tool: feature.tool,
             model: feature.model,
             effort: feature.effort,
+            thinking: feature.thinking,
             description: readFeatureDescription(feature.spec, feature.specFile, cwd),
             tasks: feature.tasks,
             dependsOn: feature.dependsOn,

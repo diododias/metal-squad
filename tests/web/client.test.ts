@@ -149,6 +149,28 @@ describe('Settings client surfaces', () => {
     expect(text).toContain('1.2.3');
   });
 
+  it('renders the effective thinking toggle with a capability warning', () => {
+    const state = {
+      ...settingsState,
+      backlogSettings: {
+        resolvedDefaults: { tool: 'codex', model: undefined, effort: 'high', thinking: 'on', skills: [], stageSkills: {} },
+        toolCapabilities: {
+          claude: { model: true, effort: true, thinking: true },
+          codex: { model: true, effort: true, thinking: false },
+          opencode: { model: true, effort: false, thinking: false },
+        },
+      },
+    } as MsqWebState;
+    const container = render(React.createElement(ConfigPage, { state, isMobile: false, send: () => undefined }));
+
+    act(() => { Array.from(container.querySelectorAll('button')).find((button) => button.textContent === 'Defaults')?.click(); });
+
+    const thinking = container.querySelector('#defaults-thinking') as HTMLInputElement;
+    expect(thinking.checked).toBe(true);
+    expect(thinking.disabled).toBe(true);
+    expect(container.textContent).toContain('codex does not support thinking; it will be ignored.');
+  });
+
   it('renders Settings in the main navigation while retaining the config route', () => {
     const container = render(React.createElement(App));
 

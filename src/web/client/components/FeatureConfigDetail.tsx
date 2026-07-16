@@ -14,6 +14,7 @@ interface ExecutionDraft {
   tool: string;
   model: string;
   effort: string;
+  thinking: string;
   maxTokens: string;
   autoStart: boolean;
 }
@@ -30,6 +31,7 @@ function executionDraftFrom(feature: FeatureCatalogEntry): ExecutionDraft {
     tool: feature.tool,
     model: feature.model ?? '',
     effort: feature.effort,
+    thinking: feature.thinking ?? 'off',
     maxTokens: feature.maxTokens?.toString() ?? '',
     autoStart: feature.autoStart ?? false,
   };
@@ -147,10 +149,11 @@ export function FeatureConfigDetail({ feature, backlogSettings, onSaveConfig, wo
       tool: feature.tool,
       model: feature.model ?? '',
       effort: feature.effort,
+      thinking: feature.thinking ?? 'off',
       maxTokens: feature.maxTokens?.toString() ?? '',
       autoStart: feature.autoStart ?? false,
     });
-  }, [feature.id, feature.tool, feature.model, feature.effort, feature.maxTokens, feature.autoStart]);
+  }, [feature.id, feature.tool, feature.model, feature.effort, feature.thinking, feature.maxTokens, feature.autoStart]);
 
   useEffect(() => {
     if (
@@ -303,8 +306,14 @@ export function FeatureConfigDetail({ feature, backlogSettings, onSaveConfig, wo
   let maxTokensError: string | undefined;
 
   if (draftExecution.tool !== executionBaseline.tool) executionPatch.tool = draftExecution.tool;
-  if (draftExecution.model !== executionBaseline.model) executionPatch.model = draftExecution.model;
-  if (draftExecution.effort !== executionBaseline.effort) executionPatch.effort = draftExecution.effort;
+  const configuredCapabilities = backlogSettings.toolCapabilities?.[draftExecution.tool as keyof typeof backlogSettings.toolCapabilities];
+  // Preserve correction of legacy/unavailable saved tools: capabilities only
+  // constrain tools known by the registry, while the existing unavailable-tool
+  // guard still blocks the save until the user selects a valid tool.
+  const executionCapabilities = configuredCapabilities ?? { model: true, effort: true, thinking: true };
+  if (executionCapabilities.model && draftExecution.model !== executionBaseline.model) executionPatch.model = draftExecution.model;
+  if (executionCapabilities.effort && draftExecution.effort !== executionBaseline.effort) executionPatch.effort = draftExecution.effort;
+  if (executionCapabilities.thinking && draftExecution.thinking !== executionBaseline.thinking) executionPatch.thinking = draftExecution.thinking;
   if (draftExecution.autoStart !== executionBaseline.autoStart) executionPatch.autoStart = draftExecution.autoStart;
 
   if (hasChangedMaxTokens) {
@@ -318,6 +327,11 @@ export function FeatureConfigDetail({ feature, backlogSettings, onSaveConfig, wo
 
   const hasUnavailableTool = !executionTools.includes(draftExecution.tool as typeof executionTools[number]);
   const hasExecutionChanges = Object.keys(executionPatch).length > 0 || hasChangedMaxTokens;
+  const unsupportedExecutionWarnings = configuredCapabilities ? [
+    !executionCapabilities.model ? `${draftExecution.tool} does not support model; it will be ignored.` : undefined,
+    !executionCapabilities.effort ? `${draftExecution.tool} does not support effort; it will be ignored.` : undefined,
+    !executionCapabilities.thinking ? `${draftExecution.tool} does not support thinking; it will be ignored.` : undefined,
+  ].filter((warning): warning is string => warning !== undefined) : [];
   const executionGuidance = maxTokensError
     ?? (hasUnavailableTool && hasExecutionChanges ? 'Select an available tool before saving execution settings.' : undefined);
   const canSaveExecution = hasExecutionChanges && !executionGuidance;
@@ -370,6 +384,7 @@ export function FeatureConfigDetail({ feature, backlogSettings, onSaveConfig, wo
             value={draftExecution.model}
             initialValue={executionBaseline.model}
             placeholder="default model"
+            disabled={!executionCapabilities.model}
             onChange={(model) => { setDraftExecution((draft) => ({ ...draft, model })); }}
           />
           <EditableSelectField
@@ -378,7 +393,16 @@ export function FeatureConfigDetail({ feature, backlogSettings, onSaveConfig, wo
             value={draftExecution.effort}
             initialValue={executionBaseline.effort}
             options={executionEfforts.map((effort) => ({ value: effort, label: effort }))}
+            disabled={!executionCapabilities.effort}
             onChange={(effort) => { setDraftExecution((draft) => ({ ...draft, effort: effort ?? '' })); }}
+          />
+          <EditableToggleField
+            id="execution-thinking"
+            label="thinking"
+            value={draftExecution.thinking === 'on'}
+            initialValue={executionBaseline.thinking === 'on'}
+            disabled={!executionCapabilities.thinking}
+            onChange={(thinking) => { setDraftExecution((draft) => ({ ...draft, thinking: thinking ? 'on' : 'off' })); }}
           />
           <EditableTextField
             id="execution-max-tokens"
@@ -396,6 +420,9 @@ export function FeatureConfigDetail({ feature, backlogSettings, onSaveConfig, wo
             onChange={(autoStart) => { setDraftExecution((draft) => ({ ...draft, autoStart })); }}
           />
           {executionGuidance && <span style={{ color: 'var(--accent-warn)', fontSize: 'var(--text-xs)', lineHeight: 1.4 }}>{executionGuidance}</span>}
+          {unsupportedExecutionWarnings.map((warning) => (
+            <span key={warning} style={{ color: 'var(--accent-warn)', fontSize: 'var(--text-xs)', lineHeight: 1.4 }}>{warning}</span>
+          ))}
           {canSaveExecution && (
             <div>
               <Button variant="primary" size="sm" onClick={saveExecution}>save execution</Button>
