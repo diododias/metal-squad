@@ -6,7 +6,6 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { App } from '../../src/web/client/App.js';
 import { parseHash } from '../../src/web/client/lib/routes.js';
-import { HelpOverlay } from '../../src/web/client/HelpOverlay.js';
 import { ConfigPage } from '../../src/web/client/pages/ConfigPage.js';
 import { BoardPage } from '../../src/web/client/pages/BoardPage.js';
 import type { MsqWebState, WebSocketClientMessage } from '../../src/web/types.js';
@@ -198,12 +197,6 @@ describe('Settings client surfaces', () => {
     expect(parseHash('#/config')).toEqual({ page: 'config' });
   });
 
-  it('renders the Settings label for the g c shortcut', () => {
-    const container = render(React.createElement(HelpOverlay, { open: true, onClose: () => undefined }));
-
-    expect(container.textContent).toContain('g c');
-    expect(container.textContent).toContain('Go to Settings');
-  });
 });
 
 describe('format helpers', () => {

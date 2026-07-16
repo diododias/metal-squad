@@ -190,6 +190,8 @@ export function BoardPage({ state, isMobile, onOpenRun, onOpenBacklogItem }: Boa
                         status: r.status,
                         stages: state.featureCatalog[r.featureId]?.workflow.stages,
                         tool: r.tool,
+                        model: state.featureCatalog[r.featureId]?.model,
+                        effort: state.featureCatalog[r.featureId]?.effort,
                         stage: r.stage,
                         tokens: r.totalTokens,
                       }}

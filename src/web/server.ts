@@ -931,6 +931,7 @@ export function createWebServer(options: {
 
   function toFeaturePatch(patch: FeatureConfigPatch): FeaturePatch {
     return {
+      ...(patch.spec !== undefined ? { spec: patch.spec } : {}),
       ...(patch.tool !== undefined ? { tool: patch.tool as Feature['tool'] } : {}),
       ...(patch.model !== undefined ? { model: patch.model } : {}),
       ...(patch.effort !== undefined ? { effort: patch.effort as Feature['effort'] } : {}),

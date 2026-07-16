@@ -28,6 +28,14 @@ describe('KanbanCard persisted identity', () => {
 });
 
 describe('KanbanCard steps sequence', () => {
+  it('shows a spinner and compact token count for a running card', () => {
+    const html = renderToStaticMarkup(
+      <KanbanCard run={{ ...run, status: 'running', tokens: 1_000_000 }} />,
+    );
+    expect(html).toContain('msq-status-spinner');
+    expect(html).toContain('1000k tok');
+  });
+
   it('marks previous stages done, the current stage highlighted and later stages pending', () => {
     const html = renderToStaticMarkup(
       <KanbanCard run={{ ...run, status: 'running', stage: 'implement', stages: ['plan', 'implement', 'review'] }} />,

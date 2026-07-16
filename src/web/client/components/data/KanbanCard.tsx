@@ -4,6 +4,7 @@ import { StatusPill, type PillStatus } from '../core/StatusPill.js';
 import { Tag } from '../core/Tag.js';
 import { FeatureIdentity } from './FeatureIdentity.js';
 import { WorkflowStepper } from '../navigation/WorkflowStepper.js';
+import { formatTokens } from '../../lib/format.js';
 
 /** Deterministic 8-hex-digit short id from a feature id string, so the same
  * feature always renders the same F-XXXXXXXX badge without a backend. */
@@ -41,6 +42,7 @@ export interface KanbanCardProps {
 
 export function KanbanCard({ run, selected, onClick }: KanbanCardProps): React.JSX.Element {
   const tasksLabel = run.tasksTotal != null ? `${String(run.tasksDone ?? 0)}/${String(run.tasksTotal)} tasks` : null;
+  const isRunning = run.status === 'running';
 
   return (
     <Card selected={selected} onClick={onClick}>
@@ -49,6 +51,7 @@ export function KanbanCard({ run, selected, onClick }: KanbanCardProps): React.J
           <FeatureIdentity title={run.title} id={run.persistedId ?? toShortFeatureId(run.featureId)} />
         </div>
         <div style={{ flexShrink: 0 }}>
+          {isRunning && <span aria-label="Running" className="msq-status-spinner" style={{ display: 'inline-block', marginRight: 6 }} />}
           <StatusPill status={run.status} />
         </div>
       </div>
@@ -72,7 +75,7 @@ export function KanbanCard({ run, selected, onClick }: KanbanCardProps): React.J
 
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: '2px 10px', fontSize: 'var(--text-2xs)', color: 'var(--text-dim)' }}>
         {run.elapsed && <span>{run.elapsed}</span>}
-        {run.tokens != null && <span>{run.tokens.toLocaleString()} tok</span>}
+        {run.tokens != null && <span>{formatTokens(run.tokens)} tok</span>}
         {tasksLabel && <span>{tasksLabel}</span>}
       </div>
     </Card>

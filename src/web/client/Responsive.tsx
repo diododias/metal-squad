@@ -117,7 +117,6 @@ export function MobileTabBar({ items, activePath, onNavigate }: MobileTabBarProp
 export interface MobileTopBarProps {
   live: boolean;
   notificationCount: number;
-  onHelp: () => void;
   onNotifications: () => void;
   onLogout?: () => void;
 }
@@ -140,7 +139,6 @@ const ICON_BTN_STYLE: React.CSSProperties = {
 export function MobileTopBar({
   live,
   notificationCount,
-  onHelp,
   onNotifications,
   onLogout,
 }: MobileTopBarProps): React.JSX.Element {
@@ -202,9 +200,6 @@ export function MobileTopBar({
               {notificationCount > 9 ? '9+' : notificationCount}
             </span>
           )}
-        </button>
-        <button onClick={onHelp} title="Help" style={ICON_BTN_STYLE}>
-          ?
         </button>
         {onLogout && (
           <button onClick={onLogout} title="Log out" style={ICON_BTN_STYLE}>
