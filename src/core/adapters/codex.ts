@@ -4,7 +4,7 @@ import { execFileSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { resolveRuntimeConfig } from '../../config/index.js';
-import { CliAbortError, CliTimeoutError, runCli } from './spawn.js';
+import { CliAbortError, CliTimeoutError, resolveToolInvocation, runCli } from './spawn.js';
 import { msqEventBus } from '../events/index.js';
 import { parseControlSignal } from './control.js';
 
@@ -61,7 +61,8 @@ export const codexAdapter: ToolAdapter = {
 
   isAvailable(): boolean {
     try {
-      execFileSync('codex', ['--version'], { stdio: 'ignore' });
+      const invocation = resolveToolInvocation('codex');
+      execFileSync(invocation.command, invocation.versionCheck, { stdio: 'ignore' });
       return true;
     } catch {
       return false;
@@ -69,6 +70,7 @@ export const codexAdapter: ToolAdapter = {
   },
 
   async runFeature(feature: Feature, prompt: string, opts: RunFeatureOptions): Promise<RunResult> {
+    const invocation = resolveToolInvocation(feature.tool, opts.cwd);
     if (feature.thinking === 'on') {
       emitRunOutput(
         opts.runId,
@@ -81,6 +83,7 @@ export const codexAdapter: ToolAdapter = {
 
     const args = opts.session?.mode === 'resume' && opts.session.handle
       ? [
+          ...invocation.baseArgs,
           'exec',
           'resume',
           '--json',
@@ -92,6 +95,7 @@ export const codexAdapter: ToolAdapter = {
           prompt,
         ]
       : [
+          ...invocation.baseArgs,
           'exec',
           '--json',
           '--skip-git-repo-check',
@@ -111,8 +115,9 @@ export const codexAdapter: ToolAdapter = {
     const seenToolCalls = new Set<string>();
 
     try {
-      ({ code, stdout, stderr } = await runCli('codex', args, {
+      ({ code, stdout, stderr } = await runCli(invocation.command, args, {
         cwd: opts.cwd,
+        env: invocation.env,
         timeoutMs,
         signal: opts.signal,
         idleThresholdMs: resolveRuntimeConfig(opts.cwd).idleThresholdMs,
