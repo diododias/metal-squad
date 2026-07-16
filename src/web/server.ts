@@ -32,6 +32,7 @@ import { loadBacklogFromCatalog } from '../core/backlog/load.js';
 import { selectStartableFeaturePlan } from '../core/orchestrator/graph.js';
 import { validateBacklogSkills } from '../core/skills/index.js';
 import { resolveRuntimeConfig } from '../config/index.js';
+import { assertConfiguredNotificationChannel } from '../core/notify/manager.js';
 import { updateCatalogFeature, updateCatalogTask, updateCatalogDefaults, type FeaturePatch, type CatalogDefaultsPatch } from '../db/backlogCatalog.js';
 import type { Feature, Task, Tool } from '../core/backlog/schema.js';
 import { buildMsqWebState, appendNotification } from './state.js';
@@ -969,6 +970,9 @@ export function createWebServer(options: {
     try {
       console.log(`[updateFeatureConfig] featureId=${featureId}, patch=`, patch);
       assertWritableDbPath();
+      if (patch.workflow?.approvals?.channel !== undefined) {
+        assertConfiguredNotificationChannel(patch.workflow.approvals.channel);
+      }
       const { repoId } = resolveRepo(featureCwd);
       updateCatalogFeature(repoId, featureId, toFeaturePatch(patch));
     } catch (error) {
@@ -1003,6 +1007,9 @@ export function createWebServer(options: {
     try {
       console.log(`[updateProjectDefaults] patch=`, patch);
       assertWritableDbPath();
+      if (patch.workflow?.approvals?.channel !== undefined) {
+        assertConfiguredNotificationChannel(patch.workflow.approvals.channel);
+      }
       const { repoId } = resolveRepo(featureCwd);
       updateCatalogDefaults(repoId, patch as CatalogDefaultsPatch);
     } catch (error) {

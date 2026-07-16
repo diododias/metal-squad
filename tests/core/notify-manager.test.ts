@@ -120,6 +120,32 @@ describe('dispatch', () => {
     expect(mockSlackSend).toHaveBeenCalledWith('fail msg', undefined);
   });
 
+  it('delivers an approval only through its selected configured channel', async () => {
+    mockResolveRuntimeConfig.mockReturnValue(makeConfig({
+      channels: [
+        { type: 'telegram', chatId: 'chat123' },
+        { type: 'slack', webhookUrl: 'https://hooks.slack.com/abc' },
+      ],
+    }));
+    const { dispatch } = await import('../../src/core/notify/manager.js');
+
+    await dispatch('stage:approval', 'approve this', undefined, 'slack');
+
+    expect(mockSlackSend).toHaveBeenCalledWith('approve this', undefined);
+    expect(mockTelegramSend).not.toHaveBeenCalled();
+  });
+
+  it('rejects a selected approval channel that is absent or unconfigured before sending', async () => {
+    mockResolveRuntimeConfig.mockReturnValue(makeConfig({
+      channels: [{ type: 'desktop' }],
+    }));
+    const { dispatch } = await import('../../src/core/notify/manager.js');
+
+    await expect(dispatch('stage:approval', 'approve this', undefined, 'slack'))
+      .rejects.toThrow('Approval channel "slack" is not configured or has no credentials.');
+    expect(mockDesktopSend).not.toHaveBeenCalled();
+  });
+
   it('builds DiscordChannel from explicit channel config', async () => {
     mockResolveRuntimeConfig.mockReturnValue(makeConfig({
       channels: [{ type: 'discord', webhookUrl: 'https://discord.com/api/webhooks/xyz' }],

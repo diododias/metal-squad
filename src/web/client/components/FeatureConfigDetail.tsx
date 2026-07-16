@@ -88,12 +88,13 @@ function SubHeading({ children }: { children: React.ReactNode }): React.JSX.Elem
 export interface FeatureConfigDetailProps {
   feature: FeatureCatalogEntry;
   backlogSettings: BacklogSettings;
+  approvalChannels?: string[];
   onSaveConfig: (patch: FeatureConfigPatch) => void;
   onSaveTaskConfig?: (taskId: string, patch: TaskConfigPatch) => void;
   workflowSaveResult?: FeatureConfigSaveResult;
 }
 
-export function FeatureConfigDetail({ feature, backlogSettings, onSaveConfig, workflowSaveResult }: FeatureConfigDetailProps): React.JSX.Element {
+export function FeatureConfigDetail({ feature, backlogSettings, approvalChannels = ['telegram'], onSaveConfig, workflowSaveResult }: FeatureConfigDetailProps): React.JSX.Element {
   const stages = feature.workflow.stages;
   const [selectedStage, setSelectedStage] = useState(stages[0] ?? 'specify');
   const [draftPrompt, setDraftPrompt] = useState('');
@@ -350,7 +351,7 @@ export function FeatureConfigDetail({ feature, backlogSettings, onSaveConfig, wo
   if (draftWorkflow.autoAdvance !== workflowBaseline.autoAdvance) approvalPatch.autoAdvance = draftWorkflow.autoAdvance;
   if (Object.keys(approvalPatch).length > 0) workflowPatch.approvals = approvalPatch;
   const hasWorkflowChanges = Object.keys(workflowPatch).length > 0;
-  const hasUnavailableApprovalChannel = draftWorkflow.approvalChannel !== 'telegram';
+  const hasUnavailableApprovalChannel = !approvalChannels.includes(draftWorkflow.approvalChannel);
   const workflowGuidance = hasUnavailableApprovalChannel && hasWorkflowChanges
     ? 'Choose an available approval destination before saving.'
     : undefined;
@@ -479,7 +480,7 @@ export function FeatureConfigDetail({ feature, backlogSettings, onSaveConfig, wo
             label="approvals.channel"
             value={draftWorkflow.approvalChannel}
             initialValue={workflowBaseline.approvalChannel}
-            options={[{ value: 'telegram', label: 'telegram' }]}
+            options={Array.from(new Set(approvalChannels)).map((channel) => ({ value: channel, label: channel }))}
             onChange={(approvalChannel) => { setDraftWorkflow((draft) => ({ ...draft, approvalChannel: approvalChannel ?? '' })); }}
           />
           <EditableToggleField

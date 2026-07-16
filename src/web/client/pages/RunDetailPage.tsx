@@ -252,7 +252,12 @@ export function RunDetailPage({
       </div>
     ),
     config: feature ? (
-      <FeatureConfigDetail feature={feature} backlogSettings={state.backlogSettings} onSaveConfig={saveConfig} />
+      <FeatureConfigDetail
+        feature={feature}
+        backlogSettings={state.backlogSettings}
+        approvalChannels={state.runtimeConfig.notifications.channels.map((channel) => channel.type)}
+        onSaveConfig={saveConfig}
+      />
     ) : (
       <div style={{ color: 'var(--text-faint)', fontSize: 'var(--text-sm)' }}>Feature config not found in catalog.</div>
     ),

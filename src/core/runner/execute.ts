@@ -997,6 +997,7 @@ async function executeStagedFeature(
           runId,
           response: 'advance',
           source: 'auto',
+          approvalChannel: workflow.approvals.channel,
         },
       );
       continue;
@@ -1008,7 +1009,7 @@ async function executeStagedFeature(
       stage,
       'approval',
       `Advance to stage ${nextStage}?`,
-      { runId },
+      { runId, approvalChannel: workflow.approvals.channel },
     );
     const decision = await waitForStageApproval(
       requestId,
@@ -1018,6 +1019,7 @@ async function executeStagedFeature(
       nextStage,
       config.workflow.pollIntervalMs,
       runId,
+      workflow.approvals.channel,
     );
     if (decision === 'retry') {
       pendingTransitionDecisionId = null;
@@ -1196,6 +1198,7 @@ async function waitForStageApproval(
   nextStage: string,
   pollIntervalMs: number,
   runId: number,
+  approvalChannel: string,
 ): Promise<'advance' | 'retry'> {
   let pendingRequestId = requestId;
 
@@ -1208,7 +1211,7 @@ async function waitForStageApproval(
       stage,
       'approval',
       `Stage ${stage} still pending. Advance to ${nextStage}?`,
-      { runId },
+      { runId, approvalChannel },
     );
   }
 }
