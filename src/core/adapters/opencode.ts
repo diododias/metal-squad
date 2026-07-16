@@ -1,7 +1,7 @@
 import { execFileSync } from 'node:child_process';
 import { sanitizeToolCallRecord, type SessionHandle, type ToolAdapter, type RunResult, type RunFeatureOptions, type TokenUsage, type ToolCallRecord } from './types.js';
 import type { Effort, Feature } from '../backlog/schema.js';
-import { CliAbortError, runCli } from './spawn.js';
+import { CliAbortError, resolveToolInvocation, runCli } from './spawn.js';
 import { msqEventBus } from '../events/index.js';
 import { parseControlSignal } from './control.js';
 import { resolveRuntimeConfig } from '../../config/index.js';
@@ -68,7 +68,8 @@ export const opencodeAdapter: ToolAdapter = {
 
   isAvailable(): boolean {
     try {
-      execFileSync('opencode', ['--version'], { stdio: 'ignore' });
+      const invocation = resolveToolInvocation('opencode');
+      execFileSync(invocation.command, invocation.versionCheck, { stdio: 'ignore' });
       return true;
     } catch {
       return false;
@@ -76,6 +77,7 @@ export const opencodeAdapter: ToolAdapter = {
   },
 
   async runFeature(feature: Feature, prompt: string, opts: RunFeatureOptions): Promise<RunResult> {
+    const invocation = resolveToolInvocation(feature.tool, opts.cwd);
     if (feature.effort !== 'medium') {
       emitRunOutput(
         opts.runId,
@@ -96,6 +98,7 @@ export const opencodeAdapter: ToolAdapter = {
     }
 
     const args = [
+      ...invocation.baseArgs,
       'run',
       '--format', 'json',
       ...(opts.session?.mode === 'resume' && opts.session.handle ? ['--session', opts.session.handle.sessionId] : []),
@@ -123,8 +126,9 @@ export const opencodeAdapter: ToolAdapter = {
       },
     );
     try {
-      ({ code, stdout, stderr } = await runCli('opencode', args, {
+      ({ code, stdout, stderr } = await runCli(invocation.command, args, {
         cwd: opts.cwd,
+        env: invocation.env,
         signal: opts.signal,
         heartbeatMs: 30_000,
         logLabel: `opencode ${feature.id}`,
