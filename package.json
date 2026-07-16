@@ -11,8 +11,10 @@
     "dist"
   ],
   "scripts": {
-    "build": "tsc && rm -rf dist/web/static dist/web/client && cp -r src/web/static dist/web/static && node esbuild.web.mjs && chmod +x dist/index.js && node scripts/migrate-db.mjs",
+    "build": "tsc && rm -rf dist/web/static dist/web/client && cp -r src/web/static dist/web/static && node esbuild.web.mjs && chmod +x dist/index.js",
     "migrate:db": "node scripts/migrate-db.mjs",
+    "gate:fast": "node scripts/gate.mjs fast",
+    "gate:full": "node scripts/with-sandbox-db.mjs node scripts/gate.mjs full",
     "dev": "tsx src/index.ts",
     "start": "node dist/index.js",
     "typecheck": "tsc --noEmit",
@@ -28,7 +30,7 @@
     "verify:repo": "npm run verify:doc-refs && npm run verify:skill-shims && npm run verify:backlog",
     "prepare": "husky",
     "clean:db": "rm -f ~/.local/share/metal-squad/app.db && rm -rf .metal-squad",
-    "web": "npm run build && export MSQ_WEB_PASSWORD=diodex && msq web --host 0.0.0.0"
+    "web": "npm run build && npm run migrate:db && export MSQ_WEB_PASSWORD=diodex && msq web --host 0.0.0.0"
   },
   "engines": {
     "node": ">=20.17.0"
