@@ -84,6 +84,7 @@ export const claudeAdapter: ToolAdapter = {
         cwd: opts.cwd,
         env: { ...invocation.env, MAX_THINKING_TOKENS: String(maxThinkingTokens) },
         idleThresholdMs: resolveRuntimeConfig(opts.cwd).idleThresholdMs,
+        heartbeatMs: resolveRuntimeConfig(opts.cwd).heartbeatMs,
         runId: opts.runId,
         featureId: feature.id,
         tool: feature.tool,
@@ -93,7 +94,7 @@ export const claudeAdapter: ToolAdapter = {
         onStatus: opts.onStatus ?? ((snapshot): void => { msqEventBus.emit('run:status', snapshot); }),
         signal: opts.signal,
         onStdoutLine: (line) => {
-          const updates = progress.onStdoutLine(line);
+          const updates = progress.onStdoutLine(line, opts.stageSkills ?? {});
           for (const update of updates) {
             if (update.output) emitRunOutput(opts.runId, feature, update.output.line, 'stdout', update.output.source);
             if (update.usage) emitUsage(opts.runId, feature, update.usage);
@@ -294,7 +295,7 @@ interface ProgressUpdate {
 }
 
 function createClaudeProgress(): {
-  onStdoutLine: (line: string) => ProgressUpdate[];
+  onStdoutLine: (line: string, stageSkills: Record<string, string[]>) => ProgressUpdate[];
   onStderrLine: (line: string) => ProgressUpdate[];
   heartbeatSuffix: () => string | undefined;
 } {
@@ -311,8 +312,8 @@ function createClaudeProgress(): {
   let latestCachedInput = 0;
 
   return {
-    onStdoutLine(line: string): ProgressUpdate[] {
-      const updates = parseClaudeLine(line);
+    onStdoutLine(line: string, stageSkills: Record<string, string[]>): ProgressUpdate[] {
+      const updates = parseClaudeLine(line, stageSkills);
       for (const u of updates) {
         if (u.output) {
           eventCount += 1;
@@ -359,7 +360,7 @@ function createClaudeProgress(): {
   };
 }
 
-function parseClaudeLine(line: string): ProgressUpdate[] {
+function parseClaudeLine(line: string, stageSkills: Record<string, string[]>): ProgressUpdate[] {
   const evt = safeJson<StreamJsonEvent>(line);
   if (!evt?.type) return [];
 
@@ -402,7 +403,7 @@ function parseClaudeLine(line: string): ProgressUpdate[] {
       } else {
         const name = normalizeSnippet(block.name);
         const input = normalizeSnippet(JSON.stringify(block.input ?? {}));
-        const stage = detectStageFromSkill(name);
+        const stage = detectStageFromSkill(name, stageSkills);
         const outputLine = normalizeSnippet(`tool ${name}${input && input !== '{}' ? ` ${input}` : ''}`);
         updates.push({
           output: { line: outputLine, source: 'tool' },
@@ -474,21 +475,10 @@ function emitUsage(runId: number, feature: Feature, usage: TokenUsage): void {
   });
 }
 
-const SKILL_STAGE_MAP: Record<string, string> = {
-  'speckit-specify': 'specify',
-  'speckit_specify': 'specify',
-  'speckit-plan': 'plan',
-  'speckit_plan': 'plan',
-  'speckit-implement': 'implement',
-  'speckit_implement': 'implement',
-  'speckit-tasks': 'tasks',
-  'speckit_tasks': 'tasks',
-};
-
-function detectStageFromSkill(skillName: string): string | null {
+function detectStageFromSkill(skillName: string, stageSkills: Record<string, string[]>): string | null {
   const lower = skillName.toLowerCase();
-  for (const [pattern, stage] of Object.entries(SKILL_STAGE_MAP)) {
-    if (lower.includes(pattern)) return stage;
+  for (const [stage, skills] of Object.entries(stageSkills)) {
+    if (skills.some((skill) => lower.includes(skill.toLowerCase()))) return stage;
   }
   return null;
 }

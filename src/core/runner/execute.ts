@@ -305,6 +305,7 @@ export async function executeBacklog(
         signal: abortSignal,
         session,
         resumeOverride: opts.resumeOverride?.featureId === feature.id ? opts.resumeOverride : undefined,
+        stageSkills: effectiveStageSkills,
       });
       const res = applyImplementPublishGate(initialRes, stage, opts.cwd);
       if (res.usage) {
@@ -740,6 +741,7 @@ interface RetryRunOptions {
   signal?: AbortSignal;
   session?: RunFeatureOptions['session'];
   resumeOverride?: ResumeOverride;
+  stageSkills?: Record<string, string[]>;
 }
 
 interface RetryCandidate {
@@ -799,6 +801,7 @@ async function runWithRetry(
         runId: opts.runId,
         signal: opts.signal,
         session,
+        ...(opts.stageSkills && Object.keys(opts.stageSkills).length > 0 ? { stageSkills: opts.stageSkills } : {}),
       });
 
       if (res.ok || res.control?.type === 'needs_input') {

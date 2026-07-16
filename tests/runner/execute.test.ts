@@ -453,7 +453,18 @@ describe('executeBacklog failure persistence', () => {
     expect(mockRunFeature).toHaveBeenCalledWith(
       expect.any(Object),
       expect.any(String),
-      { cwd: '/repo', runId: 7, signal: expect.any(AbortSignal) },
+      {
+        cwd: '/repo',
+        runId: 7,
+        signal: expect.any(AbortSignal),
+        stageSkills: {
+          specify: ['speckit-specify'],
+          plan: ['speckit-plan'],
+          tasks: ['speckit-tasks'],
+          implement: ['speckit-implement', 'dev-flow'],
+          validate: ['review'],
+        },
+      },
     );
     expect(mockAttachDefaultEventLogger).toHaveBeenCalled();
     expect(mockAttachEventNotifications).toHaveBeenCalled();
@@ -874,7 +885,18 @@ describe('executeBacklog failure persistence', () => {
       1,
       expect.any(Object),
       expect.stringContaining('Treat the following block as the exact feature description passed to `/speckit-specify`:'),
-      { cwd: '/repo', runId: 7, signal: expect.any(AbortSignal) },
+      {
+        cwd: '/repo',
+        runId: 7,
+        signal: expect.any(AbortSignal),
+        stageSkills: {
+          specify: ['speckit-specify'],
+          plan: ['speckit-plan'],
+          tasks: ['speckit-tasks'],
+          implement: ['speckit-implement', 'dev-flow'],
+          validate: ['review'],
+        },
+      },
     );
     expect(mockRunFeature.mock.calls[0]?.[1]).toContain('Feature: Feature');
     expect(mockRunFeature.mock.calls[0]?.[1]).toContain('Summary:\nspec');
@@ -1180,6 +1202,13 @@ describe('executeBacklog failure persistence', () => {
           capturedAt: '2026-07-11T11:00:00Z',
         },
       },
+      stageSkills: {
+        specify: ['speckit-specify'],
+        plan: ['speckit-plan'],
+        tasks: ['speckit-tasks'],
+        implement: ['speckit-implement', 'dev-flow'],
+        validate: ['review'],
+      },
     });
   });
 
@@ -1318,6 +1347,13 @@ describe('executeBacklog failure persistence', () => {
           capturedAt: '2026-07-11T11:00:00Z',
         },
       },
+      stageSkills: {
+        specify: ['speckit-specify'],
+        plan: ['speckit-plan'],
+        tasks: ['speckit-tasks'],
+        implement: ['speckit-implement', 'dev-flow'],
+        validate: ['review'],
+      },
     });
     expect(mockUpdateStageTransitionDecisionNextSessionId).toHaveBeenCalledWith(101, 'thread_1');
   });
@@ -1378,6 +1414,13 @@ describe('executeBacklog failure persistence', () => {
           capturedAt: '2026-07-11T11:10:00Z',
         },
       },
+      stageSkills: {
+        specify: ['speckit-specify'],
+        plan: ['speckit-plan'],
+        tasks: ['speckit-tasks'],
+        implement: ['speckit-implement', 'dev-flow'],
+        validate: ['review'],
+      },
     });
   });
 
@@ -1414,6 +1457,13 @@ describe('executeBacklog failure persistence', () => {
       cwd: '/repo',
       runId: 7,
       signal: expect.any(AbortSignal),
+      stageSkills: {
+        specify: ['speckit-specify'],
+        plan: ['speckit-plan'],
+        tasks: ['speckit-tasks'],
+        implement: ['speckit-implement', 'dev-flow'],
+        validate: ['review'],
+      },
     });
   });
 
@@ -1454,6 +1504,13 @@ describe('executeBacklog failure persistence', () => {
       cwd: '/repo',
       runId: 7,
       signal: expect.any(AbortSignal),
+      stageSkills: {
+        specify: ['speckit-specify'],
+        plan: ['speckit-plan'],
+        tasks: ['speckit-tasks'],
+        implement: ['speckit-implement', 'dev-flow'],
+        validate: ['review'],
+      },
     });
   });
 
@@ -1494,6 +1551,13 @@ describe('executeBacklog failure persistence', () => {
       cwd: '/repo',
       runId: 7,
       signal: expect.any(AbortSignal),
+      stageSkills: {
+        specify: ['speckit-specify'],
+        plan: ['speckit-plan'],
+        tasks: ['speckit-tasks'],
+        implement: ['speckit-implement', 'dev-flow'],
+        validate: ['review'],
+      },
     });
   });
 
@@ -1535,6 +1599,13 @@ describe('executeBacklog failure persistence', () => {
       cwd: '/repo',
       runId: 7,
       signal: expect.any(AbortSignal),
+      stageSkills: {
+        specify: ['speckit-specify'],
+        plan: ['speckit-plan'],
+        tasks: ['speckit-tasks'],
+        implement: ['speckit-implement', 'dev-flow'],
+        validate: ['review'],
+      },
     });
   });
 
@@ -1576,6 +1647,13 @@ describe('executeBacklog failure persistence', () => {
       cwd: '/repo',
       runId: 7,
       signal: expect.any(AbortSignal),
+      stageSkills: {
+        specify: ['speckit-specify'],
+        plan: ['speckit-plan'],
+        tasks: ['speckit-tasks'],
+        implement: ['speckit-implement', 'dev-flow'],
+        validate: ['review'],
+      },
     });
   });
 

@@ -1,6 +1,6 @@
+import { execFileSync } from 'node:child_process';
 import { sanitizeToolCallRecord, type SessionHandle, type ToolAdapter, type RunResult, type RunFeatureOptions, type TokenUsage, type ToolCallRecord } from './types.js';
 import type { Effort, Feature } from '../backlog/schema.js';
-import { execFileSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { resolveRuntimeConfig } from '../../config/index.js';
@@ -98,7 +98,8 @@ export const codexAdapter: ToolAdapter = {
           prompt,
         ];
 
-    const timeoutMs = Math.max(resolveRuntimeConfig(opts.cwd).toolTimeoutMs, invocation.minTimeoutMs);
+    const runtime = resolveRuntimeConfig(opts.cwd);
+    const timeoutMs = Math.max(runtime.toolTimeoutMs, invocation.minTimeoutMs);
     let code: number;
     let stdout: string;
     let stderr: string;
@@ -111,7 +112,8 @@ export const codexAdapter: ToolAdapter = {
         env: invocation.env,
         timeoutMs,
         signal: opts.signal,
-        idleThresholdMs: resolveRuntimeConfig(opts.cwd).idleThresholdMs,
+        idleThresholdMs: runtime.idleThresholdMs,
+        heartbeatMs: runtime.heartbeatMs,
         runId: opts.runId,
         featureId: feature.id,
         tool: feature.tool,

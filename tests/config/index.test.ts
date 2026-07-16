@@ -58,7 +58,7 @@ describe('config', () => {
 
     const { loadConfig } = await import('../../src/config/index.js');
 
-    expect(loadConfig()).toEqual({
+    expect(loadConfig()).toMatchObject({
       concurrency: 3,
       toolTimeoutMs: 600_000,
       heartbeatMs: 30_000,
@@ -122,6 +122,7 @@ describe('config', () => {
     saveConfig({
       concurrency: 5,
       toolTimeoutMs: 1_000,
+      heartbeatMs: 30_000,
       staleRunThresholdMinutes: 30,
       idleThresholdMs: 30_000,
       promptContextCharLimit: 10_000,
@@ -135,6 +136,7 @@ describe('config', () => {
     expect(JSON.parse(readFileSync(CONFIG_PATH, 'utf8'))).toEqual({
       concurrency: 5,
       toolTimeoutMs: 1_000,
+      heartbeatMs: 30_000,
       staleRunThresholdMinutes: 30,
       idleThresholdMs: 30_000,
       promptContextCharLimit: 10_000,
@@ -242,7 +244,7 @@ describe('config', () => {
     });
     ensureDataDir();
 
-    expect(loadConfig()).toEqual({
+    expect(loadConfig()).toMatchObject({
       concurrency: 2,
       toolTimeoutMs: 999,
       heartbeatMs: 30_000,

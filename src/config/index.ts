@@ -174,6 +174,7 @@ const ToolRegistrySchema = z.array(ToolRegistryEntrySchema)
 const RuntimeConfigOverrideSchema = z.object({
   concurrency: z.number().int().positive().optional(),
   toolTimeoutMs: z.number().int().positive().optional(),
+  heartbeatMs: z.number().int().nonnegative().optional(),
   staleRunThresholdMinutes: z.number().int().positive().optional(),
   idleThresholdMs: z.number().int().positive().optional(),
   promptContextCharLimit: z.number().int().positive().optional(),

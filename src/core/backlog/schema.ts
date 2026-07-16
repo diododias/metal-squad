@@ -1,4 +1,6 @@
 import { z } from 'zod';
+import { DEFAULT_PROJECT_TEMPLATE } from '../workflow/stageSkills.js';
+export { DEFAULT_PROJECT_TEMPLATE } from '../workflow/stageSkills.js';
 
 export const AdapterSchema = z.enum(['claude', 'codex', 'opencode']);
 export const ToolSchema = z.string().trim().min(1).regex(
@@ -74,7 +76,7 @@ export const StepGuidanceSchema = z.object({
 
 const WorkflowSchemaShape = z.object({
   mode: WorkflowModeSchema.default('staged'),
-  stages: z.array(z.string()).min(1).default(['specify', 'plan', 'tasks', 'implement', 'validate']),
+  stages: z.array(z.string()).min(1).default([...DEFAULT_PROJECT_TEMPLATE.stages]),
   approvals: WorkflowApprovalsSchema.default({}),
   autoAdvance: z.boolean().default(false),
   syncTasksToBacklog: z.boolean().default(true),

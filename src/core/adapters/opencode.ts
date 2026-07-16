@@ -124,7 +124,7 @@ export const opencodeAdapter: ToolAdapter = {
         cwd: opts.cwd,
         env: invocation.env,
         signal: opts.signal,
-        heartbeatMs: 30_000,
+        heartbeatMs: resolveRuntimeConfig(opts.cwd).heartbeatMs,
         logLabel: `opencode ${feature.id}`,
         heartbeatSuffix: () => progress.heartbeatSuffix(),
         progressSnapshot: () => progress.heartbeatSuffix(),
