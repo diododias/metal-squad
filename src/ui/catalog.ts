@@ -47,15 +47,13 @@ export interface FeatureCatalogEntry {
   pendingDependencies?: string[];
 }
 
-/** F31 section 5b: backlog-level settings shown alongside per-feature config
- * (budget and stageSkills live on the backlog/defaults, not per feature). */
+/** F31 section 5b: project-level settings shown alongside per-feature config. */
 export interface BacklogSettings {
   budget?: Budget;
   stageSkills: Record<string, string[]>;
   toolCapabilities?: Record<string, ToolCapabilities>;
   configSources?: ResolvedConfigSources;
-  /** Read-only merge of repo config + backlog defaults, used to resolve
-   * feature execution (see `mergeExecutionDefaults`). */
+  /** Resolved project defaults used to execute features. */
   resolvedDefaults?: ResolvedExecutionDefaults;
   /** SET-16: raw project defaults as stored in `backlog_catalog_meta`
    * (`defaults_json`), separate from `resolvedDefaults` — this is the
@@ -110,14 +108,7 @@ function loadCatalogAndSettings(cwd: string): void {
     const snapshot = resolveConfigSnapshot(cwd);
     const { repoId } = resolveRepo(cwd);
     const backlog = loadBacklogFromCatalog(repoId, cwd);
-    const resolvedDefaults = mergeExecutionDefaults({
-      tool: snapshot.repoDefaults.tool ?? 'claude',
-      model: snapshot.repoDefaults.model,
-      effort: snapshot.repoDefaults.effort ?? 'medium',
-      thinking: snapshot.repoDefaults.thinking ?? 'off',
-      skills: snapshot.repoDefaults.skills ?? [],
-      stageSkills: snapshot.repoDefaults.stageSkills ?? {},
-    }, backlog.defaults);
+    const resolvedDefaults = mergeExecutionDefaults(DefaultsSchema.parse({}), backlog.defaults);
     cachedCatalog = Object.fromEntries(
       backlog.epics.flatMap((epic) =>
         epic.features.map((feature) => [
@@ -151,7 +142,7 @@ function loadCatalogAndSettings(cwd: string): void {
 
     cachedSettings = {
       budget: backlog.budget,
-      stageSkills: 'defaults' in backlog ? backlog.defaults.stageSkills : {},
+      stageSkills: backlog.defaults.stageSkills,
       toolCapabilities: DEFAULT_TOOL_CAPABILITIES,
       configSources: snapshot.sources,
       resolvedDefaults,
