@@ -166,6 +166,11 @@ export interface ProjectDefaultsPatch {
   budget?: { maxTokens?: number; perFeatureMaxTokens?: number };
 }
 
+/** Narrow global config patch for the App Budget settings. */
+export interface BudgetConfigPatch {
+  alertAtPercent: number;
+}
+
 export interface FeatureConfigSaveIssue {
   path?: string;
   message: string;
@@ -185,6 +190,7 @@ export type WebSocketClientMessage =
   | { type: 'action:updateFeatureConfig'; featureId: string; patch: FeatureConfigPatch }
   | { type: 'action:updateTaskConfig'; featureId: string; taskId: string; patch: TaskConfigPatch }
   | { type: 'action:updateProjectDefaults'; patch: ProjectDefaultsPatch }
+  | { type: 'action:updateBudgetConfig'; patch: BudgetConfigPatch }
   | { type: 'action:pausePipeline'; pipelineId: number }
   | { type: 'action:resumePipeline'; pipelineId: number }
   | { type: 'action:abortPipeline'; pipelineId: number }

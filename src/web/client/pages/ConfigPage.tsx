@@ -351,15 +351,32 @@ function NotificationsTab({ state }: { state: MsqWebState }): React.JSX.Element 
   );
 }
 
-function BudgetTab({ state }: { state: MsqWebState }): React.JSX.Element {
-  const budget = state.backlogSettings.budget;
-  const runtimeBudget = state.runtimeConfig.budget;
+function BudgetTab({ state, send }: { state: MsqWebState; send: ConfigPageProps['send'] }): React.JSX.Element {
+  const baseline = String(state.runtimeConfig.budget.alertAtPercent);
+  const [draft, setDraft] = useState(baseline);
+
+  useEffect(() => {
+    setDraft(baseline);
+  }, [baseline]);
+
+  const alertAtPercent = Number(draft);
+  const isValid = Number.isInteger(alertAtPercent) && alertAtPercent >= 0 && alertAtPercent <= 100;
+  const canSave = draft !== baseline && isValid;
+
   return (
     <Card title="Budget">
-      <Row label="maxTokens (backlog)" value={budget?.maxTokens?.toLocaleString() ?? '—'} source="backlog" />
-      <Row label="perFeatureMaxTokens (backlog)" value={budget?.perFeatureMaxTokens?.toLocaleString() ?? '—'} source="backlog" />
-      <Row label="alertAtPercent" value={`${String(runtimeBudget.alertAtPercent)}%`} source="global" />
-      <Row label="lastResetDate" value={runtimeBudget.lastResetDate ?? '—'} source="global" />
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+        <EditableTextField
+          id="budget-alert-at-percent"
+          label="alertAtPercent"
+          value={draft}
+          initialValue={baseline}
+          placeholder="whole number from 0 to 100"
+          onChange={setDraft}
+        />
+        {!isValid && <span style={{ color: 'var(--accent-warn)', fontSize: 'var(--text-xs)', lineHeight: 1.4 }}>Enter a whole number from 0 to 100.</span>}
+        <div><Button variant="primary" size="sm" onClick={() => { if (canSave) send({ type: 'action:updateBudgetConfig', patch: { alertAtPercent } }); }} disabled={!canSave}>save budget</Button></div>
+      </div>
     </Card>
   );
 }
@@ -378,7 +395,7 @@ export function ConfigPage({ state, send }: ConfigPageProps): React.JSX.Element 
       case 'notifications':
         return <NotificationsTab state={state} />;
       case 'budget':
-        return <BudgetTab state={state} />;
+        return <BudgetTab state={state} send={send} />;
       default:
         return null;
     }

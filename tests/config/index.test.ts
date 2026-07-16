@@ -12,6 +12,12 @@ const DEFAULT_BUDGET = { alertAtPercent: 80 };
 const DEFAULT_WEB = { host: '127.0.0.1', port: 8_743, auth: 'token', statusSpinner: true };
 
 describe('config', () => {
+  it('accepts a zero-percent budget alert threshold', async () => {
+    const { ConfigSchema } = await import('../../src/config/index.js');
+
+    expect(ConfigSchema.parse({ budget: { alertAtPercent: 0 } }).budget.alertAtPercent).toBe(0);
+  });
+
   const previousHome = process.env.HOME;
   let home = '';
 

@@ -78,7 +78,7 @@ const WorkflowConfig = z.object({
 });
 
 const BudgetConfig = z.object({
-  alertAtPercent: z.number().int().min(1).max(100).default(80),
+  alertAtPercent: z.number().int().min(0).max(100).default(80),
   lastResetDate: z.string().optional(),
 });
 

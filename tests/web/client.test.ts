@@ -87,6 +87,13 @@ function render(element: React.ReactElement): HTMLElement {
   return container;
 }
 
+function dispatchInputChange(control: HTMLInputElement, value: string): void {
+  const descriptor = Object.getOwnPropertyDescriptor(Object.getPrototypeOf(control), 'value');
+  descriptor?.set?.call(control, value);
+  control.dispatchEvent(new Event('input', { bubbles: true }));
+  control.dispatchEvent(new Event('change', { bubbles: true }));
+}
+
 afterEach(() => {
   act(() => {
     roots.forEach((root) => { root.unmount(); });
@@ -188,6 +195,52 @@ describe('Settings client surfaces', () => {
     });
 
     expect(messages).toEqual([{ type: 'action:updateProjectDefaults', patch: { effort: 'high' } }]);
+  });
+
+  it('saves a valid App budget alert without rendering project token limits', () => {
+    const messages: WebSocketClientMessage[] = [];
+    const container = render(React.createElement(ConfigPage, {
+      state: settingsState,
+      isMobile: false,
+      send: (message: WebSocketClientMessage) => { messages.push(message); },
+    }));
+
+    act(() => {
+      Array.from(container.querySelectorAll('button')).find((button) => button.textContent === 'Budget')?.click();
+    });
+    expect(container.textContent).not.toContain('maxTokens (backlog)');
+    expect(container.textContent).not.toContain('perFeatureMaxTokens (backlog)');
+
+    const alertAtPercent = container.querySelector('#budget-alert-at-percent') as HTMLInputElement;
+    act(() => {
+      dispatchInputChange(alertAtPercent, '0');
+    });
+    act(() => {
+      Array.from(container.querySelectorAll('button')).find((button) => button.textContent === 'save budget')?.click();
+    });
+
+    expect(messages).toEqual([{ type: 'action:updateBudgetConfig', patch: { alertAtPercent: 0 } }]);
+  });
+
+  it('rejects an out-of-range App budget alert in the UI', () => {
+    const messages: WebSocketClientMessage[] = [];
+    const container = render(React.createElement(ConfigPage, {
+      state: settingsState,
+      isMobile: false,
+      send: (message: WebSocketClientMessage) => { messages.push(message); },
+    }));
+
+    act(() => {
+      Array.from(container.querySelectorAll('button')).find((button) => button.textContent === 'Budget')?.click();
+    });
+    const alertAtPercent = container.querySelector('#budget-alert-at-percent') as HTMLInputElement;
+    act(() => {
+      dispatchInputChange(alertAtPercent, '101');
+    });
+
+    expect(container.textContent).toContain('Enter a whole number from 0 to 100.');
+    expect((Array.from(container.querySelectorAll('button')).find((button) => button.textContent === 'save budget') as HTMLButtonElement).disabled).toBe(true);
+    expect(messages).toEqual([]);
   });
 
   it('renders Settings in the main navigation while retaining the config route', () => {

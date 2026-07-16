@@ -31,7 +31,7 @@ import { resolveRepo } from '../core/repo.js';
 import { loadBacklogFromCatalog } from '../core/backlog/load.js';
 import { selectStartableFeaturePlan } from '../core/orchestrator/graph.js';
 import { validateBacklogSkills } from '../core/skills/index.js';
-import { resolveRuntimeConfig } from '../config/index.js';
+import { loadConfig, resolveRuntimeConfig, saveConfig } from '../config/index.js';
 import { updateCatalogFeature, updateCatalogTask, updateCatalogDefaults, type FeaturePatch, type CatalogDefaultsPatch } from '../db/backlogCatalog.js';
 import type { Feature, Task, Tool } from '../core/backlog/schema.js';
 import { buildMsqWebState, appendNotification } from './state.js';
@@ -40,6 +40,7 @@ import type {
   FeatureConfigPatch,
   FeatureConfigSaveIssue,
   FeatureConfigSaveResult,
+  BudgetConfigPatch,
   ProjectDefaultsPatch,
   RunChangesPayload,
   TaskConfigPatch,
@@ -712,6 +713,10 @@ export function createWebServer(options: {
         updateProjectDefaults(message.patch, featureCwd);
         break;
       }
+      case 'action:updateBudgetConfig': {
+        updateBudgetConfig(message.patch, featureCwd);
+        break;
+      }
       case 'action:pausePipeline': {
         pausePipeline(message.pipelineId);
         reconcileWebState(featureCwd);
@@ -1015,6 +1020,26 @@ export function createWebServer(options: {
     }
     reconcileWebState(featureCwd);
     msqEventBus.emit('ui:info', { message: 'Saved project defaults.' });
+  }
+
+  function updateBudgetConfig(patch: BudgetConfigPatch, featureCwd: string): void {
+    try {
+      if (!Number.isInteger(patch.alertAtPercent) || patch.alertAtPercent < 0 || patch.alertAtPercent > 100) {
+        throw new Error('alertAtPercent must be a whole number between 0 and 100.');
+      }
+      const config = loadConfig();
+      saveConfig({
+        ...config,
+        budget: { ...config.budget, alertAtPercent: patch.alertAtPercent },
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      console.error(`[updateBudgetConfig] error: ${message}`);
+      msqEventBus.emit('ui:notice', { message: `Could not save budget settings: ${message}` });
+      return;
+    }
+    reconcileWebState(featureCwd);
+    msqEventBus.emit('ui:info', { message: 'Saved budget settings.' });
   }
 
   // Poll the DB for new output rows written by separated feature-runner
