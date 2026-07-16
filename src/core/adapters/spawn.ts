@@ -1,12 +1,64 @@
 import { spawn } from 'node:child_process';
-import type { SessionStatus, SessionStatusCallback } from './types.js';
-import type { Tool } from '../backlog/schema.js';
+import type { SessionStatus, SessionStatusCallback, ToolCapabilities } from './types.js';
+import type { Effort, Tool } from '../backlog/schema.js';
+import { DEFAULT_TOOL_REGISTRY, resolveRuntimeConfig, type ToolRegistryEntry } from '../../config/index.js';
 
 export interface SpawnResult {
   code: number;
   stdout: string;
   stderr: string;
   signal: NodeJS.Signals | null;
+}
+
+export interface ToolInvocation {
+  command: string;
+  baseArgs: string[];
+  env: Record<string, string>;
+  versionCheck: string[];
+  capabilities: ToolCapabilities;
+  thinkingBudget: Record<Effort, number>;
+  minTimeoutMs: number;
+}
+
+/**
+ * Resolves the process-level settings for an adapter from the App tool registry.
+ * Until SET-28 makes `tool` an arbitrary registry id, the legacy adapter names
+ * remain the lookup keys and fall back to their built-in invocation if a legacy
+ * config omits an entry.
+ */
+export function resolveToolInvocation(tool: Tool, cwd = process.cwd()): ToolInvocation {
+  const configured = resolveRuntimeConfig(cwd).tools.find((entry) => entry.id === tool);
+  const fallback = DEFAULT_TOOL_REGISTRY.find((entry) => entry.id === tool);
+  const entry = configured ?? fallback;
+
+  if (!entry) {
+    throw new Error(`No tool registry entry found for "${tool}".`);
+  }
+
+  return pickInvocation(entry);
+}
+
+function pickInvocation(entry: ToolRegistryEntry | (typeof DEFAULT_TOOL_REGISTRY)[number]): ToolInvocation {
+  const adapterDefaults = DEFAULT_TOOL_REGISTRY.find((defaultEntry) => defaultEntry.adapter === entry.adapter);
+  if (!adapterDefaults) {
+    throw new Error(`No defaults registered for adapter "${entry.adapter}".`);
+  }
+  const capabilities = entry.capabilities ?? adapterDefaults.capabilities;
+  const thinkingBudget = entry.thinkingBudget ?? adapterDefaults.thinkingBudget;
+  const minTimeoutMs = entry.minTimeoutMs ?? adapterDefaults.minTimeoutMs;
+  if (!capabilities || !thinkingBudget || minTimeoutMs === undefined) {
+    throw new Error(`Incomplete runtime defaults for adapter "${entry.adapter}".`);
+  }
+
+  return {
+    command: entry.command,
+    baseArgs: [...(entry.baseArgs ?? [])],
+    env: { ...(entry.env ?? {}) },
+    versionCheck: [...(entry.versionCheck ?? ['--version'])],
+    capabilities,
+    thinkingBudget,
+    minTimeoutMs,
+  };
 }
 
 export class CliTimeoutError extends Error {

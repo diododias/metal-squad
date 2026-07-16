@@ -348,7 +348,7 @@ epics:
     expect(backlog.epics[0]?.features[0]?.tasks[0]?.skills).toEqual([]);
   });
 
-  it('propagates defaults in v2 and validates referenced files', async () => {
+  it('ignores legacy YAML defaults and resolves features from project defaults', async () => {
     cwd = mkdtempSync(join(tmpdir(), 'msq-backlog-'));
     mkdirSync(join(cwd, 'specs'));
     mkdirSync(join(cwd, 'tasks'));
@@ -375,12 +375,16 @@ epics:
 `);
 
     const { loadBacklog } = await import('../../src/core/backlog/load.js');
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
     const backlog = loadBacklog(undefined, cwd);
 
-    expect(backlog.epics[0]?.features[0]?.tool).toBe('codex');
+    expect(warn).toHaveBeenCalledWith(
+      '[msq] backlog.yaml defaults are ignored; configure defaults in the Projeto settings.',
+    );
+    expect(backlog.epics[0]?.features[0]?.tool).toBe('claude');
     expect(backlog.epics[0]?.features[0]?.effort).toBe('medium');
-    expect(backlog.epics[0]?.features[0]?.skills).toEqual(['implement', 'test']);
-    expect(backlog.epics[0]?.features[0]?.tasks[0]?.skills).toEqual(['implement', 'test']);
+    expect(backlog.epics[0]?.features[0]?.skills).toEqual([]);
+    expect(backlog.epics[0]?.features[0]?.tasks[0]?.skills).toEqual([]);
   });
 
   it('throws when referenced files are missing', async () => {

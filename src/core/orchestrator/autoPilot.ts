@@ -30,7 +30,7 @@ export function shouldEvaluateNextCandidate(kind: AutoPilotOutcomeKind): boolean
 
 /** Looks up the live (catalog-backed) config for a feature so mid-run edits
  * to `autoStart` apply immediately, matching the existing
- * `workflow.approvals.autoAdvance` re-read pattern in execute.ts. */
+ * `workflow.autoAdvance` re-read pattern in execute.ts. */
 export interface AutoPilotCandidateLookup {
   getLiveFeature: (featureId: string) => Feature | undefined;
 }

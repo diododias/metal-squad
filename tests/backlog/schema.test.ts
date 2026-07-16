@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { BacklogInputSchema, BacklogSchema, BacklogV1Schema, BacklogV2Schema, EpicSchema, FallbackAlternativeSchema, RetrySchema } from '../../src/core/backlog/schema.js';
+import { BacklogInputSchema, BacklogSchema, BacklogV1Schema, BacklogV2Schema, createRegisteredToolSchema, EpicSchema, FallbackAlternativeSchema, RetrySchema } from '../../src/core/backlog/schema.js';
 
 const V1_YAML_OBJ = {
   version: 1,
@@ -88,6 +88,25 @@ describe('BacklogV1Schema', () => {
   });
 });
 
+describe('tool registry references', () => {
+  it('accepts multiple registered ids for the same adapter', () => {
+    const schema = createRegisteredToolSchema(['codex', 'codex-canary']);
+
+    expect(schema.safeParse('codex').success).toBe(true);
+    expect(schema.safeParse('codex-canary').success).toBe(true);
+  });
+
+  it('rejects an unregistered tool with an actionable error', () => {
+    const result = createRegisteredToolSchema(['claude', 'codex']).safeParse('missing-tool');
+
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.error.issues[0]?.message).toContain('Tool "missing-tool" is not registered');
+      expect(result.error.issues[0]?.message).toContain('claude, codex');
+    }
+  });
+});
+
 describe('BacklogV2Schema', () => {
   it('parses a valid v2 object', () => {
     const result = BacklogV2Schema.safeParse(V2_YAML_OBJ);
@@ -97,6 +116,13 @@ describe('BacklogV2Schema', () => {
       expect(result.data.defaults.skills).toEqual(['implement']);
       expect(result.data.epics[0]?.features[0]?.workflow?.mode).toBe('staged');
     }
+  });
+
+  it('migrates approvals.autoAdvance to the unified workflow.autoAdvance field', () => {
+    const result = BacklogV2Schema.parse(V2_YAML_OBJ);
+    const workflow = result.epics[0]?.features[0]?.workflow;
+    expect(workflow?.autoAdvance).toBe(false);
+    expect(workflow?.approvals).toEqual({ channel: 'telegram' });
   });
 
   it('applies defaults when defaults block is missing', () => {
