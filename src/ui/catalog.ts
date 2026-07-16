@@ -52,7 +52,8 @@ export interface BacklogSettings {
   stageSkills: Record<string, string[]>;
   toolCapabilities?: Record<string, ToolCapabilities>;
   configSources?: ResolvedConfigSources;
-  /** Resolved project defaults used to execute features. */
+  /** Read-only project execution defaults, used to resolve a feature through
+   * the sole Feature -> Project inheritance path. */
   resolvedDefaults?: ResolvedExecutionDefaults;
   /** SET-16: raw project defaults as stored in `backlog_catalog_meta`
    * (`defaults_json`), separate from `resolvedDefaults` — this is the

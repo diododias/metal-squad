@@ -18,7 +18,7 @@ interface ConfigShowPayload {
   };
   runtime: ReturnType<typeof resolveConfigSnapshot>['runtime'];
   defaults: {
-    backlog?: BacklogV2['defaults'];
+    project?: BacklogV2['defaults'];
     effective?: ResolvedExecutionDefaults;
   };
   feature?: {
@@ -83,7 +83,7 @@ function buildPayload(
     },
     runtime: snapshot.runtime,
     defaults: {
-      ...(backlog ? { backlog: backlog.defaults, effective: effectiveDefaults } : {}),
+      ...(backlog ? { project: backlog.defaults, effective: effectiveDefaults } : {}),
     },
     ...(feature
       ? {
