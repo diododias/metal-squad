@@ -139,8 +139,6 @@ export interface ToolCapabilities {
 
 export interface ToolAdapter {
   readonly tool: Tool;
-  /** Contrato de suporte por adapter (thinking, etc). */
-  readonly capabilities?: ToolCapabilities;
   /** Mapeia effort normalizado para a flag nativa da ferramenta. */
   effortFlag(effort: Effort): string[];
   /** Executa uma fase spec-kit para a feature com o prompt já construído. */

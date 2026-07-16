@@ -56,12 +56,6 @@ interface OpenCodeResponse {
 export const opencodeAdapter: ToolAdapter = {
   tool: 'opencode',
 
-  capabilities: {
-    model: true,
-    effort: false,
-    thinking: false,
-  },
-
   effortFlag(_effort: Effort): string[] {
     return [];
   },
@@ -78,7 +72,7 @@ export const opencodeAdapter: ToolAdapter = {
 
   async runFeature(feature: Feature, prompt: string, opts: RunFeatureOptions): Promise<RunResult> {
     const invocation = resolveToolInvocation(feature.tool, opts.cwd);
-    if (feature.effort !== 'medium') {
+    if (feature.effort !== 'medium' && !invocation.capabilities.effort) {
       emitRunOutput(
         opts.runId,
         feature,
@@ -87,7 +81,7 @@ export const opencodeAdapter: ToolAdapter = {
         'heartbeat',
       );
     }
-    if (feature.thinking === 'on') {
+    if (feature.thinking === 'on' && !invocation.capabilities.thinking) {
       emitRunOutput(
         opts.runId,
         feature,
