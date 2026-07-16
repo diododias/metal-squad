@@ -89,6 +89,82 @@ const WebConfig = z.object({
   statusSpinner: z.boolean().default(true),
 });
 
+const ToolCapabilitiesConfig = z.object({
+  model: z.boolean(),
+  effort: z.boolean(),
+  thinking: z.boolean(),
+}).strict();
+
+const ThinkingBudgetConfig = z.object({
+  low: z.number().int().nonnegative(),
+  medium: z.number().int().nonnegative(),
+  high: z.number().int().nonnegative(),
+}).strict();
+
+const ToolRegistryEntrySchema = z.object({
+  id: z.string().trim().min(1).regex(/^[a-z][a-z0-9-]*$/, 'Tool id must use lowercase letters, numbers, and hyphens.'),
+  adapter: ToolSchema,
+  command: z.string().trim().min(1),
+  baseArgs: z.array(z.string()).default([]),
+  env: z.record(z.string(), z.string()).default({}),
+  versionCheck: z.array(z.string()).min(1).default(['--version']),
+  capabilities: ToolCapabilitiesConfig,
+  thinkingBudget: ThinkingBudgetConfig,
+  minTimeoutMs: z.number().int().nonnegative(),
+}).strict();
+
+export const DEFAULT_TOOL_REGISTRY: z.input<typeof ToolRegistryEntrySchema>[] = [
+  {
+    id: 'claude',
+    adapter: 'claude',
+    command: 'claude',
+    baseArgs: [],
+    env: {},
+    versionCheck: ['--version'],
+    capabilities: { model: true, effort: true, thinking: true },
+    thinkingBudget: { low: 4_000, medium: 10_000, high: 24_000 },
+    minTimeoutMs: 0,
+  },
+  {
+    id: 'codex',
+    adapter: 'codex',
+    command: 'codex',
+    baseArgs: [],
+    env: {},
+    versionCheck: ['--version'],
+    capabilities: { model: true, effort: true, thinking: false },
+    thinkingBudget: { low: 0, medium: 0, high: 0 },
+    minTimeoutMs: 1_800_000,
+  },
+  {
+    id: 'opencode',
+    adapter: 'opencode',
+    command: 'opencode',
+    baseArgs: [],
+    env: {},
+    versionCheck: ['--version'],
+    capabilities: { model: true, effort: false, thinking: false },
+    thinkingBudget: { low: 0, medium: 0, high: 0 },
+    minTimeoutMs: 0,
+  },
+];
+
+const ToolRegistrySchema = z.array(ToolRegistryEntrySchema)
+  .min(1)
+  .superRefine((tools, ctx) => {
+    const ids = new Set<string>();
+    for (const [index, tool] of tools.entries()) {
+      if (ids.has(tool.id)) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: [index, 'id'],
+          message: `Tool id "${tool.id}" is duplicated.`,
+        });
+      }
+      ids.add(tool.id);
+    }
+  });
+
 const RuntimeConfigOverrideSchema = z.object({
   concurrency: z.number().int().positive().optional(),
   toolTimeoutMs: z.number().int().positive().optional(),
@@ -129,8 +205,10 @@ export const ConfigSchema = z.object({
   budget: BudgetConfig.default({}),
   web: WebConfig.default({}),
   stageSkills: z.record(z.string(), z.array(z.string())).default({}),
+  tools: ToolRegistrySchema.default(DEFAULT_TOOL_REGISTRY),
 });
 export type Config = z.infer<typeof ConfigSchema>;
+export type ToolRegistryEntry = z.infer<typeof ToolRegistryEntrySchema>;
 export type WebConfig = z.infer<typeof WebConfig>;
 export type RuntimeConfigOverride = z.infer<typeof RuntimeConfigOverrideSchema>;
 export type RepoDefaults = z.infer<typeof RepoDefaultsSchema>;
