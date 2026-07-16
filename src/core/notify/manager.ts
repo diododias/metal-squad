@@ -11,12 +11,8 @@ import type { NotificationChannelConfig } from '../../config/index.js';
 import { recordTimeoutNotificationDelivery } from '../../db/repo.js';
 
 function buildChannels(): NotificationChannel[] {
-  const { notifications, telegramChatId } = resolveRuntimeConfig(process.cwd());
-  const channels: NotificationChannelConfig[] = notifications.channels.length > 0
-    ? notifications.channels
-    : telegramChatId
-      ? [{ type: 'telegram', chatId: telegramChatId }]
-      : [];
+  const { notifications } = resolveRuntimeConfig(process.cwd());
+  const channels: NotificationChannelConfig[] = notifications.channels;
   return channels.reduce<NotificationChannel[]>((acc, cfg) => {
     switch (cfg.type) {
       case 'telegram': acc.push(new TelegramChannel(cfg.chatId, cfg.forumTopicId)); break;

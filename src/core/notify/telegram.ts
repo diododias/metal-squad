@@ -115,7 +115,9 @@ export class TelegramChannel implements NotificationChannel {
 /** @deprecated Use TelegramChannel via the notification manager instead. */
 export async function notify(message: string): Promise<void> {
   const token = await getSecret('telegram-bot-token');
-  const chatId = resolveRuntimeConfig(process.cwd()).telegramChatId;
+  const channel = resolveRuntimeConfig(process.cwd()).notifications.channels
+    .find((candidate) => candidate.type === 'telegram');
+  const chatId = channel?.type === 'telegram' ? channel.chatId : undefined;
   if (!token || !chatId) return;
 
   await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {

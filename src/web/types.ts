@@ -46,7 +46,7 @@ export interface WebNotificationChannel {
   type: NotificationChannelConfig['type'];
 }
 
-export type WebRuntimeConfig = Omit<Config, 'notifications' | 'telegramChatId'> & {
+export type WebRuntimeConfig = Omit<Config, 'notifications'> & {
   notifications: {
     channels: WebNotificationChannel[];
     events: Config['notifications']['events'];

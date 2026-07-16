@@ -7,7 +7,6 @@ const DEFAULT_NOTIFICATIONS = {
   channels: [],
   events: ['run:start', 'gate:created', 'run:failed', 'run:done', 'stage:approval', 'stage:input'],
 };
-const DEFAULT_WORKFLOW = { autoAdvanceStages: false, pollIntervalMs: 2_000 };
 const DEFAULT_BUDGET = { alertAtPercent: 80 };
 const DEFAULT_WEB = { host: '127.0.0.1', port: 8_743, auth: 'token', statusSpinner: true };
 
@@ -42,10 +41,7 @@ describe('config', () => {
       staleRunThresholdMinutes: 120,
       idleThresholdMs: 30_000,
       promptContextCharLimit: 20_000,
-      theme: undefined,
-      stageSkills: {},
       notifications: DEFAULT_NOTIFICATIONS,
-      workflow: DEFAULT_WORKFLOW,
       budget: DEFAULT_BUDGET,
       web: DEFAULT_WEB,
     });
@@ -63,12 +59,9 @@ describe('config', () => {
       staleRunThresholdMinutes: 30,
       idleThresholdMs: 30_000,
       promptContextCharLimit: 10_000,
-      theme: 'dark',
-      telegramChatId: '123',
       notifications: DEFAULT_NOTIFICATIONS,
-      workflow: DEFAULT_WORKFLOW,
       budget: DEFAULT_BUDGET,
-      stageSkills: {},
+      web: DEFAULT_WEB,
     });
 
     expect(existsSync(CONFIG_PATH)).toBe(true);
@@ -78,12 +71,9 @@ describe('config', () => {
       staleRunThresholdMinutes: 30,
       idleThresholdMs: 30_000,
       promptContextCharLimit: 10_000,
-      theme: 'dark',
-      telegramChatId: '123',
       notifications: DEFAULT_NOTIFICATIONS,
-      workflow: DEFAULT_WORKFLOW,
       budget: DEFAULT_BUDGET,
-      stageSkills: {},
+      web: DEFAULT_WEB,
     });
   });
 
@@ -99,11 +89,9 @@ describe('config', () => {
       staleRunThresholdMinutes: 45,
       idleThresholdMs: 30_000,
       promptContextCharLimit: 15_000,
-      theme: 'minimal',
       notifications: DEFAULT_NOTIFICATIONS,
-      workflow: DEFAULT_WORKFLOW,
       budget: DEFAULT_BUDGET,
-      stageSkills: {},
+      web: DEFAULT_WEB,
     });
     ensureDataDir();
 
@@ -113,10 +101,7 @@ describe('config', () => {
       staleRunThresholdMinutes: 45,
       idleThresholdMs: 30_000,
       promptContextCharLimit: 15_000,
-      theme: 'minimal',
-      stageSkills: {},
       notifications: DEFAULT_NOTIFICATIONS,
-      workflow: DEFAULT_WORKFLOW,
       budget: DEFAULT_BUDGET,
       web: DEFAULT_WEB,
     });
@@ -169,39 +154,27 @@ describe('config', () => {
     expect(loadConfig().notifications.events).toEqual(DEFAULT_NOTIFICATIONS.events);
   });
 
-  it('keeps theme undefined when the preference is missing', async () => {
-    home = mkdtempSync(join(tmpdir(), 'msq-config-'));
-    process.env.HOME = home;
-
-    const { loadConfig } = await import('../../src/config/index.js');
-
-    expect(loadConfig().theme).toBeUndefined();
-  });
-
-  it('loads a valid persisted theme preference', async () => {
+  it('discards retired fields and migrates a legacy Telegram chat to notifications', async () => {
     home = mkdtempSync(join(tmpdir(), 'msq-config-'));
     process.env.HOME = home;
 
     const { CONFIG_PATH, loadConfig } = await import('../../src/config/index.js');
     await import('node:fs').then(({ mkdirSync, writeFileSync }) => {
       mkdirSync(join(home, '.config', 'metal-squad'), { recursive: true });
-      writeFileSync(CONFIG_PATH, JSON.stringify({ theme: 'dark' }));
+      writeFileSync(CONFIG_PATH, JSON.stringify({
+        theme: 'dark',
+        telegramChatId: '123',
+        stageSkills: { implement: ['speckit-implement'] },
+        workflow: { autoAdvanceStages: true },
+      }));
     });
 
-    expect(loadConfig().theme).toBe('dark');
-  });
-
-  it('preserves an unknown theme preference so startup can fall back safely', async () => {
-    home = mkdtempSync(join(tmpdir(), 'msq-config-'));
-    process.env.HOME = home;
-
-    const { CONFIG_PATH, loadConfig } = await import('../../src/config/index.js');
-    await import('node:fs').then(({ mkdirSync, writeFileSync }) => {
-      mkdirSync(join(home, '.config', 'metal-squad'), { recursive: true });
-      writeFileSync(CONFIG_PATH, JSON.stringify({ theme: 'solarized' }));
-    });
-
-    expect(loadConfig().theme).toBe('solarized');
+    const config = loadConfig();
+    expect(config.notifications.channels).toEqual([{ type: 'telegram', chatId: '123' }]);
+    expect(config).not.toHaveProperty('theme');
+    expect(config).not.toHaveProperty('telegramChatId');
+    expect(config).not.toHaveProperty('stageSkills');
+    expect(config).not.toHaveProperty('workflow');
   });
 
   it('loads repo runtime overrides and env interpolation from .msq/config.yaml', async () => {

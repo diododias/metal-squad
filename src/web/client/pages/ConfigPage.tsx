@@ -66,8 +66,6 @@ function RuntimeTab({ state }: { state: MsqWebState }): React.JSX.Element {
         <Row label="toolTimeoutMs" value={c.toolTimeoutMs.toLocaleString()} source="global" />
         <Row label="staleRunThresholdMinutes" value={c.staleRunThresholdMinutes} source="global" />
         <Row label="promptContextCharLimit" value={c.promptContextCharLimit.toLocaleString()} source="global" />
-        <Row label="workflow.autoAdvanceStages" value={c.workflow.autoAdvanceStages ? 'on' : 'off'} source="global" />
-        <Row label="workflow.pollIntervalMs" value={c.workflow.pollIntervalMs} source="global" />
         <Row label="web.host" value={c.web.host} source="global" />
         <Row label="web.port" value={c.web.port} source="global" />
         <Row label="web.auth" value={c.web.auth} source="global" />
