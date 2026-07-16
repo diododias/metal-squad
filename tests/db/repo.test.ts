@@ -212,6 +212,16 @@ describe('listRunsForTui deduplication', () => {
     listRunsForTui(25);
     expect(mockAll).toHaveBeenCalledWith(25);
   });
+
+  it('aggregates pipeline token totals for the same feature only', async () => {
+    mockAll.mockReturnValue([]);
+    const { listRunsForTui } = await import('../../src/db/repo.js');
+
+    listRunsForTui();
+
+    expect(mockPrepare).toHaveBeenCalledWith(expect.stringContaining('GROUP BY r.pipeline_id, r.feature_id'));
+    expect(mockPrepare).toHaveBeenCalledWith(expect.stringContaining('AND pt.featureId = r.feature_id'));
+  });
 });
 
 describe('live run persistence helpers', () => {
