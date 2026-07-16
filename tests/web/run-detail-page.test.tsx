@@ -84,6 +84,13 @@ afterEach(() => {
 });
 
 describe('RunDetailPage resume with override', () => {
+  it('displays accumulated tokens across resumed sessions', () => {
+    const container = renderPage(makeRun({ totalTokens: 125, pipelineTotalTokens: 900 }), vi.fn());
+
+    expect(container.textContent).toContain('Tokens Consumed');
+    expect(container.textContent).toContain('900');
+  });
+
   it('renders the override controls for a resumable paused pipeline and dispatches overrides', () => {
     const send = vi.fn<(message: WebSocketClientMessage) => void>();
     const container = renderPage(makeRun(), send);

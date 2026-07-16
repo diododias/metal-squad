@@ -709,6 +709,7 @@ export function listRunsForTui(limit = 50, repoId?: string): RunSummary[] {
        pipeline_totals AS (
          SELECT
            r.pipeline_id AS pipelineId,
+           r.feature_id AS featureId,
            SUM(COALESCE(r.input_tokens, lu.input, 0)) AS pipelineInputTokens,
            SUM(COALESCE(r.cached_input_tokens, lu.cachedInput, 0)) AS pipelineCachedInputTokens,
            SUM(COALESCE(r.output_tokens, lu.output, 0)) AS pipelineOutputTokens,
@@ -716,7 +717,7 @@ export function listRunsForTui(limit = 50, repoId?: string): RunSummary[] {
          FROM runs r
          LEFT JOIN latest_usage lu ON lu.runId = r.id
          WHERE r.pipeline_id IS NOT NULL
-         GROUP BY r.pipeline_id
+         GROUP BY r.pipeline_id, r.feature_id
        ),
        pending_stage_requests AS (
          SELECT sr.*
@@ -802,7 +803,9 @@ export function listRunsForTui(limit = 50, repoId?: string): RunSummary[] {
        LEFT JOIN latest_usage lu ON lu.runId = r.id
        LEFT JOIN gates g ON g.run_id = r.id AND g.resolved_at IS NULL
        LEFT JOIN pipelines p ON p.id = r.pipeline_id
-       LEFT JOIN pipeline_totals pt ON pt.pipelineId = r.pipeline_id
+       LEFT JOIN pipeline_totals pt
+         ON pt.pipelineId = r.pipeline_id
+        AND pt.featureId = r.feature_id
        LEFT JOIN pending_stage_requests psr
          ON psr.pipeline_id = r.pipeline_id
         AND psr.feature_id = r.feature_id

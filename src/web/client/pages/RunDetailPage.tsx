@@ -10,7 +10,7 @@ import { ToolCallGroup } from '../components/transcript/ToolCallGroup.js';
 import { RunStatusIndicator } from '../components/status/RunStatusIndicator.js';
 import { FeatureConfigDetail } from '../components/FeatureConfigDetail.js';
 import { PageHeader } from '../PageHeader.js';
-import { formatElapsed, formatPercent, formatPublishTarget, formatTokens, getPublishStatusLabel, getRunStatusLabel } from '../lib/format.js';
+import { formatElapsed, formatPercent, formatPublishTarget, formatTokens, getPublishStatusLabel } from '../lib/format.js';
 import { summarizeTaskRuns } from '../lib/workflow.js';
 import type { MsqWebState, FeatureConfigPatch, WebSocketClientMessage } from '../../types.js';
 import type { TaskRun } from '../../../db/repo.js';
@@ -391,7 +391,7 @@ export function RunDetailPage({
           <MetricCard label="Tool" value={run.tool} />
           <MetricCard label="Model" value={feature?.model ?? '—'} />
           <MetricCard label="Publish" value={getPublishStatusLabel(run)} />
-          <MetricCard label="Tokens" value={formatTokens(run.totalTokens)} />
+          <MetricCard label="Tokens Consumed" value={formatTokens(run.pipelineTotalTokens ?? run.totalTokens)} />
           <MetricCard label="Context" value={formatPercent(run.contextWindowPercent)} />
           <MetricCard label="Elapsed" value={formatElapsed(run.startedAt, run.endedAt)} />
         </div>
