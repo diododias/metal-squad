@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const mockSetPassword = vi.fn();
+const mockDeletePassword = vi.fn();
 const mockGetPassword = vi.fn();
 const mockLoadConfig = vi.fn();
 
@@ -10,6 +11,10 @@ vi.mock('@napi-rs/keyring', () => ({
 
     setPassword(value: string): void {
       mockSetPassword(value);
+    }
+
+    deletePassword(): void {
+      mockDeletePassword();
     }
 
     getPassword(): string {
@@ -24,7 +29,7 @@ vi.mock('../../src/config/index.js', () => ({
 
 beforeEach(() => {
   vi.clearAllMocks();
-  mockLoadConfig.mockReturnValue({});
+  mockLoadConfig.mockReturnValue({ notifications: { channels: [] } });
 });
 
 describe('secrets', () => {
@@ -41,6 +46,15 @@ describe('secrets', () => {
     const { getSecret } = await import('../../src/security/secrets.js');
 
     await expect(Promise.resolve(getSecret('telegram-bot-token'))).resolves.toBe('value');
+  });
+
+  it('removes secrets from the keyring without reading them', async () => {
+    const { clearSecret } = await import('../../src/security/secrets.js');
+
+    await clearSecret('telegram-bot-token');
+
+    expect(mockDeletePassword).toHaveBeenCalledTimes(1);
+    expect(mockGetPassword).not.toHaveBeenCalled();
   });
 
   it('returns null when keyring access throws', async () => {
@@ -73,7 +87,7 @@ describe('notify', () => {
     vi.doMock('../../src/security/secrets.js', () => ({
       getSecret: vi.fn().mockResolvedValue('bot-token'),
     }));
-    mockLoadConfig.mockReturnValue({ telegramChatId: 'chat-1' });
+    mockLoadConfig.mockReturnValue({ notifications: { channels: [{ type: 'telegram', chatId: 'chat-1' }] } });
     const fetchSpy = vi.fn().mockResolvedValue({ ok: true });
     vi.stubGlobal('fetch', fetchSpy);
 

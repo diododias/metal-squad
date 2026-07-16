@@ -1,9 +1,10 @@
 import { existsSync } from 'node:fs';
 import type Database from 'better-sqlite3';
 import { getDb } from './index.js';
-import { resolveDbPath } from '../config/index.js';
+import { resolveDbPath, resolveRuntimeConfig } from '../config/index.js';
 import {
   BudgetSchema,
+  createRegisteredToolSchema,
   DefaultsSchema,
   FeatureSchema,
   TaskSchema,
@@ -36,6 +37,14 @@ export type FeaturePatch = Omit<Partial<Feature>, 'workflow' | 'retry'> & {
   };
   retry?: Partial<Retry>;
 };
+
+function validateRegisteredToolReference(tool: string, path: string): void {
+  const schema = createRegisteredToolSchema(resolveRuntimeConfig().tools.map((entry) => entry.id));
+  const result = schema.safeParse(tool);
+  if (!result.success) {
+    throw new Error(`Invalid ${path}: ${result.error.issues[0]?.message ?? 'unregistered tool.'}`);
+  }
+}
 
 /**
  * Readonly access that tolerates a never-initialized DB (e.g. the very first
@@ -144,7 +153,7 @@ export function listCatalogFeatures(repoId: string, epicId?: string): CatalogFea
 }
 
 /** Single-feature readonly lookup, parsed to `Feature`. Used to re-check
- * config (e.g. `workflow.approvals.autoAdvance`) mid-run without the caller
+ * config (e.g. `workflow.autoAdvance`) mid-run without the caller
  * having to hold a stale copy of `data_json` from when the run started. */
 export function getCatalogFeature(repoId: string, featureId: string): Feature | undefined {
   const db = getReadonlyDbOrNull();
@@ -392,8 +401,6 @@ export function upsertBacklogCatalog(
      ON CONFLICT(repo_id) DO UPDATE SET
        repo = excluded.repo,
        version = excluded.version,
-       defaults_json = excluded.defaults_json,
-       budget_json = excluded.budget_json,
        updated_at = datetime('now')`,
   );
 
@@ -566,6 +573,7 @@ export function updateCatalogFeature(repoId: string, featureId: string, patch: F
       throw new Error('A stages-only workflow patch must be a permutation of the saved stages.');
     }
     const merged = FeatureSchema.parse(mergeFeaturePatch(current, patch));
+    validateRegisteredToolReference(merged.tool, `feature "${featureId}".tool`);
 
     updateRow.run(
       JSON.stringify(merged),
@@ -667,12 +675,12 @@ function inheritWorkflowDefaults(current: Workflow, previous: Workflow, next: Wo
   const inherited = { ...current };
   if (sameJsonValue(current.mode, previous.mode)) inherited.mode = next.mode;
   if (sameJsonValue(current.stages, previous.stages)) inherited.stages = [...next.stages];
+  if (sameJsonValue(current.autoAdvance, previous.autoAdvance)) inherited.autoAdvance = next.autoAdvance;
   if (sameJsonValue(current.syncTasksToBacklog, previous.syncTasksToBacklog)) inherited.syncTasksToBacklog = next.syncTasksToBacklog;
   if (sameJsonValue(current.approvals, previous.approvals)) inherited.approvals = next.approvals;
   else {
     inherited.approvals = { ...current.approvals };
     if (sameJsonValue(current.approvals.channel, previous.approvals.channel)) inherited.approvals.channel = next.approvals.channel;
-    if (sameJsonValue(current.approvals.autoAdvance, previous.approvals.autoAdvance)) inherited.approvals.autoAdvance = next.approvals.autoAdvance;
   }
   return inherited;
 }
@@ -726,6 +734,7 @@ export function updateCatalogDefaults(repoId: string, patch: CatalogDefaultsPatc
           }
         : {}),
     });
+    validateRegisteredToolReference(mergedDefaults.tool, 'defaults.tool');
     const mergedBudget = budgetPatch
       ? BudgetSchema.parse({ ...currentBudget, ...budgetPatch })
       : currentBudget;
@@ -743,6 +752,7 @@ export function updateCatalogDefaults(repoId: string, patch: CatalogDefaultsPatc
         workflow: inheritWorkflowDefaults(currentFeature.workflow, currentDefaults.workflow, mergedDefaults.workflow),
       };
       const validatedFeature = FeatureSchema.parse(inheritedFeature);
+      validateRegisteredToolReference(validatedFeature.tool, `feature "${row.feature_id}".tool`);
       if (!sameJsonValue(validatedFeature, currentFeature)) {
         updateFeatureRow.run(JSON.stringify(validatedFeature), row.feature_id, repoId);
       }

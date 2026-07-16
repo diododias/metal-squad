@@ -893,7 +893,7 @@ describe('executeBacklog failure persistence', () => {
         features: [{
           id: 'feat-27', title: 'Feature', spec: 'spec', tasks: [], tool: 'codex', effort: 'medium', dependsOn: [],
           workflow: {
-            mode: 'staged', stages: ['plan', 'specify', 'implement'], approvals: { channel: 'telegram', autoAdvance: true },
+            mode: 'staged', stages: ['plan', 'specify', 'implement'], approvals: { channel: 'telegram' }, autoAdvance: true,
             syncTasksToBacklog: false, sessionPolicy: { mode: 'adaptive', alwaysIsolatedStages: [] },
           },
         }],
@@ -910,7 +910,7 @@ describe('executeBacklog failure persistence', () => {
     });
 
     expect(restored.epics[0]?.features[0]?.workflow).toEqual({
-      mode: 'staged', stages: ['specify', 'plan', 'implement'], approvals: { channel: 'telegram', autoAdvance: true },
+      mode: 'staged', stages: ['specify', 'plan', 'implement'], approvals: { channel: 'telegram' }, autoAdvance: true,
       syncTasksToBacklog: true, sessionPolicy: { mode: 'isolated', alwaysIsolatedStages: ['plan'] },
       stepGuidance: { plan: { prompt: 'Revision A.' } },
     });
@@ -938,7 +938,8 @@ describe('executeBacklog failure persistence', () => {
                 mode: 'staged',
                 stages: ['specify', 'plan'],
                 // Run started with autoAdvance disabled...
-                approvals: { channel: 'telegram', autoAdvance: false },
+                approvals: { channel: 'telegram' },
+                autoAdvance: false,
                 syncTasksToBacklog: false,
                 sessionPolicy: { mode: 'isolated', alwaysIsolatedStages: [] },
               },
@@ -951,7 +952,7 @@ describe('executeBacklog failure persistence', () => {
     // ...but the user flips the checkbox in the web UI while the run is in
     // flight, which patches the catalog row read by `getCatalogFeature`.
     mockGetCatalogFeature.mockReturnValue({
-      workflow: { approvals: { autoAdvance: true } },
+      workflow: { autoAdvance: true },
     });
 
     mockRunFeature

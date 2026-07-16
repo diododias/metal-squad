@@ -7,7 +7,6 @@ import { Tag } from './core/Tag.js';
 import type { FeatureCatalogEntry, BacklogSettings } from '../../../ui/catalog.js';
 import type { FeatureConfigPatch, FeatureConfigSaveResult, TaskConfigPatch } from '../../types.js';
 
-const executionTools = ['claude', 'codex', 'opencode'] as const;
 const executionEfforts = ['low', 'medium', 'high'] as const;
 
 interface ExecutionDraft {
@@ -42,7 +41,7 @@ function workflowDraftFrom(feature: FeatureCatalogEntry): WorkflowDraft {
     mode: feature.workflow.mode,
     syncTasksToBacklog: feature.workflow.syncTasksToBacklog,
     approvalChannel: feature.workflow.approvals.channel,
-    autoAdvance: feature.workflow.approvals.autoAdvance,
+    autoAdvance: feature.workflow.autoAdvance,
   };
 }
 
@@ -92,9 +91,10 @@ export interface FeatureConfigDetailProps {
   onSaveConfig: (patch: FeatureConfigPatch) => void;
   onSaveTaskConfig?: (taskId: string, patch: TaskConfigPatch) => void;
   workflowSaveResult?: FeatureConfigSaveResult;
+  toolIds?: string[];
 }
 
-export function FeatureConfigDetail({ feature, backlogSettings, approvalChannels = ['telegram'], onSaveConfig, workflowSaveResult }: FeatureConfigDetailProps): React.JSX.Element {
+export function FeatureConfigDetail({ feature, backlogSettings, approvalChannels = ['telegram'], onSaveConfig, workflowSaveResult, toolIds = ['claude', 'codex', 'opencode'] }: FeatureConfigDetailProps): React.JSX.Element {
   const stages = feature.workflow.stages;
   const [selectedStage, setSelectedStage] = useState(stages[0] ?? 'specify');
   const [draftPrompt, setDraftPrompt] = useState('');
@@ -326,7 +326,7 @@ export function FeatureConfigDetail({ feature, backlogSettings, approvalChannels
     }
   }
 
-  const hasUnavailableTool = !executionTools.includes(draftExecution.tool as typeof executionTools[number]);
+  const hasUnavailableTool = !toolIds.includes(draftExecution.tool);
   const hasExecutionChanges = Object.keys(executionPatch).length > 0 || hasChangedMaxTokens;
   const unsupportedExecutionWarnings = configuredCapabilities ? [
     !executionCapabilities.model ? `${draftExecution.tool} does not support model; it will be ignored.` : undefined,
@@ -346,10 +346,10 @@ export function FeatureConfigDetail({ feature, backlogSettings, approvalChannels
   const workflowPatch: NonNullable<FeatureConfigPatch['workflow']> = {};
   if (draftWorkflow.mode !== workflowBaseline.mode) workflowPatch.mode = draftWorkflow.mode;
   if (draftWorkflow.syncTasksToBacklog !== workflowBaseline.syncTasksToBacklog) workflowPatch.syncTasksToBacklog = draftWorkflow.syncTasksToBacklog;
-  const approvalPatch: { channel?: string; autoAdvance?: boolean } = {};
+  const approvalPatch: { channel?: string } = {};
   if (draftWorkflow.approvalChannel !== workflowBaseline.approvalChannel) approvalPatch.channel = draftWorkflow.approvalChannel;
-  if (draftWorkflow.autoAdvance !== workflowBaseline.autoAdvance) approvalPatch.autoAdvance = draftWorkflow.autoAdvance;
   if (Object.keys(approvalPatch).length > 0) workflowPatch.approvals = approvalPatch;
+  if (draftWorkflow.autoAdvance !== workflowBaseline.autoAdvance) workflowPatch.autoAdvance = draftWorkflow.autoAdvance;
   const hasWorkflowChanges = Object.keys(workflowPatch).length > 0;
   const hasUnavailableApprovalChannel = !approvalChannels.includes(draftWorkflow.approvalChannel);
   const workflowGuidance = hasUnavailableApprovalChannel && hasWorkflowChanges
@@ -376,7 +376,7 @@ export function FeatureConfigDetail({ feature, backlogSettings, approvalChannels
             label="tool"
             value={draftExecution.tool}
             initialValue={executionBaseline.tool}
-            options={executionTools.map((tool) => ({ value: tool, label: tool }))}
+            options={toolIds.map((tool) => ({ value: tool, label: tool }))}
             onChange={(tool) => { setDraftExecution((draft) => ({ ...draft, tool: tool ?? '' })); }}
           />
           <EditableTextField
@@ -485,7 +485,7 @@ export function FeatureConfigDetail({ feature, backlogSettings, approvalChannels
           />
           <EditableToggleField
             id="workflow-auto-advance"
-            label="approvals.autoAdvance (legacy)"
+            label="workflow.autoAdvance"
             value={draftWorkflow.autoAdvance}
             initialValue={workflowBaseline.autoAdvance}
             onChange={(autoAdvance) => { setDraftWorkflow((draft) => ({ ...draft, autoAdvance })); }}

@@ -48,7 +48,7 @@ function parseDecision(raw: string): GateDecision | null {
 function configuredTelegramChatId(): string | undefined {
   const config = resolveRuntimeConfig(process.cwd());
   const explicit = config.notifications.channels.find((channel) => channel.type === 'telegram');
-  return explicit?.type === 'telegram' ? explicit.chatId : config.telegramChatId;
+  return explicit?.type === 'telegram' ? explicit.chatId : undefined;
 }
 
 function updateContext(update: TelegramUpdate): { chatId?: string; threadId?: number } {

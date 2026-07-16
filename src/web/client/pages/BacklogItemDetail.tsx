@@ -103,6 +103,7 @@ export function BacklogItemDetail({
           feature={feature}
           backlogSettings={state.backlogSettings}
           approvalChannels={state.runtimeConfig.notifications.channels.map((channel) => channel.type)}
+          toolIds={state.runtimeConfig.tools.map((tool) => tool.id)}
           onSaveConfig={(patch) => { onSaveConfig(featureId, patch); }}
           workflowSaveResult={workflowSaveResult}
         />

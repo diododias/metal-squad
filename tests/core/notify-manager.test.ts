@@ -29,14 +29,12 @@ vi.mock('../../src/core/notify/desktop.js', () => ({ DesktopChannel: MockDesktop
 function makeConfig(overrides: {
   events?: string[];
   channels?: unknown[];
-  telegramChatId?: string;
 } = {}) {
   return {
     notifications: {
       events: overrides.events ?? ['run:start', 'run:done', 'run:failed', 'gate:created', 'stage:approval', 'stage:input', 'budget:alert'],
       channels: overrides.channels ?? [],
     },
-    telegramChatId: overrides.telegramChatId,
   };
 }
 
@@ -67,8 +65,8 @@ describe('dispatch', () => {
     expect(mockTelegramSend).not.toHaveBeenCalled();
   });
 
-  it('uses DesktopChannel fallback when no channels and no telegramChatId', async () => {
-    mockResolveRuntimeConfig.mockReturnValue(makeConfig({ channels: [], telegramChatId: undefined }));
+  it('uses DesktopChannel fallback when no channels are configured', async () => {
+    mockResolveRuntimeConfig.mockReturnValue(makeConfig({ channels: [] }));
     const { dispatch } = await import('../../src/core/notify/manager.js');
 
     await dispatch('run:start', 'fallback message');
@@ -84,16 +82,6 @@ describe('dispatch', () => {
     await dispatch('run:start', 'msg', meta);
 
     expect(mockDesktopSend).toHaveBeenCalledWith('msg', meta);
-  });
-
-  it('builds TelegramChannel from telegramChatId when channels is empty', async () => {
-    mockResolveRuntimeConfig.mockReturnValue(makeConfig({ channels: [], telegramChatId: 'chat123' }));
-    const { dispatch } = await import('../../src/core/notify/manager.js');
-
-    await dispatch('run:start', 'hello telegram');
-
-    expect(MockTelegramChannel).toHaveBeenCalledWith('chat123', undefined);
-    expect(mockTelegramSend).toHaveBeenCalledWith('hello telegram', undefined);
   });
 
   it('builds TelegramChannel from explicit channel config', async () => {
@@ -229,10 +217,9 @@ describe('dispatch', () => {
     await expect(dispatch('run:start', 'msg')).resolves.toBeUndefined();
   });
 
-  it('prefers explicit channels over telegramChatId when both present', async () => {
+  it('uses explicit channel configuration', async () => {
     mockResolveRuntimeConfig.mockReturnValue(makeConfig({
       channels: [{ type: 'slack', webhookUrl: 'https://slack/hook' }],
-      telegramChatId: 'ignored',
     }));
     const { dispatch } = await import('../../src/core/notify/manager.js');
 
