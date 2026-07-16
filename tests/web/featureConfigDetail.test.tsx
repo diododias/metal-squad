@@ -38,7 +38,14 @@ function makeFeature(overrides: Partial<FeatureCatalogEntry> = {}): FeatureCatal
   } as FeatureCatalogEntry;
 }
 
-const backlogSettings = { stageSkills: {} } as BacklogSettings;
+const backlogSettings = {
+  stageSkills: {},
+  toolCapabilities: {
+    claude: { model: true, effort: true, thinking: true },
+    codex: { model: true, effort: true, thinking: false },
+    opencode: { model: true, effort: false, thinking: false },
+  },
+} as BacklogSettings;
 
 function mount(): { container: HTMLElement; rerender: (feature: FeatureCatalogEntry, onSaveConfig: ReturnType<typeof vi.fn>, workflowSaveResult?: FeatureConfigSaveResult) => void } {
   const container = document.createElement('div');
@@ -163,6 +170,43 @@ describe('FeatureConfigDetail execution card', () => {
     act(() => { (executionControl(view.container, 'execution-auto-start') as HTMLInputElement).click(); });
     act(() => { saveButton(view.container)?.click(); });
     expect(onSaveConfig).toHaveBeenCalledWith({ autoStart: true });
+  });
+
+  it('saves thinking independently from effort and model', () => {
+    const onSaveConfig = vi.fn();
+    const view = mount();
+    view.rerender(makeFeature(), onSaveConfig);
+
+    act(() => { (executionControl(view.container, 'execution-thinking') as HTMLInputElement).click(); });
+    act(() => { saveButton(view.container)?.click(); });
+
+    expect(onSaveConfig).toHaveBeenCalledWith({ thinking: 'on' });
+  });
+
+  it('disables unsupported thinking and keeps supported effort independent', () => {
+    const onSaveConfig = vi.fn();
+    const view = mount();
+    view.rerender(makeFeature({ tool: 'codex' }), onSaveConfig);
+
+    const thinking = executionControl(view.container, 'execution-thinking') as HTMLInputElement;
+    expect(thinking.disabled).toBe(true);
+    expect(view.container.textContent).toContain('codex does not support thinking; it will be ignored.');
+
+    act(() => { dispatchChange(executionControl(view.container, 'execution-effort'), 'high'); });
+    act(() => { saveButton(view.container)?.click(); });
+    expect(onSaveConfig).toHaveBeenCalledWith({ effort: 'high' });
+  });
+
+  it('does not leak an unsupported draft field when the selected tool changes', () => {
+    const onSaveConfig = vi.fn();
+    const view = mount();
+    view.rerender(makeFeature(), onSaveConfig);
+
+    act(() => { (executionControl(view.container, 'execution-thinking') as HTMLInputElement).click(); });
+    act(() => { dispatchChange(executionControl(view.container, 'execution-tool'), 'opencode'); });
+    act(() => { saveButton(view.container)?.click(); });
+
+    expect(onSaveConfig).toHaveBeenCalledWith({ tool: 'opencode' });
   });
 
   it('clears per-field pending state when a value is restored and emits no empty patch', () => {

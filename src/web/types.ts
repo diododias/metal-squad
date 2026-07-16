@@ -122,6 +122,7 @@ export interface FeatureConfigPatch {
   tool?: string;
   model?: string;
   effort?: string;
+  thinking?: string;
   maxTokens?: number;
   autoStart?: boolean;
   skills?: string[];

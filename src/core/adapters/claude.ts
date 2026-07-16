@@ -40,6 +40,12 @@ interface StreamJsonEvent {
 export const claudeAdapter: ToolAdapter = {
   tool: 'claude',
 
+  capabilities: {
+    model: true,
+    effort: true,
+    thinking: true,
+  },
+
   effortFlag(_effort: Effort): string[] {
     return [];
   },

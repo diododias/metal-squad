@@ -3,7 +3,9 @@ import { resolve } from 'node:path';
 import { mergeExecutionDefaults, resolveConfigSnapshot, type ResolvedConfigSources, type ResolvedExecutionDefaults } from '../config/index.js';
 import { loadBacklogFromCatalog } from '../core/backlog/load.js';
 import { resolveRepo } from '../core/repo.js';
-import type { Budget, Retry, Task, Workflow } from '../core/backlog/schema.js';
+import { getAdapter } from '../core/adapters/index.js';
+import type { ToolCapabilities } from '../core/adapters/types.js';
+import type { Budget, Retry, Task, Tool, Workflow } from '../core/backlog/schema.js';
 
 const DESCRIPTION_CHAR_LIMIT = 4000;
 
@@ -16,6 +18,7 @@ export interface FeatureCatalogEntry {
   tool: string;
   model?: string;
   effort: string;
+  thinking?: string;
   /** Full spec/feature description (D2): inline `spec` summary, or the
    * content of `specFile` when no inline summary is declared. Truncated to
    * DESCRIPTION_CHAR_LIMIT so it stays readable inside the Ink detail view. */
@@ -50,9 +53,19 @@ export interface BacklogSettings {
   stageSkills: Record<string, string[]>;
   configSources?: ResolvedConfigSources;
   resolvedDefaults?: ResolvedExecutionDefaults;
+  toolCapabilities?: Record<Tool, ToolCapabilities>;
 }
 
-const DEFAULT_BACKLOG_SETTINGS: BacklogSettings = { stageSkills: {} };
+const supportedTools: readonly Tool[] = ['claude', 'codex', 'opencode'];
+const DEFAULT_TOOL_CAPABILITIES: ToolCapabilities = { model: false, effort: false, thinking: false };
+
+function getToolCapabilities(): Record<Tool, ToolCapabilities> {
+  return Object.fromEntries(
+    supportedTools.map((tool) => [tool, getAdapter(tool).capabilities ?? DEFAULT_TOOL_CAPABILITIES]),
+  ) as Record<Tool, ToolCapabilities>;
+}
+
+const DEFAULT_BACKLOG_SETTINGS: BacklogSettings = { stageSkills: {}, toolCapabilities: getToolCapabilities() };
 
 function truncateDescription(text: string): string {
   if (text.length <= DESCRIPTION_CHAR_LIMIT) return text;
@@ -108,6 +121,7 @@ function loadCatalogAndSettings(cwd: string): void {
             tool: feature.tool,
             model: feature.model,
             effort: feature.effort,
+            thinking: feature.thinking,
             description: readFeatureDescription(feature.spec, feature.specFile, cwd),
             tasks: feature.tasks,
             dependsOn: feature.dependsOn,
@@ -126,6 +140,7 @@ function loadCatalogAndSettings(cwd: string): void {
       stageSkills: 'defaults' in backlog ? backlog.defaults.stageSkills : {},
       configSources: snapshot.sources,
       resolvedDefaults,
+      toolCapabilities: getToolCapabilities(),
     };
   } catch {
     cachedCatalog = {};

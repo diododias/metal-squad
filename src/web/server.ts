@@ -870,6 +870,7 @@ export function createWebServer(options: {
       ...(patch.tool !== undefined ? { tool: patch.tool as Feature['tool'] } : {}),
       ...(patch.model !== undefined ? { model: patch.model } : {}),
       ...(patch.effort !== undefined ? { effort: patch.effort as Feature['effort'] } : {}),
+      ...(patch.thinking !== undefined ? { thinking: patch.thinking as Feature['thinking'] } : {}),
       ...(patch.maxTokens !== undefined ? { maxTokens: patch.maxTokens } : {}),
       ...(patch.autoStart !== undefined ? { autoStart: patch.autoStart } : {}),
       ...(patch.skills !== undefined ? { skills: patch.skills } : {}),
