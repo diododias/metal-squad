@@ -513,12 +513,15 @@ describe('BoardPage feature-specific workflows', () => {
 
     const html = renderToStaticMarkup(createElement(BoardPage, { state, isMobile: false, onOpenRun: () => {}, onOpenBacklogItem: () => {} }));
 
-    expect(html).toContain('✓ specify');
-    expect(html).toContain('▸ implement');
-    expect(html).toContain('▸ plan');
-    expect(html).toContain('· validate');
-    expect(html).toContain('· draft');
-    expect(html).toContain('· approve');
+    // Feature A: stage=implement on [specify, implement] → full bar, current label.
+    expect(html).toContain('implement <span');
+    expect(html).toContain('(2/2)');
+    // Feature B: stage=plan on [plan, validate] → half bar.
+    expect(html).toContain('plan <span');
+    expect(html).toContain('(1/2)');
+    // Todo feature: all segments pending on its own two-stage workflow.
+    expect(html).toContain('todo <span');
+    expect(html).toContain('(0/2)');
   });
 
   it('keeps unknown catalog runs usable without inventing workflow stages', () => {
