@@ -85,19 +85,7 @@ export function KanbanCard({ run, selected, onClick }: KanbanCardProps): React.J
       onClick={onClick}
       style={isDone ? { borderLeft: '3px solid var(--accent-ok)' } : undefined}
     >
-      {/* Muted context header: epic title truncates on its own line; the
-        * feature id never truncates — it wraps to the line below whenever
-        * the epic title leaves no room next to it. */}
-      <div style={{ display: 'flex', flexWrap: 'wrap', columnGap: 8, rowGap: 2, marginBottom: 4, ...mutedTextStyle }}>
-        {run.epicTitle && (
-          <span style={{ flexShrink: 0, maxWidth: '100%', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-            {run.epicTitle}
-          </span>
-        )}
-        <span style={{ flexShrink: 0, whiteSpace: 'nowrap' }}>{displayId}</span>
-      </div>
-
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 8, marginBottom: 6 }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 8, marginBottom: 4 }}>
         <div style={{ flex: '1 1 0%', minWidth: 0, fontSize: 'var(--text-sm)' }}>
           {displayTitle && (
             <div
@@ -118,6 +106,18 @@ export function KanbanCard({ run, selected, onClick }: KanbanCardProps): React.J
         <div style={{ flexShrink: 0 }}>
           <StatusPill status={run.status} />
         </div>
+      </div>
+
+      {/* Muted context line below the title: epic truncates on its own line;
+        * the feature id never truncates — it wraps to the line below whenever
+        * the epic title leaves no room next to it. */}
+      <div style={{ display: 'flex', flexWrap: 'wrap', columnGap: 8, rowGap: 2, marginBottom: 6, ...mutedTextStyle }}>
+        {run.epicTitle && (
+          <span style={{ flexShrink: 0, maxWidth: '100%', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+            {run.epicTitle}
+          </span>
+        )}
+        <span style={{ flexShrink: 0, whiteSpace: 'nowrap' }}>{displayId}</span>
       </div>
 
       {isDone && run.prUrl ? (
