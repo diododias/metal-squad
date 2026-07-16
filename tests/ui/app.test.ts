@@ -380,23 +380,8 @@ describe('App', () => {
     expect(paletteArgs.commands.some((command) => command.id === 'view-toggle-density')).toBe(true);
   });
 
-  it('passes the resolved theme notice to the status bar when the configured theme is unknown', async () => {
-    mockLoadConfig.mockReturnValue({ concurrency: 3, theme: 'solarized' });
-    const { App } = await import('../../src/ui/App.js');
-
-    const element = App();
-    const rootChildren = (element.props as { children: React.ReactNode }).children;
-    const statusBar = findElement(rootChildren, mockStatusBar);
-
-    expect(statusBar?.props.themeNotice).toContain('solarized');
-    expect(statusBar?.props.themeNotice).toContain('default');
-    expect(mockEventBusEmit).toHaveBeenCalledWith('ui:notice', {
-      message: 'Theme "solarized" is not supported. Using "default".',
-    });
-  });
-
-  it('does not emit a fallback notice when the configured theme is supported', async () => {
-    mockLoadConfig.mockReturnValue({ concurrency: 3, theme: 'dark' });
+  it('uses the fixed default theme without reading a retired preference', async () => {
+    mockLoadConfig.mockReturnValue({ concurrency: 3 });
     const { App } = await import('../../src/ui/App.js');
 
     const element = App();

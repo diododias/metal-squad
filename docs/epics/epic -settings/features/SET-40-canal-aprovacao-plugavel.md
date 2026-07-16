@@ -2,7 +2,7 @@
 
 **Feature Branch**: `feat/set40-canal-aprovacao-plugavel`
 **Created**: 2026-07-14
-**Status**: Draft
+**Status**: Implemented
 **Roadmap**: Settings — M9 (Consolidação, limpeza e docs)
 **Origem no plano**: S39 (`metal-squad-novos-settings-plano-implementacao.md`)
 

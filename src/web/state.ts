@@ -147,8 +147,7 @@ function normalizeFeatureCatalog(catalog: Record<string, FeatureCatalogEntry>): 
 
 function buildThemeSnapshot(): ThemeSnapshot {
   try {
-    const config = resolveRuntimeConfig(process.cwd());
-    const resolution = resolveThemePreference(config.theme);
+    const resolution = resolveThemePreference(undefined);
     const textColor = resolution.profile.roles.text.color ?? FALLBACK_ROLE_COLOR;
     const roles = Object.fromEntries(
       (Object.entries(resolution.profile.roles) as [ThemeRoleName, { color?: string }][]).map(
@@ -176,12 +175,29 @@ function buildThemeSnapshot(): ThemeSnapshot {
 /** Strips notification credentials (Slack/Discord/webhook URLs, Telegram chat
  * id) before the config crosses the WebSocket boundary — with auth 'none' any
  * local process can read the state broadcast. */
-export function sanitizeRuntimeConfig(config: Config): WebRuntimeConfig {
-  const { telegramChatId: _telegramChatId, notifications, ...rest } = config;
+function isNotificationChannelConfigured(channel: Config['notifications']['channels'][number]): boolean {
+  switch (channel.type) {
+    case 'desktop': return true;
+    case 'telegram': return channel.chatId.trim().length > 0;
+    case 'slack':
+    case 'discord': return channel.webhookUrl.trim().length > 0;
+    case 'webhook': return channel.url.trim().length > 0;
+  }
+}
+
+export function sanitizeRuntimeConfig(
+  config: Config,
+  writability: WebRuntimeConfig['writability'],
+): WebRuntimeConfig {
+  const { notifications, ...rest } = config;
   return {
     ...rest,
+    writability,
     notifications: {
-      channels: notifications.channels.map((channel) => ({ type: channel.type })),
+      channels: notifications.channels.map((channel) => ({
+        type: channel.type,
+        configured: isNotificationChannelConfigured(channel),
+      })),
       events: notifications.events,
     },
   };
@@ -196,11 +212,16 @@ let skillsCatalogCache: { value: Skill[]; expiresAt: number } | null = null;
 
 /** Test hook: drop the runtime-config/skills caches. */
 export function resetWebStateCaches(): void {
-  runtimeConfigCache = null;
+  invalidateRuntimeConfigCache();
   skillsCatalogCache = null;
 }
 
-function collectRuntimeConfig(): WebRuntimeConfig {
+/** Drop cached config after a settings write so the next state reflects it immediately. */
+export function invalidateRuntimeConfigCache(): void {
+  runtimeConfigCache = null;
+}
+
+function collectRuntimeConfig(writability: WebRuntimeConfig['writability']): WebRuntimeConfig {
   const now = Date.now();
   if (runtimeConfigCache && runtimeConfigCache.expiresAt > now) return runtimeConfigCache.value;
   let config: Config;
@@ -209,7 +230,7 @@ function collectRuntimeConfig(): WebRuntimeConfig {
   } catch {
     config = ConfigSchema.parse({});
   }
-  const value = sanitizeRuntimeConfig(config);
+  const value = sanitizeRuntimeConfig(config, writability);
   runtimeConfigCache = { value, expiresAt: now + CONFIG_CACHE_TTL_MS };
   return value;
 }
@@ -237,6 +258,7 @@ export function buildMsqWebState(): MsqWebState {
   const timeoutApprovals = collectTimeoutApprovals();
   const featureCatalog = normalizeFeatureCatalog(getFeatureCatalog());
   const backlogSettings = getBacklogSettings();
+  const environment = collectEnvironmentInfo();
   const executionRuns = runs.filter((run) => getRunGroup(run.status) === 'execution');
   const doneRuns = runs.filter((run) => run.status === 'done');
   const falhaRunsList = runs.filter((run) => getRunGroup(run.status) === 'canceled');
@@ -250,7 +272,7 @@ export function buildMsqWebState(): MsqWebState {
     timeoutApprovals,
     featureCatalog,
     backlogSettings,
-    environment: collectEnvironmentInfo(),
+    environment,
     stats: {
       totalRuns: runs.length,
       doneRuns: doneRuns.length,
@@ -264,7 +286,10 @@ export function buildMsqWebState(): MsqWebState {
     },
     notifications: [],
     theme: buildThemeSnapshot(),
-    runtimeConfig: collectRuntimeConfig(),
+    runtimeConfig: collectRuntimeConfig({
+      dbWritable: environment.dbWritable,
+      configWritable: environment.configWritable,
+    }),
     skillsCatalog: collectSkillsCatalog(),
   };
 }

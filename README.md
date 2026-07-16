@@ -298,6 +298,10 @@ Top level:
 - `repo`
 - `epics`
 
+Defaults e budget sao configurados no Projeto (catalogo SQLite). O
+`backlog.yaml` e um asset de importacao somente de epics e features. Backlogs
+legados com `defaults` continuam carregando, mas o bloco e ignorado com aviso.
+
 `feature`:
 
 - `id`
@@ -323,7 +327,7 @@ Top level:
 - `mode`: `single | staged`
 - `stages`
 - `approvals.channel`: currently `telegram`
-- `approvals.autoAdvance`
+- `autoAdvance`
 - `syncTasksToBacklog`
 
 `retry`:
@@ -404,15 +408,13 @@ Only the *automatic* continuation is opt-in.
 
 `metal-squad` applies defaults in this order:
 
-1. Schema defaults
-2. `backlog.yaml` `defaults`
-3. Feature-level explicit values
+1. Defaults do Projeto (DB)
+2. Valores explicitos da feature
 
 Current propagation behavior:
 
-- `defaults.tool` propagates to features that omit `tool`
-- `defaults.effort` propagates to features that omit `effort`
-- `defaults.skills` propagates to features and tasks that omit `skills`
+- Defaults do Projeto propagam para features que omitem valores de execucao.
+- Valores explicitos da feature continuam tendo precedencia.
 
 ### File Validation
 

@@ -76,6 +76,7 @@ describe('attachEventNotifications — full coverage', () => {
       kind: 'approval',
       prompt: 'Ready to advance?',
       source: 'manual',
+      approvalChannel: 'slack',
     });
 
     expect(mockDispatch).toHaveBeenCalledTimes(1);
@@ -89,6 +90,7 @@ describe('attachEventNotifications — full coverage', () => {
     expect((meta as Record<string, unknown>).reply_markup).toBeDefined();
     expect((meta as Record<string, unknown>).source).toBe('manual');
     expect((meta as Record<string, unknown>).requestId).toBe(10);
+    expect(mockDispatch).toHaveBeenCalledWith('stage:approval', expect.any(String), expect.any(Object), 'slack');
   });
 
   it('dispatches stage:approval without reply_markup for auto source', async () => {

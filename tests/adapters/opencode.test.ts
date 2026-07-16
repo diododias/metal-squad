@@ -15,9 +15,11 @@ const mockCliAbortErrorClass = class CliAbortError extends Error {
 const mockEmit = vi.fn();
 const mockMsqEventBus = { emit: mockEmit };
 const mockParseControlSignal = vi.fn();
+const mockResolveToolInvocation = vi.fn(() => ({ command: 'opencode', baseArgs: [], env: {}, versionCheck: ['--version'] }));
 
 vi.mock('../../src/core/adapters/spawn.js', () => ({
   runCli: mockRunCli,
+  resolveToolInvocation: mockResolveToolInvocation,
   CliAbortError: mockCliAbortErrorClass,
 }));
 vi.mock('../../src/core/events/index.js', () => ({
@@ -46,6 +48,7 @@ beforeEach(() => {
   mockRunCli.mockReset();
   mockEmit.mockReset();
   mockParseControlSignal.mockReset().mockReturnValue(undefined);
+  mockResolveToolInvocation.mockReturnValue({ command: 'opencode', baseArgs: [], env: {}, versionCheck: ['--version'] });
 });
 
 describe('opencodeAdapter.effortFlag', () => {

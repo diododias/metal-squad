@@ -1,10 +1,10 @@
+import { execFileSync } from 'node:child_process';
 import { sanitizeToolCallRecord, type SessionHandle, type ToolAdapter, type RunResult, type RunFeatureOptions, type TokenUsage, type ToolCallRecord } from './types.js';
 import type { Effort, Feature } from '../backlog/schema.js';
-import { execFileSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { resolveRuntimeConfig } from '../../config/index.js';
-import { CliAbortError, CliTimeoutError, runCli } from './spawn.js';
+import { CliAbortError, CliTimeoutError, resolveToolInvocation, runCli } from './spawn.js';
 import { msqEventBus } from '../events/index.js';
 import { parseControlSignal } from './control.js';
 
@@ -43,17 +43,8 @@ const EFFORT: Record<Effort, string> = {
   high: 'high',
 };
 
-/** Piso mínimo de timeout para runs do codex, independente do valor configurado. */
-const CODEX_MIN_TIMEOUT_MS = 1_800_000;
-
 export const codexAdapter: ToolAdapter = {
   tool: 'codex',
-
-  capabilities: {
-    model: true,
-    effort: true,
-    thinking: false,
-  },
 
   effortFlag(effort: Effort): string[] {
     return ['-c', `model_reasoning_effort="${EFFORT[effort]}"`];
@@ -61,7 +52,8 @@ export const codexAdapter: ToolAdapter = {
 
   isAvailable(): boolean {
     try {
-      execFileSync('codex', ['--version'], { stdio: 'ignore' });
+      const invocation = resolveToolInvocation('codex');
+      execFileSync(invocation.command, invocation.versionCheck, { stdio: 'ignore' });
       return true;
     } catch {
       return false;
@@ -69,7 +61,8 @@ export const codexAdapter: ToolAdapter = {
   },
 
   async runFeature(feature: Feature, prompt: string, opts: RunFeatureOptions): Promise<RunResult> {
-    if (feature.thinking === 'on') {
+    const invocation = resolveToolInvocation(feature.tool, opts.cwd);
+    if (feature.thinking === 'on' && !invocation.capabilities.thinking) {
       emitRunOutput(
         opts.runId,
         feature,
@@ -81,6 +74,7 @@ export const codexAdapter: ToolAdapter = {
 
     const args = opts.session?.mode === 'resume' && opts.session.handle
       ? [
+          ...invocation.baseArgs,
           'exec',
           'resume',
           '--json',
@@ -92,6 +86,7 @@ export const codexAdapter: ToolAdapter = {
           prompt,
         ]
       : [
+          ...invocation.baseArgs,
           'exec',
           '--json',
           '--skip-git-repo-check',
@@ -103,7 +98,8 @@ export const codexAdapter: ToolAdapter = {
           prompt,
         ];
 
-    const timeoutMs = Math.max(resolveRuntimeConfig(process.cwd()).toolTimeoutMs, CODEX_MIN_TIMEOUT_MS);
+    const runtime = resolveRuntimeConfig(opts.cwd);
+    const timeoutMs = Math.max(runtime.toolTimeoutMs, invocation.minTimeoutMs);
     let code: number;
     let stdout: string;
     let stderr: string;
@@ -111,11 +107,13 @@ export const codexAdapter: ToolAdapter = {
     const seenToolCalls = new Set<string>();
 
     try {
-      ({ code, stdout, stderr } = await runCli('codex', args, {
+      ({ code, stdout, stderr } = await runCli(invocation.command, args, {
         cwd: opts.cwd,
+        env: invocation.env,
         timeoutMs,
         signal: opts.signal,
-        idleThresholdMs: resolveRuntimeConfig(opts.cwd).idleThresholdMs,
+        idleThresholdMs: runtime.idleThresholdMs,
+        heartbeatMs: runtime.heartbeatMs,
         runId: opts.runId,
         featureId: feature.id,
         tool: feature.tool,

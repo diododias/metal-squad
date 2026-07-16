@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { collectBacklogSkillNames } from '../../src/core/skills/backlog.js';
-import type { BacklogV2 } from '../../src/core/backlog/schema.js';
+import { DEFAULT_PROJECT_TEMPLATE, type BacklogV2 } from '../../src/core/backlog/schema.js';
 
 function makeBacklog(overrides: Partial<BacklogV2> = {}): BacklogV2 {
   return {
@@ -50,7 +50,7 @@ describe('collectBacklogSkillNames', () => {
         },
       },
     });
-    const names = collectBacklogSkillNames(backlog);
+    const names = collectBacklogSkillNames(backlog, DEFAULT_PROJECT_TEMPLATE.stageSkills);
     expect(names).toContain('implement');
     expect(names).toContain('test');
   });
@@ -71,7 +71,7 @@ describe('collectBacklogSkillNames', () => {
         }],
       }],
     });
-    const names = collectBacklogSkillNames(backlog);
+    const names = collectBacklogSkillNames(backlog, DEFAULT_PROJECT_TEMPLATE.stageSkills);
     expect(names).toContain('review');
   });
 
@@ -96,7 +96,7 @@ describe('collectBacklogSkillNames', () => {
         }],
       }],
     });
-    const names = collectBacklogSkillNames(backlog);
+    const names = collectBacklogSkillNames(backlog, DEFAULT_PROJECT_TEMPLATE.stageSkills);
     expect(names).toContain('decompose');
   });
 
@@ -116,7 +116,7 @@ describe('collectBacklogSkillNames', () => {
         }],
       }],
     });
-    const names = collectBacklogSkillNames(backlog);
+    const names = collectBacklogSkillNames(backlog, DEFAULT_PROJECT_TEMPLATE.stageSkills);
     expect(names).toContain('speckit-specify');
     expect(names).toContain('speckit-implement');
     expect(names).toContain('dev-flow');
@@ -140,7 +140,7 @@ describe('collectBacklogSkillNames', () => {
         }],
       }],
     });
-    const names = collectBacklogSkillNames(backlog);
+    const names = collectBacklogSkillNames(backlog, DEFAULT_PROJECT_TEMPLATE.stageSkills);
     expect(names).toContain('analyze');
     expect(names).toContain('speckit-implement');
     expect(names).toContain('dev-flow');
