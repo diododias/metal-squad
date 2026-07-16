@@ -388,4 +388,30 @@ describe('config', () => {
     expect(() => loadRepoConfig(join(home, 'repo'))).toThrow('MISSING_SECRET');
     expect(() => loadRepoConfig(join(home, 'repo'))).toThrow('runtime.notifications.channels.0.webhookUrl');
   });
+
+  it('resolves execution defaults only from project and feature', async () => {
+    const { mergeExecutionDefaults } = await import('../../src/config/index.js');
+
+    const effective = mergeExecutionDefaults({
+      tool: 'codex',
+      model: 'project-model',
+      effort: 'medium',
+      thinking: 'off',
+      skills: ['project-skill'],
+      stageSkills: { plan: ['project-plan'] },
+    }, {
+      effort: 'high',
+      skills: ['feature-skill'],
+      stageSkills: { implement: ['feature-implement'] },
+    });
+
+    expect(effective).toEqual({
+      tool: 'codex',
+      model: 'project-model',
+      effort: 'high',
+      thinking: 'off',
+      skills: ['feature-skill'],
+      stageSkills: { plan: ['project-plan'], implement: ['feature-implement'] },
+    });
+  });
 });
