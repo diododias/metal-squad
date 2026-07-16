@@ -1,16 +1,15 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Button } from '../components/core/Button.js';
-import { MetricCard } from '../components/data/MetricCard.js';
 import { WorkflowStepper } from '../components/navigation/WorkflowStepper.js';
 import { Tabs } from '../components/navigation/Tabs.js';
 import { ApprovalBanner } from '../components/feedback/ApprovalBanner.js';
 import { QuestionBanner } from '../components/feedback/QuestionBanner.js';
 import { AgentTranscript, type TranscriptEntry } from '../components/transcript/AgentTranscript.js';
 import { ToolCallGroup } from '../components/transcript/ToolCallGroup.js';
-import { RunStatusIndicator } from '../components/status/RunStatusIndicator.js';
+import { RunStatusStrip } from '../components/status/RunStatusStrip.js';
 import { FeatureConfigDetail } from '../components/FeatureConfigDetail.js';
 import { PageHeader } from '../PageHeader.js';
-import { formatElapsed, formatPercent, formatPublishTarget, formatTokens, getPublishStatusLabel } from '../lib/format.js';
+import { formatElapsed, formatPercent, formatPublishTarget, formatTokens, getPublishStatusLabel, getRunStatusLabel } from '../lib/format.js';
 import { summarizeTaskRuns } from '../lib/workflow.js';
 import type { MsqWebState, FeatureConfigPatch, WebSocketClientMessage } from '../../types.js';
 import type { TaskRun } from '../../../db/repo.js';
@@ -62,23 +61,6 @@ function outputToTranscript(lines: OutputLine[]): TranscriptEntry[] {
   });
 }
 
-function snapshotFromRun(run: NonNullable<MsqWebState['runs'][number]>): SessionStatusSnapshot | null {
-  if (!run.sessionStatus || !run.sessionStartedAt || !run.sessionUpdatedAt) return null;
-  return {
-    runId: run.runId,
-    featureId: run.featureId,
-    tool: run.tool,
-    status: run.sessionStatus,
-    startedAt: run.sessionStartedAt,
-    updatedAt: run.sessionUpdatedAt,
-    elapsedMs: run.sessionElapsedMs ?? 0,
-    lastOutputAt: run.sessionLastOutputAt ?? null,
-    idleMs: run.sessionIdleMs ?? null,
-    reason: run.sessionReason ?? null,
-    terminal: run.sessionTerminal ?? false,
-  };
-}
-
 export function RunDetailPage({
   state,
   featureId,
@@ -106,7 +88,6 @@ export function RunDetailPage({
   const detail = run ? runDetails[run.runId] : undefined;
   const stageGroups = useMemo(() => summarizeTaskRuns(detail?.taskRuns ?? [], feature?.workflow.stages), [detail, feature]);
   const transcript = useMemo(() => outputToTranscript(run ? (linesByRun[run.runId] ?? []) : []), [run, linesByRun]);
-  const sessionStatus = detail?.sessionStatus ?? (run ? snapshotFromRun(run) : null);
   const toolCalls = detail?.toolCalls ?? [];
   const toolIds = state.runtimeConfig.tools.map((tool) => tool.id);
 
@@ -388,18 +369,17 @@ export function RunDetailPage({
             </Button>
           </div>
         )}
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(120px, 1fr))', gap: 8, marginBottom: 16 }}>
-          <MetricCard
-            label="Status"
-            value={<RunStatusIndicator status={sessionStatus} fallbackStatus={run.status} spinnerEnabled={state.runtimeConfig.web.statusSpinner} />}
+        <div style={{ marginBottom: 16 }}>
+          <RunStatusStrip
             status={run.status}
+            statusLabel={getRunStatusLabel(run)}
+            spinnerEnabled={state.runtimeConfig.web.statusSpinner}
+            tool={run.tool}
+            model={feature?.model}
+            tokens={formatTokens(run.pipelineTotalTokens ?? run.totalTokens)}
+            contextPercent={formatPercent(run.contextWindowPercent)}
+            elapsed={formatElapsed(run.startedAt, run.endedAt)}
           />
-          <MetricCard label="Tool" value={run.tool} />
-          <MetricCard label="Model" value={feature?.model ?? '—'} />
-          <MetricCard label="Publish" value={getPublishStatusLabel(run)} />
-          <MetricCard label="Tokens Consumed" value={formatTokens(run.pipelineTotalTokens ?? run.totalTokens)} />
-          <MetricCard label="Context" value={formatPercent(run.contextWindowPercent)} />
-          <MetricCard label="Elapsed" value={formatElapsed(run.startedAt, run.endedAt)} />
         </div>
         <div style={{ marginBottom: 16 }}>
           <Tabs

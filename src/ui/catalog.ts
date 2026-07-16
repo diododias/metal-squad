@@ -14,6 +14,9 @@ export interface FeatureCatalogEntry {
   /** Persistent catalog identity; kept separate from display-only fallbacks. */
   persistedId?: string;
   title: string;
+  /** Parent epic identity — surfaced muted on web kanban cards. */
+  epicId?: string;
+  epicTitle?: string;
   skills: string[];
   tool: string;
   model?: string;
@@ -117,6 +120,8 @@ function loadCatalogAndSettings(cwd: string): void {
             id: feature.id,
             persistedId: feature.id,
             title: feature.title,
+            epicId: epic.id,
+            epicTitle: epic.title,
             skills: feature.skills ?? [],
             tool: feature.tool,
             model: feature.model,

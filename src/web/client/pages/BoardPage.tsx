@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { KanbanCard } from '../components/data/KanbanCard.js';
+import { formatElapsed } from '../lib/format.js';
 import { PageHeader } from '../PageHeader.js';
 import type { MsqWebState } from '../../types.js';
 import type { RunSummary } from '../../../db/repo.js';
@@ -137,11 +138,13 @@ export function BoardPage({ state, isMobile, onOpenRun, onOpenBacklogItem }: Boa
                       featureId: f.id,
                       persistedId: f.persistedId,
                       title: f.title,
+                      epicTitle: f.epicTitle,
                       status: 'todo',
                       stages: f.workflow.stages,
                       tool: f.tool,
                       model: f.model,
                       effort: f.effort,
+                      autoAdvance: f.workflow.autoAdvance,
                     }}
                   />
                 </div>
@@ -187,13 +190,18 @@ export function BoardPage({ state, isMobile, onOpenRun, onOpenBacklogItem }: Boa
                         featureId: r.featureId,
                         persistedId: state.featureCatalog[r.featureId]?.persistedId,
                         title: state.featureCatalog[r.featureId]?.title,
+                        epicTitle: state.featureCatalog[r.featureId]?.epicTitle,
                         status: r.status,
                         stages: state.featureCatalog[r.featureId]?.workflow.stages,
                         tool: r.tool,
                         model: state.featureCatalog[r.featureId]?.model,
                         effort: state.featureCatalog[r.featureId]?.effort,
+                        autoAdvance: state.featureCatalog[r.featureId]?.workflow.autoAdvance,
                         stage: r.stage,
+                        elapsed: formatElapsed(r.startedAt, r.endedAt),
                         tokens: r.totalTokens,
+                        prUrl: r.prUrl,
+                        prNumber: r.prNumber,
                       }}
                     />
                   </div>
