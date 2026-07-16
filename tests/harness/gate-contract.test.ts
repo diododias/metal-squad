@@ -31,11 +31,13 @@ describe('harness gate contract', () => {
   });
 
   it('pre-commit hook runs the fast gate', () => {
-    expect(repoFile('.husky/pre-commit')).toContain('npm run gate:fast');
+    expect(repoFile('.husky/pre-commit')).toContain('scripts/gate.mjs fast');
   });
 
-  it('pre-push hook runs the full gate', () => {
-    expect(repoFile('.husky/pre-push')).toContain('npm run gate:full');
+  it('pre-push hook runs the full gate inside the sandbox db wrapper', () => {
+    const prePush = repoFile('.husky/pre-push');
+    expect(prePush).toContain('scripts/with-sandbox-db.mjs');
+    expect(prePush).toContain('scripts/gate.mjs full');
   });
 
   it('gate full mode refuses to run without a sandbox MSQ_DB_PATH', () => {
