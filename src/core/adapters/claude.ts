@@ -2,18 +2,10 @@ import { randomUUID } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 import { sanitizeToolCallRecord, type SessionHandle, type ToolAdapter, type RunResult, type RunFeatureOptions, type TokenUsage, type ToolCallRecord } from './types.js';
 import type { Effort, Feature } from '../backlog/schema.js';
-import { CliAbortError, CliTimeoutError, runCli } from './spawn.js';
+import { CliAbortError, CliTimeoutError, resolveToolInvocation, runCli } from './spawn.js';
 import { msqEventBus } from '../events/index.js';
 import { parseControlSignal } from './control.js';
 import { resolveRuntimeConfig } from '../../config/index.js';
-
-// Sem flag nativa de "effort": mapeia para orcamento de thinking tokens.
-// TODO(SET-29): migra para o registro de tools.
-const THINKING_BUDGET: Record<Effort, number> = {
-  low: 4_000,
-  medium: 10_000,
-  high: 24_000,
-};
 
 type ContentBlock =
   | { type: 'text'; text: string }
@@ -40,19 +32,14 @@ interface StreamJsonEvent {
 export const claudeAdapter: ToolAdapter = {
   tool: 'claude',
 
-  capabilities: {
-    model: true,
-    effort: true,
-    thinking: true,
-  },
-
   effortFlag(_effort: Effort): string[] {
     return [];
   },
 
   isAvailable(): boolean {
     try {
-      execFileSync('claude', ['--version'], { stdio: 'ignore' });
+      const invocation = resolveToolInvocation('claude');
+      execFileSync(invocation.command, invocation.versionCheck, { stdio: 'ignore' });
       return true;
     } catch {
       return false;
@@ -60,12 +47,14 @@ export const claudeAdapter: ToolAdapter = {
   },
 
   async runFeature(feature: Feature, prompt: string, opts: RunFeatureOptions): Promise<RunResult> {
+    const invocation = resolveToolInvocation(feature.tool, opts.cwd);
     const model = feature.model ? ['--model', feature.model] : [];
-    const maxThinkingTokens = feature.thinking === 'on' ? THINKING_BUDGET[feature.effort] : 0;
+    const maxThinkingTokens = feature.thinking === 'on' ? invocation.thinkingBudget[feature.effort] : 0;
     const assignedSessionId = opts.session?.mode === 'resume'
       ? opts.session.handle?.sessionId ?? null
       : randomUUID();
     const args = [
+      ...invocation.baseArgs,
       '--print',
       '--output-format', 'stream-json',
       '--verbose',
@@ -91,9 +80,9 @@ export const claudeAdapter: ToolAdapter = {
     });
 
     try {
-      ({ code, stdout, stderr } = await runCli('claude', args, {
+      ({ code, stdout, stderr } = await runCli(invocation.command, args, {
         cwd: opts.cwd,
-        env: { MAX_THINKING_TOKENS: String(maxThinkingTokens) },
+        env: { ...invocation.env, MAX_THINKING_TOKENS: String(maxThinkingTokens) },
         idleThresholdMs: resolveRuntimeConfig(opts.cwd).idleThresholdMs,
         runId: opts.runId,
         featureId: feature.id,

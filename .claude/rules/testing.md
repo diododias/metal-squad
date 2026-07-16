@@ -18,6 +18,15 @@ rtk npm run lint
 
 quando tocar TypeScript relevante em `src/`.
 
+## Gates canonicos dos hooks
+
+- `rtk npm run gate:fast` — pre-commit: typecheck + lint + testes derivados dos arquivos staged (`vitest related`); pula testes quando so docs/skills/rules mudaram.
+- `rtk npm run gate:full` — pre-push (e CI futuro): bateria completa dentro de um banco sandbox (`scripts/with-sandbox-db.mjs`); nunca toca `~/.local/share/metal-squad/app.db`.
+
+Contratos dessa infraestrutura: `rtk npx vitest run tests/harness`.
+
+Para dados deterministicos em E2E/Web (nunca no gate): `npm run db:fixture -- --scenario settings` com `MSQ_DB_PATH` sandbox (ver `harness.md`).
+
 ## Suites focadas por area
 
 ### Backlog / prompt / skills

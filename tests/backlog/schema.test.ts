@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { BacklogInputSchema, BacklogSchema, BacklogV1Schema, BacklogV2Schema, EpicSchema, FallbackAlternativeSchema, RetrySchema } from '../../src/core/backlog/schema.js';
+import { BacklogInputSchema, BacklogSchema, BacklogV1Schema, BacklogV2Schema, createRegisteredToolSchema, EpicSchema, FallbackAlternativeSchema, RetrySchema } from '../../src/core/backlog/schema.js';
 
 const V1_YAML_OBJ = {
   version: 1,
@@ -85,6 +85,25 @@ describe('BacklogV1Schema', () => {
   it('rejects version 2', () => {
     const result = BacklogV1Schema.safeParse({ ...V1_YAML_OBJ, version: 2 });
     expect(result.success).toBe(false);
+  });
+});
+
+describe('tool registry references', () => {
+  it('accepts multiple registered ids for the same adapter', () => {
+    const schema = createRegisteredToolSchema(['codex', 'codex-canary']);
+
+    expect(schema.safeParse('codex').success).toBe(true);
+    expect(schema.safeParse('codex-canary').success).toBe(true);
+  });
+
+  it('rejects an unregistered tool with an actionable error', () => {
+    const result = createRegisteredToolSchema(['claude', 'codex']).safeParse('missing-tool');
+
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.error.issues[0]?.message).toContain('Tool "missing-tool" is not registered');
+      expect(result.error.issues[0]?.message).toContain('claude, codex');
+    }
   });
 });
 

@@ -1,13 +1,5 @@
 version: 2
 repo: metal-squad
-defaults:
-  tool: codex
-  model: gpt-5.6-terra
-  effort: high
-  skills: []
-  stageSkills:
-    dev-flow:
-      - dev-flow
 epics:
   - id: settings-m3-resolved-sources
     title: Settings — M3 (Resolved sources enriquecido)
