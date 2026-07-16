@@ -277,8 +277,18 @@ repo: metal-squad
 epics:
   - id: e02-modern-tui
     title: E02 - Modern TUI
-    features: []
+    features:
+      - id: feat-01
+        title: Example feature
+        # Optional execution overrides; omitted values come from Projeto.
+        tool: codex
+        effort: high
 ```
+
+`backlog.yaml` is an import asset for epics and features. Project defaults and
+budget settings are stored in the catalog DB, not authored in this file. The
+loader accepts legacy `defaults` and `budget` blocks for migration, warns that
+they are ignored, and resolves the effective values from the Projeto settings.
 
 ### Supported Fields
 
@@ -297,9 +307,10 @@ legados com `defaults` continuam carregando, mas o bloco e ignorado com aviso.
 - `id`
 - `title`
 - `spec`
-- `tool`
+- `tool`: a tool-registry ID, such as `codex`
 - `model`
 - `effort`
+- `thinking`
 - `dependsOn`
 - `tasks`
 - `skills`
@@ -307,6 +318,7 @@ legados com `defaults` continuam carregando, mas o bloco e ignorado com aviso.
 - `context`
 - `workflow`
 - `retry`
+- `maxTokens`
 - `autoStart`: opt-in auto-pilot flag (default `false`) — see
   [Auto-Pilot](#auto-pilot) below
 
@@ -323,6 +335,36 @@ legados com `defaults` continuam carregando, mas o bloco e ignorado com aviso.
 - `maxAttempts`
 - `backoffMs`
 - `onFail`: `stop | continue | gate`
+
+### Settings Ownership: App, Projeto, and Feature
+
+Settings have three explicit owners:
+
+| Level | Source of truth | Owns | Execution inheritance |
+| --- | --- | --- | --- |
+| App | `~/.config/metal-squad/config.json` | runtime infrastructure, notifications, web settings, budget alerts, and the tool registry | Does not provide execution defaults |
+| Projeto | catalog DB for the repository | execution defaults (`tool`, `model`, `effort`, `thinking`, skills, workflow, stage-to-skill map, and `maxTokens`) | Base for every feature in the project |
+| Feature | catalog feature record, imported from `backlog.yaml` and editable in Settings | feature-specific execution overrides and feature work | Overrides Projeto only |
+
+`msq config show --feature <id>` resolves execution values in only two steps:
+**Projeto → Feature**. App configuration is intentionally outside that
+inheritance chain. A feature's `tool` value is a reference to an App-level
+tool-registry entry; the registry controls how the selected tool runs, not a
+third layer of feature defaults.
+
+### Tool Registry
+
+The App-level `tools` registry declares the tools available to projects and
+features. Every entry has an `id` referenced by `tool`, an `adapter`, and its
+invocation and capability settings:
+
+- `command`, `baseArgs`, `env`, and `versionCheck`
+- `capabilities` and `thinkingBudget`
+- `minTimeoutMs`
+
+The default registry includes `claude`, `codex`, and `opencode`. Custom IDs are
+allowed, and more than one ID may use the same adapter. A feature cannot select
+an unregistered ID.
 
 `task`:
 
@@ -411,16 +453,12 @@ Runs the feature stage by stage. The default system stage mapping is:
 - `specify -> speckit-specify`
 - `plan -> speckit-plan, speckit-tasks`
 - `implement -> speckit-implement, dev-flow`
-- `validate -> reviewr`
+- `validate -> review`
 
-Stage skill precedence is:
-
-1. System defaults
-2. Global config `stageSkills`
-3. Projeto (catalogo SQLite) `stageSkills`
-
-If a stage has no explicit mapping, the registry tries to resolve a skill with
-the same name as the stage itself.
+The default project template supplies this mapping. Each Projeto can customize
+its `stageSkills`; App configuration does not provide a competing stage-skill
+layer. If a stage has no explicit mapping, the registry tries to resolve a
+skill with the same name as the stage itself.
 
 ### Approvals and Human Input
 
@@ -588,10 +626,10 @@ It is created automatically on first run.
 {
   "concurrency": 3,
   "toolTimeoutMs": 600000,
+  "heartbeatMs": 30000,
   "staleRunThresholdMinutes": 120,
+  "idleThresholdMs": 30000,
   "promptContextCharLimit": 20000,
-  "theme": "default",
-  "telegramChatId": "123456789",
   "notifications": {
     "channels": [
       { "type": "desktop" },
@@ -609,24 +647,27 @@ It is created automatically on first run.
       "stage:input"
     ]
   },
-  "workflow": {
-    "pollIntervalMs": 2000
-  },
   "budget": {
-    "defaultMaxCostUsd": 5,
     "alertAtPercent": 80
-  },
-  "stageSkills": {
-    "specify": ["speckit-specify"],
-    "plan": ["speckit-plan", "speckit-tasks"],
-    "implement": ["speckit-implement", "dev-flow"],
-    "validate": ["reviewr"]
   },
   "web": {
     "host": "127.0.0.1",
     "port": 8743,
     "auth": "token"
-  }
+  },
+  "tools": [
+    {
+      "id": "codex",
+      "adapter": "codex",
+      "command": "codex",
+      "baseArgs": [],
+      "env": {},
+      "versionCheck": ["--version"],
+      "capabilities": { "model": true, "effort": true, "thinking": false },
+      "thinkingBudget": {},
+      "minTimeoutMs": 1800000
+    }
+  ]
 }
 ```
 
@@ -634,33 +675,28 @@ It is created automatically on first run.
 
 - `concurrency`: default concurrency for `msq run`
 - `toolTimeoutMs`: adapter timeout floor for tools that use it
+- `heartbeatMs`: interval used by the App to report a running adapter's health
 - `staleRunThresholdMinutes`: used by `msq status --repair-stale`
+- `idleThresholdMs`: threshold for detecting a run with no useful output
 - `promptContextCharLimit`: max chars per context section injected into prompts
-- `theme`: optional built-in TUI theme name: `default`, `dark`, `light`, or `minimal`
-- `telegramChatId`: legacy shortcut for a Telegram notification destination
 - `notifications.channels`: preferred notification routing
 - `notifications.events`: which events should be emitted
-- `workflow.autoAdvance`: project default with per-feature override for staged auto-advance
-- `workflow.pollIntervalMs`: polling interval for stage request resolution
-- `budget.defaultMaxCostUsd`: fallback cost cap when backlog has no `budget.maxCostUsd`
 - `budget.alertAtPercent`: alert threshold percentage
-- `stageSkills`: global stage-to-skill overrides
 - `web.host`: bind address for the web dashboard
 - `web.port`: port for the web dashboard
 - `web.auth`: `token` or `none`
+- `tools`: App-level registry that resolves each selected tool ID to its adapter
+  and invocation settings
 
 ### Precedence
 
-For stage skill mapping:
-
-1. system mapping
-2. global config `stageSkills`
-3. Projeto `stageSkills` (catalogo SQLite)
-
 For feature execution values:
 
-1. defaults do Projeto (catalogo SQLite)
-2. campos da feature
+1. Projeto defaults
+2. Feature fields
+
+App configuration is not an execution-default layer. It supplies infrastructure
+and the tool registry; a selected Feature/Projeto tool ID must resolve there.
 
 ## Notifications and Telegram
 
