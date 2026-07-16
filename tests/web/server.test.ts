@@ -40,6 +40,9 @@ const mocks = vi.hoisted(() => ({
   saveAppConfigPatch: vi.fn(),
   setSecret: vi.fn(),
   clearSecret: vi.fn(),
+  loadConfig: vi.fn(),
+  saveConfig: vi.fn(),
+  parseConfig: vi.fn((value) => value),
   spawn: vi.fn(),
   getPipeline: vi.fn(),
   getAdapter: vi.fn(),
@@ -74,6 +77,9 @@ vi.mock('../../src/config/index.js', () => ({
   resolveDbPath: () => '/tmp/metal-squad-web-test.db',
   resolveRuntimeConfig: mocks.resolveRuntimeConfig,
   saveAppConfigPatch: mocks.saveAppConfigPatch,
+  loadConfig: mocks.loadConfig,
+  saveConfig: mocks.saveConfig,
+  ConfigSchema: { parse: mocks.parseConfig },
 }));
 
 vi.mock('../../src/security/secrets.js', () => ({
@@ -940,6 +946,30 @@ describe('web server', () => {
     const notice = await waitForMessageType(socket, 'ui:notice');
     expect((notice as { payload: { message: string } }).payload.message).toContain('repo-1');
 
+    socket.close();
+  });
+
+  it('persists a complete App tool registry and broadcasts refreshed state', async () => {
+    const { createWebServer } = await import('../../src/web/server.js');
+    const tool = {
+      id: 'codex-canary', adapter: 'codex', command: 'codex-canary', baseArgs: [], env: {}, versionCheck: ['--version'],
+      capabilities: { model: true, effort: true, thinking: false }, thinkingBudget: { low: 0, medium: 0, high: 0 }, minTimeoutMs: 0,
+    };
+    mocks.loadConfig.mockReturnValue({ concurrency: 3 });
+
+    server = createWebServer({ host: '127.0.0.1', port: 0, auth: 'token', token: 'secret' });
+    await new Promise<void>((resolve) => server!.server.listen(0, '127.0.0.1', resolve));
+    const address = server!.server.address() as { port: number };
+    const socket = new WebSocket(`ws://127.0.0.1:${address.port}/ws`);
+    await waitForOpen(socket);
+    socket.send(JSON.stringify({ type: 'auth', token: 'secret' }));
+    await waitForSocketMessage(socket);
+
+    socket.send(JSON.stringify({ type: 'action:updateToolsRegistry', tools: [tool] }));
+
+    const stateMessage = await waitForMessageType(socket, 'state:full');
+    expect(mocks.saveConfig).toHaveBeenCalledWith({ concurrency: 3, tools: [tool] });
+    expect((stateMessage as { type: string }).type).toBe('state:full');
     socket.close();
   });
 
