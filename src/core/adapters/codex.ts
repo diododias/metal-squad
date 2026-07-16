@@ -50,6 +50,8 @@ export const codexAdapter: ToolAdapter = {
   tool: 'codex',
 
   capabilities: {
+    model: true,
+    effort: true,
     thinking: false,
   },
 
