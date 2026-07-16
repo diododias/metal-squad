@@ -218,7 +218,8 @@ export function App(): React.JSX.Element {
 
   return (
     <div
-      style={{ display: 'flex', flexDirection: isMobile ? 'column' : 'row', height: '100vh', width: '100vw', overflow: 'hidden', background: 'var(--bg-base)' }}
+      className="app-root"
+      style={{ display: 'flex', flexDirection: isMobile ? 'column' : 'row', width: '100vw', overflow: 'hidden', background: 'var(--bg-base)' }}
     >
       {!isMobile && (
         <Sidebar
