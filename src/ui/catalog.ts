@@ -3,9 +3,8 @@ import { resolve } from 'node:path';
 import { mergeExecutionDefaults, resolveConfigSnapshot, type ResolvedConfigSources, type ResolvedExecutionDefaults } from '../config/index.js';
 import { loadBacklogFromCatalog } from '../core/backlog/load.js';
 import { resolveRepo } from '../core/repo.js';
-import { getAdapter } from '../core/adapters/index.js';
-import type { ToolCapabilities } from '../core/adapters/types.js';
-import type { Budget, Retry, Task, Tool, Workflow } from '../core/backlog/schema.js';
+import { getCatalogMeta } from '../db/backlogCatalog.js';
+import { DefaultsSchema, type Budget, type Defaults, type Retry, type Task, type Workflow } from '../core/backlog/schema.js';
 
 const DESCRIPTION_CHAR_LIMIT = 4000;
 
@@ -52,20 +51,17 @@ export interface BacklogSettings {
   budget?: Budget;
   stageSkills: Record<string, string[]>;
   configSources?: ResolvedConfigSources;
+  /** Read-only merge of repo config + backlog defaults, used to resolve
+   * feature execution (see `mergeExecutionDefaults`). */
   resolvedDefaults?: ResolvedExecutionDefaults;
-  toolCapabilities?: Record<Tool, ToolCapabilities>;
+  /** SET-16: raw project defaults as stored in `backlog_catalog_meta`
+   * (`defaults_json`), separate from `resolvedDefaults` — this is the
+   * editable shape `action:updateProjectDefaults` patches. Falls back to
+   * schema defaults for a project that hasn't loaded a catalog yet. */
+  projectDefaults: Defaults;
 }
 
-const supportedTools: readonly Tool[] = ['claude', 'codex', 'opencode'];
-const DEFAULT_TOOL_CAPABILITIES: ToolCapabilities = { model: false, effort: false, thinking: false };
-
-function getToolCapabilities(): Record<Tool, ToolCapabilities> {
-  return Object.fromEntries(
-    supportedTools.map((tool) => [tool, getAdapter(tool).capabilities ?? DEFAULT_TOOL_CAPABILITIES]),
-  ) as Record<Tool, ToolCapabilities>;
-}
-
-const DEFAULT_BACKLOG_SETTINGS: BacklogSettings = { stageSkills: {}, toolCapabilities: getToolCapabilities() };
+const DEFAULT_BACKLOG_SETTINGS: BacklogSettings = { stageSkills: {}, projectDefaults: DefaultsSchema.parse({}) };
 
 function truncateDescription(text: string): string {
   if (text.length <= DESCRIPTION_CHAR_LIMIT) return text;
@@ -135,12 +131,17 @@ function loadCatalogAndSettings(cwd: string): void {
         ]),
       ),
     );
+    const catalogMeta = getCatalogMeta(repoId);
+    const projectDefaults = catalogMeta
+      ? DefaultsSchema.parse(JSON.parse(catalogMeta.defaults_json))
+      : DefaultsSchema.parse({});
+
     cachedSettings = {
       budget: backlog.budget,
       stageSkills: 'defaults' in backlog ? backlog.defaults.stageSkills : {},
       configSources: snapshot.sources,
       resolvedDefaults,
-      toolCapabilities: getToolCapabilities(),
+      projectDefaults,
     };
   } catch {
     cachedCatalog = {};

@@ -33,10 +33,13 @@ const mocks = vi.hoisted(() => ({
   assertWritableDbPath: vi.fn(),
   updateCatalogFeature: vi.fn(),
   updateCatalogTask: vi.fn(),
+  updateCatalogDefaults: vi.fn(),
   loadBacklogFromCatalog: vi.fn(),
   validateBacklogSkills: vi.fn(),
   resolveRuntimeConfig: vi.fn(),
   spawn: vi.fn(),
+  getPipeline: vi.fn(),
+  getAdapter: vi.fn(),
 }));
 
 vi.mock('../../src/core/repo.js', () => ({
@@ -50,6 +53,7 @@ vi.mock('../../src/db/index.js', () => ({
 vi.mock('../../src/db/backlogCatalog.js', () => ({
   updateCatalogFeature: mocks.updateCatalogFeature,
   updateCatalogTask: mocks.updateCatalogTask,
+  updateCatalogDefaults: mocks.updateCatalogDefaults,
 }));
 
 vi.mock('../../src/core/backlog/load.js', () => ({
@@ -97,6 +101,11 @@ vi.mock('../../src/db/repo.js', () => ({
   requestFeatureAbort: mocks.requestFeatureAbort,
   forceResolveGate: mocks.forceResolveGate,
   listCompletedFeatureIds: mocks.listCompletedFeatureIds,
+  getPipeline: mocks.getPipeline,
+}));
+
+vi.mock('../../src/core/adapters/index.js', () => ({
+  getAdapter: mocks.getAdapter,
 }));
 
 vi.mock('../../src/core/stats.js', () => ({
@@ -844,6 +853,59 @@ describe('web server', () => {
     socket.close();
   });
 
+  it('persists a project defaults patch and broadcasts state:full on success', async () => {
+    const { createWebServer } = await import('../../src/web/server.js');
+    mocks.updateCatalogDefaults.mockReturnValue({ defaults: { tool: 'codex', effort: 'high', skills: [], stageSkills: {} } });
+
+    server = createWebServer({ host: '127.0.0.1', port: 0, auth: 'token', token: 'secret' });
+    await new Promise<void>((resolve) => server!.server.listen(0, '127.0.0.1', resolve));
+    const address = server!.server.address() as { port: number };
+    const wsUrl = `ws://127.0.0.1:${address.port}/ws`;
+
+    const socket = new WebSocket(wsUrl);
+    await waitForOpen(socket);
+    socket.send(JSON.stringify({ type: 'auth', token: 'secret' }));
+    await waitForSocketMessage(socket); // state:full
+
+    socket.send(JSON.stringify({
+      type: 'action:updateProjectDefaults',
+      patch: { tool: 'codex', effort: 'high' },
+    }));
+
+    const stateMessage = await waitForMessageType(socket, 'state:full');
+    expect(mocks.updateCatalogDefaults).toHaveBeenCalledWith('repo-1', { tool: 'codex', effort: 'high' });
+    expect((stateMessage as { type: string }).type).toBe('state:full');
+
+    socket.close();
+  });
+
+  it('emits ui:notice without throwing when the project defaults patch fails', async () => {
+    const { createWebServer } = await import('../../src/web/server.js');
+    mocks.updateCatalogDefaults.mockImplementation(() => {
+      throw new Error('Catalog defaults not found for repo "repo-1".');
+    });
+
+    server = createWebServer({ host: '127.0.0.1', port: 0, auth: 'token', token: 'secret' });
+    await new Promise<void>((resolve) => server!.server.listen(0, '127.0.0.1', resolve));
+    const address = server!.server.address() as { port: number };
+    const wsUrl = `ws://127.0.0.1:${address.port}/ws`;
+
+    const socket = new WebSocket(wsUrl);
+    await waitForOpen(socket);
+    socket.send(JSON.stringify({ type: 'auth', token: 'secret' }));
+    await waitForSocketMessage(socket); // state:full
+
+    socket.send(JSON.stringify({
+      type: 'action:updateProjectDefaults',
+      patch: { tool: 'codex' },
+    }));
+
+    const notice = await waitForMessageType(socket, 'ui:notice');
+    expect((notice as { payload: { message: string } }).payload.message).toContain('repo-1');
+
+    socket.close();
+  });
+
   it('rebroadcasts refreshed state:full and run:detail after run-control actions', async () => {
     const { createWebServer } = await import('../../src/web/server.js');
 
@@ -1272,6 +1334,100 @@ describe('web server', () => {
 
     socket.send(JSON.stringify({ type: 'action:startFeature', featureId: 'feat-1' }));
     await vi.waitFor(() => expect(mocks.spawn).not.toHaveBeenCalled());
+
+    socket.close();
+  });
+
+  it('spawns resume with override args when the override tool is available', async () => {
+    const { createWebServer } = await import('../../src/web/server.js');
+
+    mocks.getPipeline.mockReturnValue({ id: 99, cwd, repoId: 'repo-1', featureId: 'feat-1' });
+    mocks.getAdapter.mockReturnValue({ isAvailable: () => true });
+
+    server = createWebServer({ host: '127.0.0.1', port: 0, auth: 'token', token: 'secret' });
+    await new Promise<void>((resolve) => server!.server.listen(0, '127.0.0.1', resolve));
+    const address = server!.server.address() as { port: number };
+    const socket = new WebSocket(`ws://127.0.0.1:${address.port}/ws`);
+    await waitForOpen(socket);
+    socket.send(JSON.stringify({ type: 'auth', token: 'secret' }));
+    await waitForSocketMessage(socket);
+
+    socket.send(JSON.stringify({
+      type: 'action:resumeWithOverride',
+      pipelineId: 99,
+      featureId: 'feat-1',
+      tool: 'codex',
+      model: 'gpt-5',
+      effort: 'high',
+    }));
+
+    await vi.waitFor(() => expect(mocks.spawn).toHaveBeenCalled());
+    expect(mocks.getAdapter).toHaveBeenCalledWith('codex');
+    const spawnArgs = mocks.spawn.mock.calls[0]?.[1] as string[];
+    expect(spawnArgs).toEqual(expect.arrayContaining(['resume', '99', '--tool', 'codex', '--model', 'gpt-5', '--effort', 'high']));
+    expect(mocks.loadBacklogFromCatalog).not.toHaveBeenCalled();
+    expect(mocks.updateCatalogFeature).not.toHaveBeenCalled();
+
+    socket.close();
+  });
+
+  it('blocks resumeWithOverride and emits ui:notice without spawning when the override tool is unavailable', async () => {
+    const { createWebServer } = await import('../../src/web/server.js');
+
+    mocks.getPipeline.mockReturnValue({ id: 99, cwd, repoId: 'repo-1', featureId: 'feat-1' });
+    mocks.getAdapter.mockReturnValue({ isAvailable: () => false });
+
+    server = createWebServer({ host: '127.0.0.1', port: 0, auth: 'token', token: 'secret' });
+    await new Promise<void>((resolve) => server!.server.listen(0, '127.0.0.1', resolve));
+    const address = server!.server.address() as { port: number };
+    const socket = new WebSocket(`ws://127.0.0.1:${address.port}/ws`);
+    await waitForOpen(socket);
+    socket.send(JSON.stringify({ type: 'auth', token: 'secret' }));
+    await waitForSocketMessage(socket);
+
+    const noticePromise = waitForMatchingMessage(
+      socket,
+      (message) => message.type === 'state:full'
+        && ((message.payload as { notifications: Array<{ type: string }> }).notifications.length > 0),
+    );
+    socket.send(JSON.stringify({
+      type: 'action:resumeWithOverride',
+      pipelineId: 99,
+      featureId: 'feat-1',
+      tool: 'opencode',
+    }));
+
+    const noticeState = await noticePromise;
+    expect((noticeState.payload as { notifications: Array<{ type: string; message: string }> }).notifications[0]?.type).toBe('notice');
+    expect(mocks.spawn).not.toHaveBeenCalled();
+
+    socket.close();
+  });
+
+  it('resumes without override flags when tool/model/effort are omitted', async () => {
+    const { createWebServer } = await import('../../src/web/server.js');
+
+    mocks.getPipeline.mockReturnValue({ id: 99, cwd, repoId: 'repo-1', featureId: 'feat-1' });
+
+    server = createWebServer({ host: '127.0.0.1', port: 0, auth: 'token', token: 'secret' });
+    await new Promise<void>((resolve) => server!.server.listen(0, '127.0.0.1', resolve));
+    const address = server!.server.address() as { port: number };
+    const socket = new WebSocket(`ws://127.0.0.1:${address.port}/ws`);
+    await waitForOpen(socket);
+    socket.send(JSON.stringify({ type: 'auth', token: 'secret' }));
+    await waitForSocketMessage(socket);
+
+    socket.send(JSON.stringify({
+      type: 'action:resumeWithOverride',
+      pipelineId: 99,
+      featureId: 'feat-1',
+    }));
+
+    await vi.waitFor(() => expect(mocks.spawn).toHaveBeenCalled());
+    expect(mocks.getAdapter).not.toHaveBeenCalled();
+    const spawnArgs = mocks.spawn.mock.calls[0]?.[1] as string[];
+    expect(spawnArgs).toEqual(expect.arrayContaining(['resume', '99']));
+    expect(spawnArgs).not.toContain('--tool');
 
     socket.close();
   });

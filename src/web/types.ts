@@ -145,6 +145,18 @@ export interface TaskConfigPatch {
   dependsOn?: string[];
 }
 
+/** Explicit narrow patch shape for `action:updateProjectDefaults` — mirrors
+ * `CatalogDefaultsPatch` on the wire so the client can't smuggle in fields
+ * outside the project defaults/budget contract. */
+export interface ProjectDefaultsPatch {
+  tool?: string;
+  model?: string;
+  effort?: string;
+  skills?: string[];
+  stageSkills?: Record<string, string[]>;
+  budget?: { maxTokens?: number; perFeatureMaxTokens?: number };
+}
+
 export interface FeatureConfigSaveIssue {
   path?: string;
   message: string;
@@ -163,6 +175,7 @@ export type WebSocketClientMessage =
     }
   | { type: 'action:updateFeatureConfig'; featureId: string; patch: FeatureConfigPatch }
   | { type: 'action:updateTaskConfig'; featureId: string; taskId: string; patch: TaskConfigPatch }
+  | { type: 'action:updateProjectDefaults'; patch: ProjectDefaultsPatch }
   | { type: 'action:pausePipeline'; pipelineId: number }
   | { type: 'action:resumePipeline'; pipelineId: number }
   | { type: 'action:abortPipeline'; pipelineId: number }
@@ -170,6 +183,14 @@ export type WebSocketClientMessage =
   | { type: 'action:resolveGate'; gateId: number; decision: 'approved' | 'skipped' | 'retried' }
   | { type: 'action:forceResolveGate'; gateId: number }
   | { type: 'action:resolveStageRequest'; requestId: number; response: string }
+  | {
+      type: 'action:resumeWithOverride';
+      pipelineId: number;
+      featureId: string;
+      tool?: string;
+      model?: string;
+      effort?: string;
+    }
   | { type: 'subscribe:output'; runId: number }
   | { type: 'unsubscribe:output'; runId: number }
   | { type: 'subscribe:runDetail'; runId: number }
