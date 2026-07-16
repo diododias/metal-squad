@@ -868,7 +868,7 @@ describe('executeBacklog failure persistence', () => {
       'specify',
       'approval',
       'Advance to stage plan?',
-      { runId: 7 },
+      { runId: 7, approvalChannel: 'telegram' },
     );
     expect(mockRunFeature).toHaveBeenNthCalledWith(
       1,
@@ -974,7 +974,7 @@ describe('executeBacklog failure persistence', () => {
       'specify',
       'approval',
       'Auto-advance enabled; next stage: plan.',
-      { runId: 7, response: 'advance', source: 'auto' },
+      { runId: 7, response: 'advance', source: 'auto', approvalChannel: 'telegram' },
     );
     expect(mockGetStageRequest).not.toHaveBeenCalled();
     expect(mockFinishPipeline).toHaveBeenCalledWith(9, 'done');

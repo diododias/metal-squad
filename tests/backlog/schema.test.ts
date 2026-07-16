@@ -108,6 +108,24 @@ describe('tool registry references', () => {
 });
 
 describe('BacklogV2Schema', () => {
+  it('accepts an approval channel that references a configured notification type', () => {
+    const result = BacklogV2Schema.safeParse({
+      ...V2_YAML_OBJ,
+      epics: [{
+        ...V2_YAML_OBJ.epics[0],
+        features: [{
+          ...V2_YAML_OBJ.epics[0].features[0],
+          workflow: {
+            ...V2_YAML_OBJ.epics[0].features[0].workflow,
+            approvals: { channel: 'slack', autoAdvance: false },
+          },
+        }],
+      }],
+    });
+    expect(result.success).toBe(true);
+    if (result.success) expect(result.data.epics[0]?.features[0]?.workflow.approvals.channel).toBe('slack');
+  });
+
   it('parses a valid v2 object', () => {
     const result = BacklogV2Schema.safeParse(V2_YAML_OBJ);
     expect(result.success).toBe(true);

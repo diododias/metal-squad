@@ -846,10 +846,10 @@ describe('web server', () => {
       payload: {
         featureId: 'feat1',
         ok: false,
-        issues: [{ path: 'workflow.approvals.channel', message: 'Invalid enum value.' }],
+        issues: [{ message: 'Approval channel "telegram" is not configured or has no credentials.' }],
       },
     });
-    expect(mocks.updateCatalogFeature).toHaveBeenCalledTimes(1);
+    expect(mocks.updateCatalogFeature).not.toHaveBeenCalled();
     socket.close();
   });
 

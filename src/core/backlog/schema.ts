@@ -26,7 +26,10 @@ export function createRegisteredToolSchema(registeredToolIds: readonly string[])
 export const EffortSchema = z.enum(['low', 'medium', 'high']);
 export const ThinkingSchema = z.enum(['on', 'off']);
 export const WorkflowModeSchema = z.enum(['single', 'staged']);
-export const WorkflowApprovalChannelSchema = z.enum(['telegram']);
+/** A configured notification channel type (for example `slack` or `desktop`).
+ * Availability and credentials are validated against the runtime notification
+ * config when the workflow is saved or an approval is dispatched. */
+export const WorkflowApprovalChannelSchema = z.string().trim().min(1);
 export const OnFailSchema = z.enum(['stop', 'continue', 'gate']);
 export const SessionPolicyModeSchema = z.enum(['isolated', 'adaptive']);
 export const FallbackAlternativeSchema = z.object({

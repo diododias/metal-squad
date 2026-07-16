@@ -361,7 +361,7 @@ function DefaultsTab({ state, send }: { state: MsqWebState; send: ConfigPageProp
             label="workflow.approvals.channel"
             value={draft.approvalChannel}
             initialValue={baseline.approvalChannel}
-            options={[{ value: 'telegram', label: 'telegram' }]}
+            options={Array.from(new Set([...state.runtimeConfig.notifications.channels.map((channel) => channel.type), baseline.approvalChannel])).map((channel) => ({ value: channel, label: channel }))}
             onChange={(approvalChannel) => { setDraft((current) => ({ ...current, approvalChannel: approvalChannel ?? '' })); }}
           />
           <EditableToggleField
