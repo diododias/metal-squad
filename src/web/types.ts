@@ -5,7 +5,7 @@ import type { PendingApproval } from '../ui/hooks/useGates.js';
 import type { FeatureCatalogEntry, BacklogSettings } from '../ui/catalog.js';
 import type { RunBreakdown } from '../core/stats.js';
 import type { ThemeRoleName } from '../ui/theme/types.js';
-import type { Config, NotificationChannelConfig } from '../config/index.js';
+import type { Config, NotificationChannelConfig, NotificationsPatch } from '../config/index.js';
 import type { Skill } from '../core/skills/types.js';
 
 export interface TokenStats {
@@ -44,6 +44,7 @@ export interface ThemeSnapshot {
 
 export interface WebNotificationChannel {
   type: NotificationChannelConfig['type'];
+  configured: boolean;
 }
 
 export type WebRuntimeConfig = Omit<Config, 'notifications' | 'telegramChatId'> & {
@@ -185,6 +186,7 @@ export type WebSocketClientMessage =
   | { type: 'action:updateFeatureConfig'; featureId: string; patch: FeatureConfigPatch }
   | { type: 'action:updateTaskConfig'; featureId: string; taskId: string; patch: TaskConfigPatch }
   | { type: 'action:updateProjectDefaults'; patch: ProjectDefaultsPatch }
+  | { type: 'action:updateNotifications'; patch: NotificationsPatch }
   | { type: 'action:pausePipeline'; pipelineId: number }
   | { type: 'action:resumePipeline'; pipelineId: number }
   | { type: 'action:abortPipeline'; pipelineId: number }

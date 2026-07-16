@@ -418,9 +418,9 @@ describe('buildMsqWebState pendingFeatures projection', () => {
     const state = buildMsqWebState();
 
     expect(state.runtimeConfig.notifications.channels).toEqual([
-      { type: 'slack' },
-      { type: 'telegram' },
-      { type: 'desktop' },
+      { type: 'slack', configured: true },
+      { type: 'telegram', configured: true },
+      { type: 'desktop', configured: true },
     ]);
     expect(state.runtimeConfig.notifications.events).toEqual(['run:start', 'run:done']);
     expect(JSON.stringify(state.runtimeConfig)).not.toContain('secret');

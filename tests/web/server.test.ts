@@ -37,6 +37,7 @@ const mocks = vi.hoisted(() => ({
   loadBacklogFromCatalog: vi.fn(),
   validateBacklogSkills: vi.fn(),
   resolveRuntimeConfig: vi.fn(),
+  saveNotificationsPatch: vi.fn(),
   spawn: vi.fn(),
   getPipeline: vi.fn(),
   getAdapter: vi.fn(),
@@ -70,6 +71,7 @@ vi.mock('../../src/config/index.js', () => ({
   DB_PATH_ENV: 'MSQ_DB_PATH',
   resolveDbPath: () => '/tmp/metal-squad-web-test.db',
   resolveRuntimeConfig: mocks.resolveRuntimeConfig,
+  saveNotificationsPatch: mocks.saveNotificationsPatch,
 }));
 
 vi.mock('node:child_process', async () => {
@@ -931,6 +933,29 @@ describe('web server', () => {
     const notice = await waitForMessageType(socket, 'ui:notice');
     expect((notice as { payload: { message: string } }).payload.message).toContain('repo-1');
 
+    socket.close();
+  });
+
+  it('persists a write-only notification patch and refreshes state', async () => {
+    const { createWebServer } = await import('../../src/web/server.js');
+    server = createWebServer({ host: '127.0.0.1', port: 0, auth: 'token', token: 'secret' });
+    await new Promise<void>((resolve) => server!.server.listen(0, '127.0.0.1', resolve));
+    const address = server!.server.address() as { port: number };
+    const socket = new WebSocket(`ws://127.0.0.1:${address.port}/ws`);
+    await waitForOpen(socket);
+    socket.send(JSON.stringify({ type: 'auth', token: 'secret' }));
+    await waitForSocketMessage(socket);
+
+    socket.send(JSON.stringify({
+      type: 'action:updateNotifications',
+      patch: { channels: [{ type: 'webhook', url: 'https://example.test/new-secret' }], events: ['run:done'] },
+    }));
+
+    await waitForMessageType(socket, 'state:full');
+    expect(mocks.saveNotificationsPatch).toHaveBeenCalledWith({
+      channels: [{ type: 'webhook', url: 'https://example.test/new-secret' }],
+      events: ['run:done'],
+    });
     socket.close();
   });
 

@@ -181,7 +181,13 @@ export function sanitizeRuntimeConfig(config: Config): WebRuntimeConfig {
   return {
     ...rest,
     notifications: {
-      channels: notifications.channels.map((channel) => ({ type: channel.type })),
+      channels: notifications.channels.map((channel) => ({
+        type: channel.type,
+        configured: channel.type === 'desktop'
+          || (channel.type === 'telegram' && channel.chatId.trim().length > 0)
+          || ((channel.type === 'slack' || channel.type === 'discord') && channel.webhookUrl.trim().length > 0)
+          || (channel.type === 'webhook' && channel.url.trim().length > 0),
+      })),
       events: notifications.events,
     },
   };

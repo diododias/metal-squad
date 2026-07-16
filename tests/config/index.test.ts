@@ -87,6 +87,30 @@ describe('config', () => {
     });
   });
 
+  it('preserves omitted notification credentials while updating events and removes them with a channel', async () => {
+    home = mkdtempSync(join(tmpdir(), 'msq-config-'));
+    process.env.HOME = home;
+
+    const { ConfigSchema, saveConfig, saveNotificationsPatch } = await import('../../src/config/index.js');
+    saveConfig(ConfigSchema.parse({
+      notifications: {
+        channels: [{ type: 'webhook', url: 'https://example.test/secret' }],
+        events: ['run:start'],
+      },
+    }));
+
+    const preserved = saveNotificationsPatch({
+      channels: [{ type: 'webhook' }],
+      events: ['run:done'],
+    });
+    expect(preserved.notifications).toEqual({
+      channels: [{ type: 'webhook', url: 'https://example.test/secret' }],
+      events: ['run:done'],
+    });
+
+    expect(saveNotificationsPatch({ channels: [] }).notifications.channels).toEqual([]);
+  });
+
   it('loads persisted config and ensures the data dir exists', async () => {
     home = mkdtempSync(join(tmpdir(), 'msq-config-'));
     process.env.HOME = home;

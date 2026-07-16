@@ -31,10 +31,10 @@ import { resolveRepo } from '../core/repo.js';
 import { loadBacklogFromCatalog } from '../core/backlog/load.js';
 import { selectStartableFeaturePlan } from '../core/orchestrator/graph.js';
 import { validateBacklogSkills } from '../core/skills/index.js';
-import { resolveRuntimeConfig } from '../config/index.js';
+import { resolveRuntimeConfig, saveNotificationsPatch, type NotificationsPatch } from '../config/index.js';
 import { updateCatalogFeature, updateCatalogTask, updateCatalogDefaults, type FeaturePatch, type CatalogDefaultsPatch } from '../db/backlogCatalog.js';
 import type { Feature, Task, Tool } from '../core/backlog/schema.js';
-import { buildMsqWebState, appendNotification } from './state.js';
+import { buildMsqWebState, appendNotification, resetWebStateCaches } from './state.js';
 import { createWebAuth, isAllowedHostHeader, isAllowedOrigin, timingSafeEqualStrings } from './auth.js';
 import type {
   FeatureConfigPatch,
@@ -712,6 +712,10 @@ export function createWebServer(options: {
         updateProjectDefaults(message.patch, featureCwd);
         break;
       }
+      case 'action:updateNotifications': {
+        updateNotifications(message.patch, featureCwd);
+        break;
+      }
       case 'action:pausePipeline': {
         pausePipeline(message.pipelineId);
         reconcileWebState(featureCwd);
@@ -1015,6 +1019,19 @@ export function createWebServer(options: {
     }
     reconcileWebState(featureCwd);
     msqEventBus.emit('ui:info', { message: 'Saved project defaults.' });
+  }
+
+  function updateNotifications(patch: NotificationsPatch, featureCwd: string): void {
+    try {
+      saveNotificationsPatch(patch);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      msqEventBus.emit('ui:notice', { message: `Could not save notifications: ${message}` });
+      return;
+    }
+    resetWebStateCaches();
+    reconcileWebState(featureCwd);
+    msqEventBus.emit('ui:info', { message: 'Saved notifications.' });
   }
 
   // Poll the DB for new output rows written by separated feature-runner

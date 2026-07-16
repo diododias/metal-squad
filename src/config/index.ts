@@ -58,6 +58,15 @@ export const NotificationChannelConfig = z.discriminatedUnion('type', [
 ]);
 export type NotificationChannelConfig = z.infer<typeof NotificationChannelConfig>;
 
+/** Write-only channel payload used by the Settings editor. Omitted credentials
+ * retain the credential of the channel at the same position. */
+export type NotificationChannelPatch =
+  | { type: 'telegram'; chatId?: string }
+  | { type: 'slack'; webhookUrl?: string }
+  | { type: 'discord'; webhookUrl?: string }
+  | { type: 'webhook'; url?: string }
+  | { type: 'desktop' };
+
 const DEFAULT_NOTIFICATION_EVENTS: NotificableEvent[] = [
   'run:start',
   'gate:created',
@@ -134,6 +143,11 @@ export type Config = z.infer<typeof ConfigSchema>;
 export type WebConfig = z.infer<typeof WebConfig>;
 export type RuntimeConfigOverride = z.infer<typeof RuntimeConfigOverrideSchema>;
 export type RepoDefaults = z.infer<typeof RepoDefaultsSchema>;
+
+export interface NotificationsPatch {
+  channels?: NotificationChannelPatch[];
+  events?: NotificableEvent[];
+}
 
 export interface RepoConfigFile {
   runtime: RuntimeConfigOverride;
@@ -215,6 +229,38 @@ export function resolveConfigSnapshot(cwd = process.cwd()): ResolvedConfigSnapsh
 export function saveConfig(cfg: Config): void {
   mkdirSync(CONFIG_DIR, { recursive: true });
   writeFileSync(CONFIG_PATH, JSON.stringify(cfg, null, 2));
+}
+
+export function saveNotificationsPatch(patch: NotificationsPatch): Config {
+  const current = loadConfig();
+  const channels = patch.channels?.map((channel, index) => {
+    const existing = current.notifications.channels[index];
+    switch (channel.type) {
+      case 'telegram':
+        return { type: channel.type, chatId: channel.chatId ?? (existing?.type === 'telegram' ? existing.chatId : undefined) };
+      case 'slack':
+      case 'discord':
+        return {
+          type: channel.type,
+          webhookUrl: channel.webhookUrl ?? (existing?.type === channel.type ? existing.webhookUrl : undefined),
+        };
+      case 'webhook':
+        return { type: channel.type, url: channel.url ?? (existing?.type === 'webhook' ? existing.url : undefined) };
+      case 'desktop':
+        return channel;
+    }
+  });
+  const merged = ConfigSchema.parse({
+    ...current,
+    notifications: {
+      ...current.notifications,
+      ...patch,
+      ...(channels ? { channels } : {}),
+    },
+  });
+
+  saveConfig(merged);
+  return merged;
 }
 
 /** Creates config.json with defaults on first run. No-op if the file already exists. */
