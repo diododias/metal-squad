@@ -19,7 +19,7 @@ export function registerResume(program: Command): void {
     .command('resume <target>')
     .description('Retoma uma pipeline pausada/abortada por run-id, feature-id ou repo-id')
     .option('-c, --concurrency <n>', 'runs paralelos globais')
-    .addOption(new Option('--tool <tool>', 'override pontual de ferramenta para esta retomada').choices(['claude', 'codex', 'opencode']))
+    .option('--tool <tool>', 'override pontual de ferramenta registrada para esta retomada')
     .option('--model <model>', 'override pontual de modelo para esta retomada')
     .addOption(new Option('--effort <effort>', 'override pontual de esforço para esta retomada').choices(['low', 'medium', 'high']))
     .action(async (target: string, opts: ResumeCliOptions) => {

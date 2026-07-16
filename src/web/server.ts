@@ -31,17 +31,21 @@ import { resolveRepo } from '../core/repo.js';
 import { loadBacklogFromCatalog } from '../core/backlog/load.js';
 import { selectStartableFeaturePlan } from '../core/orchestrator/graph.js';
 import { validateBacklogSkills } from '../core/skills/index.js';
-import { resolveRuntimeConfig } from '../config/index.js';
+import { ConfigSchema, loadConfig, resolveRuntimeConfig, saveAppConfigPatch, saveConfig, saveNotificationsPatch, type NotificationsPatch, type ToolRegistryEntry } from '../config/index.js';
+import { clearSecret, setSecret } from '../security/secrets.js';
 import { updateCatalogFeature, updateCatalogTask, updateCatalogDefaults, type FeaturePatch, type CatalogDefaultsPatch } from '../db/backlogCatalog.js';
-import type { Feature, Task, Tool } from '../core/backlog/schema.js';
-import { buildMsqWebState, appendNotification } from './state.js';
+import type { Feature, Task } from '../core/backlog/schema.js';
+import { buildMsqWebState, appendNotification, resetWebStateCaches } from './state.js';
 import { createWebAuth, isAllowedHostHeader, isAllowedOrigin, timingSafeEqualStrings } from './auth.js';
 import type {
+  AppConfigPatch,
   FeatureConfigPatch,
   FeatureConfigSaveIssue,
   FeatureConfigSaveResult,
+  BudgetConfigPatch,
   ProjectDefaultsPatch,
   RunChangesPayload,
+  SecretPatch,
   TaskConfigPatch,
   WebSocketClientMessage,
   WebSocketServerMessage,
@@ -648,16 +652,18 @@ export function createWebServer(options: {
         return;
       }
 
-      try {
-        console.log(`[ws] received message type=${message.type}`);
-        handleClientMessage(message, client, cwd);
-      } catch (error) {
-        const errorMessage = error instanceof Error ? error.message : String(error);
-        const errorStack = error instanceof Error ? error.stack : undefined;
-        console.error(`[ws] handleClientMessage error for ${message.type}: ${errorMessage}`);
-        if (errorStack) console.error(errorStack);
-        sendTo(client, { type: 'error', payload: { message: errorMessage } });
-      }
+      void (async (): Promise<void> => {
+        try {
+          console.log(`[ws] received message type=${message.type}`);
+          await handleClientMessage(message, client, cwd);
+        } catch (error) {
+          const errorMessage = error instanceof Error ? error.message : String(error);
+          const errorStack = error instanceof Error ? error.stack : undefined;
+          console.error(`[ws] handleClientMessage error for ${message.type}: ${errorMessage}`);
+          if (errorStack) console.error(errorStack);
+          sendTo(client, { type: 'error', payload: { message: errorMessage } });
+        }
+      })();
     });
 
     socket.on('close', () => {
@@ -680,11 +686,11 @@ export function createWebServer(options: {
     }
   });
 
-  function handleClientMessage(
+  async function handleClientMessage(
     message: Exclude<WebSocketClientMessage, { type: 'auth' }>,
     client: Client,
     featureCwd: string,
-  ): void {
+  ): Promise<void> {
     switch (message.type) {
       case 'action:startFeature': {
         startFeature(message.featureId, featureCwd);
@@ -710,6 +716,30 @@ export function createWebServer(options: {
       }
       case 'action:updateProjectDefaults': {
         updateProjectDefaults(message.patch, featureCwd);
+        break;
+      }
+      case 'action:updateBudgetConfig': {
+        updateBudgetConfig(message.patch, featureCwd);
+        break;
+      }
+      case 'action:updateNotifications': {
+        updateNotifications(message.patch, featureCwd);
+        break;
+      }
+      case 'action:updateAppConfig': {
+        updateAppConfig(message.patch, featureCwd);
+        break;
+      }
+      case 'action:setSecret': {
+        await saveSecret(message.patch, featureCwd);
+        break;
+      }
+      case 'action:clearSecret': {
+        await removeSecret(message.account, featureCwd);
+        break;
+      }
+      case 'action:updateToolsRegistry': {
+        updateToolsRegistry(message.tools, featureCwd);
         break;
       }
       case 'action:pausePipeline': {
@@ -818,6 +848,27 @@ export function createWebServer(options: {
     }
   }
 
+  function updateAppConfig(patch: AppConfigPatch, featureCwd: string): void {
+    saveAppConfigPatch(patch);
+    reconcileWebState(featureCwd);
+    msqEventBus.emit('ui:info', { message: 'Saved App config.' });
+  }
+
+  async function saveSecret(patch: SecretPatch, featureCwd: string): Promise<void> {
+    if (!patch.account.trim()) throw new Error('Secret account is required.');
+    if (!patch.value) throw new Error('Secret value is required.');
+    await setSecret(patch.account, patch.value);
+    reconcileWebState(featureCwd);
+    msqEventBus.emit('ui:info', { message: `Saved secret for ${patch.account}.` });
+  }
+
+  async function removeSecret(account: string, featureCwd: string): Promise<void> {
+    if (!account.trim()) throw new Error('Secret account is required.');
+    await clearSecret(account);
+    reconcileWebState(featureCwd);
+    msqEventBus.emit('ui:info', { message: `Cleared secret for ${account}.` });
+  }
+
   const outputUnsubscribe = msqEventBus.subscribe('run:output', (event) => {
     const data: WebSocketServerMessage = { type: 'run:output', payload: event };
     for (const client of clients.values()) {
@@ -899,7 +950,7 @@ export function createWebServer(options: {
     }
 
     if (tool) {
-      const adapter = getAdapter(tool as Tool);
+      const adapter = getAdapter(tool);
       if (!adapter.isAvailable?.()) {
         msqEventBus.emit('ui:notice', { message: `Tool "${tool}" is unavailable — resume aborted, no run created.` });
         return;
@@ -932,7 +983,7 @@ export function createWebServer(options: {
   function toFeaturePatch(patch: FeatureConfigPatch): FeaturePatch {
     return {
       ...(patch.spec !== undefined ? { spec: patch.spec } : {}),
-      ...(patch.tool !== undefined ? { tool: patch.tool as Feature['tool'] } : {}),
+      ...(patch.tool !== undefined ? { tool: patch.tool } : {}),
       ...(patch.model !== undefined ? { model: patch.model } : {}),
       ...(patch.effort !== undefined ? { effort: patch.effort as Feature['effort'] } : {}),
       ...(patch.thinking !== undefined ? { thinking: patch.thinking as Feature['thinking'] } : {}),
@@ -1015,6 +1066,56 @@ export function createWebServer(options: {
     }
     reconcileWebState(featureCwd);
     msqEventBus.emit('ui:info', { message: 'Saved project defaults.' });
+  }
+
+  function updateBudgetConfig(patch: BudgetConfigPatch, featureCwd: string): void {
+    try {
+      if (!Number.isInteger(patch.alertAtPercent) || patch.alertAtPercent < 0 || patch.alertAtPercent > 100) {
+        throw new Error('alertAtPercent must be a whole number between 0 and 100.');
+      }
+      const config = loadConfig();
+      saveConfig({
+        ...config,
+        budget: { ...config.budget, alertAtPercent: patch.alertAtPercent },
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      console.error(`[updateBudgetConfig] error: ${message}`);
+      msqEventBus.emit('ui:notice', { message: `Could not save budget settings: ${message}` });
+      return;
+    }
+    reconcileWebState(featureCwd);
+    msqEventBus.emit('ui:info', { message: 'Saved budget settings.' });
+  }
+
+  function updateNotifications(patch: NotificationsPatch, featureCwd: string): void {
+    try {
+      saveNotificationsPatch(patch);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      msqEventBus.emit('ui:notice', { message: `Could not save notifications: ${message}` });
+      return;
+    }
+    resetWebStateCaches();
+    reconcileWebState(featureCwd);
+    msqEventBus.emit('ui:info', { message: 'Saved notifications.' });
+  }
+
+  function updateToolsRegistry(tools: ToolRegistryEntry[], featureCwd: string): void {
+    try {
+      console.log(`[updateToolsRegistry] tools=${tools.map((tool) => tool.id).join(',')}`);
+      // loadConfig + saveConfig are intentional here: this is App-level state,
+      // not catalog state, and ConfigSchema owns duplicate-id/full-entry validation.
+      saveConfig(ConfigSchema.parse({ ...loadConfig(), tools }));
+      resetWebStateCaches();
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      console.error(`[updateToolsRegistry] error: ${message}`);
+      msqEventBus.emit('ui:notice', { message: `Could not save tools registry: ${message}` });
+      return;
+    }
+    reconcileWebState(featureCwd);
+    msqEventBus.emit('ui:info', { message: 'Saved tools registry.' });
   }
 
   // Poll the DB for new output rows written by separated feature-runner
