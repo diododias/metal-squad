@@ -5,7 +5,7 @@ import type { PendingApproval } from '../ui/hooks/useGates.js';
 import type { FeatureCatalogEntry, BacklogSettings } from '../ui/catalog.js';
 import type { RunBreakdown } from '../core/stats.js';
 import type { ThemeRoleName } from '../ui/theme/types.js';
-import type { Config, NotificationChannelConfig } from '../config/index.js';
+import type { Config, NotificationChannelConfig, ToolRegistryEntry } from '../config/index.js';
 import type { Skill } from '../core/skills/types.js';
 
 export interface TokenStats {
@@ -44,9 +44,17 @@ export interface ThemeSnapshot {
 
 export interface WebNotificationChannel {
   type: NotificationChannelConfig['type'];
+  /** Whether the channel has the credential material it needs, never the material itself. */
+  configured: boolean;
+}
+
+export interface RuntimeConfigWritability {
+  dbWritable: boolean;
+  configWritable: boolean;
 }
 
 export type WebRuntimeConfig = Omit<Config, 'notifications' | 'telegramChatId'> & {
+  writability: RuntimeConfigWritability;
   notifications: {
     channels: WebNotificationChannel[];
     events: Config['notifications']['events'];
@@ -166,6 +174,12 @@ export interface ProjectDefaultsPatch {
   budget?: { maxTokens?: number; perFeatureMaxTokens?: number };
 }
 
+/** Complete App-level tool registry replacement. The server validates this
+ * against ConfigSchema before it is persisted to config.json. */
+export interface ToolsRegistryPatch {
+  tools: ToolRegistryEntry[];
+}
+
 export interface FeatureConfigSaveIssue {
   path?: string;
   message: string;
@@ -185,6 +199,7 @@ export type WebSocketClientMessage =
   | { type: 'action:updateFeatureConfig'; featureId: string; patch: FeatureConfigPatch }
   | { type: 'action:updateTaskConfig'; featureId: string; taskId: string; patch: TaskConfigPatch }
   | { type: 'action:updateProjectDefaults'; patch: ProjectDefaultsPatch }
+  | { type: 'action:updateToolsRegistry'; tools: ToolRegistryEntry[] }
   | { type: 'action:pausePipeline'; pipelineId: number }
   | { type: 'action:resumePipeline'; pipelineId: number }
   | { type: 'action:abortPipeline'; pipelineId: number }

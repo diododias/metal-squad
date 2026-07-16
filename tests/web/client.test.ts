@@ -41,6 +41,10 @@ const settingsState = {
     promptContextCharLimit: 20_000,
     workflow: { autoAdvanceStages: false, pollIntervalMs: 5_000 },
     web: { host: '127.0.0.1', port: 3000, auth: 'none' },
+    tools: [
+      { id: 'claude', adapter: 'claude', command: 'claude', baseArgs: [], env: {}, versionCheck: ['--version'], capabilities: { model: true, effort: true, thinking: true }, thinkingBudget: { low: 0, medium: 0, high: 0 }, minTimeoutMs: 0 },
+      { id: 'codex-canary', adapter: 'codex', command: 'codex-canary', baseArgs: [], env: {}, versionCheck: ['--version'], capabilities: { model: true, effort: true, thinking: false }, thinkingBudget: { low: 0, medium: 0, high: 0 }, minTimeoutMs: 0 },
+    ],
     notifications: { channels: [], events: [] },
     budget: { alertAtPercent: 80, lastResetDate: null },
   },
@@ -49,7 +53,7 @@ const settingsState = {
     resolvedDefaults: undefined,
     budget: undefined,
     projectDefaults: {
-      tool: 'claude',
+      tool: 'codex',
       effort: 'medium',
       thinking: 'off',
       skills: ['speckit-specify'],
@@ -124,6 +128,7 @@ describe('Settings client surfaces', () => {
     expect(Array.from(container.querySelectorAll('button')).map((button) => button.textContent)).toEqual([
       '[Runtime]',
       'Defaults',
+      'Tools',
       'Skills',
       'Notifications',
       'Budget',
@@ -188,6 +193,16 @@ describe('Settings client surfaces', () => {
     });
 
     expect(messages).toEqual([{ type: 'action:updateProjectDefaults', patch: { effort: 'high' } }]);
+  });
+
+  it('shows registered tools and sends a complete registry update', () => {
+    const messages: WebSocketClientMessage[] = [];
+    const container = render(React.createElement(ConfigPage, { state: settingsState, isMobile: false, send: (message: WebSocketClientMessage) => { messages.push(message); } }));
+    act(() => { Array.from(container.querySelectorAll('button')).find((button) => button.textContent === 'Tools')?.click(); });
+    expect(container.textContent).toContain('Tools registry');
+    expect(container.textContent).toContain('claude');
+    act(() => { Array.from(container.querySelectorAll('button')).filter((button) => button.textContent === 'remove')[1]?.click(); });
+    expect(messages).toEqual([{ type: 'action:updateToolsRegistry', tools: [settingsState.runtimeConfig.tools[0]] }]);
   });
 
   it('renders Settings in the main navigation while retaining the config route', () => {

@@ -7,6 +7,7 @@ import { Tabs } from '../components/navigation/Tabs.js';
 import { Tag } from '../components/core/Tag.js';
 import { PageHeader } from '../PageHeader.js';
 import type { MsqWebState, ProjectDefaultsPatch, WebSocketClientMessage } from '../../types.js';
+import type { ToolRegistryEntry } from '../../../config/index.js';
 
 export interface ConfigPageProps {
   state: MsqWebState;
@@ -17,6 +18,7 @@ export interface ConfigPageProps {
 const SUB_TABS = [
   { id: 'runtime', label: 'Runtime' },
   { id: 'defaults', label: 'Defaults' },
+  { id: 'tools', label: 'Tools' },
   { id: 'skills', label: 'Skills' },
   { id: 'notifications', label: 'Notifications' },
   { id: 'budget', label: 'Budget' },
@@ -199,7 +201,7 @@ function DefaultsTab({ state, send }: { state: MsqWebState; send: ConfigPageProp
             label="tool"
             value={draft.tool}
             initialValue={baseline.tool}
-            options={['claude', 'codex', 'opencode'].map((tool) => ({ value: tool, label: tool }))}
+            options={state.runtimeConfig.tools.map((tool) => ({ value: tool.id, label: tool.id }))}
             onChange={(tool) => { setDraft((current) => ({ ...current, tool: tool ?? '' })); }}
           />
           <EditableTextField
@@ -304,6 +306,85 @@ function DefaultsTab({ state, send }: { state: MsqWebState; send: ConfigPageProp
   );
 }
 
+function emptyTool(): ToolRegistryEntry {
+  return {
+    id: '', adapter: 'claude', command: '', baseArgs: [], env: {}, versionCheck: ['--version'],
+    capabilities: { model: true, effort: true, thinking: true },
+    thinkingBudget: { low: 0, medium: 0, high: 0 }, minTimeoutMs: 0,
+  };
+}
+
+function listFromCsv(value: string): string[] {
+  return value.split(',').map((item) => item.trim()).filter(Boolean);
+}
+
+function ToolEditor({ tool, idReadOnly = false, onSave, onCancel }: { tool: ToolRegistryEntry; idReadOnly?: boolean; onSave: (tool: ToolRegistryEntry) => void; onCancel: () => void }): React.JSX.Element {
+  const [draft, setDraft] = useState<ToolRegistryEntry>(tool);
+  const [baseArgs, setBaseArgs] = useState(tool.baseArgs.join(', '));
+  const [versionCheck, setVersionCheck] = useState(tool.versionCheck.join(', '));
+  const [env, setEnv] = useState(JSON.stringify(tool.env));
+  const [issue, setIssue] = useState<string | null>(null);
+
+  function save(): void {
+    let parsedEnv: Record<string, string>;
+    try {
+      const parsed: unknown = JSON.parse(env);
+      if (!parsed || Array.isArray(parsed) || typeof parsed !== 'object' || Object.values(parsed).some((value) => typeof value !== 'string')) throw new Error();
+      parsedEnv = parsed as Record<string, string>;
+    } catch {
+      setIssue('env must be a JSON object with string values.');
+      return;
+    }
+    if (!draft.id.trim() || !draft.command.trim()) {
+      setIssue('id and command are required.');
+      return;
+    }
+    onSave({ ...draft, id: draft.id.trim(), command: draft.command.trim(), baseArgs: listFromCsv(baseArgs), versionCheck: listFromCsv(versionCheck), env: parsedEnv });
+  }
+
+  const input: React.CSSProperties = { width: '100%', boxSizing: 'border-box', background: 'var(--bg-sunken)', border: '1px solid var(--border-dim)', borderRadius: 'var(--radius-sm)', color: 'var(--text-primary)', padding: '6px 8px', fontFamily: 'var(--font-mono)' };
+  return (
+    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 10 }}>
+      <label>id<input aria-label="Tool id" readOnly={idReadOnly} style={input} value={draft.id} onChange={(event) => { setDraft({ ...draft, id: event.target.value }); }} /></label>
+      <label>adapter<select aria-label="Tool adapter" style={input} value={draft.adapter} onChange={(event) => { setDraft({ ...draft, adapter: event.target.value as ToolRegistryEntry['adapter'] }); }}><option value="claude">claude</option><option value="codex">codex</option><option value="opencode">opencode</option></select></label>
+      <label>command<input aria-label="Tool command" style={input} value={draft.command} onChange={(event) => { setDraft({ ...draft, command: event.target.value }); }} /></label>
+      <label>baseArgs (comma-separated)<input aria-label="Tool base arguments" style={input} value={baseArgs} onChange={(event) => { setBaseArgs(event.target.value); }} /></label>
+      <label>versionCheck (comma-separated)<input aria-label="Tool version check" style={input} value={versionCheck} onChange={(event) => { setVersionCheck(event.target.value); }} /></label>
+      <label>minTimeoutMs<input aria-label="Tool minimum timeout" type="number" min="0" style={input} value={draft.minTimeoutMs} onChange={(event) => { setDraft({ ...draft, minTimeoutMs: Number(event.target.value) }); }} /></label>
+      <label style={{ gridColumn: '1 / -1' }}>env (JSON)<input aria-label="Tool environment" style={input} value={env} onChange={(event) => { setEnv(event.target.value); }} /></label>
+      {(['model', 'effort', 'thinking'] as const).map((key) => <label key={key}><input type="checkbox" checked={draft.capabilities[key]} onChange={(event) => { setDraft({ ...draft, capabilities: { ...draft.capabilities, [key]: event.target.checked } }); }} /> supports {key}</label>)}
+      {(['low', 'medium', 'high'] as const).map((key) => <label key={key}>thinking {key}<input aria-label={`Tool thinking ${key}`} type="number" min="0" style={input} value={draft.thinkingBudget[key]} onChange={(event) => { setDraft({ ...draft, thinkingBudget: { ...draft.thinkingBudget, [key]: Number(event.target.value) } }); }} /></label>)}
+      {issue && <span style={{ gridColumn: '1 / -1', color: 'var(--accent-warn)' }}>{issue}</span>}
+      <div style={{ gridColumn: '1 / -1', display: 'flex', gap: 8 }}><Button variant="primary" size="sm" onClick={save}>save tool</Button><Button variant="neutral" size="sm" onClick={onCancel}>cancel</Button></div>
+    </div>
+  );
+}
+
+function ToolsTab({ state, send }: { state: MsqWebState; send: ConfigPageProps['send'] }): React.JSX.Element {
+  const tools = state.runtimeConfig.tools;
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [adding, setAdding] = useState(false);
+  const inUse = (id: string): boolean => state.backlogSettings.projectDefaults.tool === id || Object.values(state.featureCatalog).some((feature) => feature.tool === id);
+  const save = (next: ToolRegistryEntry, originalId?: string): void => {
+    const nextTools = originalId ? tools.map((tool) => tool.id === originalId ? next : tool) : [...tools, next];
+    send({ type: 'action:updateToolsRegistry', tools: nextTools });
+    setEditingId(null);
+    setAdding(false);
+  };
+
+  return <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+    <Card title="Tools registry">
+      <p style={{ color: 'var(--text-dim)', fontSize: 'var(--text-sm)', marginTop: 0 }}>App-level tool definitions. Changes are saved to config.json and become available in tool selects immediately.</p>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+        {tools.map((tool) => <div key={tool.id} style={{ borderBottom: '1px solid var(--border-dim)', paddingBottom: 12 }}>
+          {editingId === tool.id ? <ToolEditor tool={tool} idReadOnly={inUse(tool.id)} onSave={(next) => { save(next, tool.id); }} onCancel={() => { setEditingId(null); }} /> : <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}><strong>{tool.id}</strong><Tag tone="accent">{tool.adapter}</Tag><span style={{ color: 'var(--text-dim)', fontFamily: 'var(--font-mono)', fontSize: 'var(--text-xs)' }}>{tool.command}</span><Button variant="neutral" size="sm" onClick={() => { setEditingId(tool.id); setAdding(false); }}>edit</Button><Button variant="destructive" size="sm" disabled={inUse(tool.id) || tools.length <= 1} title={inUse(tool.id) ? 'A tool referenced by defaults or a feature cannot be removed.' : tools.length <= 1 ? 'The registry must retain at least one tool.' : 'Remove tool'} onClick={() => { send({ type: 'action:updateToolsRegistry', tools: tools.filter((candidate) => candidate.id !== tool.id) }); }}>remove</Button>{inUse(tool.id) && <span style={{ color: 'var(--accent-warn)', fontSize: 'var(--text-xs)' }}>in use — removal blocked</span>}</div>}
+        </div>)}
+        {adding ? <ToolEditor tool={emptyTool()} onSave={(next) => { save(next); }} onCancel={() => { setAdding(false); }} /> : <div><Button variant="primary" size="sm" onClick={() => { setAdding(true); setEditingId(null); }}>add tool</Button></div>}
+      </div>
+    </Card>
+  </div>;
+}
+
 function SkillsTab({ state }: { state: MsqWebState }): React.JSX.Element {
   return (
     <Card title="Discovered skills (repo > global > external > builtin)">
@@ -373,6 +454,8 @@ export function ConfigPage({ state, send }: ConfigPageProps): React.JSX.Element 
         return <RuntimeTab state={state} />;
       case 'defaults':
         return <DefaultsTab state={state} send={send} />;
+      case 'tools':
+        return <ToolsTab state={state} send={send} />;
       case 'skills':
         return <SkillsTab state={state} />;
       case 'notifications':

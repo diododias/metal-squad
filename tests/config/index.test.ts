@@ -266,7 +266,7 @@ describe('config', () => {
     expect(loadConfig().theme).toBe('solarized');
   });
 
-  it('loads repo runtime overrides and env interpolation from .msq/config.yaml', async () => {
+  it('loads repo runtime overrides but ignores legacy defaults from .msq/config.yaml', async () => {
     home = mkdtempSync(join(tmpdir(), 'msq-config-'));
     process.env.HOME = home;
     process.env.SLACK_WEBHOOK_URL = 'https://example.test/hook';
@@ -294,12 +294,10 @@ describe('config', () => {
     const repoConfig = loadRepoConfig(join(home, 'repo'));
     const runtime = resolveRuntimeConfig(join(home, 'repo'));
 
-    expect(repoConfig.defaults).toEqual({
-      tool: 'codex',
-      model: 'gpt-5.4',
-      effort: 'high',
-      stageSkills: { plan: ['speckit-plan'] },
-    });
+    expect(repoConfig).toEqual({ runtime: {
+      concurrency: 5,
+      notifications: { channels: [{ type: 'slack', webhookUrl: 'https://example.test/hook' }] },
+    } });
     expect(runtime.concurrency).toBe(5);
     expect(runtime.notifications.channels).toEqual([
       { type: 'slack', webhookUrl: 'https://example.test/hook' },
