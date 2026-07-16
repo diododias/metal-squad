@@ -5,7 +5,7 @@ import type { PendingApproval } from '../ui/hooks/useGates.js';
 import type { FeatureCatalogEntry, BacklogSettings } from '../ui/catalog.js';
 import type { RunBreakdown } from '../core/stats.js';
 import type { ThemeRoleName } from '../ui/theme/types.js';
-import type { Config, NotificationChannelConfig, ToolRegistryEntry } from '../config/index.js';
+import type { AppConfigPatch as ConfigAppConfigPatch, Config, NotificationChannelConfig, ToolRegistryEntry } from '../config/index.js';
 import type { Skill } from '../core/skills/types.js';
 
 export interface TokenStats {
@@ -172,6 +172,16 @@ export interface ToolsRegistryPatch {
   tools: ToolRegistryEntry[];
 }
 
+/** App-owned runtime config patch accepted by the Settings WebSocket API. */
+export type AppConfigPatch = ConfigAppConfigPatch;
+
+/** Write-only secret input. It is accepted by the WebSocket action but is never
+ * included in state or any server message. */
+export interface SecretPatch {
+  account: string;
+  value: string;
+}
+
 export interface FeatureConfigSaveIssue {
   path?: string;
   message: string;
@@ -192,6 +202,9 @@ export type WebSocketClientMessage =
   | { type: 'action:updateTaskConfig'; featureId: string; taskId: string; patch: TaskConfigPatch }
   | { type: 'action:updateProjectDefaults'; patch: ProjectDefaultsPatch }
   | { type: 'action:updateToolsRegistry'; tools: ToolRegistryEntry[] }
+  | { type: 'action:updateAppConfig'; patch: AppConfigPatch }
+  | { type: 'action:setSecret'; patch: SecretPatch }
+  | { type: 'action:clearSecret'; account: string }
   | { type: 'action:pausePipeline'; pipelineId: number }
   | { type: 'action:resumePipeline'; pipelineId: number }
   | { type: 'action:abortPipeline'; pipelineId: number }
