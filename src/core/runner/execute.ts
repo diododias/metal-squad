@@ -170,7 +170,7 @@ export async function executeBacklog(
   let autoPilotProtectiveStop = false;
 
   const repoStageSkills = backlog.version === 2 ? backlog.defaults.stageSkills : {};
-  const effectiveStageSkills = collectEffectiveStageSkills(repoStageSkills, config.stageSkills);
+  const effectiveStageSkills = collectEffectiveStageSkills(repoStageSkills);
   const completedFeatureIds = listCompletedFeatureIds(repoId);
 
   const resolvedPlan = opts.featureId
@@ -915,7 +915,7 @@ async function executeStagedFeature(
         res.control.prompt,
         { runId, options: res.control.options },
       );
-      const response = await waitForStageRequestResponse(requestId, config.workflow.pollIntervalMs);
+      const response = await waitForStageRequestResponse(requestId, 2_000);
       stageInputs.set(stage, [...(stageInputs.get(stage) ?? []), response]);
       // Reuse the same resume-vs-new-session policy as a normal stage
       // transition instead of always forcing a fresh session — a needs_input
@@ -1015,7 +1015,7 @@ async function executeStagedFeature(
       feature.id,
       stage,
       nextStage,
-      config.workflow.pollIntervalMs,
+      2_000,
       runId,
     );
     if (decision === 'retry') {

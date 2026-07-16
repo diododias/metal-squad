@@ -53,7 +53,7 @@ export interface RuntimeConfigWritability {
   configWritable: boolean;
 }
 
-export type WebRuntimeConfig = Omit<Config, 'notifications' | 'telegramChatId'> & {
+export type WebRuntimeConfig = Omit<Config, 'notifications'> & {
   writability: RuntimeConfigWritability;
   notifications: {
     channels: WebNotificationChannel[];

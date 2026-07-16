@@ -5,6 +5,8 @@ import { parse } from 'yaml';
 import { z } from 'zod';
 import type { Defaults, Feature } from '../core/backlog/schema.js';
 import { AdapterSchema, EffortSchema, ThinkingSchema, ToolSchema } from '../core/backlog/schema.js';
+import { getCatalogMeta, updateCatalogDefaults } from '../db/backlogCatalog.js';
+import { resolveRepo } from '../core/repo.js';
 
 export const CONFIG_DIR = join(homedir(), '.config', 'metal-squad');
 export const DATA_DIR = join(homedir(), '.local', 'share', 'metal-squad');
@@ -79,10 +81,6 @@ const DEFAULT_NOTIFICATION_EVENTS: NotificableEvent[] = [
 const NotificationsConfig = z.object({
   channels: z.array(NotificationChannelConfig).default([]),
   events: z.array(z.enum(NOTIFICABLE_EVENTS)).default(DEFAULT_NOTIFICATION_EVENTS),
-});
-
-const WorkflowConfig = z.object({
-  pollIntervalMs: z.number().int().positive().default(2_000),
 });
 
 const BudgetConfig = z.object({
@@ -179,13 +177,9 @@ const RuntimeConfigOverrideSchema = z.object({
   staleRunThresholdMinutes: z.number().int().positive().optional(),
   idleThresholdMs: z.number().int().positive().optional(),
   promptContextCharLimit: z.number().int().positive().optional(),
-  theme: z.string().trim().min(1).optional(),
-  telegramChatId: z.string().optional(),
   notifications: NotificationsConfig.partial().optional(),
-  workflow: WorkflowConfig.partial().optional(),
   budget: BudgetConfig.partial().optional(),
   web: WebConfig.partial().optional(),
-  stageSkills: z.record(z.string(), z.array(z.string())).optional(),
 });
 
 export const REPO_CONFIG_PATH = '.msq/config.yaml';
@@ -198,22 +192,16 @@ export const ConfigSchema = z.object({
   staleRunThresholdMinutes: z.number().int().positive().default(120),
   idleThresholdMs: z.number().int().positive().default(30_000),
   promptContextCharLimit: z.number().int().positive().default(20_000),
-  theme: z.string().trim().min(1).optional(),
-  telegramChatId: z.string().optional(),
   notifications: NotificationsConfig.default({}),
-  workflow: WorkflowConfig.default({}),
   budget: BudgetConfig.default({}),
   web: WebConfig.default({}),
-  stageSkills: z.record(z.string(), z.array(z.string())).default({}),
   tools: ToolRegistrySchema.default(DEFAULT_TOOL_REGISTRY),
 });
 export type Config = z.infer<typeof ConfigSchema>;
-export interface AppConfigPatch extends Omit<Partial<Config>, 'notifications' | 'workflow' | 'budget' | 'web' | 'stageSkills'> {
+export interface AppConfigPatch extends Omit<Partial<Config>, 'notifications' | 'budget' | 'web'> {
   notifications?: Partial<Config['notifications']>;
-  workflow?: Partial<Config['workflow']>;
   budget?: Partial<Config['budget']>;
   web?: Partial<Config['web']>;
-  stageSkills?: Config['stageSkills'];
 }
 export type ToolRegistryEntry = z.infer<typeof ToolRegistryEntrySchema>;
 export type WebConfig = z.infer<typeof WebConfig>;
@@ -279,12 +267,14 @@ export function loadRepoConfig(cwd = process.cwd()): RepoConfigFile {
 }
 
 export function resolveRuntimeConfig(cwd = process.cwd()): Config {
+  migrateLegacyStageSkills(cwd);
   const globalConfig = loadConfig();
   const repoConfig = loadRepoConfig(cwd);
   return mergeRuntimeConfig(globalConfig, repoConfig.runtime);
 }
 
 export function resolveConfigSnapshot(cwd = process.cwd()): ResolvedConfigSnapshot {
+  migrateLegacyStageSkills(cwd);
   const repoConfigPath = REPO_CONFIG_ABS_PATH(cwd);
   const hasRepoConfig = existsSync(repoConfigPath);
   const repoConfig = loadRepoConfig(cwd);
@@ -359,10 +349,8 @@ export function saveAppConfigPatch(patch: AppConfigPatch): Config {
     ...current,
     ...patch,
     notifications: patch.notifications ? { ...current.notifications, ...patch.notifications } : current.notifications,
-    workflow: patch.workflow ? { ...current.workflow, ...patch.workflow } : current.workflow,
     budget: patch.budget ? { ...current.budget, ...patch.budget } : current.budget,
     web: patch.web ? { ...current.web, ...patch.web } : current.web,
-    stageSkills: patch.stageSkills ? { ...current.stageSkills, ...patch.stageSkills } : current.stageSkills,
   });
 
   if (!configWritable()) {
@@ -391,6 +379,9 @@ function normalizeLegacyConfig(raw: unknown): unknown {
   if (!raw || typeof raw !== 'object') return raw;
   const cfg = structuredClone(raw) as {
     telegramChatId?: string;
+    theme?: unknown;
+    workflow?: unknown;
+    stageSkills?: unknown;
     notifications?: {
       channels?: { type: string; chatId?: string }[];
       events?: string[];
@@ -403,6 +394,10 @@ function normalizeLegacyConfig(raw: unknown): unknown {
       channels: [{ type: 'telegram', chatId: cfg.telegramChatId }],
     };
   }
+  delete cfg.telegramChatId;
+  delete cfg.theme;
+  delete cfg.workflow;
+  delete cfg.stageSkills;
 
   const events = cfg.notifications?.events ?? [];
   const legacyEventDefaults = [
@@ -421,6 +416,33 @@ function normalizeLegacyConfig(raw: unknown): unknown {
   }
 
   return cfg;
+}
+
+/**
+ * `stageSkills` used to be an application-wide setting. Project defaults are
+ * now its owner, so copy a valid legacy value into an already-published
+ * catalog. We intentionally retain the old JSON field on disk until a catalog
+ * exists: this lets a first `backlog load` create the project before the next
+ * config resolution performs the migration, without making startup fail.
+ */
+function migrateLegacyStageSkills(cwd: string): void {
+  if (!existsSync(CONFIG_PATH)) return;
+  try {
+    const raw: unknown = JSON.parse(readFileSync(CONFIG_PATH, 'utf8'));
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return;
+    const stageSkills = z.record(z.string(), z.array(z.string())).safeParse(
+      (raw as { stageSkills?: unknown }).stageSkills,
+    );
+    if (!stageSkills.success || Object.keys(stageSkills.data).length === 0) return;
+
+    const { repoId } = resolveRepo(cwd);
+    if (!getCatalogMeta(repoId)) return;
+    updateCatalogDefaults(repoId, { stageSkills: stageSkills.data });
+    writeFileSync(CONFIG_PATH, `${JSON.stringify(normalizeLegacyConfig(raw), null, 2)}\n`);
+  } catch {
+    // Legacy config must never prevent startup. Invalid JSON is reported by
+    // loadConfig with its actionable path-specific error instead.
+  }
 }
 
 export function mergeStageSkills(
@@ -460,12 +482,6 @@ export function mergeRuntimeConfig(base: Config, overlay: RuntimeConfigOverride 
           events: overlay.notifications.events ?? base.notifications.events,
         }
       : base.notifications,
-    workflow: overlay.workflow
-      ? {
-          ...base.workflow,
-          ...overlay.workflow,
-        }
-      : base.workflow,
     budget: overlay.budget
       ? {
           ...base.budget,
@@ -478,7 +494,6 @@ export function mergeRuntimeConfig(base: Config, overlay: RuntimeConfigOverride 
           ...overlay.web,
         }
       : base.web,
-    stageSkills: mergeStageSkills(base.stageSkills, overlay.stageSkills),
   });
 }
 

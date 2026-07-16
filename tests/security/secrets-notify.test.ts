@@ -29,7 +29,7 @@ vi.mock('../../src/config/index.js', () => ({
 
 beforeEach(() => {
   vi.clearAllMocks();
-  mockLoadConfig.mockReturnValue({});
+  mockLoadConfig.mockReturnValue({ notifications: { channels: [] } });
 });
 
 describe('secrets', () => {
@@ -87,7 +87,7 @@ describe('notify', () => {
     vi.doMock('../../src/security/secrets.js', () => ({
       getSecret: vi.fn().mockResolvedValue('bot-token'),
     }));
-    mockLoadConfig.mockReturnValue({ telegramChatId: 'chat-1' });
+    mockLoadConfig.mockReturnValue({ notifications: { channels: [{ type: 'telegram', chatId: 'chat-1' }] } });
     const fetchSpy = vi.fn().mockResolvedValue({ ok: true });
     vi.stubGlobal('fetch', fetchSpy);
 
