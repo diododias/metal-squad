@@ -1,7 +1,6 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { mergeExecutionDefaults, resolveConfigSnapshot, type ResolvedConfigSources, type ResolvedExecutionDefaults } from '../config/index.js';
-import { getAdapter } from '../core/adapters/index.js';
 import type { ToolCapabilities } from '../core/adapters/types.js';
 import { loadBacklogFromCatalog } from '../core/backlog/load.js';
 import { resolveRepo } from '../core/repo.js';
@@ -47,15 +46,13 @@ export interface FeatureCatalogEntry {
   pendingDependencies?: string[];
 }
 
-/** F31 section 5b: backlog-level settings shown alongside per-feature config
- * (budget and stageSkills live on the backlog/defaults, not per feature). */
+/** F31 section 5b: project-level settings shown alongside per-feature config. */
 export interface BacklogSettings {
   budget?: Budget;
   stageSkills: Record<string, string[]>;
   toolCapabilities?: Record<string, ToolCapabilities>;
   configSources?: ResolvedConfigSources;
-  /** Read-only merge of repo config + backlog defaults, used to resolve
-   * feature execution (see `mergeExecutionDefaults`). */
+  /** Resolved project defaults used to execute features. */
   resolvedDefaults?: ResolvedExecutionDefaults;
   /** SET-16: raw project defaults as stored in `backlog_catalog_meta`
    * (`defaults_json`), separate from `resolvedDefaults` — this is the
@@ -65,9 +62,9 @@ export interface BacklogSettings {
 }
 
 const DEFAULT_TOOL_CAPABILITIES: Record<string, ToolCapabilities> = {
-  claude: getAdapter('claude').capabilities ?? { model: true, effort: true, thinking: true },
-  codex: getAdapter('codex').capabilities ?? { model: true, effort: true, thinking: true },
-  opencode: getAdapter('opencode').capabilities ?? { model: true, effort: true, thinking: true },
+  claude: { model: true, effort: true, thinking: true },
+  codex: { model: true, effort: true, thinking: false },
+  opencode: { model: true, effort: false, thinking: false },
 };
 
 const DEFAULT_BACKLOG_SETTINGS: BacklogSettings = {
@@ -110,14 +107,7 @@ function loadCatalogAndSettings(cwd: string): void {
     const snapshot = resolveConfigSnapshot(cwd);
     const { repoId } = resolveRepo(cwd);
     const backlog = loadBacklogFromCatalog(repoId, cwd);
-    const resolvedDefaults = mergeExecutionDefaults({
-      tool: snapshot.repoDefaults.tool ?? 'claude',
-      model: snapshot.repoDefaults.model,
-      effort: snapshot.repoDefaults.effort ?? 'medium',
-      thinking: snapshot.repoDefaults.thinking ?? 'off',
-      skills: snapshot.repoDefaults.skills ?? [],
-      stageSkills: snapshot.repoDefaults.stageSkills ?? {},
-    }, backlog.defaults);
+    const resolvedDefaults = mergeExecutionDefaults(DefaultsSchema.parse({}), backlog.defaults);
     cachedCatalog = Object.fromEntries(
       backlog.epics.flatMap((epic) =>
         epic.features.map((feature) => [
@@ -151,7 +141,7 @@ function loadCatalogAndSettings(cwd: string): void {
 
     cachedSettings = {
       budget: backlog.budget,
-      stageSkills: 'defaults' in backlog ? backlog.defaults.stageSkills : {},
+      stageSkills: backlog.defaults.stageSkills,
       toolCapabilities: DEFAULT_TOOL_CAPABILITIES,
       configSources: snapshot.sources,
       resolvedDefaults,

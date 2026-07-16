@@ -10,6 +10,23 @@ const DEFAULT_NOTIFICATIONS = {
 const DEFAULT_WORKFLOW = { autoAdvanceStages: false, pollIntervalMs: 2_000 };
 const DEFAULT_BUDGET = { alertAtPercent: 80 };
 const DEFAULT_WEB = { host: '127.0.0.1', port: 8_743, auth: 'token', statusSpinner: true };
+const DEFAULT_TOOLS = [
+  {
+    id: 'claude', adapter: 'claude', command: 'claude', baseArgs: [], env: {}, versionCheck: ['--version'],
+    capabilities: { model: true, effort: true, thinking: true },
+    thinkingBudget: { low: 4_000, medium: 10_000, high: 24_000 }, minTimeoutMs: 0,
+  },
+  {
+    id: 'codex', adapter: 'codex', command: 'codex', baseArgs: [], env: {}, versionCheck: ['--version'],
+    capabilities: { model: true, effort: true, thinking: false },
+    thinkingBudget: { low: 0, medium: 0, high: 0 }, minTimeoutMs: 1_800_000,
+  },
+  {
+    id: 'opencode', adapter: 'opencode', command: 'opencode', baseArgs: [], env: {}, versionCheck: ['--version'],
+    capabilities: { model: true, effort: false, thinking: false },
+    thinkingBudget: { low: 0, medium: 0, high: 0 }, minTimeoutMs: 0,
+  },
+];
 
 describe('config', () => {
   const previousHome = process.env.HOME;
@@ -48,7 +65,49 @@ describe('config', () => {
       workflow: DEFAULT_WORKFLOW,
       budget: DEFAULT_BUDGET,
       web: DEFAULT_WEB,
+      tools: DEFAULT_TOOLS,
     });
+  });
+
+  it('accepts multiple ids for the same adapter', async () => {
+    const { ConfigSchema } = await import('../../src/config/index.js');
+
+    const config = ConfigSchema.parse({
+      tools: [
+        ...DEFAULT_TOOLS,
+        {
+          ...DEFAULT_TOOLS[1],
+          id: 'codex-canary',
+          command: 'codex-canary',
+        },
+      ],
+    });
+
+    expect(config.tools.map((tool) => tool.id)).toContain('codex-canary');
+    expect(config.tools.filter((tool) => tool.adapter === 'codex')).toHaveLength(2);
+  });
+
+  it('rejects malformed tool entries and duplicate ids with actionable paths', async () => {
+    const { ConfigSchema } = await import('../../src/config/index.js');
+
+    const malformed = ConfigSchema.safeParse({
+      tools: [{ id: 'bad id', adapter: 'codex' }],
+    });
+    expect(malformed.success).toBe(false);
+    if (!malformed.success) {
+      expect(malformed.error.issues.map((issue) => issue.path.join('.'))).toContain('tools.0.command');
+      expect(malformed.error.issues.map((issue) => issue.path.join('.'))).toContain('tools.0.id');
+    }
+
+    const duplicate = ConfigSchema.safeParse({
+      tools: [DEFAULT_TOOLS[0], { ...DEFAULT_TOOLS[0] }],
+    });
+    expect(duplicate.success).toBe(false);
+    if (!duplicate.success) {
+      expect(duplicate.error.issues).toEqual(expect.arrayContaining([
+        expect.objectContaining({ path: ['tools', 1, 'id'], message: 'Tool id "claude" is duplicated.' }),
+      ]));
+    }
   });
 
   it('saves config and creates the config directory', async () => {
@@ -69,6 +128,7 @@ describe('config', () => {
       workflow: DEFAULT_WORKFLOW,
       budget: DEFAULT_BUDGET,
       stageSkills: {},
+      tools: DEFAULT_TOOLS,
     });
 
     expect(existsSync(CONFIG_PATH)).toBe(true);
@@ -84,6 +144,7 @@ describe('config', () => {
       workflow: DEFAULT_WORKFLOW,
       budget: DEFAULT_BUDGET,
       stageSkills: {},
+      tools: DEFAULT_TOOLS,
     });
   });
 
@@ -180,6 +241,7 @@ describe('config', () => {
       workflow: DEFAULT_WORKFLOW,
       budget: DEFAULT_BUDGET,
       web: DEFAULT_WEB,
+      tools: DEFAULT_TOOLS,
     });
     expect(existsSync(DB_PATH.replace(/\/app\.db$/, ''))).toBe(true);
   });
@@ -265,7 +327,7 @@ describe('config', () => {
     expect(loadConfig().theme).toBe('solarized');
   });
 
-  it('loads repo runtime overrides and env interpolation from .msq/config.yaml', async () => {
+  it('loads repo runtime overrides but ignores legacy defaults from .msq/config.yaml', async () => {
     home = mkdtempSync(join(tmpdir(), 'msq-config-'));
     process.env.HOME = home;
     process.env.SLACK_WEBHOOK_URL = 'https://example.test/hook';
@@ -293,12 +355,10 @@ describe('config', () => {
     const repoConfig = loadRepoConfig(join(home, 'repo'));
     const runtime = resolveRuntimeConfig(join(home, 'repo'));
 
-    expect(repoConfig.defaults).toEqual({
-      tool: 'codex',
-      model: 'gpt-5.4',
-      effort: 'high',
-      stageSkills: { plan: ['speckit-plan'] },
-    });
+    expect(repoConfig).toEqual({ runtime: {
+      concurrency: 5,
+      notifications: { channels: [{ type: 'slack', webhookUrl: 'https://example.test/hook' }] },
+    } });
     expect(runtime.concurrency).toBe(5);
     expect(runtime.notifications.channels).toEqual([
       { type: 'slack', webhookUrl: 'https://example.test/hook' },
