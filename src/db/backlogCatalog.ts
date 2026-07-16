@@ -1,9 +1,10 @@
 import { existsSync } from 'node:fs';
 import type Database from 'better-sqlite3';
 import { getDb } from './index.js';
-import { resolveDbPath } from '../config/index.js';
+import { resolveDbPath, resolveRuntimeConfig } from '../config/index.js';
 import {
   BudgetSchema,
+  createRegisteredToolSchema,
   DefaultsSchema,
   FeatureSchema,
   TaskSchema,
@@ -36,6 +37,14 @@ export type FeaturePatch = Omit<Partial<Feature>, 'workflow' | 'retry'> & {
   };
   retry?: Partial<Retry>;
 };
+
+function validateRegisteredToolReference(tool: string, path: string): void {
+  const schema = createRegisteredToolSchema(resolveRuntimeConfig().tools.map((entry) => entry.id));
+  const result = schema.safeParse(tool);
+  if (!result.success) {
+    throw new Error(`Invalid ${path}: ${result.error.issues[0]?.message ?? 'unregistered tool.'}`);
+  }
+}
 
 /**
  * Readonly access that tolerates a never-initialized DB (e.g. the very first
@@ -566,6 +575,7 @@ export function updateCatalogFeature(repoId: string, featureId: string, patch: F
       throw new Error('A stages-only workflow patch must be a permutation of the saved stages.');
     }
     const merged = FeatureSchema.parse(mergeFeaturePatch(current, patch));
+    validateRegisteredToolReference(merged.tool, `feature "${featureId}".tool`);
 
     updateRow.run(
       JSON.stringify(merged),
@@ -726,6 +736,7 @@ export function updateCatalogDefaults(repoId: string, patch: CatalogDefaultsPatc
           }
         : {}),
     });
+    validateRegisteredToolReference(mergedDefaults.tool, 'defaults.tool');
     const mergedBudget = budgetPatch
       ? BudgetSchema.parse({ ...currentBudget, ...budgetPatch })
       : currentBudget;
@@ -743,6 +754,7 @@ export function updateCatalogDefaults(repoId: string, patch: CatalogDefaultsPatc
         workflow: inheritWorkflowDefaults(currentFeature.workflow, currentDefaults.workflow, mergedDefaults.workflow),
       };
       const validatedFeature = FeatureSchema.parse(inheritedFeature);
+      validateRegisteredToolReference(validatedFeature.tool, `feature "${row.feature_id}".tool`);
       if (!sameJsonValue(validatedFeature, currentFeature)) {
         updateFeatureRow.run(JSON.stringify(validatedFeature), row.feature_id, repoId);
       }

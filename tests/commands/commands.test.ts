@@ -424,16 +424,25 @@ describe('commands', () => {
     expect(log).toHaveBeenCalledWith(expect.stringContaining('Override pontual'));
   });
 
-  it('rejects --tool outside the enum before touching the DB', async () => {
+  it('rejects an unregistered --tool with an actionable registry error', async () => {
+    mockFindResumablePipeline.mockReturnValue({
+      id: 9,
+      repoId: 'repo-1',
+      cwd: '/tmp/resume-repo',
+      autoAdvance: 0,
+    });
+    mockGetAdapter.mockImplementation(() => {
+      throw new Error('Tool "not-a-tool" is not registered. Register it in config.tools or use one of: claude, codex.');
+    });
     const { registerResume } = await import('../../src/commands/resume.js');
     const program = new Command();
-    program.exitOverride();
     registerResume(program);
 
     await expect(
       program.parseAsync(['node', 'msq', 'resume', '9', '--tool', 'not-a-tool']),
-    ).rejects.toThrow();
-    expect(mockFindResumablePipeline).not.toHaveBeenCalled();
+    ).rejects.toThrow('Tool "not-a-tool" is not registered');
+    expect(mockGetPipelineSnapshot).not.toHaveBeenCalled();
+    expect(mockExecuteBacklog).not.toHaveBeenCalled();
   });
 
   it('rejects a valid --tool that is unavailable in the environment, without creating a run or resuming the pipeline', async () => {

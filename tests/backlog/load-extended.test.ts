@@ -6,6 +6,7 @@ const mockParse = vi.fn();
 const mockBacklogSchemaParse = vi.fn();
 const mockBacklogV2SchemaParse = vi.fn((value: unknown) => value);
 const mockLoadRepoConfig = vi.fn(() => ({ defaults: {} }));
+const mockResolveRuntimeConfig = vi.fn(() => ({ tools: [{ id: 'claude' }, { id: 'codex' }, { id: 'opencode' }] }));
 
 vi.mock('node:fs', () => ({
   readFileSync: mockReadFileSync,
@@ -15,11 +16,17 @@ vi.mock('yaml', () => ({ parse: mockParse, stringify: vi.fn() }));
 vi.mock('../../src/config/index.js', () => ({
   loadRepoConfig: mockLoadRepoConfig,
   mergeStageSkills: (base: Record<string, string[]> = {}, overlay: Record<string, string[]> = {}) => ({ ...base, ...overlay }),
+  resolveRuntimeConfig: mockResolveRuntimeConfig,
 }));
 vi.mock('../../src/core/backlog/schema.js', () => ({
   BacklogSchema: { parse: mockBacklogSchemaParse },
   BacklogInputSchema: { parse: mockBacklogSchemaParse },
   BacklogV2Schema: { parse: mockBacklogV2SchemaParse },
+  createRegisteredToolSchema: (registeredToolIds: string[]) => ({
+    safeParse: (tool: string) => registeredToolIds.includes(tool)
+      ? { success: true, data: tool }
+      : { success: false, error: { issues: [{ message: `Tool \"${tool}\" is not registered.` }] } },
+  }),
 }));
 
 beforeEach(() => {
