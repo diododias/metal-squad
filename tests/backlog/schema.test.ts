@@ -106,8 +106,43 @@ describe('BacklogV2Schema', () => {
     if (result.success) {
       expect(result.data.defaults.tool).toBe('claude');
       expect(result.data.defaults.effort).toBe('medium');
+      expect(result.data.defaults.thinking).toBe('off');
       expect(result.data.defaults.skills).toEqual([]);
     }
+  });
+
+  it('accepts model, effort and thinking as independent fields on defaults and feature', () => {
+    const result = BacklogV2Schema.safeParse({
+      ...V2_YAML_OBJ,
+      defaults: { tool: 'claude', model: 'opus', effort: 'high', thinking: 'on' },
+      epics: [
+        {
+          ...V2_YAML_OBJ.epics[0],
+          features: [
+            {
+              ...V2_YAML_OBJ.epics[0].features[0],
+              model: 'sonnet',
+              effort: 'low',
+              thinking: 'on',
+            },
+          ],
+        },
+      ],
+    });
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.defaults).toMatchObject({ model: 'opus', effort: 'high', thinking: 'on' });
+      const feat = result.data.epics[0]?.features[0];
+      expect(feat).toMatchObject({ model: 'sonnet', effort: 'low', thinking: 'on' });
+    }
+  });
+
+  it('rejects an invalid thinking value', () => {
+    const result = BacklogV2Schema.safeParse({
+      ...V2_YAML_OBJ,
+      defaults: { tool: 'claude', thinking: 'maybe' },
+    });
+    expect(result.success).toBe(false);
   });
 
   it('rejects version 1', () => {

@@ -71,6 +71,7 @@ function buildPayload(
     tool: snapshot.repoDefaults.tool ?? 'claude',
     model: snapshot.repoDefaults.model,
     effort: snapshot.repoDefaults.effort ?? 'medium',
+    thinking: snapshot.repoDefaults.thinking ?? 'off',
     skills: snapshot.repoDefaults.skills ?? [],
     stageSkills: snapshot.repoDefaults.stageSkills ?? {},
   };

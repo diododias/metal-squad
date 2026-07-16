@@ -2,6 +2,7 @@ import { z } from 'zod';
 
 export const ToolSchema = z.enum(['claude', 'codex', 'opencode']);
 export const EffortSchema = z.enum(['low', 'medium', 'high']);
+export const ThinkingSchema = z.enum(['on', 'off']);
 export const WorkflowModeSchema = z.enum(['single', 'staged']);
 export const WorkflowApprovalChannelSchema = z.enum(['telegram']);
 export const OnFailSchema = z.enum(['stop', 'continue', 'gate']);
@@ -28,6 +29,7 @@ export const DefaultsSchema = z.object({
   tool: ToolSchema.default('claude'),
   model: z.string().trim().min(1).optional(),
   effort: EffortSchema.default('medium'),
+  thinking: ThinkingSchema.default('off'),
   skills: z.array(z.string()).default([]),
   stageSkills: z.record(z.string(), z.array(z.string())).default({}),
 });
@@ -104,6 +106,7 @@ export const FeatureSchema = z.object({
   tool: ToolSchema.default('claude'),
   model: z.string().optional(),
   effort: EffortSchema.default('medium'),
+  thinking: ThinkingSchema.default('off'),
   dependsOn: z.array(z.string()).default([]),
   tasks: z.array(TaskSchema).default([]),
   skills: z.array(z.string()).optional(),
@@ -167,6 +170,7 @@ export const BacklogInputSchema = z.union([BacklogV1InputSchema, BacklogV2InputS
 
 export type Tool = z.infer<typeof ToolSchema>;
 export type Effort = z.infer<typeof EffortSchema>;
+export type Thinking = z.infer<typeof ThinkingSchema>;
 export type OnFail = z.infer<typeof OnFailSchema>;
 export type SessionPolicyMode = z.infer<typeof SessionPolicyModeSchema>;
 export type Budget = z.infer<typeof BudgetSchema>;

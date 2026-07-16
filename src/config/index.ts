@@ -4,7 +4,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { parse } from 'yaml';
 import { z } from 'zod';
 import type { Defaults, Feature } from '../core/backlog/schema.js';
-import { EffortSchema, ToolSchema } from '../core/backlog/schema.js';
+import { EffortSchema, ThinkingSchema, ToolSchema } from '../core/backlog/schema.js';
 
 export const CONFIG_DIR = join(homedir(), '.config', 'metal-squad');
 export const DATA_DIR = join(homedir(), '.local', 'share', 'metal-squad');
@@ -108,6 +108,7 @@ const RepoDefaultsSchema = z.object({
   tool: ToolSchema.optional(),
   model: z.string().trim().min(1).optional(),
   effort: EffortSchema.optional(),
+  thinking: ThinkingSchema.optional(),
   skills: z.array(z.string()).optional(),
   stageSkills: z.record(z.string(), z.array(z.string())).optional(),
 });
@@ -143,6 +144,7 @@ export interface ResolvedExecutionDefaults {
   tool: z.infer<typeof ToolSchema>;
   model?: string;
   effort: z.infer<typeof EffortSchema>;
+  thinking: z.infer<typeof ThinkingSchema>;
   skills: string[];
   stageSkills: Record<string, string[]>;
 }
@@ -284,6 +286,7 @@ export function mergeExecutionDefaults(
     tool: overlay.tool ?? base.tool,
     model: overlay.model ?? base.model,
     effort: overlay.effort ?? base.effort,
+    thinking: overlay.thinking ?? base.thinking,
     skills: overlay.skills ?? base.skills,
     stageSkills: mergeStageSkills(base.stageSkills, overlayStageSkills),
   };
