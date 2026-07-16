@@ -1848,7 +1848,7 @@ describe('executeBacklog auto-pilot', () => {
     }));
   });
 
-  it('continues to the next autoStart feature after an ordinary execution failure', async () => {
+  it('stops auto-pilot and notifies a human after an execution failure', async () => {
     const backlog = twoFeatureAutoStartBacklog({
       feat01Retry: { maxAttempts: 1, backoffMs: 0, onFail: 'continue', fallback: [] },
     });
@@ -1857,15 +1857,14 @@ describe('executeBacklog auto-pilot', () => {
     const { executeBacklog } = await import('../../src/core/runner/execute.js');
     await executeBacklog(backlog, { cwd: '/repo', concurrency: 1, featureId: 'feat-01' });
 
-    expect(mockSpawn).toHaveBeenCalledWith(
-      expect.any(String),
-      expect.arrayContaining(['run', '--feature', 'feat-02']),
-      expect.any(Object),
-    );
+    expect(mockSpawn).not.toHaveBeenCalled();
+    expect(mockEventEmit).toHaveBeenCalledWith('run:failed', expect.objectContaining({
+      featureId: 'feat-01',
+      error: 'boom',
+    }));
     expect(mockEventEmit).toHaveBeenCalledWith('autopilot:decision', expect.objectContaining({
       triggerKind: 'failed-execution',
-      action: 'start',
-      selectedFeatureId: 'feat-02',
+      action: 'stop',
     }));
   });
 
@@ -1879,7 +1878,7 @@ describe('executeBacklog auto-pilot', () => {
     expect(mockSpawn).not.toHaveBeenCalled();
     expect(mockEventEmit).toHaveBeenCalledWith('autopilot:decision', expect.objectContaining({
       triggerKind: 'aborted-manual',
-      action: 'idle',
+      action: 'stop',
     }));
   });
 

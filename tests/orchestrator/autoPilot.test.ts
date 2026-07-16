@@ -57,13 +57,10 @@ describe('classifyFailedOutcome', () => {
 });
 
 describe('shouldEvaluateNextCandidate', () => {
-  it('qualifies success, blocked-human, and failed-execution', () => {
+  it('qualifies only success', () => {
     expect(shouldEvaluateNextCandidate('success')).toBe(true);
-    expect(shouldEvaluateNextCandidate('blocked-human')).toBe(true);
-    expect(shouldEvaluateNextCandidate('failed-execution')).toBe(true);
-  });
-
-  it('excludes blocked-protective and aborted-manual', () => {
+    expect(shouldEvaluateNextCandidate('blocked-human')).toBe(false);
+    expect(shouldEvaluateNextCandidate('failed-execution')).toBe(false);
     expect(shouldEvaluateNextCandidate('blocked-protective')).toBe(false);
     expect(shouldEvaluateNextCandidate('aborted-manual')).toBe(false);
   });
@@ -166,12 +163,24 @@ describe('buildAutoPilotDecision', () => {
     expect(decision.selectedFeatureId).toBeUndefined();
   });
 
-  it('returns action=idle for aborted-manual', () => {
+  it('returns action=stop for failed execution regardless of a selected candidate', () => {
+    const decision = buildAutoPilotDecision({
+      triggerFeatureId: 'feat-01',
+      triggerRunId: 7,
+      triggerKind: 'failed-execution',
+      selected: feature('feat-02', { autoStart: true }),
+    });
+    expect(decision).toMatchObject({ action: 'stop' });
+    expect(decision.selectedFeatureId).toBeUndefined();
+    expect(decision.reason).toContain('Manual intervention required');
+  });
+
+  it('returns action=stop for an aborted run', () => {
     const decision = buildAutoPilotDecision({
       triggerFeatureId: 'feat-01',
       triggerRunId: 7,
       triggerKind: 'aborted-manual',
     });
-    expect(decision).toMatchObject({ action: 'idle' });
+    expect(decision).toMatchObject({ action: 'stop' });
   });
 });
