@@ -7,7 +7,7 @@ const DEFAULT_NOTIFICATIONS = {
   channels: [],
   events: ['run:start', 'gate:created', 'run:failed', 'run:done', 'stage:approval', 'stage:input'],
 };
-const DEFAULT_WORKFLOW = { autoAdvanceStages: false, pollIntervalMs: 2_000 };
+const DEFAULT_WORKFLOW = { pollIntervalMs: 2_000 };
 const DEFAULT_BUDGET = { alertAtPercent: 80 };
 const DEFAULT_WEB = { host: '127.0.0.1', port: 8_743, auth: 'token', statusSpinner: true };
 const DEFAULT_TOOLS = [

@@ -118,6 +118,13 @@ describe('BacklogV2Schema', () => {
     }
   });
 
+  it('migrates approvals.autoAdvance to the unified workflow.autoAdvance field', () => {
+    const result = BacklogV2Schema.parse(V2_YAML_OBJ);
+    const workflow = result.epics[0]?.features[0]?.workflow;
+    expect(workflow?.autoAdvance).toBe(false);
+    expect(workflow?.approvals).toEqual({ channel: 'telegram' });
+  });
+
   it('applies defaults when defaults block is missing', () => {
     const obj = { version: 2, repo: 'test-repo', epics: [] };
     const result = BacklogV2Schema.safeParse(obj);

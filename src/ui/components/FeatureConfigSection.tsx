@@ -19,7 +19,8 @@ const DEFAULT_RETRY: Required<Retry> = {
 const _DEFAULT_WORKFLOW: Workflow = {
   mode: 'staged',
   stages: ['specify', 'plan', 'tasks', 'implement', 'validate'],
-  approvals: { channel: 'telegram', autoAdvance: false },
+  approvals: { channel: 'telegram' },
+  autoAdvance: false,
   syncTasksToBacklog: true,
   sessionPolicy: { mode: 'isolated', alwaysIsolatedStages: [] },
   stepGuidance: {},
@@ -94,7 +95,7 @@ export function FeatureConfigSection({ feature, settings, width }: Props): React
       <Box marginTop={1} flexDirection="column">
         <Text {...theme.role('muted')} bold>Approvals</Text>
         {row(theme, 'channel', workflow.approvals.channel)}
-        {row(theme, 'autoAdvance', String(workflow.approvals.autoAdvance))}
+        {row(theme, 'autoAdvance', String(workflow.autoAdvance))}
       </Box>
       <Box marginTop={1} flexDirection="column">
         <Text {...theme.role('muted')} bold>Session policy</Text>

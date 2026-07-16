@@ -339,7 +339,7 @@ Top level:
 - `mode`: `single | staged`
 - `stages`
 - `approvals.channel`: currently `telegram`
-- `approvals.autoAdvance`
+- `autoAdvance`
 - `syncTasksToBacklog`
 
 `retry`:
@@ -636,7 +636,6 @@ It is created automatically on first run.
     ]
   },
   "workflow": {
-    "autoAdvanceStages": false,
     "pollIntervalMs": 2000
   },
   "budget": {
@@ -667,7 +666,7 @@ It is created automatically on first run.
 - `telegramChatId`: legacy shortcut for a Telegram notification destination
 - `notifications.channels`: preferred notification routing
 - `notifications.events`: which events should be emitted
-- `workflow.autoAdvanceStages`: global default for staged auto-advance
+- `workflow.autoAdvance`: project default with per-feature override for staged auto-advance
 - `workflow.pollIntervalMs`: polling interval for stage request resolution
 - `budget.defaultMaxCostUsd`: fallback cost cap when backlog has no `budget.maxCostUsd`
 - `budget.alertAtPercent`: alert threshold percentage
