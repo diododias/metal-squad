@@ -104,15 +104,6 @@ const RuntimeConfigOverrideSchema = z.object({
   stageSkills: z.record(z.string(), z.array(z.string())).optional(),
 });
 
-const RepoDefaultsSchema = z.object({
-  tool: ToolSchema.optional(),
-  model: z.string().trim().min(1).optional(),
-  effort: EffortSchema.optional(),
-  thinking: ThinkingSchema.optional(),
-  skills: z.array(z.string()).optional(),
-  stageSkills: z.record(z.string(), z.array(z.string())).optional(),
-});
-
 export const REPO_CONFIG_PATH = '.msq/config.yaml';
 export const REPO_CONFIG_ABS_PATH = (cwd = process.cwd()): string => resolve(cwd, REPO_CONFIG_PATH);
 
@@ -133,11 +124,9 @@ export const ConfigSchema = z.object({
 export type Config = z.infer<typeof ConfigSchema>;
 export type WebConfig = z.infer<typeof WebConfig>;
 export type RuntimeConfigOverride = z.infer<typeof RuntimeConfigOverrideSchema>;
-export type RepoDefaults = z.infer<typeof RepoDefaultsSchema>;
 
 export interface RepoConfigFile {
   runtime: RuntimeConfigOverride;
-  defaults: RepoDefaults;
 }
 
 export interface ResolvedExecutionDefaults {
@@ -157,15 +146,13 @@ export interface ResolvedConfigSources {
 
 export interface ResolvedConfigSnapshot {
   runtime: Config;
-  repoDefaults: RepoDefaults;
   sources: ResolvedConfigSources;
 }
 
-export type ExecutionDefaultsLike = Partial<ResolvedExecutionDefaults> | RepoDefaults | Defaults | Feature;
+export type ExecutionDefaultsLike = Partial<ResolvedExecutionDefaults> | Defaults | Feature;
 
 const RepoConfigFileSchema = z.object({
   runtime: RuntimeConfigOverrideSchema.default({}),
-  defaults: RepoDefaultsSchema.default({}),
 });
 
 export function loadConfig(): Config {
@@ -180,7 +167,7 @@ export function loadConfig(): Config {
 
 export function loadRepoConfig(cwd = process.cwd()): RepoConfigFile {
   const repoConfigPath = REPO_CONFIG_ABS_PATH(cwd);
-  if (!existsSync(repoConfigPath)) return { runtime: {}, defaults: {} };
+  if (!existsSync(repoConfigPath)) return { runtime: {} };
   try {
     const raw = readFileSync(repoConfigPath, 'utf8');
     const parsed: unknown = parse(raw);
@@ -204,7 +191,6 @@ export function resolveConfigSnapshot(cwd = process.cwd()): ResolvedConfigSnapsh
   const repoConfig = loadRepoConfig(cwd);
   return {
     runtime: mergeRuntimeConfig(loadConfig(), repoConfig.runtime),
-    repoDefaults: repoConfig.defaults,
     sources: {
       globalConfigPath: CONFIG_PATH,
       ...(hasRepoConfig ? { repoConfigPath } : {}),

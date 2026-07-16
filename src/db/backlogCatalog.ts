@@ -392,8 +392,6 @@ export function upsertBacklogCatalog(
      ON CONFLICT(repo_id) DO UPDATE SET
        repo = excluded.repo,
        version = excluded.version,
-       defaults_json = excluded.defaults_json,
-       budget_json = excluded.budget_json,
        updated_at = datetime('now')`,
   );
 
