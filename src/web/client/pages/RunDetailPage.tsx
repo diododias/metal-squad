@@ -138,7 +138,8 @@ export function RunDetailPage({
   const stages = feature?.workflow.stages ?? ['specify', 'plan', 'tasks', 'implement', 'validate'];
   const canPause = run.pipelineStatus === 'running';
   const canAbort = run.pipelineStatus === 'running' || run.pipelineStatus === 'blocked';
-  const canResumeWithOverride = run.pipelineStatus === 'paused' || run.pipelineStatus === 'aborted';
+  const canResumeWithOverride = run.pipelineId != null
+    && (run.pipelineStatus === 'paused' || run.pipelineStatus === 'aborted');
   const pendingPrompt = run.pendingStageRequestPrompt;
 
   function resumeWithOverride(): void {
