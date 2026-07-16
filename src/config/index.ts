@@ -1,6 +1,6 @@
 import { homedir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { accessSync, constants, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { parse } from 'yaml';
 import { z } from 'zod';
 import type { Defaults, Feature } from '../core/backlog/schema.js';
@@ -199,6 +199,13 @@ export const ConfigSchema = z.object({
   tools: ToolRegistrySchema.default(DEFAULT_TOOL_REGISTRY),
 });
 export type Config = z.infer<typeof ConfigSchema>;
+export interface AppConfigPatch extends Omit<Partial<Config>, 'notifications' | 'workflow' | 'budget' | 'web' | 'stageSkills'> {
+  notifications?: Partial<Config['notifications']>;
+  workflow?: Partial<Config['workflow']>;
+  budget?: Partial<Config['budget']>;
+  web?: Partial<Config['web']>;
+  stageSkills?: Config['stageSkills'];
+}
 export type ToolRegistryEntry = z.infer<typeof ToolRegistryEntrySchema>;
 export type WebConfig = z.infer<typeof WebConfig>;
 export type RuntimeConfigOverride = z.infer<typeof RuntimeConfigOverrideSchema>;
@@ -279,6 +286,45 @@ export function resolveConfigSnapshot(cwd = process.cwd()): ResolvedConfigSnapsh
 export function saveConfig(cfg: Config): void {
   mkdirSync(CONFIG_DIR, { recursive: true });
   writeFileSync(CONFIG_PATH, JSON.stringify(cfg, null, 2));
+}
+
+/** Returns whether the current config file, or the nearest existing parent for it, can be written. */
+export function configWritable(): boolean {
+  let probePath = existsSync(CONFIG_PATH) ? CONFIG_PATH : CONFIG_DIR;
+
+  while (!existsSync(probePath)) {
+    const parentPath = dirname(probePath);
+    if (parentPath === probePath) return false;
+    probePath = parentPath;
+  }
+
+  try {
+    accessSync(probePath, constants.W_OK);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** Applies an App-owned config patch without replacing untouched config sections. */
+export function saveAppConfigPatch(patch: AppConfigPatch): Config {
+  const current = loadConfig();
+  const merged = ConfigSchema.parse({
+    ...current,
+    ...patch,
+    notifications: patch.notifications ? { ...current.notifications, ...patch.notifications } : current.notifications,
+    workflow: patch.workflow ? { ...current.workflow, ...patch.workflow } : current.workflow,
+    budget: patch.budget ? { ...current.budget, ...patch.budget } : current.budget,
+    web: patch.web ? { ...current.web, ...patch.web } : current.web,
+    stageSkills: patch.stageSkills ? { ...current.stageSkills, ...patch.stageSkills } : current.stageSkills,
+  });
+
+  if (!configWritable()) {
+    throw new Error(`Cannot write metal-squad config at ${CONFIG_PATH}: file is not writable. Check its permissions.`);
+  }
+
+  saveConfig(merged);
+  return merged;
 }
 
 /** Creates config.json with defaults on first run. No-op if the file already exists. */
