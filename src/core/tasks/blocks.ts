@@ -41,7 +41,7 @@ export const MODEL_CONTEXT_WINDOWS: Record<string, number> = {
 };
 
 /** Janela de contexto por tool quando nao ha modelo explicito. */
-const TOOL_CONTEXT_WINDOWS: Record<Tool, number> = {
+const TOOL_CONTEXT_WINDOWS: Record<string, number> = {
   claude: 200_000,
   codex: 256_000,
   opencode: 128_000,
@@ -95,8 +95,9 @@ export function resolveContextWindow(input: { model?: string; tool?: Tool }): nu
       if (model.includes(key)) return window;
     }
   }
-  if (input.tool && TOOL_CONTEXT_WINDOWS[input.tool]) {
-    return TOOL_CONTEXT_WINDOWS[input.tool];
+  const toolContextWindow = input.tool ? TOOL_CONTEXT_WINDOWS[input.tool] : undefined;
+  if (toolContextWindow !== undefined) {
+    return toolContextWindow;
   }
   return DEFAULT_CONTEXT_WINDOW;
 }

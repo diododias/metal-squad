@@ -33,7 +33,7 @@ import { selectStartableFeaturePlan } from '../core/orchestrator/graph.js';
 import { validateBacklogSkills } from '../core/skills/index.js';
 import { resolveRuntimeConfig } from '../config/index.js';
 import { updateCatalogFeature, updateCatalogTask, updateCatalogDefaults, type FeaturePatch, type CatalogDefaultsPatch } from '../db/backlogCatalog.js';
-import type { Feature, Task, Tool } from '../core/backlog/schema.js';
+import type { Feature, Task } from '../core/backlog/schema.js';
 import { buildMsqWebState, appendNotification } from './state.js';
 import { createWebAuth, isAllowedHostHeader, isAllowedOrigin, timingSafeEqualStrings } from './auth.js';
 import type {
@@ -899,7 +899,7 @@ export function createWebServer(options: {
     }
 
     if (tool) {
-      const adapter = getAdapter(tool as Tool);
+      const adapter = getAdapter(tool);
       if (!adapter.isAvailable?.()) {
         msqEventBus.emit('ui:notice', { message: `Tool "${tool}" is unavailable — resume aborted, no run created.` });
         return;
@@ -932,7 +932,7 @@ export function createWebServer(options: {
   function toFeaturePatch(patch: FeatureConfigPatch): FeaturePatch {
     return {
       ...(patch.spec !== undefined ? { spec: patch.spec } : {}),
-      ...(patch.tool !== undefined ? { tool: patch.tool as Feature['tool'] } : {}),
+      ...(patch.tool !== undefined ? { tool: patch.tool } : {}),
       ...(patch.model !== undefined ? { model: patch.model } : {}),
       ...(patch.effort !== undefined ? { effort: patch.effort as Feature['effort'] } : {}),
       ...(patch.thinking !== undefined ? { thinking: patch.thinking as Feature['thinking'] } : {}),

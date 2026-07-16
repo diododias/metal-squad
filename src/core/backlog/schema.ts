@@ -1,6 +1,28 @@
 import { z } from 'zod';
 
-export const ToolSchema = z.enum(['claude', 'codex', 'opencode']);
+export const AdapterSchema = z.enum(['claude', 'codex', 'opencode']);
+export const ToolSchema = z.string().trim().min(1).regex(
+  /^[a-z][a-z0-9-]*$/,
+  'Tool id must use lowercase letters, numbers, and hyphens.',
+);
+
+/**
+ * Builds the runtime validation for a backlog `tool` reference. The registry
+ * itself lives in runtime config, so this cannot be a fixed enum.
+ */
+export function createRegisteredToolSchema(registeredToolIds: readonly string[]): z.ZodType<string> {
+  const registered = new Set(registeredToolIds);
+  const available = [...registered].sort();
+
+  return ToolSchema.superRefine((tool, ctx) => {
+    if (!registered.has(tool)) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: `Tool "${tool}" is not registered. Register it in config.tools or use one of: ${available.join(', ')}.`,
+      });
+    }
+  });
+}
 export const EffortSchema = z.enum(['low', 'medium', 'high']);
 export const ThinkingSchema = z.enum(['on', 'off']);
 export const WorkflowModeSchema = z.enum(['single', 'staged']);

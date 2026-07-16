@@ -4,7 +4,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { parse } from 'yaml';
 import { z } from 'zod';
 import type { Defaults, Feature } from '../core/backlog/schema.js';
-import { EffortSchema, ThinkingSchema, ToolSchema } from '../core/backlog/schema.js';
+import { AdapterSchema, EffortSchema, ThinkingSchema, ToolSchema } from '../core/backlog/schema.js';
 
 export const CONFIG_DIR = join(homedir(), '.config', 'metal-squad');
 export const DATA_DIR = join(homedir(), '.local', 'share', 'metal-squad');
@@ -103,7 +103,7 @@ const ThinkingBudgetConfig = z.object({
 
 const ToolRegistryEntrySchema = z.object({
   id: z.string().trim().min(1).regex(/^[a-z][a-z0-9-]*$/, 'Tool id must use lowercase letters, numbers, and hyphens.'),
-  adapter: ToolSchema,
+  adapter: AdapterSchema,
   command: z.string().trim().min(1),
   baseArgs: z.array(z.string()).default([]),
   env: z.record(z.string(), z.string()).default({}),
