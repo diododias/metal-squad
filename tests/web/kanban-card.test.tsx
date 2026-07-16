@@ -21,13 +21,14 @@ describe('KanbanCard persisted identity', () => {
     expect(html).toContain(toShortFeatureId(run.featureId));
   });
 
-  it('shows the muted epic title with the feature id always rendered beside or below it', () => {
+  it('shows the title on top with the muted epic and feature id below it', () => {
     const html = renderToStaticMarkup(
       <KanbanCard run={{ ...run, persistedId: 'F-23456789', epicTitle: 'Web Dashboard' }} />,
     );
     expect(html).toContain('Web Dashboard');
     expect(html).toContain('F-23456789');
-    expect(html.indexOf('Web Dashboard')).toBeLessThan(html.indexOf('Legacy feature'));
+    expect(html.indexOf('Legacy feature')).toBeLessThan(html.indexOf('Web Dashboard'));
+    expect(html.indexOf('Web Dashboard')).toBeLessThan(html.indexOf('F-23456789'));
   });
 
   it('keeps the feature id in the markup even when the epic title is long', () => {
