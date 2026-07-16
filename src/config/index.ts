@@ -161,7 +161,12 @@ export interface ResolvedConfigSnapshot {
   sources: ResolvedConfigSources;
 }
 
-export type ExecutionDefaultsLike = Partial<ResolvedExecutionDefaults> | RepoDefaults | Defaults | Feature;
+/**
+ * Execution defaults have exactly two owners: a project and one of its
+ * features. App and repo configuration are infrastructure-only and must not
+ * be passed through this resolver.
+ */
+export type ExecutionDefaultsLike = Partial<ResolvedExecutionDefaults> | Defaults | Feature;
 
 const RepoConfigFileSchema = z.object({
   runtime: RuntimeConfigOverrideSchema.default({}),
@@ -278,17 +283,17 @@ export function mergeStageSkills(
 }
 
 export function mergeExecutionDefaults(
-  base: ResolvedExecutionDefaults,
-  overlay: ExecutionDefaultsLike = {},
+  projectDefaults: ResolvedExecutionDefaults,
+  featureOverrides: ExecutionDefaultsLike = {},
 ): ResolvedExecutionDefaults {
-  const overlayStageSkills = 'stageSkills' in overlay ? overlay.stageSkills : undefined;
+  const overlayStageSkills = 'stageSkills' in featureOverrides ? featureOverrides.stageSkills : undefined;
   return {
-    tool: overlay.tool ?? base.tool,
-    model: overlay.model ?? base.model,
-    effort: overlay.effort ?? base.effort,
-    thinking: overlay.thinking ?? base.thinking,
-    skills: overlay.skills ?? base.skills,
-    stageSkills: mergeStageSkills(base.stageSkills, overlayStageSkills),
+    tool: featureOverrides.tool ?? projectDefaults.tool,
+    model: featureOverrides.model ?? projectDefaults.model,
+    effort: featureOverrides.effort ?? projectDefaults.effort,
+    thinking: featureOverrides.thinking ?? projectDefaults.thinking,
+    skills: featureOverrides.skills ?? projectDefaults.skills,
+    stageSkills: mergeStageSkills(projectDefaults.stageSkills, overlayStageSkills),
   };
 }
 

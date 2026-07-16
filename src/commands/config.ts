@@ -18,8 +18,7 @@ interface ConfigShowPayload {
   };
   runtime: ReturnType<typeof resolveConfigSnapshot>['runtime'];
   defaults: {
-    repo: ReturnType<typeof resolveConfigSnapshot>['repoDefaults'];
-    backlog?: BacklogV2['defaults'];
+    project?: BacklogV2['defaults'];
     effective?: ResolvedExecutionDefaults;
   };
   feature?: {
@@ -67,17 +66,9 @@ function buildPayload(
   backlog: BacklogV2 | null,
   featureId?: string,
 ): ConfigShowPayload {
-  const baseDefaults: ResolvedExecutionDefaults = {
-    tool: snapshot.repoDefaults.tool ?? 'claude',
-    model: snapshot.repoDefaults.model,
-    effort: snapshot.repoDefaults.effort ?? 'medium',
-    thinking: snapshot.repoDefaults.thinking ?? 'off',
-    skills: snapshot.repoDefaults.skills ?? [],
-    stageSkills: snapshot.repoDefaults.stageSkills ?? {},
-  };
   const effectiveDefaults = backlog
-    ? mergeExecutionDefaults(baseDefaults, backlog.defaults)
-    : baseDefaults;
+    ? mergeExecutionDefaults(backlog.defaults)
+    : undefined;
   const feature = featureId && backlog ? findFeature(backlog, featureId) : null;
   if (featureId && !feature) {
     throw new Error(`Unknown feature "${featureId}".`);
@@ -89,15 +80,14 @@ function buildPayload(
     },
     runtime: snapshot.runtime,
     defaults: {
-      repo: snapshot.repoDefaults,
-      ...(backlog ? { backlog: backlog.defaults, effective: effectiveDefaults } : {}),
+      ...(backlog ? { project: backlog.defaults, effective: effectiveDefaults } : {}),
     },
     ...(feature
       ? {
           feature: {
             id: feature.id,
             title: feature.title,
-            effective: mergeExecutionDefaults(effectiveDefaults, feature),
+            effective: mergeExecutionDefaults(effectiveDefaults!, feature),
           },
         }
       : {}),

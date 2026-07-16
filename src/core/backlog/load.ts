@@ -1,7 +1,6 @@
 import { readFileSync, existsSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { resolve, dirname, isAbsolute } from 'node:path';
 import { parse, stringify } from 'yaml';
-import { loadRepoConfig, mergeStageSkills } from '../../config/index.js';
 import {
   BacklogInputSchema,
   BacklogV2Schema,
@@ -20,14 +19,13 @@ export const BACKLOG_FILE = 'backlog.yaml';
 
 type RawYamlMap = Record<string, unknown>;
 
-function normalizeV1(backlog: BacklogV1Input, repoDefaults: ReturnType<typeof loadRepoConfig>['defaults'] = {}): BacklogV2Input {
+function normalizeV1(backlog: BacklogV1Input): BacklogV2Input {
   const defaults: Defaults = {
-    tool: repoDefaults.tool ?? 'claude',
-    ...(repoDefaults.model ? { model: repoDefaults.model } : {}),
-    effort: repoDefaults.effort ?? 'medium',
-    thinking: repoDefaults.thinking ?? 'off',
-    skills: repoDefaults.skills ?? [],
-    stageSkills: repoDefaults.stageSkills ?? {},
+    tool: 'claude',
+    effort: 'medium',
+    thinking: 'off',
+    skills: [],
+    stageSkills: {},
     workflow: {
       mode: 'staged',
       stages: ['specify', 'plan', 'tasks', 'implement', 'validate'],
@@ -56,15 +54,15 @@ function normalizeV1(backlog: BacklogV1Input, repoDefaults: ReturnType<typeof lo
   };
 }
 
-function propagateDefaults(backlog: BacklogV2Input, repoDefaults: ReturnType<typeof loadRepoConfig>['defaults'] = {}): BacklogV2Input {
+function propagateDefaults(backlog: BacklogV2Input): BacklogV2Input {
   const defaults: Defaults = {
     ...backlog.defaults,
     tool: backlog.defaults.tool,
-    model: backlog.defaults.model ?? repoDefaults.model,
+    model: backlog.defaults.model,
     effort: backlog.defaults.effort,
     thinking: backlog.defaults.thinking,
     skills: backlog.defaults.skills,
-    stageSkills: mergeStageSkills(repoDefaults.stageSkills, backlog.defaults.stageSkills),
+    stageSkills: backlog.defaults.stageSkills,
     workflow: backlog.defaults.workflow,
     ...(backlog.defaults.maxTokens !== undefined ? { maxTokens: backlog.defaults.maxTokens } : {}),
   };
@@ -106,30 +104,22 @@ function validateFiles(backlog: BacklogV2, root: string): void {
   }
 }
 
-function applyDefaultsBeforeParse(
-  raw: unknown,
-  repoDefaults: ReturnType<typeof loadRepoConfig>['defaults'] = {},
-): unknown {
+function applyDefaultsBeforeParse(raw: unknown): unknown {
   if (!isRecord(raw) || raw.version !== 2) return raw;
 
   const defaults = isRecord(raw.defaults) ? raw.defaults : {};
-  const defaultTool = typeof defaults.tool === 'string' ? defaults.tool : repoDefaults.tool;
-  const defaultModel = typeof defaults.model === 'string' ? defaults.model : repoDefaults.model;
-  const defaultEffort = typeof defaults.effort === 'string' ? defaults.effort : repoDefaults.effort;
-  const defaultThinking = typeof defaults.thinking === 'string' ? defaults.thinking : repoDefaults.thinking;
+  const defaultTool = typeof defaults.tool === 'string' ? defaults.tool : undefined;
+  const defaultModel = typeof defaults.model === 'string' ? defaults.model : undefined;
+  const defaultEffort = typeof defaults.effort === 'string' ? defaults.effort : undefined;
+  const defaultThinking = typeof defaults.thinking === 'string' ? defaults.thinking : undefined;
   const defaultMaxTokens = typeof defaults.maxTokens === 'number' ? defaults.maxTokens : undefined;
-  const defaultSkills: unknown[] | undefined = Array.isArray(defaults.skills) ? defaults.skills : repoDefaults.skills;
-  const defaultStageSkills = isRecord(defaults.stageSkills)
-    ? defaults.stageSkills
-    : repoDefaults.stageSkills;
+  const defaultSkills: unknown[] | undefined = Array.isArray(defaults.skills) ? defaults.skills : undefined;
   const epics = Array.isArray(raw.epics) ? raw.epics : [];
 
   return {
     ...raw,
     defaults: {
-      ...repoDefaults,
       ...defaults,
-      ...(defaultStageSkills ? { stageSkills: { ...defaultStageSkills, ...(isRecord(defaults.stageSkills) ? defaults.stageSkills : {}) } } : {}),
     },
     epics: epics.map((epic): unknown => {
       if (!isRecord(epic)) return epic;
@@ -187,15 +177,14 @@ export function loadBacklogWithRegistration(path = BACKLOG_FILE, cwd = process.c
   const absPath = isAbsolute(path) ? path : resolve(cwd, path);
   const root = dirname(absPath);
   const raw = readFileSync(absPath, 'utf8');
-  const repoDefaults = loadRepoConfig(cwd).defaults;
-  const parsed = BacklogInputSchema.parse(applyDefaultsBeforeParse(parse(raw), repoDefaults));
+  const parsed = BacklogInputSchema.parse(applyDefaultsBeforeParse(parse(raw)));
 
   let v2Input: BacklogV2Input;
   if (parsed.version === 1) {
     console.warn('[msq] backlog.yaml is in v1 format — consider upgrading to version: 2');
-    v2Input = normalizeV1(parsed, repoDefaults);
+    v2Input = normalizeV1(parsed);
   } else {
-    v2Input = propagateDefaults(parsed, repoDefaults);
+    v2Input = propagateDefaults(parsed);
   }
 
   const registration = registerBacklogFeatures(v2Input, occupiedFeatureIds());
@@ -307,5 +296,5 @@ export function loadBacklogFromCatalog(repoId: string, cwd = process.cwd()): Bac
     epics,
   };
 
-  return BacklogV2Schema.parse(propagateDefaults(BacklogV2Schema.parse(raw), loadRepoConfig(cwd).defaults));
+  return BacklogV2Schema.parse(propagateDefaults(BacklogV2Schema.parse(raw)));
 }

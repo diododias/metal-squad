@@ -65,7 +65,7 @@ vi.mock('../../src/core/skills/index.js', () => ({
 vi.mock('../../src/config/index.js', () => ({
   resolveRuntimeConfig: mockResolveRuntimeConfig,
   resolveConfigSnapshot: mockResolveConfigSnapshot,
-  mergeExecutionDefaults: (base: Record<string, unknown>, overlay: Record<string, unknown>) => ({
+  mergeExecutionDefaults: (base: Record<string, unknown>, overlay: Record<string, unknown> = {}) => ({
     ...base,
     ...overlay,
     stageSkills: {
@@ -503,6 +503,17 @@ describe('commands', () => {
         }],
       }],
     });
+    mockResolveConfigSnapshot.mockReturnValue({
+      runtime: mockResolveRuntimeConfig(),
+      repoDefaults: {
+        tool: 'claude',
+        model: 'app-model',
+        effort: 'low',
+        skills: ['app-skill'],
+        stageSkills: { implement: ['app-stage-skill'] },
+      },
+      sources: { globalConfigPath: '/tmp/global.json', repoConfigPath: '/tmp/repo/.msq/config.yaml' },
+    });
 
     const { registerConfig } = await import('../../src/commands/config.js');
     const program = new Command();
@@ -511,8 +522,16 @@ describe('commands', () => {
     await program.parseAsync(['node', 'msq', 'config', 'show', '--feature', 'feat-1', '--json']);
 
     const printed = log.mock.calls.at(-1)?.[0] as string;
-    const payload = JSON.parse(printed) as { feature: { id: string; effective: { effort: string } } };
+    const payload = JSON.parse(printed) as {
+      defaults: { project: { tool: string; skills: string[] }; repo?: unknown };
+      feature: { id: string; effective: { effort: string; model?: string; skills: string[]; stageSkills: Record<string, string[]> } };
+    };
     expect(payload.feature.id).toBe('feat-1');
     expect(payload.feature.effective.effort).toBe('high');
+    expect(payload.feature.effective.model).toBeUndefined();
+    expect(payload.feature.effective.skills).toEqual(['implement']);
+    expect(payload.feature.effective.stageSkills).toEqual({ plan: ['speckit-plan'] });
+    expect(payload.defaults.project).toMatchObject({ tool: 'codex', skills: ['implement'] });
+    expect(payload.defaults.repo).toBeUndefined();
   });
 });

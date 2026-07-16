@@ -54,8 +54,8 @@ export interface BacklogSettings {
   stageSkills: Record<string, string[]>;
   toolCapabilities?: Record<string, ToolCapabilities>;
   configSources?: ResolvedConfigSources;
-  /** Read-only merge of repo config + backlog defaults, used to resolve
-   * feature execution (see `mergeExecutionDefaults`). */
+  /** Read-only project execution defaults, used to resolve a feature through
+   * the sole Feature -> Project inheritance path. */
   resolvedDefaults?: ResolvedExecutionDefaults;
   /** SET-16: raw project defaults as stored in `backlog_catalog_meta`
    * (`defaults_json`), separate from `resolvedDefaults` — this is the
@@ -110,14 +110,7 @@ function loadCatalogAndSettings(cwd: string): void {
     const snapshot = resolveConfigSnapshot(cwd);
     const { repoId } = resolveRepo(cwd);
     const backlog = loadBacklogFromCatalog(repoId, cwd);
-    const resolvedDefaults = mergeExecutionDefaults({
-      tool: snapshot.repoDefaults.tool ?? 'claude',
-      model: snapshot.repoDefaults.model,
-      effort: snapshot.repoDefaults.effort ?? 'medium',
-      thinking: snapshot.repoDefaults.thinking ?? 'off',
-      skills: snapshot.repoDefaults.skills ?? [],
-      stageSkills: snapshot.repoDefaults.stageSkills ?? {},
-    }, backlog.defaults);
+    const resolvedDefaults = mergeExecutionDefaults(backlog.defaults);
     cachedCatalog = Object.fromEntries(
       backlog.epics.flatMap((epic) =>
         epic.features.map((feature) => [

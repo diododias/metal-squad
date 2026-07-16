@@ -169,8 +169,7 @@ export async function executeBacklog(
   let budgetPauseTriggered = false;
   let autoPilotProtectiveStop = false;
 
-  const repoStageSkills = backlog.version === 2 ? backlog.defaults.stageSkills : {};
-  const effectiveStageSkills = collectEffectiveStageSkills(repoStageSkills, config.stageSkills);
+  const effectiveStageSkills = backlog.version === 2 ? backlog.defaults.stageSkills : {};
   const completedFeatureIds = listCompletedFeatureIds(repoId);
 
   const resolvedPlan = opts.featureId
