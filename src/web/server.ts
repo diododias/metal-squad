@@ -42,6 +42,7 @@ import type {
   FeatureConfigPatch,
   FeatureConfigSaveIssue,
   FeatureConfigSaveResult,
+  BudgetConfigPatch,
   ProjectDefaultsPatch,
   RunChangesPayload,
   SecretPatch,
@@ -717,6 +718,10 @@ export function createWebServer(options: {
         updateProjectDefaults(message.patch, featureCwd);
         break;
       }
+      case 'action:updateBudgetConfig': {
+        updateBudgetConfig(message.patch, featureCwd);
+        break;
+      }
       case 'action:updateNotifications': {
         updateNotifications(message.patch, featureCwd);
         break;
@@ -1061,6 +1066,26 @@ export function createWebServer(options: {
     }
     reconcileWebState(featureCwd);
     msqEventBus.emit('ui:info', { message: 'Saved project defaults.' });
+  }
+
+  function updateBudgetConfig(patch: BudgetConfigPatch, featureCwd: string): void {
+    try {
+      if (!Number.isInteger(patch.alertAtPercent) || patch.alertAtPercent < 0 || patch.alertAtPercent > 100) {
+        throw new Error('alertAtPercent must be a whole number between 0 and 100.');
+      }
+      const config = loadConfig();
+      saveConfig({
+        ...config,
+        budget: { ...config.budget, alertAtPercent: patch.alertAtPercent },
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      console.error(`[updateBudgetConfig] error: ${message}`);
+      msqEventBus.emit('ui:notice', { message: `Could not save budget settings: ${message}` });
+      return;
+    }
+    reconcileWebState(featureCwd);
+    msqEventBus.emit('ui:info', { message: 'Saved budget settings.' });
   }
 
   function updateNotifications(patch: NotificationsPatch, featureCwd: string): void {

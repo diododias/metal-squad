@@ -174,6 +174,11 @@ export interface ProjectDefaultsPatch {
   budget?: { maxTokens?: number; perFeatureMaxTokens?: number };
 }
 
+/** Narrow global config patch for the App Budget settings. */
+export interface BudgetConfigPatch {
+  alertAtPercent: number;
+}
+
 /** App-owned runtime config patch accepted by the Settings WebSocket API. */
 export type AppConfigPatch = ConfigAppConfigPatch;
 
@@ -209,6 +214,7 @@ export type WebSocketClientMessage =
   | { type: 'action:updateFeatureConfig'; featureId: string; patch: FeatureConfigPatch }
   | { type: 'action:updateTaskConfig'; featureId: string; taskId: string; patch: TaskConfigPatch }
   | { type: 'action:updateProjectDefaults'; patch: ProjectDefaultsPatch }
+  | { type: 'action:updateBudgetConfig'; patch: BudgetConfigPatch }
   | { type: 'action:updateNotifications'; patch: NotificationsPatch }
   | { type: 'action:updateAppConfig'; patch: AppConfigPatch }
   | { type: 'action:setSecret'; patch: SecretPatch }

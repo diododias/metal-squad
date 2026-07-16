@@ -29,6 +29,12 @@ const DEFAULT_TOOLS = [
 ];
 
 describe('config', () => {
+  it('accepts a zero-percent budget alert threshold', async () => {
+    const { ConfigSchema } = await import('../../src/config/index.js');
+
+    expect(ConfigSchema.parse({ budget: { alertAtPercent: 0 } }).budget.alertAtPercent).toBe(0);
+  });
+
   const previousHome = process.env.HOME;
   let home = '';
 
