@@ -407,6 +407,7 @@ describe('buildMsqWebState pendingFeatures projection', () => {
           { type: 'slack', webhookUrl: 'https://hooks.slack.com/services/T00/B00/secret' },
           { type: 'telegram', chatId: '123456' },
           { type: 'desktop' },
+          { type: 'webhook', url: '' },
         ],
         events: ['run:start', 'run:done'],
       },
@@ -421,15 +422,17 @@ describe('buildMsqWebState pendingFeatures projection', () => {
       { type: 'slack', configured: true },
       { type: 'telegram', configured: true },
       { type: 'desktop', configured: true },
+      { type: 'webhook', configured: false },
     ]);
     expect(state.runtimeConfig.notifications.events).toEqual(['run:start', 'run:done']);
+    expect(state.runtimeConfig.writability).toEqual({ dbWritable: true, configWritable: true });
     expect(JSON.stringify(state.runtimeConfig)).not.toContain('secret');
     expect(JSON.stringify(state.runtimeConfig)).not.toContain('123456');
     expect(state.runtimeConfig).not.toHaveProperty('telegramChatId');
   });
 
-  it('caches runtime config between builds until the caches are reset', async () => {
-    const { buildMsqWebState, resetWebStateCaches } = await import('../../src/web/state.js');
+  it('invalidates cached runtime config after a settings write', async () => {
+    const { buildMsqWebState, invalidateRuntimeConfigCache } = await import('../../src/web/state.js');
     mocks.listRunsForTui.mockReturnValue([]);
 
     expect(buildMsqWebState().runtimeConfig.concurrency).toBe(3);
@@ -438,7 +441,7 @@ describe('buildMsqWebState pendingFeatures projection', () => {
     mocks.resolveRuntimeConfig.mockReturnValue(changed);
     expect(buildMsqWebState().runtimeConfig.concurrency).toBe(3);
 
-    resetWebStateCaches();
+    invalidateRuntimeConfigCache();
     expect(buildMsqWebState().runtimeConfig.concurrency).toBe(9);
   });
 });

@@ -36,7 +36,6 @@ const TABS = [
   { id: 'output', label: 'Live Output' },
 ];
 
-const resumeTools = ['claude', 'codex', 'opencode'] as const;
 const resumeEfforts = ['low', 'medium', 'high'] as const;
 
 const inputStyle: React.CSSProperties = {
@@ -109,6 +108,7 @@ export function RunDetailPage({
   const transcript = useMemo(() => outputToTranscript(run ? (linesByRun[run.runId] ?? []) : []), [run, linesByRun]);
   const sessionStatus = detail?.sessionStatus ?? (run ? snapshotFromRun(run) : null);
   const toolCalls = detail?.toolCalls ?? [];
+  const toolIds = state.runtimeConfig.tools.map((tool) => tool.id);
 
   useEffect(() => {
     if (activeTab !== 'output') return;
@@ -252,7 +252,7 @@ export function RunDetailPage({
       </div>
     ),
     config: feature ? (
-      <FeatureConfigDetail feature={feature} backlogSettings={state.backlogSettings} onSaveConfig={saveConfig} />
+      <FeatureConfigDetail feature={feature} backlogSettings={state.backlogSettings} toolIds={toolIds} onSaveConfig={saveConfig} />
     ) : (
       <div style={{ color: 'var(--text-faint)', fontSize: 'var(--text-sm)' }}>Feature config not found in catalog.</div>
     ),
@@ -355,7 +355,7 @@ export function RunDetailPage({
               style={inputStyle}
             >
               <option value="">tool (default)</option>
-              {resumeTools.map((tool) => (
+              {toolIds.map((tool) => (
                 <option key={tool} value={tool}>{tool}</option>
               ))}
             </select>

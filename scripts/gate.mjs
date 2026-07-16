@@ -4,8 +4,9 @@ import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { spawnSync } from 'node:child_process';
+import { assertNodeVersion, resolveFastTestArgs } from './gate-lib.mjs';
 
-const mode = process.argv[2] ?? 'pre-commit';
+const mode = process.argv[2] ?? 'fast';
 const repoRoot = resolve(dirname(new URL(import.meta.url).pathname), '..');
 const stampPath = join(repoRoot, '.git', '.msq-npm-ci-stamp');
 
@@ -45,6 +46,15 @@ function run(command, args, options = {}) {
   }
 }
 
+function capture(command, args) {
+  const result = spawnSync(command, args, { cwd: repoRoot, encoding: 'utf8' });
+  if (result.status !== 0) {
+    if (result.stderr) process.stderr.write(result.stderr);
+    throw new Error(`Command failed: ${[command, ...args].join(' ')}`);
+  }
+  return result.stdout ?? '';
+}
+
 function ensureDependenciesInstalled() {
   const packageJson = readFileSync(join(repoRoot, 'package.json'), 'utf8');
   const packageLock = readFileSync(join(repoRoot, 'package-lock.json'), 'utf8');
@@ -56,7 +66,7 @@ function ensureDependenciesInstalled() {
 
   const currentStamp = existsSync(stampPath) ? readFileSync(stampPath, 'utf8').trim() : '';
   if (existsSync(join(repoRoot, 'node_modules')) && currentStamp === digest) {
-    console.log('[husky-gate] npm ci skipped (lockfile/node version unchanged)');
+    console.log('[gate] npm ci skipped (lockfile/node version unchanged)');
     return;
   }
 
@@ -65,19 +75,57 @@ function ensureDependenciesInstalled() {
   writeFileSync(stampPath, `${digest}\n`);
 }
 
-function main() {
-  console.log(`[husky-gate] starting ${mode}`);
-  ensureDependenciesInstalled();
+function runFastTests() {
+  const stagedFiles = capture('git', ['diff', '--cached', '--name-only', '--diff-filter=ACMR'])
+    .split('\n')
+    .map((line) => line.trim())
+    .filter(Boolean);
+
+  const testArgs = resolveFastTestArgs(stagedFiles);
+  if (!testArgs) {
+    console.log('[gate] no staged src/tests changes; skipping tests');
+    return;
+  }
+
+  run('rtk', ['npx', 'vitest', ...testArgs]);
+}
+
+function runFast() {
+  run('rtk', ['npm', 'run', 'typecheck']);
+  run('rtk', ['npm', 'run', 'lint']);
+  runFastTests();
+}
+
+function runFull() {
+  if (!process.env.MSQ_DB_PATH) {
+    throw new Error(
+      '[gate] full mode requires a sandbox MSQ_DB_PATH so it never touches the real catalog. Run it via `npm run gate:full`.',
+    );
+  }
 
   run('rtk', ['npm', 'run', 'build']);
+  run('rtk', ['npm', 'run', 'migrate:db']);
   run('rtk', ['npm', 'run', 'typecheck']);
   run('rtk', ['npm', 'run', 'lint']);
   run('rtk', ['npm', 'test']);
   run('rtk', ['npm', 'run', 'test:coverage:gate']);
   run('rtk', ['npm', 'run', 'verify:repo']);
   run('rtk', ['node', 'dist/index.js', '--help']);
+}
 
-  console.log(`[husky-gate] ${mode} passed`);
+function main() {
+  if (mode !== 'fast' && mode !== 'full') {
+    throw new Error(`[gate] unknown mode "${mode}"; expected "fast" or "full"`);
+  }
+
+  assertNodeVersion();
+  console.log(`[gate] starting ${mode}`);
+  ensureDependenciesInstalled();
+
+  if (mode === 'fast') runFast();
+  else runFull();
+
+  console.log(`[gate] ${mode} passed`);
 }
 
 main();
