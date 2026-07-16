@@ -37,10 +37,16 @@ const settingsState = {
   runtimeConfig: {
     concurrency: 1,
     toolTimeoutMs: 60_000,
+    heartbeatMs: 30_000,
     staleRunThresholdMinutes: 10,
     promptContextCharLimit: 20_000,
+    writability: { dbWritable: true, configWritable: true },
     workflow: { autoAdvanceStages: false, pollIntervalMs: 5_000 },
     web: { host: '127.0.0.1', port: 3000, auth: 'none' },
+    tools: [
+      { id: 'claude', adapter: 'claude', command: 'claude', baseArgs: [], env: {}, versionCheck: ['--version'], capabilities: { model: true, effort: true, thinking: true }, thinkingBudget: { low: 0, medium: 0, high: 0 }, minTimeoutMs: 0 },
+      { id: 'codex-canary', adapter: 'codex', command: 'codex-canary', baseArgs: [], env: {}, versionCheck: ['--version'], capabilities: { model: true, effort: true, thinking: false }, thinkingBudget: { low: 0, medium: 0, high: 0 }, minTimeoutMs: 0 },
+    ],
     notifications: { channels: [], events: [] },
     budget: { alertAtPercent: 80, lastResetDate: null },
   },
@@ -49,7 +55,7 @@ const settingsState = {
     resolvedDefaults: undefined,
     budget: undefined,
     projectDefaults: {
-      tool: 'claude',
+      tool: 'codex',
       effort: 'medium',
       thinking: 'off',
       skills: ['speckit-specify'],
@@ -131,9 +137,11 @@ describe('Settings client surfaces', () => {
     expect(Array.from(container.querySelectorAll('button')).map((button) => button.textContent)).toEqual([
       '[Runtime]',
       'Defaults',
+      'Tools',
       'Skills',
       'Notifications',
       'Budget',
+      'save runtime',
     ]);
     expect(container.textContent).toContain('secrets');
     expect(container.textContent).toContain('empty');
@@ -241,6 +249,100 @@ describe('Settings client surfaces', () => {
     expect(container.textContent).toContain('Enter a whole number from 0 to 100.');
     expect((Array.from(container.querySelectorAll('button')).find((button) => button.textContent === 'save budget') as HTMLButtonElement).disabled).toBe(true);
     expect(messages).toEqual([]);
+  });
+
+  it('saves editable notification channels without reading configured credentials', () => {
+    const messages: WebSocketClientMessage[] = [];
+    const state = {
+      ...settingsState,
+      runtimeConfig: {
+        ...settingsState.runtimeConfig,
+        notifications: {
+          channels: [{ type: 'webhook', configured: true }],
+          events: ['run:start'],
+        },
+      },
+    } as MsqWebState;
+    const container = render(React.createElement(ConfigPage, {
+      state,
+      isMobile: false,
+      send: (message: WebSocketClientMessage) => { messages.push(message); },
+    }));
+
+    act(() => {
+      Array.from(container.querySelectorAll('button')).find((button) => button.textContent === 'Notifications')?.click();
+    });
+    expect(container.textContent).toContain('configured');
+    expect((container.querySelector('#notification-channel-0-credential') as HTMLInputElement).value).toBe('');
+
+    const done = container.querySelector('[id="notification-event-run:done"]') as HTMLInputElement;
+    act(() => {
+      done.click();
+      Array.from(container.querySelectorAll('button')).find((button) => button.textContent === 'save notifications')?.click();
+    });
+
+    expect(messages).toEqual([{
+      type: 'action:updateNotifications',
+      patch: { channels: [{ type: 'webhook' }], events: ['run:start', 'run:done'] },
+    }]);
+  });
+
+  it('saves changed App runtime settings and removes global workflow controls', () => {
+    const messages: WebSocketClientMessage[] = [];
+    const container = render(React.createElement(ConfigPage, {
+      state: settingsState,
+      isMobile: false,
+      send: (message: WebSocketClientMessage) => { messages.push(message); },
+    }));
+
+    expect(container.textContent).not.toContain('workflow.autoAdvanceStages');
+    expect(container.textContent).not.toContain('workflow.pollIntervalMs');
+
+    const concurrency = container.querySelector('#runtime-concurrency') as HTMLInputElement;
+    const port = container.querySelector('#runtime-web-port') as HTMLInputElement;
+    act(() => {
+      Object.getOwnPropertyDescriptor(Object.getPrototypeOf(concurrency), 'value')?.set?.call(concurrency, '5');
+      concurrency.dispatchEvent(new Event('input', { bubbles: true }));
+      concurrency.dispatchEvent(new Event('change', { bubbles: true }));
+      Object.getOwnPropertyDescriptor(Object.getPrototypeOf(port), 'value')?.set?.call(port, '8080');
+      port.dispatchEvent(new Event('input', { bubbles: true }));
+      port.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+    act(() => {
+      Array.from(container.querySelectorAll('button')).find((button) => button.textContent === 'save runtime')?.click();
+    });
+
+    expect(messages).toEqual([{
+      type: 'action:updateAppConfig',
+      patch: { concurrency: 5, web: { port: 8080 } },
+    }]);
+  });
+
+  it('disables runtime controls when config.json is not writable', () => {
+    const state = {
+      ...settingsState,
+      runtimeConfig: {
+        ...settingsState.runtimeConfig,
+        writability: { dbWritable: true, configWritable: false },
+      },
+      environment: { ...settingsState.environment, configWritable: false },
+    } as MsqWebState;
+    const container = render(React.createElement(ConfigPage, { state, isMobile: false, send: () => undefined }));
+
+    expect((container.querySelector('#runtime-concurrency') as HTMLInputElement).disabled).toBe(true);
+    expect((container.querySelector('#runtime-web-auth') as HTMLSelectElement).disabled).toBe(true);
+    expect(Array.from(container.querySelectorAll('button')).find((button) => button.textContent === 'save runtime')?.disabled).toBe(true);
+    expect(container.textContent).toContain('config.json is read-only');
+  });
+
+  it('shows registered tools and sends a complete registry update', () => {
+    const messages: WebSocketClientMessage[] = [];
+    const container = render(React.createElement(ConfigPage, { state: settingsState, isMobile: false, send: (message: WebSocketClientMessage) => { messages.push(message); } }));
+    act(() => { Array.from(container.querySelectorAll('button')).find((button) => button.textContent === 'Tools')?.click(); });
+    expect(container.textContent).toContain('Tools registry');
+    expect(container.textContent).toContain('claude');
+    act(() => { Array.from(container.querySelectorAll('button')).filter((button) => button.textContent === 'remove')[1]?.click(); });
+    expect(messages).toEqual([{ type: 'action:updateToolsRegistry', tools: [settingsState.runtimeConfig.tools[0]] }]);
   });
 
   it('renders Settings in the main navigation while retaining the config route', () => {

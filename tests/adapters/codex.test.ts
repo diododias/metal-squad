@@ -3,6 +3,11 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 const mockRunCli = vi.fn();
 const mockExecFileSync = vi.fn();
 const mockEventEmit = vi.fn();
+const mockResolveToolInvocation = vi.fn(() => ({
+  command: 'codex', baseArgs: [], env: {}, versionCheck: ['--version'],
+  capabilities: { model: true, effort: true, thinking: false },
+  thinkingBudget: { low: 0, medium: 0, high: 0 }, minTimeoutMs: 1_800_000,
+}));
 
 class MockCliTimeoutError extends Error {
   readonly stdout: string;
@@ -32,6 +37,7 @@ vi.mock('../../src/config/index.js', () => ({
 
 vi.mock('../../src/core/adapters/spawn.js', () => ({
   runCli: mockRunCli,
+  resolveToolInvocation: mockResolveToolInvocation,
   CliTimeoutError: MockCliTimeoutError,
 }));
 
@@ -49,6 +55,11 @@ beforeEach(() => {
   mockRunCli.mockReset();
   mockExecFileSync.mockReset();
   mockEventEmit.mockReset();
+  mockResolveToolInvocation.mockReturnValue({
+    command: 'codex', baseArgs: [], env: {}, versionCheck: ['--version'],
+    capabilities: { model: true, effort: true, thinking: false },
+    thinkingBudget: { low: 0, medium: 0, high: 0 }, minTimeoutMs: 1_800_000,
+  });
 });
 
 describe('codexAdapter timeout observability', () => {
@@ -158,7 +169,7 @@ describe('codexAdapter timeout observability', () => {
     });
   });
 
-  it('declares thinking as unsupported and warns without altering the invocation', async () => {
+  it('reads thinking capability and minimum timeout from the registry invocation', async () => {
     mockRunCli.mockResolvedValue({
       code: 0,
       stdout: JSON.stringify({
@@ -169,8 +180,6 @@ describe('codexAdapter timeout observability', () => {
     });
 
     const { codexAdapter } = await import('../../src/core/adapters/codex.js');
-    expect(codexAdapter.capabilities).toEqual({ model: true, effort: true, thinking: false });
-
     await codexAdapter.runFeature({
       id: 'feat-04',
       title: 'Feature',
@@ -191,5 +200,8 @@ describe('codexAdapter timeout observability', () => {
     const [, calledArgs] = mockRunCli.mock.calls[0] as [string, string[], unknown];
     expect(calledArgs).not.toContain('thinking');
     expect(calledArgs).toEqual(expect.arrayContaining(['-c', 'model_reasoning_effort="high"']));
+    expect(mockRunCli).toHaveBeenCalledWith(expect.any(String), expect.any(Array), expect.objectContaining({
+      timeoutMs: 1_800_000,
+    }));
   });
 });

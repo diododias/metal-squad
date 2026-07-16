@@ -1,10 +1,10 @@
 import { homedir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { accessSync, constants, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { parse } from 'yaml';
 import { z } from 'zod';
 import type { Defaults, Feature } from '../core/backlog/schema.js';
-import { EffortSchema, ThinkingSchema, ToolSchema } from '../core/backlog/schema.js';
+import { AdapterSchema, EffortSchema, ThinkingSchema, ToolSchema } from '../core/backlog/schema.js';
 
 export const CONFIG_DIR = join(homedir(), '.config', 'metal-squad');
 export const DATA_DIR = join(homedir(), '.local', 'share', 'metal-squad');
@@ -58,6 +58,15 @@ export const NotificationChannelConfig = z.discriminatedUnion('type', [
 ]);
 export type NotificationChannelConfig = z.infer<typeof NotificationChannelConfig>;
 
+/** Write-only channel payload used by the Settings editor. Omitted credentials
+ * retain the credential of the channel at the same position. */
+export type NotificationChannelPatch =
+  | { type: 'telegram'; chatId?: string }
+  | { type: 'slack'; webhookUrl?: string }
+  | { type: 'discord'; webhookUrl?: string }
+  | { type: 'webhook'; url?: string }
+  | { type: 'desktop' };
+
 const DEFAULT_NOTIFICATION_EVENTS: NotificableEvent[] = [
   'run:start',
   'gate:created',
@@ -89,6 +98,82 @@ const WebConfig = z.object({
   statusSpinner: z.boolean().default(true),
 });
 
+const ToolCapabilitiesConfig = z.object({
+  model: z.boolean(),
+  effort: z.boolean(),
+  thinking: z.boolean(),
+}).strict();
+
+const ThinkingBudgetConfig = z.object({
+  low: z.number().int().nonnegative(),
+  medium: z.number().int().nonnegative(),
+  high: z.number().int().nonnegative(),
+}).strict();
+
+const ToolRegistryEntrySchema = z.object({
+  id: z.string().trim().min(1).regex(/^[a-z][a-z0-9-]*$/, 'Tool id must use lowercase letters, numbers, and hyphens.'),
+  adapter: AdapterSchema,
+  command: z.string().trim().min(1),
+  baseArgs: z.array(z.string()).default([]),
+  env: z.record(z.string(), z.string()).default({}),
+  versionCheck: z.array(z.string()).min(1).default(['--version']),
+  capabilities: ToolCapabilitiesConfig.optional(),
+  thinkingBudget: ThinkingBudgetConfig.optional(),
+  minTimeoutMs: z.number().int().nonnegative().optional(),
+}).strict();
+
+export const DEFAULT_TOOL_REGISTRY: z.input<typeof ToolRegistryEntrySchema>[] = [
+  {
+    id: 'claude',
+    adapter: 'claude',
+    command: 'claude',
+    baseArgs: [],
+    env: {},
+    versionCheck: ['--version'],
+    capabilities: { model: true, effort: true, thinking: true },
+    thinkingBudget: { low: 4_000, medium: 10_000, high: 24_000 },
+    minTimeoutMs: 0,
+  },
+  {
+    id: 'codex',
+    adapter: 'codex',
+    command: 'codex',
+    baseArgs: [],
+    env: {},
+    versionCheck: ['--version'],
+    capabilities: { model: true, effort: true, thinking: false },
+    thinkingBudget: { low: 0, medium: 0, high: 0 },
+    minTimeoutMs: 1_800_000,
+  },
+  {
+    id: 'opencode',
+    adapter: 'opencode',
+    command: 'opencode',
+    baseArgs: [],
+    env: {},
+    versionCheck: ['--version'],
+    capabilities: { model: true, effort: false, thinking: false },
+    thinkingBudget: { low: 0, medium: 0, high: 0 },
+    minTimeoutMs: 0,
+  },
+];
+
+const ToolRegistrySchema = z.array(ToolRegistryEntrySchema)
+  .min(1)
+  .superRefine((tools, ctx) => {
+    const ids = new Set<string>();
+    for (const [index, tool] of tools.entries()) {
+      if (ids.has(tool.id)) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: [index, 'id'],
+          message: `Tool id "${tool.id}" is duplicated.`,
+        });
+      }
+      ids.add(tool.id);
+    }
+  });
+
 const RuntimeConfigOverrideSchema = z.object({
   concurrency: z.number().int().positive().optional(),
   toolTimeoutMs: z.number().int().positive().optional(),
@@ -104,21 +189,13 @@ const RuntimeConfigOverrideSchema = z.object({
   stageSkills: z.record(z.string(), z.array(z.string())).optional(),
 });
 
-const RepoDefaultsSchema = z.object({
-  tool: ToolSchema.optional(),
-  model: z.string().trim().min(1).optional(),
-  effort: EffortSchema.optional(),
-  thinking: ThinkingSchema.optional(),
-  skills: z.array(z.string()).optional(),
-  stageSkills: z.record(z.string(), z.array(z.string())).optional(),
-});
-
 export const REPO_CONFIG_PATH = '.msq/config.yaml';
 export const REPO_CONFIG_ABS_PATH = (cwd = process.cwd()): string => resolve(cwd, REPO_CONFIG_PATH);
 
 export const ConfigSchema = z.object({
   concurrency: z.number().int().positive().default(3),
   toolTimeoutMs: z.number().int().positive().default(600_000),
+  heartbeatMs: z.number().int().positive().default(30_000),
   staleRunThresholdMinutes: z.number().int().positive().default(120),
   idleThresholdMs: z.number().int().positive().default(30_000),
   promptContextCharLimit: z.number().int().positive().default(20_000),
@@ -129,15 +206,27 @@ export const ConfigSchema = z.object({
   budget: BudgetConfig.default({}),
   web: WebConfig.default({}),
   stageSkills: z.record(z.string(), z.array(z.string())).default({}),
+  tools: ToolRegistrySchema.default(DEFAULT_TOOL_REGISTRY),
 });
 export type Config = z.infer<typeof ConfigSchema>;
+export interface AppConfigPatch extends Omit<Partial<Config>, 'notifications' | 'workflow' | 'budget' | 'web' | 'stageSkills'> {
+  notifications?: Partial<Config['notifications']>;
+  workflow?: Partial<Config['workflow']>;
+  budget?: Partial<Config['budget']>;
+  web?: Partial<Config['web']>;
+  stageSkills?: Config['stageSkills'];
+}
+export type ToolRegistryEntry = z.infer<typeof ToolRegistryEntrySchema>;
 export type WebConfig = z.infer<typeof WebConfig>;
 export type RuntimeConfigOverride = z.infer<typeof RuntimeConfigOverrideSchema>;
-export type RepoDefaults = z.infer<typeof RepoDefaultsSchema>;
+
+export interface NotificationsPatch {
+  channels?: NotificationChannelPatch[];
+  events?: NotificableEvent[];
+}
 
 export interface RepoConfigFile {
   runtime: RuntimeConfigOverride;
-  defaults: RepoDefaults;
 }
 
 export interface ResolvedExecutionDefaults {
@@ -157,15 +246,13 @@ export interface ResolvedConfigSources {
 
 export interface ResolvedConfigSnapshot {
   runtime: Config;
-  repoDefaults: RepoDefaults;
   sources: ResolvedConfigSources;
 }
 
-export type ExecutionDefaultsLike = Partial<ResolvedExecutionDefaults> | RepoDefaults | Defaults | Feature;
+export type ExecutionDefaultsLike = Partial<ResolvedExecutionDefaults> | Defaults | Feature;
 
 const RepoConfigFileSchema = z.object({
   runtime: RuntimeConfigOverrideSchema.default({}),
-  defaults: RepoDefaultsSchema.default({}),
 });
 
 export function loadConfig(): Config {
@@ -180,7 +267,7 @@ export function loadConfig(): Config {
 
 export function loadRepoConfig(cwd = process.cwd()): RepoConfigFile {
   const repoConfigPath = REPO_CONFIG_ABS_PATH(cwd);
-  if (!existsSync(repoConfigPath)) return { runtime: {}, defaults: {} };
+  if (!existsSync(repoConfigPath)) return { runtime: {} };
   try {
     const raw = readFileSync(repoConfigPath, 'utf8');
     const parsed: unknown = parse(raw);
@@ -204,7 +291,6 @@ export function resolveConfigSnapshot(cwd = process.cwd()): ResolvedConfigSnapsh
   const repoConfig = loadRepoConfig(cwd);
   return {
     runtime: mergeRuntimeConfig(loadConfig(), repoConfig.runtime),
-    repoDefaults: repoConfig.defaults,
     sources: {
       globalConfigPath: CONFIG_PATH,
       ...(hasRepoConfig ? { repoConfigPath } : {}),
@@ -215,6 +301,77 @@ export function resolveConfigSnapshot(cwd = process.cwd()): ResolvedConfigSnapsh
 export function saveConfig(cfg: Config): void {
   mkdirSync(CONFIG_DIR, { recursive: true });
   writeFileSync(CONFIG_PATH, JSON.stringify(cfg, null, 2));
+}
+
+export function saveNotificationsPatch(patch: NotificationsPatch): Config {
+  const current = loadConfig();
+  const channels = patch.channels?.map((channel, index) => {
+    const existing = current.notifications.channels[index];
+    switch (channel.type) {
+      case 'telegram':
+        return { type: channel.type, chatId: channel.chatId ?? (existing?.type === 'telegram' ? existing.chatId : undefined) };
+      case 'slack':
+      case 'discord':
+        return {
+          type: channel.type,
+          webhookUrl: channel.webhookUrl ?? (existing?.type === channel.type ? existing.webhookUrl : undefined),
+        };
+      case 'webhook':
+        return { type: channel.type, url: channel.url ?? (existing?.type === 'webhook' ? existing.url : undefined) };
+      case 'desktop':
+        return channel;
+    }
+  });
+  const merged = ConfigSchema.parse({
+    ...current,
+    notifications: {
+      ...current.notifications,
+      ...patch,
+      ...(channels ? { channels } : {}),
+    },
+  });
+
+  saveConfig(merged);
+  return merged;
+}
+
+/** Returns whether the current config file, or the nearest existing parent for it, can be written. */
+export function configWritable(): boolean {
+  let probePath = existsSync(CONFIG_PATH) ? CONFIG_PATH : CONFIG_DIR;
+
+  while (!existsSync(probePath)) {
+    const parentPath = dirname(probePath);
+    if (parentPath === probePath) return false;
+    probePath = parentPath;
+  }
+
+  try {
+    accessSync(probePath, constants.W_OK);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** Applies an App-owned config patch without replacing untouched config sections. */
+export function saveAppConfigPatch(patch: AppConfigPatch): Config {
+  const current = loadConfig();
+  const merged = ConfigSchema.parse({
+    ...current,
+    ...patch,
+    notifications: patch.notifications ? { ...current.notifications, ...patch.notifications } : current.notifications,
+    workflow: patch.workflow ? { ...current.workflow, ...patch.workflow } : current.workflow,
+    budget: patch.budget ? { ...current.budget, ...patch.budget } : current.budget,
+    web: patch.web ? { ...current.web, ...patch.web } : current.web,
+    stageSkills: patch.stageSkills ? { ...current.stageSkills, ...patch.stageSkills } : current.stageSkills,
+  });
+
+  if (!configWritable()) {
+    throw new Error(`Cannot write metal-squad config at ${CONFIG_PATH}: file is not writable. Check its permissions.`);
+  }
+
+  saveConfig(merged);
+  return merged;
 }
 
 /** Creates config.json with defaults on first run. No-op if the file already exists. */
