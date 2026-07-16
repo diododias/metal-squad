@@ -167,7 +167,21 @@ describe('getBacklogSettings projectDefaults (SET-16)', () => {
     try {
       const { getBacklogSettings } = await setup(cwd);
       const settings = getBacklogSettings(cwd);
-      expect(settings.projectDefaults).toEqual({ tool: 'claude', effort: 'medium', skills: [], stageSkills: {} });
+      expect(settings.projectDefaults).toEqual({
+        tool: 'claude',
+        effort: 'medium',
+        thinking: 'off',
+        skills: [],
+        stageSkills: {},
+        workflow: {
+          mode: 'staged',
+          stages: ['specify', 'plan', 'tasks', 'implement', 'validate'],
+          approvals: { channel: 'telegram', autoAdvance: false },
+          syncTasksToBacklog: true,
+          sessionPolicy: { mode: 'isolated', alwaysIsolatedStages: [] },
+          stepGuidance: {},
+        },
+      });
     } finally {
       rmSync(cwd, { recursive: true, force: true });
     }

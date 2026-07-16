@@ -533,6 +533,29 @@ describe('backlogCatalog upsert/diff/load', () => {
       expect(stored.model).toBe('sonnet-5');
     });
 
+    it('updates inherited feature values while preserving workflow siblings', async () => {
+      const { upsertBacklogCatalog, updateCatalogDefaults } = await setup();
+      const { loadBacklogFromCatalog } = await import('../../src/core/backlog/load.js');
+      upsertBacklogCatalog(makeBacklog(), 'repo-1');
+
+      updateCatalogDefaults('repo-1', {
+        effort: 'high',
+        workflow: { mode: 'single' },
+        maxTokens: 9000,
+      });
+
+      const feature = loadBacklogFromCatalog('repo-1').epics[0]?.features[0];
+      expect(feature).toMatchObject({
+        effort: 'high',
+        maxTokens: 9000,
+        workflow: {
+          mode: 'single',
+          stages: ['specify', 'plan', 'tasks', 'implement', 'validate'],
+          syncTasksToBacklog: true,
+        },
+      });
+    });
+
     it('merges a budget patch onto existing budget fields without dropping siblings', async () => {
       const { upsertBacklogCatalog, updateCatalogDefaults } = await setup();
       upsertBacklogCatalog(makeBacklog({ budget: { maxTokens: 100000, perFeatureMaxTokens: 5000 } }), 'repo-1');

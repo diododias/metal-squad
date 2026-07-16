@@ -150,7 +150,7 @@ function MainPanelComponent({
   selectedRunIndex: _selectedRunIndex,
   selectedFeature,
   featureCatalog = {},
-  backlogSettings = { stageSkills: {}, projectDefaults: { tool: 'claude', effort: 'medium', skills: [], stageSkills: {} } },
+  backlogSettings = { stageSkills: {}, projectDefaults: { tool: 'claude', effort: 'medium', thinking: 'off', skills: [], stageSkills: {}, workflow: { mode: 'staged', stages: ['specify', 'plan', 'tasks', 'implement', 'validate'], approvals: { channel: 'telegram', autoAdvance: false }, syncTasksToBacklog: true, sessionPolicy: { mode: 'isolated', alwaysIsolatedStages: [] }, stepGuidance: {} } } },
   activeView,
   output,
   outputPaused,
