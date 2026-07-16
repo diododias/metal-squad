@@ -24,7 +24,6 @@ export const BudgetSchema = z.object({
   maxTokens: z.number().int().positive().optional(),
   perFeatureMaxTokens: z.number().int().positive().optional(),
 });
-
 export const TaskSchema = z.object({
   id: z.string(),
   title: z.string(),

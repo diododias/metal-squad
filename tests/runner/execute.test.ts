@@ -534,7 +534,21 @@ describe('executeBacklog failure persistence', () => {
     const backlog: Backlog = {
       version: 2,
       repo: 'repo',
-      defaults: { tool: 'claude', effort: 'medium', skills: ['implement'], stageSkills: {} },
+      defaults: {
+        tool: 'claude',
+        effort: 'medium',
+        thinking: 'off',
+        skills: ['implement'],
+        stageSkills: {},
+        workflow: {
+          mode: 'staged',
+          stages: ['specify', 'plan', 'tasks', 'implement', 'validate'],
+          approvals: { channel: 'telegram', autoAdvance: false },
+          syncTasksToBacklog: true,
+          sessionPolicy: { mode: 'isolated', alwaysIsolatedStages: [] },
+          stepGuidance: {},
+        },
+      },
       epics: [
         {
           id: 'epic-1',
@@ -596,7 +610,21 @@ describe('executeBacklog failure persistence', () => {
     const backlog: Backlog = {
       version: 2,
       repo: 'repo',
-      defaults: { tool: 'claude', effort: 'medium', skills: ['implement'], stageSkills: {} },
+      defaults: {
+        tool: 'claude',
+        effort: 'medium',
+        thinking: 'off',
+        skills: ['implement'],
+        stageSkills: {},
+        workflow: {
+          mode: 'staged',
+          stages: ['specify', 'plan', 'tasks', 'implement', 'validate'],
+          approvals: { channel: 'telegram', autoAdvance: false },
+          syncTasksToBacklog: true,
+          sessionPolicy: { mode: 'isolated', alwaysIsolatedStages: [] },
+          stepGuidance: {},
+        },
+      },
       epics: [
         {
           id: 'epic-1',

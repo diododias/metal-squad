@@ -46,12 +46,12 @@ describe('adapter registry', () => {
 });
 
 describe('claude adapter', () => {
-  it('maps effort tiers to models', async () => {
+  it('keeps effortFlag empty since effort no longer selects a model tier', async () => {
     const { claudeAdapter } = await import('../../src/core/adapters/claude.js');
 
-    expect(claudeAdapter.effortFlag('low')).toEqual(['--model', 'haiku']);
-    expect(claudeAdapter.effortFlag('medium')).toEqual(['--model', 'sonnet']);
-    expect(claudeAdapter.effortFlag('high')).toEqual(['--model', 'opus']);
+    expect(claudeAdapter.effortFlag('low')).toEqual([]);
+    expect(claudeAdapter.effortFlag('medium')).toEqual([]);
+    expect(claudeAdapter.effortFlag('high')).toEqual([]);
   });
 
   it('returns failed result when cli exits with non-zero code', async () => {
@@ -95,6 +95,7 @@ describe('claude adapter', () => {
           title: 'Feature',
           tool: 'claude',
           effort: 'medium',
+          thinking: 'off',
           model: 'custom',
           dependsOn: [],
           tasks: [],
@@ -116,6 +117,7 @@ describe('claude adapter', () => {
       expect.arrayContaining(['--print', '--output-format', 'stream-json', '--verbose', '--dangerously-skip-permissions', '--model', 'custom', '--', 'PROMPT']),
       expect.objectContaining({
         cwd: '/repo',
+        env: { MAX_THINKING_TOKENS: '0' },
         idleThresholdMs: 30_000,
         onStatus: expect.any(Function),
         onStdoutLine: expect.any(Function),
@@ -132,6 +134,42 @@ describe('claude adapter', () => {
       output: 3,
       total: 5,
     });
+  });
+
+  it('coexists model, effort and thinking=on in the spawn', async () => {
+    const resultLine = JSON.stringify({
+      type: 'result',
+      subtype: 'success',
+      result: 'done',
+      usage: { input_tokens: 2, output_tokens: 3 },
+    });
+    mockRunCli.mockResolvedValue({
+      code: 0,
+      stdout: resultLine,
+      stderr: '',
+    });
+    const { claudeAdapter } = await import('../../src/core/adapters/claude.js');
+
+    await claudeAdapter.runFeature(
+      {
+        id: 'feat-1',
+        title: 'Feature',
+        tool: 'claude',
+        effort: 'high',
+        thinking: 'on',
+        model: 'custom',
+        dependsOn: [],
+        tasks: [],
+      },
+      'PROMPT',
+      { cwd: '/repo', runId: 4 },
+    );
+
+    expect(mockRunCli).toHaveBeenCalledWith(
+      'claude',
+      expect.arrayContaining(['--model', 'custom']),
+      expect.objectContaining({ env: { MAX_THINKING_TOKENS: '24000' } }),
+    );
   });
 
   it('handles malformed JSON and max-turn errors', async () => {
@@ -354,6 +392,47 @@ describe('claude adapter', () => {
 });
 
 describe('opencode adapter', () => {
+  it('declares capabilities and warns when effort/thinking are requested', async () => {
+    mockRunCli.mockResolvedValue({
+      code: 0,
+      stdout: JSON.stringify({ response: 'done' }),
+      stderr: '',
+    });
+    const { opencodeAdapter } = await import('../../src/core/adapters/opencode.js');
+
+    expect(opencodeAdapter.capabilities).toEqual({ model: true, effort: false, thinking: false });
+
+    await opencodeAdapter.runFeature(
+      {
+        id: 'feat-1',
+        title: 'Feature',
+        tool: 'opencode',
+        effort: 'high',
+        thinking: 'on',
+        dependsOn: [],
+        tasks: [],
+      },
+      'test-prompt',
+      { cwd: '/repo', runId: 20 },
+    );
+
+    expect(mockEventEmit).toHaveBeenCalledWith('run:output', expect.objectContaining({
+      runId: 20,
+      featureId: 'feat-1',
+      tool: 'opencode',
+      line: 'aviso: opencode não suporta effort; opção ignorada.',
+    }));
+    expect(mockEventEmit).toHaveBeenCalledWith('run:output', expect.objectContaining({
+      runId: 20,
+      featureId: 'feat-1',
+      tool: 'opencode',
+      line: 'aviso: opencode não suporta thinking; opção ignorada.',
+    }));
+
+    const [, calledArgs] = mockRunCli.mock.calls[0] as [string, string[], unknown];
+    expect(calledArgs).not.toContain('--thinking');
+  });
+
   it('keeps effortFlag empty and handles cli failures', async () => {
     mockRunCli.mockResolvedValue({ code: 2, stdout: '', stderr: 'bad' });
     const { opencodeAdapter } = await import('../../src/core/adapters/opencode.js');

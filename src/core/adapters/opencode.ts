@@ -53,14 +53,14 @@ interface OpenCodeResponse {
   part?: OpenCodePart;
 }
 
-const _EFFORT_HINT: Record<Effort, string> = {
-  low: 'small_model',
-  medium: 'model',
-  high: 'model',
-};
-
 export const opencodeAdapter: ToolAdapter = {
   tool: 'opencode',
+
+  capabilities: {
+    model: true,
+    effort: false,
+    thinking: false,
+  },
 
   effortFlag(_effort: Effort): string[] {
     return [];
@@ -76,10 +76,28 @@ export const opencodeAdapter: ToolAdapter = {
   },
 
   async runFeature(feature: Feature, prompt: string, opts: RunFeatureOptions): Promise<RunResult> {
+    if (feature.effort !== 'medium') {
+      emitRunOutput(
+        opts.runId,
+        feature,
+        'aviso: opencode não suporta effort; opção ignorada.',
+        'stderr',
+        'heartbeat',
+      );
+    }
+    if (feature.thinking === 'on') {
+      emitRunOutput(
+        opts.runId,
+        feature,
+        'aviso: opencode não suporta thinking; opção ignorada.',
+        'stderr',
+        'heartbeat',
+      );
+    }
+
     const args = [
       'run',
       '--format', 'json',
-      '--thinking',
       ...(opts.session?.mode === 'resume' && opts.session.handle ? ['--session', opts.session.handle.sessionId] : []),
       ...(feature.model ? ['--model', feature.model] : []),
       '--',

@@ -122,6 +122,7 @@ export interface FeatureConfigPatch {
   tool?: string;
   model?: string;
   effort?: string;
+  thinking?: string;
   maxTokens?: number;
   autoStart?: boolean;
   skills?: string[];
@@ -190,6 +191,14 @@ export type WebSocketClientMessage =
   | { type: 'action:resolveGate'; gateId: number; decision: 'approved' | 'skipped' | 'retried' }
   | { type: 'action:forceResolveGate'; gateId: number }
   | { type: 'action:resolveStageRequest'; requestId: number; response: string }
+  | {
+      type: 'action:resumeWithOverride';
+      pipelineId: number;
+      featureId: string;
+      tool?: string;
+      model?: string;
+      effort?: string;
+    }
   | { type: 'subscribe:output'; runId: number }
   | { type: 'unsubscribe:output'; runId: number }
   | { type: 'subscribe:runDetail'; runId: number }

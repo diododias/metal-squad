@@ -143,6 +143,7 @@ function DefaultsTab({ state, send }: { state: MsqWebState; send: ConfigPageProp
   const defaults = state.backlogSettings.projectDefaults;
   const baseline = useMemo(() => defaultsDraftFrom(defaults), [defaults]);
   const [draft, setDraft] = useState<DefaultsDraft>(baseline);
+  const capabilities = state.backlogSettings.toolCapabilities?.[draft.tool] ?? { model: true, effort: true, thinking: true };
 
   useEffect(() => {
     setDraft(baseline);
@@ -152,8 +153,8 @@ function DefaultsTab({ state, send }: { state: MsqWebState; send: ConfigPageProp
   const stageOrderIsValid = stages.length > 0 && new Set(stages).size === stages.length;
   const maxTokens = draft.maxTokens === '' ? undefined : Number(draft.maxTokens);
   const maxTokensIsValid = maxTokens === undefined || (Number.isInteger(maxTokens) && maxTokens > 0);
-  const thinkingWarning = draft.thinking === 'on' && draft.tool === 'opencode'
-    ? 'opencode does not support thinking; it will be ignored.'
+  const thinkingWarning = draft.thinking === 'on' && !capabilities.thinking
+    ? `${draft.tool} does not support thinking; it will be ignored.`
     : undefined;
   const guidance = !stageOrderIsValid
     ? 'Workflow stages must contain at least one unique stage.'

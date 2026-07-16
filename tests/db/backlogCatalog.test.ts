@@ -8,7 +8,21 @@ function makeBacklog(overrides: Partial<BacklogV2> = {}): BacklogV2 {
   return {
     version: 2,
     repo: 'demo',
-    defaults: { tool: 'claude', effort: 'medium', skills: [], stageSkills: {} },
+    defaults: {
+      tool: 'claude',
+      effort: 'medium',
+      thinking: 'off',
+      skills: [],
+      stageSkills: {},
+      workflow: {
+        mode: 'staged',
+        stages: ['specify', 'plan', 'tasks', 'implement', 'validate'],
+        approvals: { channel: 'telegram', autoAdvance: false },
+        syncTasksToBacklog: true,
+        sessionPolicy: { mode: 'isolated', alwaysIsolatedStages: [] },
+        stepGuidance: {},
+      },
+    },
     epics: [
       {
         id: 'epic-1',
@@ -513,7 +527,24 @@ describe('backlogCatalog upsert/diff/load', () => {
     it('persists a partial defaults patch without clearing untouched fields', async () => {
       const { db, upsertBacklogCatalog, updateCatalogDefaults } = await setup();
       upsertBacklogCatalog(
-        makeBacklog({ defaults: { tool: 'claude', model: 'sonnet-5', effort: 'medium', skills: ['review'], stageSkills: {} } }),
+        makeBacklog({
+          defaults: {
+            tool: 'claude',
+            model: 'sonnet-5',
+            effort: 'medium',
+            thinking: 'off',
+            skills: ['review'],
+            stageSkills: {},
+            workflow: {
+              mode: 'staged',
+              stages: ['specify', 'plan', 'tasks', 'implement', 'validate'],
+              approvals: { channel: 'telegram', autoAdvance: false },
+              syncTasksToBacklog: true,
+              sessionPolicy: { mode: 'isolated', alwaysIsolatedStages: [] },
+              stepGuidance: {},
+            },
+          },
+        }),
         'repo-1',
       );
 

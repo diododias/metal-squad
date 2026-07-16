@@ -1,6 +1,8 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { mergeExecutionDefaults, resolveConfigSnapshot, type ResolvedConfigSources, type ResolvedExecutionDefaults } from '../config/index.js';
+import { getAdapter } from '../core/adapters/index.js';
+import type { ToolCapabilities } from '../core/adapters/types.js';
 import { loadBacklogFromCatalog } from '../core/backlog/load.js';
 import { resolveRepo } from '../core/repo.js';
 import { getCatalogMeta } from '../db/backlogCatalog.js';
@@ -17,6 +19,7 @@ export interface FeatureCatalogEntry {
   tool: string;
   model?: string;
   effort: string;
+  thinking?: string;
   /** Full spec/feature description (D2): inline `spec` summary, or the
    * content of `specFile` when no inline summary is declared. Truncated to
    * DESCRIPTION_CHAR_LIMIT so it stays readable inside the Ink detail view. */
@@ -49,6 +52,7 @@ export interface FeatureCatalogEntry {
 export interface BacklogSettings {
   budget?: Budget;
   stageSkills: Record<string, string[]>;
+  toolCapabilities?: Record<string, ToolCapabilities>;
   configSources?: ResolvedConfigSources;
   /** Read-only merge of repo config + backlog defaults, used to resolve
    * feature execution (see `mergeExecutionDefaults`). */
@@ -60,7 +64,17 @@ export interface BacklogSettings {
   projectDefaults: Defaults;
 }
 
-const DEFAULT_BACKLOG_SETTINGS: BacklogSettings = { stageSkills: {}, projectDefaults: DefaultsSchema.parse({}) };
+const DEFAULT_TOOL_CAPABILITIES: Record<string, ToolCapabilities> = {
+  claude: getAdapter('claude').capabilities ?? { model: true, effort: true, thinking: true },
+  codex: getAdapter('codex').capabilities ?? { model: true, effort: true, thinking: true },
+  opencode: getAdapter('opencode').capabilities ?? { model: true, effort: true, thinking: true },
+};
+
+const DEFAULT_BACKLOG_SETTINGS: BacklogSettings = {
+  stageSkills: {},
+  toolCapabilities: DEFAULT_TOOL_CAPABILITIES,
+  projectDefaults: DefaultsSchema.parse({}),
+};
 
 function truncateDescription(text: string): string {
   if (text.length <= DESCRIPTION_CHAR_LIMIT) return text;
@@ -116,6 +130,7 @@ function loadCatalogAndSettings(cwd: string): void {
             tool: feature.tool,
             model: feature.model,
             effort: feature.effort,
+            thinking: feature.thinking,
             description: readFeatureDescription(feature.spec, feature.specFile, cwd),
             tasks: feature.tasks,
             dependsOn: feature.dependsOn,
@@ -137,6 +152,7 @@ function loadCatalogAndSettings(cwd: string): void {
     cachedSettings = {
       budget: backlog.budget,
       stageSkills: 'defaults' in backlog ? backlog.defaults.stageSkills : {},
+      toolCapabilities: DEFAULT_TOOL_CAPABILITIES,
       configSources: snapshot.sources,
       resolvedDefaults,
       projectDefaults,

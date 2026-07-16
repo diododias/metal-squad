@@ -10,6 +10,7 @@ import { assertWritableDbPath } from '../db/index.js';
 import {
   abortPipeline,
   forceResolveGate,
+  getPipeline,
   listCompletedFeatureIds,
   listRunEvents,
   listRunHistoryForFeature,
@@ -24,6 +25,7 @@ import {
   resolveStageRequest,
   resumePipeline,
 } from '../db/repo.js';
+import { getAdapter } from '../core/adapters/index.js';
 import { computeRunBreakdown } from '../core/stats.js';
 import { resolveRepo } from '../core/repo.js';
 import { loadBacklogFromCatalog } from '../core/backlog/load.js';
@@ -31,7 +33,7 @@ import { selectStartableFeaturePlan } from '../core/orchestrator/graph.js';
 import { validateBacklogSkills } from '../core/skills/index.js';
 import { resolveRuntimeConfig } from '../config/index.js';
 import { updateCatalogFeature, updateCatalogTask, updateCatalogDefaults, type FeaturePatch, type CatalogDefaultsPatch } from '../db/backlogCatalog.js';
-import type { Feature, Task } from '../core/backlog/schema.js';
+import type { Feature, Task, Tool } from '../core/backlog/schema.js';
 import { buildMsqWebState, appendNotification } from './state.js';
 import { createWebAuth, isAllowedHostHeader, isAllowedOrigin, timingSafeEqualStrings } from './auth.js';
 import type {
@@ -745,6 +747,11 @@ export function createWebServer(options: {
         reconcileWebState(featureCwd);
         break;
       }
+      case 'action:resumeWithOverride': {
+        resumeWithOverride(message.pipelineId, message.featureId, message.tool, message.model, message.effort);
+        reconcileWebState(featureCwd);
+        break;
+      }
       case 'subscribe:output': {
         client.outputSubscriptions.add(message.runId);
         const rows = listRunOutput(message.runId, 120);
@@ -870,11 +877,64 @@ export function createWebServer(options: {
     msqEventBus.emit('ui:info', { message: `Starting ${featureId}...` });
   }
 
+  /** Mirrors `src/commands/resume.ts`: validates the override tool is available
+   * before spawning, so an unavailable tool never creates a run (FR-002/FR-003).
+   * The backlog itself is never touched — the override is passed as spawn args
+   * only (FR-004). */
+  function resumeWithOverride(
+    pipelineId: number,
+    featureId: string,
+    tool?: string,
+    model?: string,
+    effort?: string,
+  ): void {
+    const pipeline = getPipeline(pipelineId);
+    if (!pipeline) {
+      msqEventBus.emit('ui:notice', { message: `Pipeline ${String(pipelineId)} not found — resume aborted.` });
+      return;
+    }
+    if (!pipeline.cwd) {
+      msqEventBus.emit('ui:notice', { message: `Pipeline ${String(pipelineId)} has no cwd persisted — resume aborted.` });
+      return;
+    }
+
+    if (tool) {
+      const adapter = getAdapter(tool as Tool);
+      if (!adapter.isAvailable?.()) {
+        msqEventBus.emit('ui:notice', { message: `Tool "${tool}" is unavailable — resume aborted, no run created.` });
+        return;
+      }
+    }
+
+    const entrypoint = process.argv[1];
+    if (!entrypoint) {
+      msqEventBus.emit('ui:notice', { message: `Could not resume ${featureId}: CLI entrypoint was not resolved.` });
+      return;
+    }
+
+    const args = [...process.execArgv, entrypoint, 'resume', String(pipelineId)];
+    if (tool) args.push('--tool', tool);
+    if (model) args.push('--model', model);
+    if (effort) args.push('--effort', effort);
+
+    const child = spawn(process.execPath, args, {
+      detached: true,
+      stdio: 'ignore',
+      cwd: pipeline.cwd,
+    });
+    child.once('error', (error) => {
+      msqEventBus.emit('ui:notice', { message: `Could not resume ${featureId}: ${error.message}` });
+    });
+    child.unref();
+    msqEventBus.emit('ui:info', { message: `Resuming ${featureId}...` });
+  }
+
   function toFeaturePatch(patch: FeatureConfigPatch): FeaturePatch {
     return {
       ...(patch.tool !== undefined ? { tool: patch.tool as Feature['tool'] } : {}),
       ...(patch.model !== undefined ? { model: patch.model } : {}),
       ...(patch.effort !== undefined ? { effort: patch.effort as Feature['effort'] } : {}),
+      ...(patch.thinking !== undefined ? { thinking: patch.thinking as Feature['thinking'] } : {}),
       ...(patch.maxTokens !== undefined ? { maxTokens: patch.maxTokens } : {}),
       ...(patch.autoStart !== undefined ? { autoStart: patch.autoStart } : {}),
       ...(patch.skills !== undefined ? { skills: patch.skills } : {}),

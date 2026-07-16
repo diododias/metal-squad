@@ -157,4 +157,39 @@ describe('codexAdapter timeout observability', () => {
       source: 'tool',
     });
   });
+
+  it('declares thinking as unsupported and warns without altering the invocation', async () => {
+    mockRunCli.mockResolvedValue({
+      code: 0,
+      stdout: JSON.stringify({
+        type: 'item.completed',
+        item: { type: 'agent_message', text: 'done' },
+      }),
+      stderr: '',
+    });
+
+    const { codexAdapter } = await import('../../src/core/adapters/codex.js');
+    expect(codexAdapter.capabilities).toEqual({ model: true, effort: true, thinking: false });
+
+    await codexAdapter.runFeature({
+      id: 'feat-04',
+      title: 'Feature',
+      tool: 'codex',
+      effort: 'high',
+      thinking: 'on',
+      dependsOn: [],
+      tasks: [],
+    }, 'prompt', { cwd: '/repo', runId: 11 });
+
+    expect(mockEventEmit).toHaveBeenCalledWith('run:output', expect.objectContaining({
+      runId: 11,
+      featureId: 'feat-04',
+      tool: 'codex',
+      line: 'aviso: codex não suporta thinking; opção ignorada.',
+    }));
+
+    const [, calledArgs] = mockRunCli.mock.calls[0] as [string, string[], unknown];
+    expect(calledArgs).not.toContain('thinking');
+    expect(calledArgs).toEqual(expect.arrayContaining(['-c', 'model_reasoning_effort="high"']));
+  });
 });

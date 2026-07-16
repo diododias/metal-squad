@@ -36,6 +36,19 @@ const TABS = [
   { id: 'output', label: 'Live Output' },
 ];
 
+const resumeTools = ['claude', 'codex', 'opencode'] as const;
+const resumeEfforts = ['low', 'medium', 'high'] as const;
+
+const inputStyle: React.CSSProperties = {
+  background: 'var(--bg-sunken)',
+  border: '1px solid var(--border-dim)',
+  borderRadius: 'var(--radius-sm)',
+  color: 'var(--text-primary)',
+  fontFamily: 'var(--font-mono)',
+  fontSize: 'var(--text-xs)',
+  padding: '6px 9px',
+};
+
 function outputToTranscript(lines: OutputLine[]): TranscriptEntry[] {
   return lines.map((line, i) => {
     const source = line.source ?? 'stdout';
@@ -77,6 +90,9 @@ export function RunDetailPage({
   send,
 }: RunDetailPageProps): React.JSX.Element {
   const [activeTab, setActiveTab] = useState('summary');
+  const [overrideTool, setOverrideTool] = useState('');
+  const [overrideModel, setOverrideModel] = useState('');
+  const [overrideEffort, setOverrideEffort] = useState('');
   const run = state.runs.find((r) => r.featureId === featureId);
   const feature = state.featureCatalog[featureId];
   const runId = run?.runId;
@@ -122,7 +138,21 @@ export function RunDetailPage({
   const stages = feature?.workflow.stages ?? ['specify', 'plan', 'tasks', 'implement', 'validate'];
   const canPause = run.pipelineStatus === 'running';
   const canAbort = run.pipelineStatus === 'running' || run.pipelineStatus === 'blocked';
+  const canResumeWithOverride = run.pipelineId != null
+    && (run.pipelineStatus === 'paused' || run.pipelineStatus === 'aborted');
   const pendingPrompt = run.pendingStageRequestPrompt;
+
+  function resumeWithOverride(tool?: string): void {
+    if (run?.pipelineId == null) return;
+    send({
+      type: 'action:resumeWithOverride',
+      pipelineId: run.pipelineId,
+      featureId,
+      tool: tool ?? overrideTool,
+      model: overrideModel || undefined,
+      effort: overrideEffort || undefined,
+    });
+  }
 
   function resolveApproval(response: 'advance' | 'hold' | 'retry'): void {
     if (run == null) return;
@@ -296,8 +326,63 @@ export function RunDetailPage({
             {run.pendingStageRequestKind === 'input' ? (
               <QuestionBanner prompt={pendingPrompt} options={run.pendingStageRequestOptions ?? undefined} onAnswer={resolveQuestion} />
             ) : (
-              <ApprovalBanner prompt={pendingPrompt} onAdvance={() => { resolveApproval('advance'); }} onHold={() => { resolveApproval('hold'); }} onRetry={() => { resolveApproval('retry'); }} />
+              <ApprovalBanner
+                prompt={pendingPrompt}
+                onAdvance={() => { resolveApproval('advance'); }}
+                onAdvanceWithTool={(tool) => { resumeWithOverride(tool); }}
+                onHold={() => { resolveApproval('hold'); }}
+                onRetry={() => { resolveApproval('retry'); }}
+              />
             )}
+          </div>
+        )}
+        {canResumeWithOverride && (
+          <div
+            style={{
+              display: 'flex',
+              flexWrap: 'wrap',
+              alignItems: 'center',
+              gap: 8,
+              padding: 12,
+              marginBottom: 16,
+              border: '1px solid var(--border-dim)',
+              borderRadius: 'var(--radius-md)',
+              background: 'var(--bg-panel)',
+            }}
+          >
+            <span style={{ color: 'var(--text-dim)', fontSize: 'var(--text-sm)' }}>Resume with another tool:</span>
+            <select
+              aria-label="Resume tool override"
+              value={overrideTool}
+              onChange={(e) => { setOverrideTool(e.target.value); }}
+              style={inputStyle}
+            >
+              <option value="">tool (default)</option>
+              {resumeTools.map((tool) => (
+                <option key={tool} value={tool}>{tool}</option>
+              ))}
+            </select>
+            <input
+              aria-label="Resume model override"
+              value={overrideModel}
+              onChange={(e) => { setOverrideModel(e.target.value); }}
+              placeholder="model (optional)"
+              style={{ ...inputStyle, minWidth: 140 }}
+            />
+            <select
+              aria-label="Resume effort override"
+              value={overrideEffort}
+              onChange={(e) => { setOverrideEffort(e.target.value); }}
+              style={inputStyle}
+            >
+              <option value="">effort (optional)</option>
+              {resumeEfforts.map((effort) => (
+                <option key={effort} value={effort}>{effort}</option>
+              ))}
+            </select>
+            <Button variant="ok" size="sm" onClick={() => { resumeWithOverride(); }}>
+              resume with override
+            </Button>
           </div>
         )}
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(120px, 1fr))', gap: 8, marginBottom: 16 }}>
