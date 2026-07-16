@@ -56,7 +56,6 @@ import { buildPrompt } from '../backlog/prompt.js';
 import { createSkillRegistry } from '../skills/index.js';
 import { syncFeatureTasksToBacklog } from '../backlog/sync.js';
 import type { Skill } from '../skills/types.js';
-import { collectEffectiveStageSkills } from '../workflow/stageSkills.js';
 import { decideStageTransition } from '../workflow/sessionPolicy.js';
 import {
   createBudgetTracker,

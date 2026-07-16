@@ -290,7 +290,7 @@ export function stageBacklogFile(path = BACKLOG_FILE, cwd = process.cwd(), backl
  * (populated by `msq backlog load`), instead of reading backlog.yaml.
  * This is the runtime source of truth after F35 — see docs/features/F35-backlog-catalog-import.md.
  */
-export function loadBacklogFromCatalog(repoId: string, cwd = process.cwd()): BacklogV2 {
+export function loadBacklogFromCatalog(repoId: string, _cwd = process.cwd()): BacklogV2 {
   const meta = getCatalogMeta(repoId);
   const epicRows = listCatalogEpics(repoId);
 
