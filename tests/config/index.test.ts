@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { chmodSync, existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -146,6 +146,67 @@ describe('config', () => {
       stageSkills: {},
       tools: DEFAULT_TOOLS,
     });
+  });
+
+  it('saves an App config patch without replacing untouched sections', async () => {
+    home = mkdtempSync(join(tmpdir(), 'msq-config-'));
+    process.env.HOME = home;
+
+    const { CONFIG_PATH, ConfigSchema, saveAppConfigPatch, saveConfig } = await import('../../src/config/index.js');
+    saveConfig({
+      ...ConfigSchema.parse({}),
+      concurrency: 2,
+      web: { ...DEFAULT_WEB, port: 9_001 },
+      workflow: { ...DEFAULT_WORKFLOW, autoAdvanceStages: true },
+      stageSkills: { implement: ['speckit-implement'] },
+    });
+
+    const saved = saveAppConfigPatch({
+      concurrency: 5,
+      web: { port: 9_002 },
+      stageSkills: { validate: ['dev-flow'] },
+    });
+
+    expect(saved).toMatchObject({
+      concurrency: 5,
+      web: { ...DEFAULT_WEB, port: 9_002 },
+      workflow: { ...DEFAULT_WORKFLOW, autoAdvanceStages: true },
+      stageSkills: { implement: ['speckit-implement'], validate: ['dev-flow'] },
+    });
+    expect(JSON.parse(readFileSync(CONFIG_PATH, 'utf8'))).toMatchObject({
+      concurrency: 5,
+      web: { ...DEFAULT_WEB, port: 9_002 },
+      workflow: { ...DEFAULT_WORKFLOW, autoAdvanceStages: true },
+      stageSkills: { implement: ['speckit-implement'], validate: ['dev-flow'] },
+    });
+  });
+
+  it('rejects App config patches before writing when config.json is read-only', async () => {
+    home = mkdtempSync(join(tmpdir(), 'msq-config-'));
+    process.env.HOME = home;
+
+    const { CONFIG_PATH, ConfigSchema, configWritable, saveAppConfigPatch, saveConfig } = await import('../../src/config/index.js');
+    saveConfig({ ...ConfigSchema.parse({}), concurrency: 2 });
+    const original = readFileSync(CONFIG_PATH, 'utf8');
+    chmodSync(CONFIG_PATH, 0o444);
+
+    expect(configWritable()).toBe(false);
+    expect(() => saveAppConfigPatch({ concurrency: 5 })).toThrow(
+      `Cannot write metal-squad config at ${CONFIG_PATH}: file is not writable. Check its permissions.`,
+    );
+    expect(readFileSync(CONFIG_PATH, 'utf8')).toBe(original);
+  });
+
+  it('rejects invalid App config patches without writing', async () => {
+    home = mkdtempSync(join(tmpdir(), 'msq-config-'));
+    process.env.HOME = home;
+
+    const { CONFIG_PATH, ConfigSchema, saveAppConfigPatch, saveConfig } = await import('../../src/config/index.js');
+    saveConfig({ ...ConfigSchema.parse({}), concurrency: 2 });
+    const original = readFileSync(CONFIG_PATH, 'utf8');
+
+    expect(() => saveAppConfigPatch({ concurrency: 0 })).toThrow();
+    expect(readFileSync(CONFIG_PATH, 'utf8')).toBe(original);
   });
 
   it('loads persisted config and ensures the data dir exists', async () => {
