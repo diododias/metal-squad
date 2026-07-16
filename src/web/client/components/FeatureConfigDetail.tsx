@@ -42,7 +42,7 @@ function workflowDraftFrom(feature: FeatureCatalogEntry): WorkflowDraft {
     mode: feature.workflow.mode,
     syncTasksToBacklog: feature.workflow.syncTasksToBacklog,
     approvalChannel: feature.workflow.approvals.channel,
-    autoAdvance: feature.workflow.approvals.autoAdvance,
+    autoAdvance: feature.workflow.autoAdvance,
   };
 }
 
@@ -345,10 +345,10 @@ export function FeatureConfigDetail({ feature, backlogSettings, onSaveConfig, wo
   const workflowPatch: NonNullable<FeatureConfigPatch['workflow']> = {};
   if (draftWorkflow.mode !== workflowBaseline.mode) workflowPatch.mode = draftWorkflow.mode;
   if (draftWorkflow.syncTasksToBacklog !== workflowBaseline.syncTasksToBacklog) workflowPatch.syncTasksToBacklog = draftWorkflow.syncTasksToBacklog;
-  const approvalPatch: { channel?: string; autoAdvance?: boolean } = {};
+  const approvalPatch: { channel?: string } = {};
   if (draftWorkflow.approvalChannel !== workflowBaseline.approvalChannel) approvalPatch.channel = draftWorkflow.approvalChannel;
-  if (draftWorkflow.autoAdvance !== workflowBaseline.autoAdvance) approvalPatch.autoAdvance = draftWorkflow.autoAdvance;
   if (Object.keys(approvalPatch).length > 0) workflowPatch.approvals = approvalPatch;
+  if (draftWorkflow.autoAdvance !== workflowBaseline.autoAdvance) workflowPatch.autoAdvance = draftWorkflow.autoAdvance;
   const hasWorkflowChanges = Object.keys(workflowPatch).length > 0;
   const hasUnavailableApprovalChannel = draftWorkflow.approvalChannel !== 'telegram';
   const workflowGuidance = hasUnavailableApprovalChannel && hasWorkflowChanges
@@ -484,7 +484,7 @@ export function FeatureConfigDetail({ feature, backlogSettings, onSaveConfig, wo
           />
           <EditableToggleField
             id="workflow-auto-advance"
-            label="approvals.autoAdvance (legacy)"
+            label="workflow.autoAdvance"
             value={draftWorkflow.autoAdvance}
             initialValue={workflowBaseline.autoAdvance}
             onChange={(autoAdvance) => { setDraftWorkflow((draft) => ({ ...draft, autoAdvance })); }}

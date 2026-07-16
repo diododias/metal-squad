@@ -68,14 +68,6 @@ export function registerResume(program: Command): void {
         cwd: pipeline.cwd,
         concurrency,
         resumePipelineId: pipeline.id,
-        // Do not force a defined boolean here — `resolveAutoAdvance()` treats
-        // any defined `autoAdvanceStages` as an explicit CLI override that
-        // wins over the catalog checkbox for every stage transition. Leaving
-        // it `undefined` lets resume re-check the catalog per transition like
-        // a fresh run does, instead of freezing whatever the checkbox said
-        // when the pipeline was first created (which may be stale by the
-        // time resume runs). See H20.
-        autoAdvanceStages: undefined,
         ...(hasOverride && targetFeatureId
           ? { resumeOverride: { featureId: targetFeatureId, tool: opts.tool, model: opts.model, effort: opts.effort } }
           : {}),

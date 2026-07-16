@@ -27,7 +27,8 @@ function makeFeature(overrides: Partial<FeatureCatalogEntry> = {}): FeatureCatal
     workflow: {
       mode: 'staged',
       stages: ['specify'],
-      approvals: { channel: 'telegram', autoAdvance: false },
+      approvals: { channel: 'telegram' },
+      autoAdvance: false,
       syncTasksToBacklog: true,
       sessionPolicy: { mode: 'isolated', alwaysIsolatedStages: [] },
     },
@@ -255,9 +256,9 @@ describe('FeatureConfigDetail workflow card', () => {
     const scenarios: Array<{ feature?: FeatureCatalogEntry; id: string; value?: string; expected: object }> = [
       { id: 'workflow-mode', value: 'single', expected: { workflow: { mode: 'single' } } },
       { id: 'workflow-sync-tasks', expected: { workflow: { syncTasksToBacklog: false } } },
-      { id: 'workflow-auto-advance', expected: { workflow: { approvals: { autoAdvance: true } } } },
+      { id: 'workflow-auto-advance', expected: { workflow: { autoAdvance: true } } },
       {
-        feature: makeFeature({ workflow: { ...makeFeature().workflow, approvals: { channel: 'legacy-channel' as 'telegram', autoAdvance: false } } }),
+        feature: makeFeature({ workflow: { ...makeFeature().workflow, approvals: { channel: 'legacy-channel' as 'telegram' }, autoAdvance: false } }),
         id: 'workflow-approval-channel',
         value: 'telegram',
         expected: { workflow: { approvals: { channel: 'telegram' } } },
@@ -280,7 +281,7 @@ describe('FeatureConfigDetail workflow card', () => {
 
   it('keeps an unavailable approval destination and rejected draft visible for correction', () => {
     const onSaveConfig = vi.fn();
-    const feature = makeFeature({ workflow: { ...makeFeature().workflow, approvals: { channel: 'legacy-channel' as 'telegram', autoAdvance: false } } });
+    const feature = makeFeature({ workflow: { ...makeFeature().workflow, approvals: { channel: 'legacy-channel' as 'telegram' }, autoAdvance: false } });
     const view = mount();
     view.rerender(feature, onSaveConfig);
 

@@ -31,7 +31,8 @@ function normalizeV1(backlog: BacklogV1Input, repoDefaults: ReturnType<typeof lo
     workflow: {
       mode: 'staged',
       stages: ['specify', 'plan', 'tasks', 'implement', 'validate'],
-      approvals: { channel: 'telegram', autoAdvance: false },
+      approvals: { channel: 'telegram' },
+      autoAdvance: false,
       syncTasksToBacklog: true,
       sessionPolicy: { mode: 'isolated', alwaysIsolatedStages: [] },
       stepGuidance: {},

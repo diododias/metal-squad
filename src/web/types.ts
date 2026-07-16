@@ -130,8 +130,9 @@ export interface FeatureConfigPatch {
   workflow?: {
     mode?: string;
     stages?: string[];
+    autoAdvance?: boolean;
     syncTasksToBacklog?: boolean;
-    approvals?: { channel?: string; autoAdvance?: boolean };
+    approvals?: { channel?: string };
     stepGuidance?: Record<string, { skills?: string[]; prompt?: string }>;
     sessionPolicy?: { alwaysIsolatedStages?: string[] };
   };
@@ -159,8 +160,9 @@ export interface ProjectDefaultsPatch {
   workflow?: {
     mode?: string;
     stages?: string[];
+    autoAdvance?: boolean;
     syncTasksToBacklog?: boolean;
-    approvals?: { channel?: string; autoAdvance?: boolean };
+    approvals?: { channel?: string };
   };
   maxTokens?: number;
   budget?: { maxTokens?: number; perFeatureMaxTokens?: number };

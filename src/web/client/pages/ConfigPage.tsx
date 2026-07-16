@@ -66,7 +66,6 @@ function RuntimeTab({ state }: { state: MsqWebState }): React.JSX.Element {
         <Row label="toolTimeoutMs" value={c.toolTimeoutMs.toLocaleString()} source="global" />
         <Row label="staleRunThresholdMinutes" value={c.staleRunThresholdMinutes} source="global" />
         <Row label="promptContextCharLimit" value={c.promptContextCharLimit.toLocaleString()} source="global" />
-        <Row label="workflow.autoAdvanceStages" value={c.workflow.autoAdvanceStages ? 'on' : 'off'} source="global" />
         <Row label="workflow.pollIntervalMs" value={c.workflow.pollIntervalMs} source="global" />
         <Row label="web.host" value={c.web.host} source="global" />
         <Row label="web.port" value={c.web.port} source="global" />
@@ -126,7 +125,7 @@ function defaultsDraftFrom(defaults: NonNullable<MsqWebState['backlogSettings'][
     workflowStages: defaults.workflow.stages.join(', '),
     syncTasksToBacklog: defaults.workflow.syncTasksToBacklog,
     approvalChannel: defaults.workflow.approvals.channel,
-    autoAdvance: defaults.workflow.approvals.autoAdvance,
+    autoAdvance: defaults.workflow.autoAdvance,
     maxTokens: defaults.maxTokens?.toString() ?? '',
   };
 }
@@ -177,11 +176,11 @@ function DefaultsTab({ state, send }: { state: MsqWebState; send: ConfigPageProp
   if (draft.workflowMode !== baseline.workflowMode) workflowPatch.mode = draft.workflowMode;
   if (!sameJson(stages, csvList(baseline.workflowStages))) workflowPatch.stages = stages;
   if (draft.syncTasksToBacklog !== baseline.syncTasksToBacklog) workflowPatch.syncTasksToBacklog = draft.syncTasksToBacklog;
-  if (draft.approvalChannel !== baseline.approvalChannel || draft.autoAdvance !== baseline.autoAdvance) {
+  if (draft.approvalChannel !== baseline.approvalChannel) {
     workflowPatch.approvals = {};
     if (draft.approvalChannel !== baseline.approvalChannel) workflowPatch.approvals.channel = draft.approvalChannel;
-    if (draft.autoAdvance !== baseline.autoAdvance) workflowPatch.approvals.autoAdvance = draft.autoAdvance;
   }
+  if (draft.autoAdvance !== baseline.autoAdvance) workflowPatch.autoAdvance = draft.autoAdvance;
   if (Object.keys(workflowPatch).length > 0) patch.workflow = workflowPatch;
   if (draft.maxTokens !== baseline.maxTokens && maxTokens !== undefined && maxTokensIsValid) patch.maxTokens = maxTokens;
 
@@ -291,7 +290,7 @@ function DefaultsTab({ state, send }: { state: MsqWebState; send: ConfigPageProp
           />
           <EditableToggleField
             id="defaults-workflow-auto-advance"
-            label="workflow.approvals.autoAdvance"
+            label="workflow.autoAdvance"
             value={draft.autoAdvance}
             initialValue={baseline.autoAdvance}
             onChange={(autoAdvance) => { setDraft((current) => ({ ...current, autoAdvance })); }}

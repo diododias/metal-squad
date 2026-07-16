@@ -277,7 +277,7 @@ describe('backlogCatalog upsert/diff/load', () => {
       });
     });
 
-    it('deep-merges a stages-only reorder while preserving approvals', async () => {
+    it('deep-merges a stages-only reorder while preserving the project autoAdvance value', async () => {
       const { upsertBacklogCatalog, updateCatalogFeature } = await setup();
       upsertBacklogCatalog(makeBacklog(), 'repo-1');
 
@@ -285,7 +285,8 @@ describe('backlogCatalog upsert/diff/load', () => {
         workflow: { stages: ['plan', 'specify', 'tasks', 'implement', 'validate'] },
       });
       expect(updated.workflow.stages).toEqual(['plan', 'specify', 'tasks', 'implement', 'validate']);
-      expect(updated.workflow.approvals).toEqual({ channel: 'telegram', autoAdvance: false });
+      expect(updated.workflow.approvals).toEqual({ channel: 'telegram' });
+      expect(updated.workflow.autoAdvance).toBe(false);
       expect(updated.workflow.syncTasksToBacklog).toBe(true);
     });
 
@@ -294,7 +295,8 @@ describe('backlogCatalog upsert/diff/load', () => {
       const workflow = {
         mode: 'staged' as const,
         stages: ['specify', 'plan', 'implement'],
-        approvals: { channel: 'telegram' as const, autoAdvance: false },
+        approvals: { channel: 'telegram' as const },
+        autoAdvance: false,
         syncTasksToBacklog: true,
         sessionPolicy: { mode: 'isolated' as const, alwaysIsolatedStages: ['plan'] },
         stepGuidance: { plan: { skills: ['planner'], prompt: 'Plan carefully.' } },
@@ -312,14 +314,15 @@ describe('backlogCatalog upsert/diff/load', () => {
       expect(stored.workflow).toEqual(updated.workflow);
     });
 
-    it('deep-merges workflow.approvals so patching only autoAdvance preserves channel', async () => {
+    it('updates workflow.autoAdvance without changing the approval channel', async () => {
       const { upsertBacklogCatalog, updateCatalogFeature } = await setup();
       upsertBacklogCatalog(makeBacklog(), 'repo-1');
 
       const updated = updateCatalogFeature('repo-1', 'feat-1', {
-        workflow: { approvals: { autoAdvance: true } },
+        workflow: { autoAdvance: true },
       });
-      expect(updated.workflow.approvals).toEqual({ channel: 'telegram', autoAdvance: true });
+      expect(updated.workflow.approvals).toEqual({ channel: 'telegram' });
+      expect(updated.workflow.autoAdvance).toBe(true);
       expect(updated.workflow.stages).toEqual(['specify', 'plan', 'tasks', 'implement', 'validate']);
     });
 
@@ -328,7 +331,8 @@ describe('backlogCatalog upsert/diff/load', () => {
       const workflow = {
         mode: 'staged' as const,
         stages: ['specify', 'plan'],
-        approvals: { channel: 'telegram' as const, autoAdvance: false },
+        approvals: { channel: 'telegram' as const },
+        autoAdvance: false,
         syncTasksToBacklog: true,
         sessionPolicy: { mode: 'isolated' as const, alwaysIsolatedStages: ['specify'] },
         stepGuidance: { specify: { prompt: 'Keep this guidance.' } },
@@ -571,7 +575,7 @@ describe('backlogCatalog upsert/diff/load', () => {
 
       updateCatalogDefaults('repo-1', {
         effort: 'high',
-        workflow: { mode: 'single' },
+        workflow: { mode: 'single', autoAdvance: true },
         maxTokens: 9000,
       });
 
@@ -581,10 +585,24 @@ describe('backlogCatalog upsert/diff/load', () => {
         maxTokens: 9000,
         workflow: {
           mode: 'single',
+          autoAdvance: true,
           stages: ['specify', 'plan', 'tasks', 'implement', 'validate'],
           syncTasksToBacklog: true,
         },
       });
+    });
+
+    it('updates inherited autoAdvance but preserves a feature override', async () => {
+      const { upsertBacklogCatalog, updateCatalogDefaults, updateCatalogFeature } = await setup();
+      const { loadBacklogFromCatalog } = await import('../../src/core/backlog/load.js');
+      upsertBacklogCatalog(makeBacklog(), 'repo-1');
+
+      updateCatalogFeature('repo-1', 'feat-1', { workflow: { autoAdvance: true } });
+      updateCatalogDefaults('repo-1', { workflow: { autoAdvance: false } });
+
+      const feature = loadBacklogFromCatalog('repo-1').epics[0]?.features[0];
+      expect(feature?.workflow.autoAdvance).toBe(true);
+
     });
 
     it('merges a budget patch onto existing budget fields without dropping siblings', async () => {

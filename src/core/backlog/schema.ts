@@ -35,7 +35,6 @@ export const TaskSchema = z.object({
 
 export const WorkflowApprovalsSchema = z.object({
   channel: WorkflowApprovalChannelSchema.default('telegram'),
-  autoAdvance: z.boolean().default(false),
 });
 
 export const WorkflowSessionPolicySchema = z.object({
@@ -48,14 +47,29 @@ export const StepGuidanceSchema = z.object({
   prompt: z.string().optional(),
 });
 
-export const WorkflowSchema = z.object({
+const WorkflowSchemaShape = z.object({
   mode: WorkflowModeSchema.default('staged'),
   stages: z.array(z.string()).min(1).default(['specify', 'plan', 'tasks', 'implement', 'validate']),
   approvals: WorkflowApprovalsSchema.default({}),
+  autoAdvance: z.boolean().default(false),
   syncTasksToBacklog: z.boolean().default(true),
   sessionPolicy: WorkflowSessionPolicySchema.default({}),
   stepGuidance: z.record(z.string(), StepGuidanceSchema).default({}),
-}).superRefine((workflow, ctx) => {
+});
+
+/** Normalizes the former approvals.autoAdvance input into workflow.autoAdvance. */
+export const WorkflowSchema = z.preprocess((value) => {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return value;
+  const workflow = value as Record<string, unknown>;
+  const approvals = workflow.approvals;
+  if (typeof approvals !== 'object' || approvals === null || Array.isArray(approvals)) return workflow;
+  const { autoAdvance: legacyAutoAdvance, ...normalizedApprovals } = approvals as Record<string, unknown>;
+  return {
+    ...workflow,
+    ...(workflow.autoAdvance === undefined && typeof legacyAutoAdvance === 'boolean' ? { autoAdvance: legacyAutoAdvance } : {}),
+    approvals: normalizedApprovals,
+  };
+}, WorkflowSchemaShape).superRefine((workflow, ctx) => {
   const seen = new Set<string>();
   for (const [index, stage] of workflow.sessionPolicy.alwaysIsolatedStages.entries()) {
     if (!workflow.stages.includes(stage)) {
