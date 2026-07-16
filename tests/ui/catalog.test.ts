@@ -207,7 +207,8 @@ describe('getBacklogSettings projectDefaults (SET-16)', () => {
         workflow: {
           mode: 'staged',
           stages: ['specify', 'plan', 'tasks', 'implement', 'validate'],
-          approvals: { channel: 'telegram', autoAdvance: false },
+          approvals: { channel: 'telegram' },
+          autoAdvance: false,
           syncTasksToBacklog: true,
           sessionPolicy: { mode: 'isolated', alwaysIsolatedStages: [] },
           stepGuidance: {},

@@ -7,7 +7,7 @@ const DEFAULT_NOTIFICATIONS = {
   channels: [],
   events: ['run:start', 'gate:created', 'run:failed', 'run:done', 'stage:approval', 'stage:input'],
 };
-const DEFAULT_WORKFLOW = { autoAdvanceStages: false, pollIntervalMs: 2_000 };
+const DEFAULT_WORKFLOW = { pollIntervalMs: 2_000 };
 const DEFAULT_BUDGET = { alertAtPercent: 80 };
 const DEFAULT_WEB = { host: '127.0.0.1', port: 8_743, auth: 'token', statusSpinner: true };
 const DEFAULT_TOOLS = [
@@ -188,7 +188,7 @@ describe('config', () => {
       ...ConfigSchema.parse({}),
       concurrency: 2,
       web: { ...DEFAULT_WEB, port: 9_001 },
-      workflow: { ...DEFAULT_WORKFLOW, autoAdvanceStages: true },
+      workflow: DEFAULT_WORKFLOW,
       stageSkills: { implement: ['speckit-implement'] },
     });
 
@@ -201,13 +201,13 @@ describe('config', () => {
     expect(saved).toMatchObject({
       concurrency: 5,
       web: { ...DEFAULT_WEB, port: 9_002 },
-      workflow: { ...DEFAULT_WORKFLOW, autoAdvanceStages: true },
+      workflow: DEFAULT_WORKFLOW,
       stageSkills: { implement: ['speckit-implement'], validate: ['dev-flow'] },
     });
     expect(JSON.parse(readFileSync(CONFIG_PATH, 'utf8'))).toMatchObject({
       concurrency: 5,
       web: { ...DEFAULT_WEB, port: 9_002 },
-      workflow: { ...DEFAULT_WORKFLOW, autoAdvanceStages: true },
+      workflow: DEFAULT_WORKFLOW,
       stageSkills: { implement: ['speckit-implement'], validate: ['dev-flow'] },
     });
   });

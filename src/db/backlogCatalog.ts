@@ -153,7 +153,7 @@ export function listCatalogFeatures(repoId: string, epicId?: string): CatalogFea
 }
 
 /** Single-feature readonly lookup, parsed to `Feature`. Used to re-check
- * config (e.g. `workflow.approvals.autoAdvance`) mid-run without the caller
+ * config (e.g. `workflow.autoAdvance`) mid-run without the caller
  * having to hold a stale copy of `data_json` from when the run started. */
 export function getCatalogFeature(repoId: string, featureId: string): Feature | undefined {
   const db = getReadonlyDbOrNull();
@@ -675,12 +675,12 @@ function inheritWorkflowDefaults(current: Workflow, previous: Workflow, next: Wo
   const inherited = { ...current };
   if (sameJsonValue(current.mode, previous.mode)) inherited.mode = next.mode;
   if (sameJsonValue(current.stages, previous.stages)) inherited.stages = [...next.stages];
+  if (sameJsonValue(current.autoAdvance, previous.autoAdvance)) inherited.autoAdvance = next.autoAdvance;
   if (sameJsonValue(current.syncTasksToBacklog, previous.syncTasksToBacklog)) inherited.syncTasksToBacklog = next.syncTasksToBacklog;
   if (sameJsonValue(current.approvals, previous.approvals)) inherited.approvals = next.approvals;
   else {
     inherited.approvals = { ...current.approvals };
     if (sameJsonValue(current.approvals.channel, previous.approvals.channel)) inherited.approvals.channel = next.approvals.channel;
-    if (sameJsonValue(current.approvals.autoAdvance, previous.approvals.autoAdvance)) inherited.approvals.autoAdvance = next.approvals.autoAdvance;
   }
   return inherited;
 }

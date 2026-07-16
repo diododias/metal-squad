@@ -82,7 +82,6 @@ const NotificationsConfig = z.object({
 });
 
 const WorkflowConfig = z.object({
-  autoAdvanceStages: z.boolean().default(false),
   pollIntervalMs: z.number().int().positive().default(2_000),
 });
 

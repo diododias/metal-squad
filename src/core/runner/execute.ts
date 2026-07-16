@@ -86,7 +86,6 @@ export interface ExecuteOptions {
   cwd: string;
   concurrency: number;
   featureId?: string;
-  autoAdvanceStages?: boolean;
   resumePipelineId?: number;
   resumeOverride?: ResumeOverride;
 }
@@ -118,6 +117,7 @@ function applyWorkflowRevisions(features: Feature[], revisions: PipelineWorkflow
       ...feature,
       workflow: {
         ...revision,
+        autoAdvance: feature.workflow.autoAdvance,
         // Approval transitions are intentionally resolved from the current
         // catalog, even when the structural workflow is frozen for resume.
         approvals: feature.workflow.approvals,
@@ -203,7 +203,7 @@ export async function executeBacklog(
     : createPipeline(
         repoId,
         opts.featureId ?? resolvedPlan[resolvedPlan.length - 1]?.id ?? 'backlog',
-        Boolean(opts.autoAdvanceStages),
+        Boolean(resolvedPlan[resolvedPlan.length - 1]?.workflow.autoAdvance),
         { cwd: opts.cwd, snapshot: initialSnapshot },
       );
   const persistedPipeline = getPipeline(pipelineId);
@@ -848,23 +848,22 @@ async function executeStagedFeature(
 ): Promise<RunResult> {
   const workflow = feature.workflow;
   const sessionPolicy = workflow.sessionPolicy;
-  // Re-read `approvals.autoAdvance` from the catalog at each transition
+  // Re-read `workflow.autoAdvance` from the catalog at each transition
   // rather than caching it once — the web UI lets the user flip this
   // checkbox while a run is already in flight, and that edit must take
   // effect on the very next stage transition instead of only on future runs.
   const resolveAutoAdvance = (): boolean => {
-    if (opts.autoAdvanceStages !== undefined) return opts.autoAdvanceStages;
-    let featureAutoAdvance = workflow.approvals.autoAdvance;
+    let autoAdvance = workflow.autoAdvance;
     try {
       const { repoId } = resolveRepo(opts.cwd);
       const liveFeature = getCatalogFeature(repoId, feature.id);
-      if (liveFeature) featureAutoAdvance = liveFeature.workflow.approvals.autoAdvance;
+      if (liveFeature) autoAdvance = liveFeature.workflow.autoAdvance;
     } catch {
       // catalog read failed (e.g. sandboxed harness DB) — fall back to the
       // value captured when this run started rather than aborting a stage
       // transition over a config re-check.
     }
-    return featureAutoAdvance || config.workflow.autoAdvanceStages;
+    return autoAdvance;
   };
   const stages = workflow.stages;
   const persistedRequests = listStageRequestsForFeature(pipelineId, feature.id);

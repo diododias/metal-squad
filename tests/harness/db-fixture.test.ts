@@ -56,7 +56,7 @@ describe('db fixture scenarios', () => {
     expect(override?.thinking).toBe('on');
     expect(override?.dependsOn).toEqual(['fix-set-inherit']);
     expect(override?.workflow.stages).toEqual(['specify', 'implement', 'validate']);
-    expect(override?.workflow.approvals.autoAdvance).toBe(true);
+    expect(override?.workflow.autoAdvance).toBe(true);
     expect(override?.workflow.sessionPolicy.alwaysIsolatedStages).toEqual(['validate']);
 
     const tasks = listCatalogTasks('fixture/settings', 'fix-set-override');
