@@ -31,17 +31,20 @@ import { resolveRepo } from '../core/repo.js';
 import { loadBacklogFromCatalog } from '../core/backlog/load.js';
 import { selectStartableFeaturePlan } from '../core/orchestrator/graph.js';
 import { validateBacklogSkills } from '../core/skills/index.js';
-import { ConfigSchema, loadConfig, resolveRuntimeConfig, saveConfig, type ToolRegistryEntry } from '../config/index.js';
+import { ConfigSchema, loadConfig, resolveRuntimeConfig, saveAppConfigPatch, saveConfig, type ToolRegistryEntry } from '../config/index.js';
+import { clearSecret, setSecret } from '../security/secrets.js';
 import { updateCatalogFeature, updateCatalogTask, updateCatalogDefaults, type FeaturePatch, type CatalogDefaultsPatch } from '../db/backlogCatalog.js';
 import type { Feature, Task } from '../core/backlog/schema.js';
 import { buildMsqWebState, appendNotification, resetWebStateCaches } from './state.js';
 import { createWebAuth, isAllowedHostHeader, isAllowedOrigin, timingSafeEqualStrings } from './auth.js';
 import type {
+  AppConfigPatch,
   FeatureConfigPatch,
   FeatureConfigSaveIssue,
   FeatureConfigSaveResult,
   ProjectDefaultsPatch,
   RunChangesPayload,
+  SecretPatch,
   TaskConfigPatch,
   WebSocketClientMessage,
   WebSocketServerMessage,
@@ -648,16 +651,18 @@ export function createWebServer(options: {
         return;
       }
 
-      try {
-        console.log(`[ws] received message type=${message.type}`);
-        handleClientMessage(message, client, cwd);
-      } catch (error) {
-        const errorMessage = error instanceof Error ? error.message : String(error);
-        const errorStack = error instanceof Error ? error.stack : undefined;
-        console.error(`[ws] handleClientMessage error for ${message.type}: ${errorMessage}`);
-        if (errorStack) console.error(errorStack);
-        sendTo(client, { type: 'error', payload: { message: errorMessage } });
-      }
+      void (async (): Promise<void> => {
+        try {
+          console.log(`[ws] received message type=${message.type}`);
+          await handleClientMessage(message, client, cwd);
+        } catch (error) {
+          const errorMessage = error instanceof Error ? error.message : String(error);
+          const errorStack = error instanceof Error ? error.stack : undefined;
+          console.error(`[ws] handleClientMessage error for ${message.type}: ${errorMessage}`);
+          if (errorStack) console.error(errorStack);
+          sendTo(client, { type: 'error', payload: { message: errorMessage } });
+        }
+      })();
     });
 
     socket.on('close', () => {
@@ -680,11 +685,11 @@ export function createWebServer(options: {
     }
   });
 
-  function handleClientMessage(
+  async function handleClientMessage(
     message: Exclude<WebSocketClientMessage, { type: 'auth' }>,
     client: Client,
     featureCwd: string,
-  ): void {
+  ): Promise<void> {
     switch (message.type) {
       case 'action:startFeature': {
         startFeature(message.featureId, featureCwd);
@@ -710,6 +715,18 @@ export function createWebServer(options: {
       }
       case 'action:updateProjectDefaults': {
         updateProjectDefaults(message.patch, featureCwd);
+        break;
+      }
+      case 'action:updateAppConfig': {
+        updateAppConfig(message.patch, featureCwd);
+        break;
+      }
+      case 'action:setSecret': {
+        await saveSecret(message.patch, featureCwd);
+        break;
+      }
+      case 'action:clearSecret': {
+        await removeSecret(message.account, featureCwd);
         break;
       }
       case 'action:updateToolsRegistry': {
@@ -820,6 +837,27 @@ export function createWebServer(options: {
         break;
       }
     }
+  }
+
+  function updateAppConfig(patch: AppConfigPatch, featureCwd: string): void {
+    saveAppConfigPatch(patch);
+    reconcileWebState(featureCwd);
+    msqEventBus.emit('ui:info', { message: 'Saved App config.' });
+  }
+
+  async function saveSecret(patch: SecretPatch, featureCwd: string): Promise<void> {
+    if (!patch.account.trim()) throw new Error('Secret account is required.');
+    if (!patch.value) throw new Error('Secret value is required.');
+    await setSecret(patch.account, patch.value);
+    reconcileWebState(featureCwd);
+    msqEventBus.emit('ui:info', { message: `Saved secret for ${patch.account}.` });
+  }
+
+  async function removeSecret(account: string, featureCwd: string): Promise<void> {
+    if (!account.trim()) throw new Error('Secret account is required.');
+    await clearSecret(account);
+    reconcileWebState(featureCwd);
+    msqEventBus.emit('ui:info', { message: `Cleared secret for ${account}.` });
   }
 
   const outputUnsubscribe = msqEventBus.subscribe('run:output', (event) => {
