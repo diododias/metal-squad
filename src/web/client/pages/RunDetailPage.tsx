@@ -10,7 +10,7 @@ import { RunStatusStrip } from '../components/status/RunStatusStrip.js';
 import { FeatureConfigDetail } from '../components/FeatureConfigDetail.js';
 import { PageHeader } from '../PageHeader.js';
 import { useIsMobile } from '../Responsive.js';
-import { formatElapsed, formatPercent, formatPublishTarget, formatTokens, getPublishStatusLabel, getRunStatusLabel } from '../lib/format.js';
+import { formatClockTime, formatElapsed, formatPercent, formatPublishTarget, formatTokens, getPublishStatusLabel, getRunStatusLabel } from '../lib/format.js';
 import { summarizeTaskRuns } from '../lib/workflow.js';
 import type { MsqWebState, FeatureConfigPatch, WebSocketClientMessage } from '../../types.js';
 import type { TaskRun } from '../../../db/repo.js';
