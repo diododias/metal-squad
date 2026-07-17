@@ -171,6 +171,77 @@ describe('RunDetailPage resume with override', () => {
   });
 });
 
+describe('RunDetailPage Live Output ordering', () => {
+  it('interleaves tool calls and output lines chronologically even when output timestamps lack a timezone marker', () => {
+    const run = makeRun();
+    const send = vi.fn<(message: WebSocketClientMessage) => void>();
+    const container = document.createElement('div');
+    document.body.append(container);
+    const root = createRoot(container);
+    roots.push(root);
+
+    act(() => {
+      root.render(
+        <RunDetailPage
+          state={makeState(run)}
+          featureId="feat-1"
+          runDetails={{
+            1: {
+              taskRuns: [],
+              breakdown: null,
+              sessionStatus: null,
+              statusHistory: [],
+              toolCalls: [
+                {
+                  id: 'tool-a',
+                  runId: 1,
+                  featureId: 'feat-1',
+                  tool: 'codex',
+                  sequence: 1,
+                  phase: 'completed',
+                  name: 'shell',
+                  arguments: null,
+                  output: null,
+                  step: null,
+                  // Tool call rows already use the fixed ISO-with-Z format.
+                  startedAt: '2026-07-16T13:50:37.000Z',
+                  completedAt: null,
+                  error: null,
+                },
+              ],
+            },
+          } as unknown as Parameters<typeof RunDetailPage>[0]['runDetails']}
+          linesByRun={{
+            // Legacy output rows written before the ISO created_at fix have no
+            // timezone marker and must still be treated as UTC, not local time.
+            1: [
+              { runId: 1, source: 'agent', line: 'before the tool call', createdAt: '2026-07-16 13:50:21' },
+              { runId: 1, source: 'agent', line: 'after the tool call', createdAt: '2026-07-16 13:50:52' },
+            ],
+          }}
+          onSubscribeRun={() => () => undefined}
+          onBack={() => undefined}
+          send={send}
+        />,
+      );
+    });
+
+    const outputTab = Array.from(container.querySelectorAll('button, [role="tab"]')).find((el) => el.textContent === 'Live Output');
+    act(() => { (outputTab as HTMLElement)?.click(); });
+
+    const text = container.textContent ?? '';
+    const beforeIdx = text.indexOf('before the tool call');
+    const toolIdx = text.indexOf('tool:shell');
+    const afterIdx = text.indexOf('after the tool call');
+
+    expect(beforeIdx).toBeGreaterThanOrEqual(0);
+    expect(toolIdx).toBeGreaterThanOrEqual(0);
+    expect(afterIdx).toBeGreaterThanOrEqual(0);
+    expect(beforeIdx).toBeLessThan(toolIdx);
+    expect(toolIdx).toBeLessThan(afterIdx);
+  });
+});
+
 describe('RunDetailPage mobile close control', () => {
   afterEach(() => {
     window.history.replaceState(null, '', '/');
