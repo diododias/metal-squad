@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import { sanitizeToolCallRecord, type SessionHandle, type ToolAdapter, type RunResult, type RunFeatureOptions, type TokenUsage, type ToolCallRecord } from './types.js';
+import { detectStderrLevel, sanitizeToolCallRecord, type SessionHandle, type ToolAdapter, type RunResult, type RunFeatureOptions, type TokenUsage, type ToolCallRecord } from './types.js';
 import type { Effort, Feature } from '../backlog/schema.js';
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
@@ -123,13 +123,13 @@ export const codexAdapter: ToolAdapter = {
         onStatus: opts.onStatus ?? ((snapshot): void => { msqEventBus.emit('run:status', snapshot); }),
         onStdoutLine: (line) => {
           const update = progress.onStdoutLine(line);
-          if (update.output) emitRunOutput(opts.runId, feature, update.output.line, 'stdout', update.output.source);
+          if (update.output) emitRunOutput(opts.runId, feature, update.output.line, 'stdout', update.output.source, update.output);
           if (update.usage) emitUsage(opts.runId, feature, update.usage);
           if (update.toolCall) emitToolCall(opts, feature, update.toolCall, seenToolCalls);
         },
         onStderrLine: (line) => {
           const update = progress.onStderrLine(line);
-          if (update.output) emitRunOutput(opts.runId, feature, update.output.line, 'stderr', update.output.source);
+          if (update.output) emitRunOutput(opts.runId, feature, update.output.line, 'stderr', update.output.source, update.output);
           if (update.toolCall) emitToolCall(opts, feature, update.toolCall, seenToolCalls);
         },
       }));
@@ -330,6 +330,8 @@ interface ProgressUpdate {
   output?: {
     line: string;
     source: 'agent' | 'tool' | 'stderr';
+    toolName?: string;
+    level?: 'error' | 'warn';
   };
   usage?: TokenUsage;
   toolCall?: Omit<ToolCallRecord, 'runId' | 'featureId' | 'tool'>;
@@ -380,6 +382,7 @@ function createCodexProgress(): {
           output: {
             line: errorLine,
             source: 'tool',
+            level: 'error',
           },
         };
       }
@@ -391,6 +394,7 @@ function createCodexProgress(): {
           output: {
             line: toolLine,
             source: 'tool',
+            toolName: deriveCodexToolName(evt) ?? undefined,
           },
           toolCall: normalizeCodexToolCall(evt, eventCount),
         };
@@ -406,6 +410,7 @@ function createCodexProgress(): {
         output: {
           line: text,
           source: 'stderr',
+          level: detectStderrLevel(line),
         },
       };
     },
@@ -442,6 +447,15 @@ function emitToolCall(opts: RunFeatureOptions, feature: Feature, partial: Omit<T
 
 function normalizeSnippet(text: unknown): string {
   return String(text ?? '').replace(/\s+/g, ' ').trim().slice(0, 140); // eslint-disable-line @typescript-eslint/no-base-to-string
+}
+
+function deriveCodexToolName(evt: CodexEvent): string | null {
+  if (evt.type !== 'item.completed') return null;
+  const item = evt.item;
+  if (!item || item.type === 'agent_message') return null;
+  if (item.type === 'command_execution') return 'shell';
+  const label = normalizeSnippet(item.name ?? item.tool_name ?? item.type ?? '');
+  return label || null;
 }
 
 function summarizeCodexToolEvent(evt: CodexEvent): string | null {
@@ -505,6 +519,7 @@ function emitRunOutput(
   line: string,
   stream: 'stdout' | 'stderr',
   source: 'agent' | 'tool' | 'stderr' | 'heartbeat',
+  extra?: { toolName?: string; level?: 'error' | 'warn' },
 ): void {
   msqEventBus.emit('run:output', {
     runId,
@@ -513,6 +528,9 @@ function emitRunOutput(
     line,
     stream,
     source,
+    createdAt: new Date().toISOString(),
+    ...(extra?.toolName !== undefined ? { toolName: extra.toolName } : {}),
+    ...(extra?.level !== undefined ? { level: extra.level } : {}),
   });
 }
 

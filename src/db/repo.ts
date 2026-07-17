@@ -418,13 +418,16 @@ export interface RunOutputRow {
   source: OutputSource;
   line: string;
   createdAt: string;
+  toolName: string | null;
+  level: string | null;
 }
 
 export function appendRunOutput(event: RunOutputEvent): void {
+  const createdAt = event.createdAt ?? new Date().toISOString();
   getDb('readwrite')
     .prepare(
-      `INSERT INTO run_output (run_id, feature_id, tool, stream, source, line)
-       VALUES (?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO run_output (run_id, feature_id, tool, stream, source, line, created_at, tool_name, level)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     )
     .run(
       event.runId,
@@ -433,6 +436,9 @@ export function appendRunOutput(event: RunOutputEvent): void {
       event.stream,
       event.source ?? event.stream,
       event.line,
+      createdAt,
+      event.toolName ?? null,
+      event.level ?? null,
     );
 }
 
@@ -549,7 +555,7 @@ export function listRunOutput(runId: number, limit = 120): RunOutputRow[] {
   if (!hasDbFile()) return [];
   return getDb('readonly')
     .prepare(
-      `SELECT id, run_id AS runId, feature_id AS featureId, tool, stream, source, line, created_at AS createdAt
+      `SELECT id, run_id AS runId, feature_id AS featureId, tool, stream, source, line, created_at AS createdAt, tool_name AS toolName, level
        FROM (
          SELECT *
          FROM run_output
@@ -566,7 +572,7 @@ export function listRunOutputAfterId(runId: number, afterId: number, limit = 200
   if (!hasDbFile()) return [];
   return getDb('readonly')
     .prepare(
-      `SELECT id, run_id AS runId, feature_id AS featureId, tool, stream, source, line, created_at AS createdAt
+      `SELECT id, run_id AS runId, feature_id AS featureId, tool, stream, source, line, created_at AS createdAt, tool_name AS toolName, level
        FROM run_output
        WHERE run_id = ? AND id > ?
        ORDER BY id ASC

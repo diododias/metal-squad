@@ -10,6 +10,13 @@ export function formatElapsed(startedAt: string, endedAt: string | null): string
   return `${String(mins)}m${String(secs % 60)}s`;
 }
 
+export function formatClockTime(iso: string | undefined): string | undefined {
+  if (!iso) return undefined;
+  const ms = parseTimestampMs(iso);
+  if (ms === null) return undefined;
+  return new Date(ms).toLocaleTimeString('en-GB', { hour12: false });
+}
+
 export function formatDurationMs(ms: number | null | undefined): string {
   if (ms === null || ms === undefined) return '—';
   const secs = Math.max(0, Math.round(ms / 1000));

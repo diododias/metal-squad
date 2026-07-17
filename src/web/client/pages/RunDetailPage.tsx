@@ -51,13 +51,17 @@ const inputStyle: React.CSSProperties = {
 function outputToTranscript(lines: OutputLine[]): TranscriptEntry[] {
   return lines.map((line, i) => {
     const source = line.source ?? 'stdout';
-    const type: TranscriptEntry['type'] = source === 'tool' ? 'tool' : source === 'agent' ? 'agent' : 'system';
+    const isError = line.level === 'error';
+    const type: TranscriptEntry['type'] = source === 'tool' || isError ? 'tool' : source === 'agent' ? 'agent' : 'system';
+    const text = line.level === 'warn' ? `[warn] ${line.line}` : line.line;
     return {
       id: line.id ?? i,
       type,
-      tool: line.tool,
-      text: line.line,
-      command: type === 'tool' ? line.line : undefined,
+      status: isError ? 'error' : undefined,
+      tool: line.toolName ?? line.tool,
+      text,
+      command: type === 'tool' ? text : undefined,
+      time: formatClockTime(line.createdAt),
     };
   });
 }

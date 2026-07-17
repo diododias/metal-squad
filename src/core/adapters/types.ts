@@ -39,6 +39,14 @@ export type ToolCallCallback = (record: ToolCallRecord) => void;
 
 const SENSITIVE_KEY = /(token|secret|password|authorization|api[_-]?key|cookie)/i;
 
+const STDERR_LOG_LEVEL = /^\S+\s+(ERROR|WARN)\s/;
+
+export function detectStderrLevel(line: string): 'error' | 'warn' | undefined {
+  const match = STDERR_LOG_LEVEL.exec(line);
+  if (!match) return undefined;
+  return match[1] === 'ERROR' ? 'error' : 'warn';
+}
+
 export function sanitizeToolCallValue(value: unknown, depth = 0): unknown {
   if (depth > 4) return '[truncated]';
   if (value == null || typeof value === 'number' || typeof value === 'boolean') return value;
