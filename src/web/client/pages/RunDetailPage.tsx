@@ -61,7 +61,8 @@ function outputToTranscript(lines: OutputLine[]): TimedEntry[] {
       status: isError ? 'error' : undefined,
       tool: line.toolName ?? line.tool,
       text,
-      command: type === 'tool' ? text : undefined,
+      command: type === 'tool' && !isError && source === 'tool' ? text : undefined,
+      output: type === 'tool' && isError ? text : undefined,
       time: formatClockTime(line.createdAt),
       sortKey: parseTimestampMs(line.createdAt) ?? i,
     };
@@ -111,7 +112,10 @@ export function RunDetailPage({
   const toolCalls = useMemo(() => detail?.toolCalls ?? [], [detail]);
   const combinedOutput = useMemo(() => {
     const lineEntries = outputToTranscript(run ? (linesByRun[run.runId] ?? []) : []).filter(
-      (entry) => entry.type !== 'tool' || toolCalls.length === 0,
+      // Duplicate tool-echo lines are dropped once structured tool calls cover them, but
+      // error lines (e.g. raw stderr router failures) have no structured counterpart and
+      // must always surface, even when the run has other successful tool calls.
+      (entry) => entry.type !== 'tool' || entry.status === 'error' || toolCalls.length === 0,
     );
     const toolEntries = toolCallsToTranscript(toolCalls);
     return [...lineEntries, ...toolEntries].sort((a, b) => a.sortKey - b.sortKey);
