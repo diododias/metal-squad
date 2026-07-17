@@ -800,6 +800,9 @@ export function createWebServer(options: {
               line: row.line,
               stream: row.stream,
               source: row.source,
+              createdAt: row.createdAt,
+              toolName: row.toolName ?? undefined,
+              level: row.level ?? undefined,
             },
           });
         }
@@ -1154,6 +1157,9 @@ export function createWebServer(options: {
               line: row.line,
               stream: row.stream,
               source: row.source,
+              createdAt: row.createdAt,
+              toolName: row.toolName ?? undefined,
+              level: row.level ?? undefined,
             },
           }));
         }

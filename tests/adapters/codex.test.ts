@@ -166,6 +166,8 @@ describe('codexAdapter timeout observability', () => {
       line: 'shell /bin/zsh -lc pwd -> /repo',
       stream: 'stdout',
       source: 'tool',
+      createdAt: expect.any(String),
+      toolName: 'shell',
     });
   });
 
@@ -203,5 +205,64 @@ describe('codexAdapter timeout observability', () => {
     expect(mockRunCli).toHaveBeenCalledWith(expect.any(String), expect.any(Array), expect.objectContaining({
       timeoutMs: 1_800_000,
     }));
+  });
+
+  it('flags structured error events with level: error', async () => {
+    mockRunCli.mockImplementation(async (_bin, _args, opts) => {
+      opts.onStdoutLine?.(JSON.stringify({
+        type: 'turn.failed',
+        error: { message: 'boom' },
+      }));
+      return { code: 0, stdout: '', stderr: '' };
+    });
+
+    const { codexAdapter } = await import('../../src/core/adapters/codex.js');
+    await codexAdapter.runFeature({
+      id: 'feat-06',
+      title: 'Feature',
+      tool: 'codex',
+      effort: 'medium',
+      dependsOn: [],
+      tasks: [],
+    }, 'prompt', { cwd: '/repo', runId: 12 });
+
+    expect(mockEventEmit).toHaveBeenCalledWith('run:output', {
+      runId: 12,
+      featureId: 'feat-06',
+      tool: 'codex',
+      line: 'error boom',
+      stream: 'stdout',
+      source: 'tool',
+      createdAt: expect.any(String),
+      level: 'error',
+    });
+  });
+
+  it('flags raw stderr log lines carrying an ERROR level', async () => {
+    mockRunCli.mockImplementation(async (_bin, _args, opts) => {
+      opts.onStderrLine?.('2026-07-16T13:23:27.625650Z ERROR codex_core::tools::router: error=apply_patch verification failed');
+      return { code: 0, stdout: '', stderr: '' };
+    });
+
+    const { codexAdapter } = await import('../../src/core/adapters/codex.js');
+    await codexAdapter.runFeature({
+      id: 'feat-07',
+      title: 'Feature',
+      tool: 'codex',
+      effort: 'medium',
+      dependsOn: [],
+      tasks: [],
+    }, 'prompt', { cwd: '/repo', runId: 13 });
+
+    expect(mockEventEmit).toHaveBeenCalledWith('run:output', {
+      runId: 13,
+      featureId: 'feat-07',
+      tool: 'codex',
+      line: '2026-07-16T13:23:27.625650Z ERROR codex_core::tools::router: error=apply_patch verification failed',
+      stream: 'stderr',
+      source: 'stderr',
+      createdAt: expect.any(String),
+      level: 'error',
+    });
   });
 });

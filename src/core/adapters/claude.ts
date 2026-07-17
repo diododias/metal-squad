@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
-import { sanitizeToolCallRecord, type SessionHandle, type ToolAdapter, type RunResult, type RunFeatureOptions, type TokenUsage, type ToolCallRecord } from './types.js';
+import { detectStderrLevel, sanitizeToolCallRecord, type SessionHandle, type ToolAdapter, type RunResult, type RunFeatureOptions, type TokenUsage, type ToolCallRecord } from './types.js';
 import type { Effort, Feature } from '../backlog/schema.js';
 import { CliAbortError, CliTimeoutError, resolveToolInvocation, runCli } from './spawn.js';
 import { msqEventBus } from '../events/index.js';
@@ -96,7 +96,7 @@ export const claudeAdapter: ToolAdapter = {
         onStdoutLine: (line) => {
           const updates = progress.onStdoutLine(line, opts.stageSkills ?? {});
           for (const update of updates) {
-            if (update.output) emitRunOutput(opts.runId, feature, update.output.line, 'stdout', update.output.source);
+            if (update.output) emitRunOutput(opts.runId, feature, update.output.line, 'stdout', update.output.source, update.output);
             if (update.usage) emitUsage(opts.runId, feature, update.usage);
             if (update.stage) emitTaskStage(opts.runId, feature, update.stage);
             if (update.toolCall) emitToolCall(opts, feature, update.toolCall, seenToolCalls);
@@ -105,7 +105,7 @@ export const claudeAdapter: ToolAdapter = {
         onStderrLine: (line) => {
           const updates = progress.onStderrLine(line);
           for (const update of updates) {
-            if (update.output) emitRunOutput(opts.runId, feature, update.output.line, 'stderr', update.output.source);
+            if (update.output) emitRunOutput(opts.runId, feature, update.output.line, 'stderr', update.output.source, update.output);
             if (update.toolCall) emitToolCall(opts, feature, update.toolCall, seenToolCalls);
           }
         },
@@ -286,6 +286,8 @@ interface ProgressUpdate {
   output?: {
     line: string;
     source: 'agent' | 'tool' | 'stderr';
+    toolName?: string;
+    level?: 'error' | 'warn';
   };
   usage?: TokenUsage;
   /** true quando `usage` ja e o total autoritativo (evento `result`). */
@@ -346,7 +348,7 @@ function createClaudeProgress(): {
       if (!text) return [];
       stderrCount += 1;
       lastStderrSnippet = text;
-      return [{ output: { line: text, source: 'stderr' } }];
+      return [{ output: { line: text, source: 'stderr', level: detectStderrLevel(line) } }];
     },
     heartbeatSuffix(): string | undefined {
       const parts: string[] = [];
@@ -386,7 +388,7 @@ function parseClaudeLine(line: string, stageSkills: Record<string, string[]>): P
       } else if (block.type === 'tool_result') {
         const output = normalizeSnippet(JSON.stringify(block.content ?? ''));
         updates.push({
-          output: output ? { line: `tool result ${output}`, source: 'tool' } : undefined,
+          output: output ? { line: `tool result ${output}`, source: 'tool', toolName: 'tool result', level: block.is_error ? 'error' : undefined } : undefined,
           toolCall: {
             id: block.tool_use_id ?? `tool-result-${String(updates.length)}`,
             sequence: updates.length + 1,
@@ -406,7 +408,7 @@ function parseClaudeLine(line: string, stageSkills: Record<string, string[]>): P
         const stage = detectStageFromSkill(name, stageSkills);
         const outputLine = normalizeSnippet(`tool ${name}${input && input !== '{}' ? ` ${input}` : ''}`);
         updates.push({
-          output: { line: outputLine, source: 'tool' },
+          output: { line: outputLine, source: 'tool', toolName: name },
           ...(stage ? { stage } : {}),
           toolCall: {
             id: block.id ?? `${name}-${String(updates.length)}`,
@@ -452,6 +454,7 @@ function emitRunOutput(
   line: string,
   stream: 'stdout' | 'stderr',
   source: 'agent' | 'tool' | 'stderr' | 'heartbeat',
+  extra?: { toolName?: string; level?: 'error' | 'warn' },
 ): void {
   msqEventBus.emit('run:output', {
     runId,
@@ -460,6 +463,9 @@ function emitRunOutput(
     line,
     stream,
     source,
+    createdAt: new Date().toISOString(),
+    ...(extra?.toolName !== undefined ? { toolName: extra.toolName } : {}),
+    ...(extra?.level !== undefined ? { level: extra.level } : {}),
   });
 }
 

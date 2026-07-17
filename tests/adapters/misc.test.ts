@@ -320,6 +320,7 @@ describe('claude adapter', () => {
       line: 'Atualizando prompt builder agora.',
       stream: 'stdout',
       source: 'agent',
+      createdAt: expect.any(String),
     });
     expect(mockEventEmit).toHaveBeenCalledWith('run:output', {
       runId: 4,
@@ -328,6 +329,7 @@ describe('claude adapter', () => {
       line: 'warning: still running',
       stream: 'stderr',
       source: 'stderr',
+      createdAt: expect.any(String),
     });
   });
 

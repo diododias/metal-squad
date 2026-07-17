@@ -8,7 +8,14 @@ import { assertNodeVersion, resolveFastTestArgs } from './gate-lib.mjs';
 
 const mode = process.argv[2] ?? 'fast';
 const repoRoot = resolve(dirname(new URL(import.meta.url).pathname), '..');
-const stampPath = join(repoRoot, '.git', '.msq-npm-ci-stamp');
+// `--absolute-git-dir` resolves to the worktree's own git dir (e.g.
+// `.git/worktrees/<name>`) instead of assuming `<repoRoot>/.git` is a
+// directory, which is false inside a `git worktree` checkout (there it's a
+// file pointing at the real git dir). node_modules is per-worktree, so the
+// stamp must be too.
+const gitDir = spawnSync('git', ['rev-parse', '--absolute-git-dir'], { cwd: repoRoot, encoding: 'utf8' })
+  .stdout.trim() || join(repoRoot, '.git');
+const stampPath = join(gitDir, '.msq-npm-ci-stamp');
 
 function run(command, args, options = {}) {
   const result = spawnSync(command, args, {

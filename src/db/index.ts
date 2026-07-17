@@ -507,6 +507,17 @@ function migrate(d: Database.Database): void {
   ensureTaskRunColumn('context_window_tokens', `ALTER TABLE task_runs ADD COLUMN context_window_tokens INTEGER`);
   ensureTaskRunColumn('context_window_percent', `ALTER TABLE task_runs ADD COLUMN context_window_percent REAL`);
 
+  const runOutputColumns = d
+    .prepare(`PRAGMA table_info(run_output)`)
+    .all() as { name?: string }[];
+  const ensureRunOutputColumn = (name: string, sql: string): void => {
+    if (!runOutputColumns.some((column) => column.name === name)) {
+      d.exec(sql);
+    }
+  };
+  ensureRunOutputColumn('tool_name', `ALTER TABLE run_output ADD COLUMN tool_name TEXT`);
+  ensureRunOutputColumn('level', `ALTER TABLE run_output ADD COLUMN level TEXT`);
+
   const pipelineColumns = d
     .prepare(`PRAGMA table_info(pipelines)`)
     .all() as { name?: string }[];

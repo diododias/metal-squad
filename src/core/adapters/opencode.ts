@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import { sanitizeToolCallRecord, type SessionHandle, type ToolAdapter, type RunResult, type RunFeatureOptions, type TokenUsage, type ToolCallRecord } from './types.js';
+import { detectStderrLevel, sanitizeToolCallRecord, type SessionHandle, type ToolAdapter, type RunResult, type RunFeatureOptions, type TokenUsage, type ToolCallRecord } from './types.js';
 import type { Effort, Feature } from '../backlog/schema.js';
 import { CliAbortError, resolveToolInvocation, runCli } from './spawn.js';
 import { msqEventBus } from '../events/index.js';
@@ -109,7 +109,7 @@ export const opencodeAdapter: ToolAdapter = {
     const streamParser = createOpenCodeStreamParser(
       (event) => {
         const update = progress.onEvent(event);
-        if (update.output) emitRunOutput(opts.runId, feature, update.output.line, 'stdout', update.output.source);
+        if (update.output) emitRunOutput(opts.runId, feature, update.output.line, 'stdout', update.output.source, update.output);
         if (update.usage) emitUsage(opts.runId, feature, update.usage);
         if (update.toolCall) emitToolCall(opts, feature, update.toolCall, seenToolCalls);
       },
@@ -138,7 +138,7 @@ export const opencodeAdapter: ToolAdapter = {
         onStderrLine: (line) => {
           const update = progress.onStderrLine(line);
           if (!update.output) return;
-          emitRunOutput(opts.runId, feature, update.output.line, 'stderr', update.output.source);
+          emitRunOutput(opts.runId, feature, update.output.line, 'stderr', update.output.source, update.output);
         },
       }));
     } catch (error) {
@@ -273,6 +273,8 @@ function parseOpenCodeEvent(json: OpenCodeResponse): {
   output?: {
     line: string;
     source: 'agent' | 'tool' | 'stdout';
+    toolName?: string;
+    level?: 'error' | 'warn';
   };
   usage?: TokenUsage;
   toolCall?: Omit<ToolCallRecord, 'runId' | 'featureId' | 'tool'>;
@@ -284,7 +286,7 @@ function parseOpenCodeEvent(json: OpenCodeResponse): {
       json.message,
     ) || 'Unknown opencode error';
     const errorName = pickTextSnippet(json.error?.name) || 'UnknownError';
-    return { output: { line: `${errorName}: ${errorMsg}`, source: 'stdout' } };
+    return { output: { line: `${errorName}: ${errorMsg}`, source: 'stdout', level: 'error' } };
   }
 
   const usage = opencodeAdapter.parseUsage?.(JSON.stringify(json)) ?? undefined;
@@ -303,6 +305,7 @@ function parseOpenCodeEvent(json: OpenCodeResponse): {
       output: {
         line: normalizeSnippet(`tool ${toolName}${payload && payload !== '{}' ? ` ${payload}` : ''}`),
         source: 'tool',
+        toolName,
       },
       toolCall: {
         id: part?.callID ?? part?.id ?? `${toolName}-${String(Date.now())}`,
@@ -488,6 +491,8 @@ function createOpenCodeProgress(): {
     output?: {
       line: string;
       source: 'agent' | 'tool' | 'stdout';
+      toolName?: string;
+      level?: 'error' | 'warn';
     };
     usage?: TokenUsage;
     toolCall?: Omit<ToolCallRecord, 'runId' | 'featureId' | 'tool'>;
@@ -496,6 +501,7 @@ function createOpenCodeProgress(): {
     output?: {
       line: string;
       source: 'stderr';
+      level?: 'error' | 'warn';
     };
   };
   heartbeatSuffix: () => string | undefined;
@@ -511,7 +517,7 @@ function createOpenCodeProgress(): {
 
   return {
     onEvent(event: OpenCodeResponse): {
-      output?: { line: string; source: 'agent' | 'tool' | 'stdout' };
+      output?: { line: string; source: 'agent' | 'tool' | 'stdout'; toolName?: string; level?: 'error' | 'warn' };
       usage?: TokenUsage;
       toolCall?: Omit<ToolCallRecord, 'runId' | 'featureId' | 'tool'>;
     } {
@@ -527,12 +533,12 @@ function createOpenCodeProgress(): {
       }
       return update;
     },
-    onStderrLine(line: string): { output?: { line: string; source: 'stderr' } } {
+    onStderrLine(line: string): { output?: { line: string; source: 'stderr'; level?: 'error' | 'warn' } } {
       const text = normalizeSnippet(line);
       if (!text) return {};
       stderrCount += 1;
       lastStderrSnippet = text;
-      return { output: { line: text, source: 'stderr' as const } };
+      return { output: { line: text, source: 'stderr' as const, level: detectStderrLevel(line) } };
     },
     heartbeatSuffix(): string | undefined {
       const parts: string[] = [];
@@ -562,6 +568,7 @@ function emitRunOutput(
   line: string,
   stream: 'stdout' | 'stderr',
   source: 'agent' | 'tool' | 'stdout' | 'stderr' | 'heartbeat',
+  extra?: { toolName?: string; level?: 'error' | 'warn' },
 ): void {
   msqEventBus.emit('run:output', {
     runId,
@@ -570,6 +577,9 @@ function emitRunOutput(
     line,
     stream,
     source,
+    createdAt: new Date().toISOString(),
+    ...(extra?.toolName !== undefined ? { toolName: extra.toolName } : {}),
+    ...(extra?.level !== undefined ? { level: extra.level } : {}),
   });
 }
 

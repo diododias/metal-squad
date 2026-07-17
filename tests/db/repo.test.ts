@@ -248,6 +248,9 @@ describe('live run persistence helpers', () => {
       'stdout',
       'tool',
       'tool write_file {"path":"src/ui/App.tsx"}',
+      expect.any(String),
+      null,
+      null,
     );
   });
 
