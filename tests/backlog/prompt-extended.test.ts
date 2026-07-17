@@ -293,3 +293,39 @@ describe('buildPrompt — string literals and conditionals', () => {
     expect(result).toBe('/test-skill\n\n---\n\nFeature: feat-1 — My Feature');
   });
 });
+
+describe('buildPrompt — dependency publications', () => {
+  const deps = [
+    { featureId: 'feat-b', prNumber: 20, prUrl: 'https://example.test/pr/20', branchName: 'feat/b', remoteBranch: 'origin/feat/b' },
+    { featureId: 'feat-a', prNumber: 10, prUrl: 'https://example.test/pr/10', branchName: 'feat/a', remoteBranch: 'origin/feat/a' },
+  ];
+
+  it('renders the dependency PR section and recommends the first branch as base', async () => {
+    const { buildPrompt } = await import('../../src/core/backlog/prompt.js');
+    const feature = makeFeature();
+    const result = buildPrompt(feature as never, [makeSkill('Base prompt')], '/cwd', {
+      dependencyPublications: deps,
+    });
+    expect(result).toContain('Dependency pull requests');
+    expect(result).toContain('- feat-b — PR #20 https://example.test/pr/20 (branch feat/b)');
+    expect(result).toContain('- feat-a — PR #10 https://example.test/pr/10 (branch feat/a)');
+    expect(result).toContain('Recommended base: feat/b.');
+    expect(result).toContain('(stacked PR), not develop');
+  });
+
+  it('omits the dependency section when there are no publications', async () => {
+    const { buildPrompt } = await import('../../src/core/backlog/prompt.js');
+    const feature = makeFeature();
+    const result = buildPrompt(feature as never, [makeSkill('Base prompt')], '/cwd', {
+      dependencyPublications: [],
+    });
+    expect(result).not.toContain('Dependency pull requests');
+  });
+
+  it('does not render the section when the option is omitted', async () => {
+    const { buildPrompt } = await import('../../src/core/backlog/prompt.js');
+    const feature = makeFeature();
+    const result = buildPrompt(feature as never, [makeSkill('Base prompt')], '/cwd');
+    expect(result).not.toContain('Dependency pull requests');
+  });
+});

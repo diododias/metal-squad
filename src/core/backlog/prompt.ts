@@ -2,11 +2,13 @@ import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
 import { relative, resolve } from 'node:path';
 import type { Feature } from './schema.js';
 import type { Skill } from '../skills/types.js';
+import type { DependencyPublication } from '../git/dependencies.js';
 
 export interface PromptBuildOptions {
   maxContextChars?: number;
   activeStage?: string | null;
   stepGuidanceSkills?: Skill[];
+  dependencyPublications?: DependencyPublication[];
 }
 
 function normalizePrompt(prompt: string): string {
@@ -91,6 +93,24 @@ function buildTasksSection(feature: Feature, cwd: string): string | null {
   return parts.length > 0 ? parts.join('\n\n') : null;
 }
 
+export function buildDependencyPublicationsSection(
+  publications: DependencyPublication[] | undefined,
+): string | null {
+  // Most-recent-first ordering makes the first entry the recommended base.
+  const recommended = publications?.[0];
+  if (!recommended) return null;
+  const lines = publications.map((pub) => {
+    const prLabel = pub.prNumber ? `PR #${String(pub.prNumber)} ${pub.prUrl}` : `PR ${pub.prUrl}`;
+    return `- ${pub.featureId} — ${prLabel} (branch ${pub.branchName})`;
+  });
+  return [
+    'Dependency pull requests (base your working branch on one of these instead of develop):',
+    ...lines,
+    `Recommended base: ${recommended.branchName}. Create your working branch from that branch and open`,
+    'your pull request targeting that same branch (stacked PR), not develop.',
+  ].join('\n');
+}
+
 function dedupeStepGuidanceSkills(baseSkills: Skill[], extraSkills: Skill[]): Skill[] {
   const seen = new Set(baseSkills.map((skill) => skill.name));
   const deduped: Skill[] = [];
@@ -118,6 +138,7 @@ export function buildPrompt(
     effectiveSkills,
     opts.stepGuidanceSkills ?? [],
   ).map((skill) => `/${skill.name}`);
+  const dependencySection = buildDependencyPublicationsSection(opts.dependencyPublications);
   const technicalSpecification = [
     `Feature: ${feature.id} — ${feature.title}`,
     specContent,
@@ -130,6 +151,7 @@ export function buildPrompt(
     ...effectiveSkills.map((skill) => `/${skill.name}`),
     ...stepGuidanceSkillCommands,
     technicalSpecification,
+    dependencySection,
     directPrompt,
   ]
     .filter((section): section is string => Boolean(section))

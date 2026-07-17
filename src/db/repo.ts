@@ -240,6 +240,50 @@ export function updateRunPublishState(runId: number, publish: RunPublishState): 
     );
 }
 
+export interface PublishedRunRow {
+  featureId: string;
+  prNumber: number | null;
+  prUrl: string | null;
+  branchName: string | null;
+  remoteBranch: string | null;
+  baseBranch: string | null;
+  startedAt: string;
+}
+
+// Most recent run of a feature that produced a pull request (pr_url set). Used
+// to recover a dependency's published PR/branch so a dependent feature can
+// stack its own branch/PR on top of it.
+export function getLatestPublishedRunForFeature(
+  repoId: string,
+  featureId: string,
+): PublishedRunRow | null {
+  if (!hasDbFile()) return null;
+  const db = getDb('readonly');
+  const runColumns = new Set(
+    (db.prepare(`PRAGMA table_info(runs)`).all() as { name?: string }[])
+      .map((column) => column.name)
+      .filter((name): name is string => typeof name === 'string'),
+  );
+  if (!runColumns.has('pr_url')) return null;
+  const row = db
+    .prepare(
+      `SELECT
+         r.feature_id AS featureId,
+         ${getRunColumnProjection(runColumns, 'pr_number', 'prNumber')},
+         ${getRunColumnProjection(runColumns, 'pr_url', 'prUrl')},
+         ${getRunColumnProjection(runColumns, 'branch_name', 'branchName')},
+         ${getRunColumnProjection(runColumns, 'remote_branch', 'remoteBranch')},
+         ${getRunColumnProjection(runColumns, 'base_branch', 'baseBranch')},
+         r.started_at AS startedAt
+       FROM runs r
+       WHERE r.repo_id = ? AND r.feature_id = ? AND r.pr_url IS NOT NULL
+       ORDER BY r.started_at DESC
+       LIMIT 1`,
+    )
+    .get(repoId, featureId) as PublishedRunRow | undefined;
+  return row ?? null;
+}
+
 export function upsertRunSessionStatus(snapshot: SessionStatusSnapshot): void {
   const database = getDb('readwrite');
   const legacyStatus = snapshot.status === 'completed'
