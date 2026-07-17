@@ -22,7 +22,7 @@ repositories, and can ask for human approval or input through Telegram.
 
 ## Requirements
 
-- Node.js `>=20`
+- Node.js `24.16.x` (use `nvm use` to load the repository version)
 - One or more supported CLIs installed and authenticated when used:
   - `codex`
   - `claude`

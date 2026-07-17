@@ -29,7 +29,7 @@ jobs:
       - name: Configurar Node.js
         uses: actions/setup-node@v6
         with:
-          node-version: 22
+          node-version: 24.16.0
           cache: npm
 
       - name: Executar porta de qualidade completa

@@ -2,16 +2,16 @@ import { describe, expect, it } from 'vitest';
 import { isNodeVersionSupported, resolveFastTestArgs } from '../../scripts/gate-lib.mjs';
 
 describe('isNodeVersionSupported', () => {
-  it('accepts versions at or above the minimum', () => {
-    expect(isNodeVersionSupported('20.17.0')).toBe(true);
-    expect(isNodeVersionSupported('20.18.1')).toBe(true);
-    expect(isNodeVersionSupported('22.0.0')).toBe(true);
-    expect(isNodeVersionSupported('v21.0.0')).toBe(true);
+  it('accepts supported Node 24 versions', () => {
+    expect(isNodeVersionSupported('24.16.0')).toBe(true);
+    expect(isNodeVersionSupported('24.16.1')).toBe(true);
+    expect(isNodeVersionSupported('v24.17.0')).toBe(true);
   });
 
-  it('rejects versions below the minimum', () => {
-    expect(isNodeVersionSupported('20.16.9')).toBe(false);
-    expect(isNodeVersionSupported('18.20.0')).toBe(false);
+  it('rejects unsupported Node versions', () => {
+    expect(isNodeVersionSupported('24.15.9')).toBe(false);
+    expect(isNodeVersionSupported('22.18.0')).toBe(false);
+    expect(isNodeVersionSupported('25.0.0')).toBe(false);
   });
 });
 

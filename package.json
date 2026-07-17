@@ -22,6 +22,7 @@
     "typecheck": "tsc --noEmit",
     "lint": "eslint src",
     "format": "prettier --write src",
+    "pretest": "node scripts/assert-node-version.mjs",
     "test": "vitest run",
     "test:coverage": "vitest run --coverage",
     "test:coverage:gate": "mkdir -p coverage/.tmp && vitest run --config vitest.coverage-gate.config.ts --coverage",
@@ -35,7 +36,7 @@
     "web": "npm run build && npm run migrate:db && export MSQ_WEB_PASSWORD=diodex && msq web --host 0.0.0.0"
   },
   "engines": {
-    "node": ">=20.17.0"
+    "node": ">=24.16.0 <25"
   },
   "dependencies": {
     "@napi-rs/keyring": "^1.1.6",

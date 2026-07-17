@@ -138,6 +138,7 @@ export function KanbanCard({ run, selected, onClick }: KanbanCardProps): React.J
             <WorkflowStepper
               stages={run.stages}
               currentStage={isDone ? null : (run.stage ?? null)}
+              completed={isDone}
               variant="bar"
               allPending={run.status === 'todo'}
             />
