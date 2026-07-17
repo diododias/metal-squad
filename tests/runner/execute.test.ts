@@ -100,6 +100,7 @@ vi.mock('../../src/core/events/index.js', () => ({
   msqEventBus: {
     emit: mockEventEmit,
   },
+  logCaughtError: vi.fn(),
   attachDefaultEventLogger: mockAttachDefaultEventLogger,
   attachEventNotifications: mockAttachEventNotifications,
   attachRunPersistence: mockAttachRunPersistence,

@@ -3,6 +3,7 @@ import { relative, resolve } from 'node:path';
 import type { Feature } from './schema.js';
 import type { Skill } from '../skills/types.js';
 import type { DependencyPublication } from '../git/dependencies.js';
+import { logCaughtError } from '../events/logging.js';
 
 export interface PromptBuildOptions {
   maxContextChars?: number;
@@ -41,7 +42,8 @@ function readContextEntry(path: string, cwd: string): string | null {
       try {
         const content = readFileSync(file, 'utf8');
         return `--- ${relative(cwd, file)} ---\n${content}`;
-      } catch {
+      } catch (error) {
+        logCaughtError('backlog/prompt.readContextEntry', error);
         return null;
       }
     })

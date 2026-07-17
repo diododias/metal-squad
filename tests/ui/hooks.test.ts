@@ -27,6 +27,7 @@ describe('ui hooks', () => {
     }));
 
     vi.doMock('../../src/core/events/index.js', () => ({
+      logCaughtError: vi.fn(),
       msqEventBus: {
         subscribe: vi.fn((event: string, listener: () => void) => {
           const current = listeners.get(event) ?? [];
@@ -66,6 +67,7 @@ describe('ui hooks', () => {
     }));
 
     vi.doMock('../../src/core/events/index.js', () => ({
+      logCaughtError: vi.fn(),
       msqEventBus: {
         subscribe: vi.fn((event: string, listener: () => void) => {
           const current = listeners.get(event) ?? [];
@@ -104,6 +106,7 @@ describe('ui hooks', () => {
     }));
 
     vi.doMock('../../src/core/events/index.js', () => ({
+      logCaughtError: vi.fn(),
       msqEventBus: {
         subscribe: vi.fn((event: string, listener: () => void) => {
           const current = listeners.get(event) ?? [];
@@ -152,6 +155,7 @@ describe('ui hooks', () => {
     }));
 
     vi.doMock('../../src/core/events/index.js', () => ({
+      logCaughtError: vi.fn(),
       msqEventBus: {
         subscribe: vi.fn((event: string, listener: (payload: { runId: number }) => void) => {
           const current = listeners.get(event) ?? [];
@@ -198,6 +202,7 @@ describe('ui hooks', () => {
     }));
 
     vi.doMock('../../src/core/events/index.js', () => ({
+      logCaughtError: vi.fn(),
       msqEventBus: {
         subscribe: vi.fn((event: string, listener: () => void) => {
           const current = listeners.get(event) ?? [];
@@ -239,6 +244,7 @@ describe('ui hooks', () => {
     }));
 
     vi.doMock('../../src/core/events/index.js', () => ({
+      logCaughtError: vi.fn(),
       msqEventBus: {
         subscribe: vi.fn((event: string, listener: (payload: any) => void) => {
           const current = listeners.get(event) ?? [];

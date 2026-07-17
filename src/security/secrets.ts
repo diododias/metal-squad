@@ -1,3 +1,5 @@
+import { logCaughtError } from '../core/events/logging.js';
+
 const SERVICE = 'metal-squad';
 
 /**
@@ -19,7 +21,8 @@ export async function getSecret(account: string): Promise<string | null> {
   const { Entry } = await import('@napi-rs/keyring');
   try {
     return new Entry(SERVICE, account).getPassword();
-  } catch {
+  } catch (error) {
+    logCaughtError(`security/secrets.getSecret(${account})`, error);
     return null; // TODO: tentar fallback cifrado
   }
 }

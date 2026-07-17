@@ -1,5 +1,6 @@
 import { execFileSync } from 'node:child_process';
 import type { PublishEvidence } from '../adapters/types.js';
+import { logCaughtError } from '../events/logging.js';
 
 export interface PublishVerification {
   ok: boolean;
@@ -27,7 +28,8 @@ function runCommand(command: string, args: string[], cwd: string): string {
 function tryRunGit(args: string[], cwd: string): string | null {
   try {
     return runCommand('git', args, cwd);
-  } catch {
+  } catch (error) {
+    logCaughtError(`git/publish.tryRunGit(${args.join(' ')})`, error);
     return null;
   }
 }
@@ -35,7 +37,8 @@ function tryRunGit(args: string[], cwd: string): string | null {
 function tryRunCommand(command: string, args: string[], cwd: string): string | null {
   try {
     return runCommand(command, args, cwd);
-  } catch {
+  } catch (error) {
+    logCaughtError(`git/publish.tryRunCommand(${command})`, error);
     return null;
   }
 }
@@ -53,7 +56,8 @@ function parsePrView(raw: string | null): GhPullRequestView | null {
   if (!raw) return null;
   try {
     return JSON.parse(raw) as GhPullRequestView;
-  } catch {
+  } catch (error) {
+    logCaughtError('git/publish.parsePrView', error);
     return null;
   }
 }

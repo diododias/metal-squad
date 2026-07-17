@@ -24,6 +24,7 @@ vi.mock('../../src/core/adapters/spawn.js', () => ({
 }));
 vi.mock('../../src/core/events/index.js', () => ({
   msqEventBus: mockMsqEventBus,
+  logCaughtError: vi.fn(),
 }));
 vi.mock('../../src/core/adapters/control.js', () => ({
   parseControlSignal: mockParseControlSignal,

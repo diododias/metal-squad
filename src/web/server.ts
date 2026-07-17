@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { spawn, execFileSync } from 'node:child_process';
 import { WebSocketServer, type WebSocket } from 'ws';
 import type { MsqEvents } from '../core/events/types.js';
-import { msqEventBus } from '../core/events/index.js';
+import { msqEventBus, logCaughtError } from '../core/events/index.js';
 import { assertWritableDbPath } from '../db/index.js';
 import {
   abortPipeline,
@@ -150,7 +150,8 @@ function runGit(args: string[], cwd: string): string {
 function computeRunChanges(runId: number, cwd: string): RunChangesPayload {
   try {
     runGit(['rev-parse', '--is-inside-work-tree'], cwd);
-  } catch {
+  } catch (error) {
+    logCaughtError('web/server.computeRunChanges.notAGitRepo', error);
     return {
       runId,
       branch: null,
@@ -163,31 +164,36 @@ function computeRunChanges(runId: number, cwd: string): RunChangesPayload {
   let branch: string | null = null;
   try {
     branch = runGit(['rev-parse', '--abbrev-ref', 'HEAD'], cwd).trim() || null;
-  } catch {
+  } catch (error) {
+    logCaughtError('web/server.computeRunChanges.branch', error);
     branch = null;
   }
 
   let remoteUrl: string | null = null;
   try {
     remoteUrl = runGit(['config', '--get', 'remote.origin.url'], cwd).trim() || null;
-  } catch {
+  } catch (error) {
+    logCaughtError('web/server.computeRunChanges.remoteUrl', error);
     remoteUrl = null;
   }
 
   let statusOutput = '';
   try {
     statusOutput = runGit(['status', '--porcelain'], cwd);
-  } catch {
+  } catch (error) {
+    logCaughtError('web/server.computeRunChanges.statusOutput', error);
     statusOutput = '';
   }
 
   let numstatOutput = '';
   try {
     numstatOutput = runGit(['diff', '--numstat', 'HEAD'], cwd);
-  } catch {
+  } catch (error) {
+    logCaughtError('web/server.computeRunChanges.numstatHead', error);
     try {
       numstatOutput = runGit(['diff', '--numstat'], cwd);
-    } catch {
+    } catch (fallbackError) {
+      logCaughtError('web/server.computeRunChanges.numstatFallback', fallbackError);
       numstatOutput = '';
     }
   }
@@ -301,7 +307,8 @@ export function createWebServer(options: {
       const endedAt = runEvents.find((event) => event.event === 'done' || event.event === 'failed')?.createdAt ?? null;
       const breakdown = startedAt ? computeRunBreakdown(runEvents, startedAt, endedAt) : null;
       return { runId, taskRuns, breakdown, sessionStatus: getRunSessionStatus(runId), statusHistory: getStatusHistory(runEvents), toolCalls: listRunToolCalls(runId) };
-    } catch {
+    } catch (error) {
+      logCaughtError('web/server.buildRunDetailPayload', error);
       return null;
     }
   }
@@ -329,8 +336,9 @@ export function createWebServer(options: {
       if (!force && client.historyPayloadSignatures.get(featureId) === signature) return;
       client.historyPayloadSignatures.set(featureId, signature);
       sendTo(client, { type: 'run:history', payload });
-    } catch {
+    } catch (error) {
       // DB unavailable — skip this update
+      logCaughtError('web/server.sendRunHistory', error);
     }
   }
 
@@ -437,7 +445,8 @@ export function createWebServer(options: {
           ? 'text/css'
           : 'text/html';
       return { body, contentType };
-    } catch {
+    } catch (error) {
+      logCaughtError('web/server.readStaticAsset', error);
       return null;
     }
   }
@@ -485,7 +494,8 @@ export function createWebServer(options: {
           let body: string;
           try {
             body = await readRequestBody(req);
-          } catch {
+          } catch (error) {
+            logCaughtError('web/server.loginHandler.readRequestBody', error);
             res.writeHead(413, { 'Content-Type': 'text/plain' });
             res.end('Payload too large');
             return;
@@ -628,7 +638,8 @@ export function createWebServer(options: {
       let message: WebSocketClientMessage | undefined;
       try {
         message = JSON.parse(data) as WebSocketClientMessage;
-      } catch {
+      } catch (error) {
+        logCaughtError('web/server.wsMessageHandler.parse', error);
         socket.close(1007, 'Invalid JSON');
         return;
       }

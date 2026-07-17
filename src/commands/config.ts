@@ -9,6 +9,7 @@ import {
 import { loadBacklog, loadBacklogFromCatalog } from '../core/backlog/load.js';
 import type { BacklogV2, Feature } from '../core/backlog/schema.js';
 import { resolveRepo } from '../core/repo.js';
+import { logCaughtError } from '../core/events/logging.js';
 
 interface ConfigShowPayload {
   sources: {
@@ -56,7 +57,8 @@ function tryLoadBacklog(cwd: string): BacklogV2 | null {
   }
   try {
     return loadBacklogFromCatalog(resolveRepo(cwd).repoId, cwd);
-  } catch {
+  } catch (error) {
+    logCaughtError('commands/config.tryLoadBacklog', error);
     return null;
   }
 }

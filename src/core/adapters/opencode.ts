@@ -2,7 +2,7 @@ import { execFileSync } from 'node:child_process';
 import { detectStderrLevel, sanitizeToolCallRecord, type SessionHandle, type ToolAdapter, type RunResult, type RunFeatureOptions, type TokenUsage, type ToolCallRecord } from './types.js';
 import type { Effort, Feature } from '../backlog/schema.js';
 import { CliAbortError, resolveToolInvocation, runCli } from './spawn.js';
-import { msqEventBus } from '../events/index.js';
+import { msqEventBus, logCaughtError } from '../events/index.js';
 import { parseControlSignal } from './control.js';
 import { resolveRuntimeConfig } from '../../config/index.js';
 
@@ -241,7 +241,8 @@ function isCliTimeoutError(error: unknown): error is {
 function safeJson<T>(s: string): T | null { // eslint-disable-line @typescript-eslint/no-unnecessary-type-parameters
   try {
     return JSON.parse(s) as T;
-  } catch {
+  } catch (error) {
+    logCaughtError('adapters/opencode.safeJson', error);
     return null;
   }
 }
@@ -264,7 +265,8 @@ function serializePayloadSnippet(payload: unknown): string {
   if (payload == null) return '';
   try {
     return normalizeSnippet(JSON.stringify(payload));
-  } catch {
+  } catch (error) {
+    logCaughtError('adapters/opencode.serializePayloadSnippet', error);
     return normalizeSnippet(String(payload)); // eslint-disable-line @typescript-eslint/no-base-to-string
   }
 }

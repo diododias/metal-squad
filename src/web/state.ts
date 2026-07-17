@@ -22,6 +22,7 @@ import type { ThemeRoleName } from '../ui/theme/types.js';
 import { createSkillRegistry } from '../core/skills/registry.js';
 import type { Skill } from '../core/skills/types.js';
 import { collectEnvironmentInfo } from './environment.js';
+import { logCaughtError } from '../core/events/index.js';
 import type { MsqWebState, ThemeSnapshot, TimeoutApprovalState, TokenStats, UiNotification, WebRuntimeConfig } from './types.js';
 
 const DASHBOARD_PERIODS: { label: string; days: number | null }[] = [
@@ -60,7 +61,8 @@ function collectGates(): MsqWebState['gates'] {
     const gates = openGates().map(gateToPendingApproval);
     const stageRequests = listPendingStageRequests().map(stageRequestToPendingApproval);
     return [...gates, ...stageRequests];
-  } catch {
+  } catch (error) {
+    logCaughtError('web/state.collectGates', error);
     return [];
   }
 }
@@ -68,7 +70,8 @@ function collectGates(): MsqWebState['gates'] {
 function collectRuns(): RunSummary[] {
   try {
     return sortRunsByGroup(listRunsForTui(2000));
-  } catch {
+  } catch (error) {
+    logCaughtError('web/state.collectRuns', error);
     return [];
   }
 }
@@ -76,7 +79,8 @@ function collectRuns(): RunSummary[] {
 function collectRunningTasks(): RunningTaskSummary[] {
   try {
     return listRunningTaskRuns(50);
-  } catch {
+  } catch (error) {
+    logCaughtError('web/state.collectRunningTasks', error);
     return [];
   }
 }
@@ -95,7 +99,8 @@ function collectTimeoutApprovals(): TimeoutApprovalState[] {
       notificationAttempts: request.notificationAttempts,
       createdAt: request.createdAt,
     }));
-  } catch {
+  } catch (error) {
+    logCaughtError('web/state.collectTimeoutApprovals', error);
     return [];
   }
 }
@@ -110,7 +115,8 @@ function collectPendingFeatures(runs: RunSummary[], repoId: string): FeatureCata
         .map((run) => run.featureId),
     );
     return getPendingFeatures(catalog, doneFeatureIds, activeFeatureIds);
-  } catch {
+  } catch (error) {
+    logCaughtError('web/state.collectPendingFeatures', error);
     return [];
   }
 }
@@ -129,7 +135,8 @@ function computeTokenStats(sinceDays = 7): TokenStats {
 function collectDashboardRows(): StatsRunRow[] {
   try {
     return listRunsForStats({ sinceDays: 7 });
-  } catch {
+  } catch (error) {
+    logCaughtError('web/state.collectDashboardRows', error);
     return [];
   }
 }
@@ -155,7 +162,8 @@ function buildThemeSnapshot(): ThemeSnapshot {
       ),
     ) as Record<ThemeRoleName, string>;
     return { name: resolution.active, roles };
-  } catch {
+  } catch (error) {
+    logCaughtError('web/state.buildThemeSnapshot', error);
     return {
       name: 'default',
       roles: {
@@ -227,7 +235,8 @@ function collectRuntimeConfig(writability: WebRuntimeConfig['writability']): Web
   let config: Config;
   try {
     config = resolveRuntimeConfig(process.cwd());
-  } catch {
+  } catch (error) {
+    logCaughtError('web/state.collectRuntimeConfig', error);
     config = ConfigSchema.parse({});
   }
   const value = sanitizeRuntimeConfig(config, writability);
@@ -241,7 +250,8 @@ function collectSkillsCatalog(): Skill[] {
   let value: Skill[];
   try {
     value = createSkillRegistry().discover(process.cwd());
-  } catch {
+  } catch (error) {
+    logCaughtError('web/state.collectSkillsCatalog', error);
     value = [];
   }
   skillsCatalogCache = { value, expiresAt: now + CONFIG_CACHE_TTL_MS };
