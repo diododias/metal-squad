@@ -16,6 +16,7 @@ import type { TaskRun } from '../../../db/repo.js';
 import type { RunBreakdown } from '../../../core/stats.js';
 import type { OutputLine } from '../hooks/useLocalOutput.js';
 import type { SessionStatusSnapshot, ToolCallRecord } from '../../../core/adapters/types.js';
+import { detectStderrLevel } from '../../../core/adapters/types.js';
 
 export interface RunDetailPageProps {
   state: MsqWebState;
@@ -52,9 +53,13 @@ type TimedEntry = TranscriptEntry & { sortKey: number };
 function outputToTranscript(lines: OutputLine[]): TimedEntry[] {
   return lines.map((line, i) => {
     const source = line.source ?? 'stdout';
-    const isError = line.level === 'error';
+    // Historical rows (and any adapter path that doesn't tag `level` itself) still
+    // carry the raw stderr log line, so re-detect error/warn from the text as a
+    // fallback rather than trusting only the persisted `level` column.
+    const level = line.level ?? detectStderrLevel(line.line);
+    const isError = level === 'error';
     const type: TranscriptEntry['type'] = source === 'tool' || isError ? 'tool' : source === 'agent' ? 'agent' : 'system';
-    const text = line.level === 'warn' ? `[warn] ${line.line}` : line.line;
+    const text = level === 'warn' ? `[warn] ${line.line}` : line.line;
     return {
       id: line.id ?? i,
       type,
