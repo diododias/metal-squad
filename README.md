@@ -57,6 +57,20 @@ For local development without rebuilding:
 npm run dev -- <command>
 ```
 
+## Continuous Integration
+
+The `CI / qualidade-completa` GitHub Actions check runs for pull requests to
+`develop`, pushes to `develop`, and manual dispatches. It uses the same complete,
+disposable-database quality gate as local development:
+
+```bash
+npm run gate:full
+```
+
+After the workflow succeeds for the first time, configure the `develop` GitHub
+ruleset to require `CI / qualidade-completa` and require source branches to be
+up to date before merge.
+
 Examples:
 
 ```bash

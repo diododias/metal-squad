@@ -43,4 +43,8 @@ describe('harness gate contract', () => {
   it('gate full mode refuses to run without a sandbox MSQ_DB_PATH', () => {
     expect(repoFile('scripts/gate.mjs')).toContain('full mode requires a sandbox MSQ_DB_PATH');
   });
+
+  it('runs child quality commands without depending on the local rtk executable', () => {
+    expect(repoFile('scripts/gate.mjs')).not.toMatch(/run\('rtk'/);
+  });
 });
