@@ -242,6 +242,77 @@ describe('RunDetailPage Live Output ordering', () => {
   });
 });
 
+describe('RunDetailPage error output', () => {
+  it('surfaces a raw stderr error line as a collapsible red tool card even when the run has other tool calls', () => {
+    const run = makeRun();
+    const container = document.createElement('div');
+    document.body.append(container);
+    const root = createRoot(container);
+    roots.push(root);
+
+    const errorLine = 'ERROR codex_core::tools::router: error=apply_patch verification failed: Failed to find expected lines';
+
+    act(() => {
+      root.render(
+        <RunDetailPage
+          state={makeState(run)}
+          featureId="feat-1"
+          runDetails={{
+            1: {
+              taskRuns: [],
+              breakdown: null,
+              sessionStatus: null,
+              statusHistory: [],
+              // A run almost always has structured tool calls; the error line must
+              // still surface even though it has no matching ToolCallRecord.
+              toolCalls: [
+                {
+                  id: 'tool-a',
+                  runId: 1,
+                  featureId: 'feat-1',
+                  tool: 'codex',
+                  sequence: 1,
+                  phase: 'completed',
+                  name: 'shell',
+                  arguments: null,
+                  output: null,
+                  step: null,
+                  startedAt: '2026-07-16T13:50:37.000Z',
+                  completedAt: null,
+                  error: null,
+                },
+              ],
+            },
+          } as unknown as Parameters<typeof RunDetailPage>[0]['runDetails']}
+          linesByRun={{
+            1: [
+              { runId: 1, source: 'stderr', level: 'error', line: errorLine, createdAt: '2026-07-16T13:56:06.000Z' },
+            ],
+          }}
+          onSubscribeRun={() => () => undefined}
+          onBack={() => undefined}
+          send={vi.fn()}
+        />,
+      );
+    });
+
+    const outputTab = Array.from(container.querySelectorAll('button, [role="tab"]')).find((el) => el.textContent === 'Live Output');
+    act(() => { (outputTab as HTMLElement)?.click(); });
+
+    // Collapsed by default: the error text lives in the collapsible output panel,
+    // not inlined as a truncated one-liner next to the tool badge.
+    expect(container.textContent ?? '').not.toContain(errorLine);
+    const toggle = Array.from(container.querySelectorAll('div')).find(
+      (el) => el.children.length === 0 && el.textContent?.startsWith('▸ show output'),
+    );
+    expect(toggle).toBeDefined();
+
+    act(() => { (toggle as HTMLElement).click(); });
+
+    expect(container.textContent ?? '').toContain(errorLine);
+  });
+});
+
 describe('RunDetailPage mobile close control', () => {
   afterEach(() => {
     window.history.replaceState(null, '', '/');
