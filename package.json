@@ -13,6 +13,7 @@
   "scripts": {
     "build": "tsc && rm -rf dist/web/static dist/web/client && cp -r src/web/static dist/web/static && node esbuild.web.mjs && chmod +x dist/index.js",
     "migrate:db": "node scripts/migrate-db.mjs",
+    "db:backup": "node scripts/backup-db.mjs",
     "db:fixture": "node scripts/db-fixture.mjs",
     "gate:fast": "node scripts/gate.mjs fast",
     "gate:full": "node scripts/with-sandbox-db.mjs node scripts/gate.mjs full",

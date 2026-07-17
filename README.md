@@ -109,6 +109,7 @@ msq ui
 - Example backlog: [backlog.example.yaml](./backlog.example.yaml)
 - Global config: `~/.config/metal-squad/config.json`
 - Global DB: `~/.local/share/metal-squad/app.db`
+- SQLite backups: `~/.config/metal-squad/backup/<timestamp>/app.db` (run `npm run db:backup`)
 - Repo skills: `./.msq/skills/<skill-name>/`
 - Global skills: `~/.config/metal-squad/skills/<skill-name>/`
 - Generated task decomposition output: `./.msq/generated/<featureId>/decompose.yaml`
