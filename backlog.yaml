@@ -1,21 +1,15 @@
 version: 2
 repo: metal-squad
-defaults:
-  tool: codex
-  model: gpt-5.6-luna
-  effort: high
-  skills: []
-  stageSkills:
-    specify:
-      - speckit-specify
-    plan:
-      - speckit-plan
-    tasks:
-      - speckit-tasks
-    implement:
-      - speckit-implement
-      - dev-flow
 epics:
-  - id: v1-foundation-quick-wins
-    title: V1 — Marco 1 (Fundação + Quick Wins)
+  - id: settings-m3-resolved-sources
+    title: Settings — M3 (Resolved sources enriquecido)
+    features: []
+  - id: settings-m4-project-defaults
+    title: Settings — M4 (Projeto editável)
+    features: []
+  - id: settings-m5-resume-tool
+    title: Settings — M5 (Resume com troca de tool no web)
+    features: []
+  - id: settings-m6-adapter-settings
+    title: Settings — M6 (model/effort/thinking reais por adapter)
     features: []

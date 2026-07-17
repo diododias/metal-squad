@@ -89,8 +89,8 @@ export function useWebSocket(onMessage: (message: WebSocketServerMessage) => voi
             }
           }
           onMessageRef.current(message);
-        } catch {
-          // ignore invalid JSON
+        } catch (error) {
+          console.error('[useWebSocket] failed to parse message', error);
         }
       });
 

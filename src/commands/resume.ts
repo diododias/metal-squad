@@ -1,6 +1,6 @@
 import { Option, type Command } from 'commander';
 import { loadBacklogFromCatalog } from '../core/backlog/load.js';
-import { executeBacklog } from '../core/runner/execute.js';
+import { executeBacklog, rehydrateBacklogWorkflowRevisions } from '../core/runner/execute.js';
 import { validateBacklogSkills } from '../core/skills/index.js';
 import { resolveRuntimeConfig } from '../config/index.js';
 import { findResumablePipeline, getPipelineSnapshot } from '../db/repo.js';
@@ -19,7 +19,7 @@ export function registerResume(program: Command): void {
     .command('resume <target>')
     .description('Retoma uma pipeline pausada/abortada por run-id, feature-id ou repo-id')
     .option('-c, --concurrency <n>', 'runs paralelos globais')
-    .addOption(new Option('--tool <tool>', 'override pontual de ferramenta para esta retomada').choices(['claude', 'codex', 'opencode']))
+    .option('--tool <tool>', 'override pontual de ferramenta registrada para esta retomada')
     .option('--model <model>', 'override pontual de modelo para esta retomada')
     .addOption(new Option('--effort <effort>', 'override pontual de esforço para esta retomada').choices(['low', 'medium', 'high']))
     .action(async (target: string, opts: ResumeCliOptions) => {
@@ -59,7 +59,7 @@ export function registerResume(program: Command): void {
         );
       }
 
-      const backlog = loadBacklogFromCatalog(pipeline.repoId);
+      const backlog = rehydrateBacklogWorkflowRevisions(loadBacklogFromCatalog(pipeline.repoId), snapshot.workflowRevisions);
       validateBacklogSkills(backlog, pipeline.cwd);
       const concurrency = opts.concurrency
         ? Number(opts.concurrency)
@@ -68,14 +68,6 @@ export function registerResume(program: Command): void {
         cwd: pipeline.cwd,
         concurrency,
         resumePipelineId: pipeline.id,
-        // Do not force a defined boolean here — `resolveAutoAdvance()` treats
-        // any defined `autoAdvanceStages` as an explicit CLI override that
-        // wins over the catalog checkbox for every stage transition. Leaving
-        // it `undefined` lets resume re-check the catalog per transition like
-        // a fresh run does, instead of freezing whatever the checkbox said
-        // when the pipeline was first created (which may be stale by the
-        // time resume runs). See H20.
-        autoAdvanceStages: undefined,
         ...(hasOverride && targetFeatureId
           ? { resumeOverride: { featureId: targetFeatureId, tool: opts.tool, model: opts.model, effort: opts.effort } }
           : {}),

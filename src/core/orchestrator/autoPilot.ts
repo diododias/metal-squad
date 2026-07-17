@@ -22,16 +22,15 @@ export function classifyFailedOutcome(kind: RunFailedKind): AutoPilotOutcomeKind
   return kind === 'aborted' ? 'aborted-manual' : 'failed-execution';
 }
 
-/** Outcomes that qualify for auto-pilot to evaluate a next candidate at all
- * (as opposed to `blocked-protective`, which is a hard stop, and
- * `aborted-manual`, which waits for human-initiated recovery). */
+/** Only a successfully completed feature may unlock the next detached
+ * auto-pilot run. Every other outcome remains with a human for recovery. */
 export function shouldEvaluateNextCandidate(kind: AutoPilotOutcomeKind): boolean {
-  return kind === 'success' || kind === 'blocked-human' || kind === 'failed-execution';
+  return kind === 'success';
 }
 
 /** Looks up the live (catalog-backed) config for a feature so mid-run edits
  * to `autoStart` apply immediately, matching the existing
- * `workflow.approvals.autoAdvance` re-read pattern in execute.ts. */
+ * `workflow.autoAdvance` re-read pattern in execute.ts. */
 export interface AutoPilotCandidateLookup {
   getLiveFeature: (featureId: string) => Feature | undefined;
 }
@@ -67,23 +66,13 @@ export function buildAutoPilotDecision(params: {
 }): AutoPilotDecision {
   const { triggerFeatureId, triggerRunId, triggerKind, selected } = params;
 
-  if (triggerKind === 'blocked-protective') {
+  if (triggerKind !== 'success') {
     return {
       triggerFeatureId,
       triggerRunId,
       triggerKind,
       action: 'stop',
-      reason: 'Protective stop: budget or token limit reached. Manual intervention required.',
-    };
-  }
-
-  if (triggerKind === 'aborted-manual') {
-    return {
-      triggerFeatureId,
-      triggerRunId,
-      triggerKind,
-      action: 'idle',
-      reason: 'Run was manually aborted; auto-pilot does not continue automatically.',
+      reason: 'Auto-pilot stopped: the previous feature did not complete successfully. Manual intervention required.',
     };
   }
 

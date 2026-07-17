@@ -1,11 +1,16 @@
 import { existsSync } from 'node:fs';
 import type Database from 'better-sqlite3';
 import { getDb } from './index.js';
-import { resolveDbPath } from '../config/index.js';
+import { resolveDbPath, resolveRuntimeConfig } from '../config/index.js';
 import {
+  BudgetSchema,
+  createRegisteredToolSchema,
+  DefaultsSchema,
   FeatureSchema,
   TaskSchema,
   type BacklogV2,
+  type Budget,
+  type Defaults,
   type Epic,
   type Feature,
   type Retry,
@@ -32,6 +37,14 @@ export type FeaturePatch = Omit<Partial<Feature>, 'workflow' | 'retry'> & {
   };
   retry?: Partial<Retry>;
 };
+
+function validateRegisteredToolReference(tool: string, path: string): void {
+  const schema = createRegisteredToolSchema(resolveRuntimeConfig().tools.map((entry) => entry.id));
+  const result = schema.safeParse(tool);
+  if (!result.success) {
+    throw new Error(`Invalid ${path}: ${result.error.issues[0]?.message ?? 'unregistered tool.'}`);
+  }
+}
 
 /**
  * Readonly access that tolerates a never-initialized DB (e.g. the very first
@@ -140,7 +153,7 @@ export function listCatalogFeatures(repoId: string, epicId?: string): CatalogFea
 }
 
 /** Single-feature readonly lookup, parsed to `Feature`. Used to re-check
- * config (e.g. `workflow.approvals.autoAdvance`) mid-run without the caller
+ * config (e.g. `workflow.autoAdvance`) mid-run without the caller
  * having to hold a stale copy of `data_json` from when the run started. */
 export function getCatalogFeature(repoId: string, featureId: string): Feature | undefined {
   const db = getReadonlyDbOrNull();
@@ -388,8 +401,6 @@ export function upsertBacklogCatalog(
      ON CONFLICT(repo_id) DO UPDATE SET
        repo = excluded.repo,
        version = excluded.version,
-       defaults_json = excluded.defaults_json,
-       budget_json = excluded.budget_json,
        updated_at = datetime('now')`,
   );
 
@@ -522,6 +533,13 @@ function mergeFeaturePatch(current: Feature, patch: FeaturePatch): unknown {
   };
 }
 
+function isPermutation(current: readonly string[], candidate: readonly string[]): boolean {
+  return current.length === candidate.length
+    && new Set(current).size === current.length
+    && new Set(candidate).size === candidate.length
+    && candidate.every((stage) => current.includes(stage));
+}
+
 /**
  * Patches a single feature's `data_json` in place, re-validating through
  * `FeatureSchema` so an invalid patch throws instead of writing a corrupt
@@ -547,7 +565,15 @@ export function updateCatalogFeature(repoId: string, featureId: string, patch: F
       );
     }
     const current = FeatureSchema.parse(JSON.parse(row.data_json));
+    const reorderedStages = patch.workflow?.stages;
+    const isStagesOnlyPatch = reorderedStages !== undefined
+      && patch.workflow?.stepGuidance === undefined
+      && patch.workflow?.sessionPolicy === undefined;
+    if (isStagesOnlyPatch && !isPermutation(current.workflow.stages, reorderedStages)) {
+      throw new Error('A stages-only workflow patch must be a permutation of the saved stages.');
+    }
     const merged = FeatureSchema.parse(mergeFeaturePatch(current, patch));
+    validateRegisteredToolReference(merged.tool, `feature "${featureId}".tool`);
 
     updateRow.run(
       JSON.stringify(merged),
@@ -623,6 +649,122 @@ export function updateCatalogTask(featureId: string, taskId: string, patch: Part
     updateFeatureRow.run(JSON.stringify(updatedFeature), featureId);
 
     return merged;
+  });
+
+  return run();
+}
+
+export type CatalogDefaultsPatch = Omit<Partial<Defaults>, 'workflow'> & {
+  workflow?: Partial<Omit<Workflow, 'approvals' | 'sessionPolicy'>> & {
+    approvals?: Partial<Workflow['approvals']>;
+    sessionPolicy?: Partial<Workflow['sessionPolicy']>;
+  };
+  budget?: Partial<Budget>;
+};
+
+export interface CatalogDefaults {
+  defaults: Defaults;
+  budget?: Budget;
+}
+
+function sameJsonValue(left: unknown, right: unknown): boolean {
+  return JSON.stringify(left) === JSON.stringify(right);
+}
+
+function inheritWorkflowDefaults(current: Workflow, previous: Workflow, next: Workflow): Workflow {
+  const inherited = { ...current };
+  if (sameJsonValue(current.mode, previous.mode)) inherited.mode = next.mode;
+  if (sameJsonValue(current.stages, previous.stages)) inherited.stages = [...next.stages];
+  if (sameJsonValue(current.autoAdvance, previous.autoAdvance)) inherited.autoAdvance = next.autoAdvance;
+  if (sameJsonValue(current.syncTasksToBacklog, previous.syncTasksToBacklog)) inherited.syncTasksToBacklog = next.syncTasksToBacklog;
+  if (sameJsonValue(current.approvals, previous.approvals)) inherited.approvals = next.approvals;
+  else {
+    inherited.approvals = { ...current.approvals };
+    if (sameJsonValue(current.approvals.channel, previous.approvals.channel)) inherited.approvals.channel = next.approvals.channel;
+  }
+  return inherited;
+}
+
+/**
+ * Patches a project's `defaults_json`/`budget_json` in place, mirroring
+ * `updateCatalogFeature`'s merge-then-validate contract at the project level.
+ * `getDb('readwrite')` asserts the DB path is writable before any query runs.
+ */
+export function updateCatalogDefaults(repoId: string, patch: CatalogDefaultsPatch): CatalogDefaults {
+  const db = getDb('readwrite');
+
+  const getRow = db.prepare(
+    `SELECT defaults_json, budget_json FROM backlog_catalog_meta WHERE repo_id = ?`,
+  );
+  const updateRow = db.prepare(
+    `UPDATE backlog_catalog_meta SET defaults_json = ?, budget_json = ?, updated_at = datetime('now') WHERE repo_id = ?`,
+  );
+  const featureRows = db.prepare(
+    `SELECT feature_id, data_json FROM backlog_features WHERE repo_id = ? AND archived_at IS NULL`,
+  );
+  const updateFeatureRow = db.prepare(
+    `UPDATE backlog_features SET data_json = ?, updated_at = datetime('now') WHERE feature_id = ? AND repo_id = ?`,
+  );
+
+  const run = db.transaction((): CatalogDefaults => {
+    const row = getRow.get(repoId) as { defaults_json: string; budget_json: string | null } | undefined;
+    if (!row) {
+      throw new BacklogCatalogNotFoundError(`Catalog defaults not found for repo "${repoId}".`);
+    }
+
+    const currentDefaults = DefaultsSchema.parse(JSON.parse(row.defaults_json));
+    const currentBudget = row.budget_json ? BudgetSchema.parse(JSON.parse(row.budget_json)) : undefined;
+
+    const { budget: budgetPatch, workflow: workflowPatch, ...defaultsPatch } = patch;
+    const mergedDefaults = DefaultsSchema.parse({
+      ...currentDefaults,
+      ...defaultsPatch,
+      ...(workflowPatch
+        ? {
+            workflow: {
+              ...currentDefaults.workflow,
+              ...workflowPatch,
+              approvals: workflowPatch.approvals
+                ? { ...currentDefaults.workflow.approvals, ...workflowPatch.approvals }
+                : currentDefaults.workflow.approvals,
+              sessionPolicy: workflowPatch.sessionPolicy
+                ? { ...currentDefaults.workflow.sessionPolicy, ...workflowPatch.sessionPolicy }
+                : currentDefaults.workflow.sessionPolicy,
+            },
+          }
+        : {}),
+    });
+    validateRegisteredToolReference(mergedDefaults.tool, 'defaults.tool');
+    const mergedBudget = budgetPatch
+      ? BudgetSchema.parse({ ...currentBudget, ...budgetPatch })
+      : currentBudget;
+
+    for (const row of featureRows.all(repoId) as { feature_id: string; data_json: string }[]) {
+      const currentFeature = FeatureSchema.parse(JSON.parse(row.data_json));
+      const inheritedFeature = {
+        ...currentFeature,
+        ...(sameJsonValue(currentFeature.tool, currentDefaults.tool) ? { tool: mergedDefaults.tool } : {}),
+        ...(sameJsonValue(currentFeature.model, currentDefaults.model) ? { model: mergedDefaults.model } : {}),
+        ...(sameJsonValue(currentFeature.effort, currentDefaults.effort) ? { effort: mergedDefaults.effort } : {}),
+        ...(sameJsonValue(currentFeature.thinking, currentDefaults.thinking) ? { thinking: mergedDefaults.thinking } : {}),
+        ...(sameJsonValue(currentFeature.skills ?? [], currentDefaults.skills) ? { skills: mergedDefaults.skills } : {}),
+        ...(sameJsonValue(currentFeature.maxTokens, currentDefaults.maxTokens) ? { maxTokens: mergedDefaults.maxTokens } : {}),
+        workflow: inheritWorkflowDefaults(currentFeature.workflow, currentDefaults.workflow, mergedDefaults.workflow),
+      };
+      const validatedFeature = FeatureSchema.parse(inheritedFeature);
+      validateRegisteredToolReference(validatedFeature.tool, `feature "${row.feature_id}".tool`);
+      if (!sameJsonValue(validatedFeature, currentFeature)) {
+        updateFeatureRow.run(JSON.stringify(validatedFeature), row.feature_id, repoId);
+      }
+    }
+
+    updateRow.run(
+      JSON.stringify(mergedDefaults),
+      mergedBudget ? JSON.stringify(mergedBudget) : null,
+      repoId,
+    );
+
+    return { defaults: mergedDefaults, budget: mergedBudget };
   });
 
   return run();

@@ -46,7 +46,21 @@ describe('backlog load command', () => {
   const backlog = {
     version: 2,
     repo: 'demo',
-    defaults: { tool: 'claude', effort: 'medium', skills: [], stageSkills: {} },
+    defaults: {
+      tool: 'claude',
+      effort: 'medium',
+      thinking: 'off',
+      skills: [],
+      stageSkills: {},
+      workflow: {
+        mode: 'staged',
+        stages: ['specify', 'plan', 'tasks', 'implement', 'validate'],
+        approvals: { channel: 'telegram', autoAdvance: false },
+        syncTasksToBacklog: true,
+        sessionPolicy: { mode: 'isolated', alwaysIsolatedStages: [] },
+        stepGuidance: {},
+      },
+    },
     epics: [{ id: 'epic-1', title: 'Epic', features: [{ id: 'feat-1' }] }],
   };
   const loaded = { backlog, registrations: [] };

@@ -12,7 +12,7 @@ describe('buildPrompt — dynamic skill-based prompt builder', () => {
     cwd = '';
   });
 
-  it('renders skill templates in order and joins with separator', async () => {
+  it('renders skill commands in order before the feature specification', async () => {
     const { buildPrompt } = await import('../../src/core/backlog/prompt.js');
     const skills = [
       {
@@ -33,10 +33,10 @@ describe('buildPrompt — dynamic skill-based prompt builder', () => {
       skills,
     );
 
-    expect(prompt).toBe('Step A for feat-1\n\n---\n\nStep B for My Feature');
+    expect(prompt).toBe('/a\n\n---\n\n/b\n\n---\n\nFeature: feat-1 — My Feature');
   });
 
-  it('injects specFile content via {{spec}} placeholder', async () => {
+  it('always injects specFile content without exposing the skill template', async () => {
     cwd = mkdtempSync(join(tmpdir(), 'msq-buildprompt-'));
     mkdirSync(join(cwd, 'specs'));
     writeFileSync(join(cwd, 'specs', 'f.md'), 'The spec content');
@@ -65,7 +65,8 @@ describe('buildPrompt — dynamic skill-based prompt builder', () => {
       cwd,
     );
 
-    expect(prompt).toContain('Implement: f1');
+    expect(prompt.startsWith('/implement')).toBe(true);
+    expect(prompt).not.toContain('Implement: f1');
     expect(prompt).toContain('Feature summary:\nShort summary');
     expect(prompt).toContain('The spec content');
   });
@@ -147,7 +148,7 @@ describe('buildPrompt — dynamic skill-based prompt builder', () => {
     expect(prompt).toContain('My Feature');
   });
 
-  it('respects inputs filter: specFile-only skill gets spec but not context', async () => {
+  it('always includes technical context regardless of skill metadata inputs', async () => {
     cwd = mkdtempSync(join(tmpdir(), 'msq-buildprompt-'));
     mkdirSync(join(cwd, 'specs'));
     mkdirSync(join(cwd, 'ctx'));
@@ -179,8 +180,8 @@ describe('buildPrompt — dynamic skill-based prompt builder', () => {
     );
 
     expect(prompt).toContain('SPEC_DATA');
-    expect(prompt).not.toContain('CTX_DATA');
-    expect(prompt).toContain('ctx=');
+    expect(prompt).toContain('CTX_DATA');
+    expect(prompt).not.toContain('ctx=');
   });
 
   it('injects task metadata and taskFile content via {{tasks}} placeholder', async () => {
@@ -224,7 +225,7 @@ describe('buildPrompt — dynamic skill-based prompt builder', () => {
     expect(prompt).toContain('--- tasks/t1.md ---\nImplement the parser');
   });
 
-  it('truncates injected context when maxContextChars is configured', async () => {
+  it('does not truncate technical context when maxContextChars is configured', async () => {
     cwd = mkdtempSync(join(tmpdir(), 'msq-buildprompt-'));
     mkdirSync(join(cwd, 'ctx'));
     writeFileSync(join(cwd, 'ctx', 'big.md'), 'A'.repeat(160));
@@ -252,8 +253,8 @@ describe('buildPrompt — dynamic skill-based prompt builder', () => {
       { maxContextChars: 80 },
     );
 
-    expect(prompt).toContain('[truncated to respect promptContextCharLimit]');
-    expect(prompt.length).toBeLessThan(140);
+    expect(prompt).not.toContain('[truncated to respect promptContextCharLimit]');
+    expect(prompt).toContain('A'.repeat(160));
   });
 
   it('adds step-guidance skill prompts and direct prompt only for the active stage', async () => {
@@ -300,10 +301,10 @@ describe('buildPrompt — dynamic skill-based prompt builder', () => {
       stepGuidanceSkills: [],
     });
 
-    expect(implementPrompt).toContain('Base implement prompt');
-    expect(implementPrompt).toContain('Extra guardrails');
+    expect(implementPrompt).toContain('/speckit-implement');
+    expect(implementPrompt).toContain('/repo-implement-guardrails');
     expect(implementPrompt).toContain('Touch only implementation files.');
-    expect(planPrompt).toBe('Base implement prompt');
+    expect(planPrompt).toBe('/speckit-implement\n\n---\n\nFeature: feat-1 — My Feature');
   });
 });
 
@@ -347,7 +348,7 @@ epics:
     expect(backlog.epics[0]?.features[0]?.tasks[0]?.skills).toEqual([]);
   });
 
-  it('propagates defaults in v2 and validates referenced files', async () => {
+  it('ignores legacy YAML defaults and resolves features from project defaults', async () => {
     cwd = mkdtempSync(join(tmpdir(), 'msq-backlog-'));
     mkdirSync(join(cwd, 'specs'));
     mkdirSync(join(cwd, 'tasks'));
@@ -374,12 +375,16 @@ epics:
 `);
 
     const { loadBacklog } = await import('../../src/core/backlog/load.js');
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
     const backlog = loadBacklog(undefined, cwd);
 
-    expect(backlog.epics[0]?.features[0]?.tool).toBe('codex');
+    expect(warn).toHaveBeenCalledWith(
+      '[msq] backlog.yaml defaults are ignored; configure defaults in the Projeto settings.',
+    );
+    expect(backlog.epics[0]?.features[0]?.tool).toBe('claude');
     expect(backlog.epics[0]?.features[0]?.effort).toBe('medium');
-    expect(backlog.epics[0]?.features[0]?.skills).toEqual(['implement', 'test']);
-    expect(backlog.epics[0]?.features[0]?.tasks[0]?.skills).toEqual(['implement', 'test']);
+    expect(backlog.epics[0]?.features[0]?.skills).toEqual([]);
+    expect(backlog.epics[0]?.features[0]?.tasks[0]?.skills).toEqual([]);
   });
 
   it('throws when referenced files are missing', async () => {
@@ -410,7 +415,7 @@ epics:
     );
   });
 
-  it('falls back to the builtin implement template when no skill resolves', async () => {
+  it('falls back to the builtin implement command when no skill resolves', async () => {
     cwd = mkdtempSync(join(tmpdir(), 'msq-prompt-'));
     mkdirSync(join(cwd, 'specs'));
     mkdirSync(join(cwd, 'context'));
@@ -431,7 +436,7 @@ epics:
       tasks: [],
     }, [], cwd);
 
-    expect(prompt).toContain('Implement feat-1 (Feature).');
+    expect(prompt.startsWith('/implement')).toBe(true);
     expect(prompt).toContain('Feature summary:\nShort summary');
     expect(prompt).toContain('--- specs/feat.md ---\nDetailed spec');
     expect(prompt).toContain('--- context/notes.md ---\nContext details');

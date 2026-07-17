@@ -5,6 +5,7 @@ import type { StageTransitionDecision } from '../workflow/sessionPolicy.js';
 export type GateDecision = 'approved' | 'skipped' | 'retried';
 export type OutputStream = 'stdout' | 'stderr';
 export type OutputSource = 'stdout' | 'stderr' | 'agent' | 'tool' | 'heartbeat';
+export type OutputLevel = 'error' | 'warn';
 export type StageRequestKind = 'approval' | 'input';
 export type ContextQueryTool = 'dora' | 'serena' | 'shell';
 export type ContextQueryKind = 'structured' | 'shell_read';
@@ -27,6 +28,9 @@ export interface RunOutputEvent {
   featureId?: string;
   tool?: Tool;
   source?: OutputSource;
+  createdAt?: string;
+  toolName?: string;
+  level?: OutputLevel;
 }
 
 export interface RunDoneEvent {
@@ -79,6 +83,7 @@ export interface StageRequestCreatedEvent {
   kind: StageRequestKind;
   prompt: string;
   source?: 'manual' | 'auto';
+  approvalChannel?: string;
   options?: string[];
   featureName?: string;
 }

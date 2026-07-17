@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { listRunOutput, type RunOutputRow } from '../../db/repo.js';
-import { msqEventBus } from '../../core/events/index.js';
+import { msqEventBus, logCaughtError } from '../../core/events/index.js';
 
 const MIN_INTERVAL_MS = 750;
 const MAX_INTERVAL_MS = 3_000;
@@ -49,8 +49,9 @@ export function useRunOutput(
           currentIntervalRef.current + ADAPTIVE_BACKOFF_MS,
         );
       }
-    } catch {
+    } catch (error) {
       // DB locked or unavailable — keep stale data
+      logCaughtError('useRunOutput.refresh', error);
     }
   }, [baseIntervalMs, limit, output.length, runId]);
 

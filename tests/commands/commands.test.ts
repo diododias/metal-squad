@@ -8,6 +8,7 @@ const mockResolveRepo = vi.fn();
 const mockRegisterRepo = vi.fn();
 const mockLoadBacklog = vi.fn();
 const mockExecuteBacklog = vi.fn();
+const mockRehydrateBacklogWorkflowRevisions = vi.fn((backlog) => backlog);
 const mockValidateBacklogSkills = vi.fn();
 const mockResolveRuntimeConfig = vi.fn();
 const mockResolveConfigSnapshot = vi.fn();
@@ -52,6 +53,7 @@ vi.mock('../../src/core/backlog/load.js', async () => {
 
 vi.mock('../../src/core/runner/execute.js', () => ({
   executeBacklog: mockExecuteBacklog,
+  rehydrateBacklogWorkflowRevisions: mockRehydrateBacklogWorkflowRevisions,
 }));
 
 vi.mock('../../src/core/skills/index.js', () => ({
@@ -63,7 +65,7 @@ vi.mock('../../src/core/skills/index.js', () => ({
 vi.mock('../../src/config/index.js', () => ({
   resolveRuntimeConfig: mockResolveRuntimeConfig,
   resolveConfigSnapshot: mockResolveConfigSnapshot,
-  mergeExecutionDefaults: (base: Record<string, unknown>, overlay: Record<string, unknown>) => ({
+  mergeExecutionDefaults: (base: Record<string, unknown>, overlay: Record<string, unknown> = {}) => ({
     ...base,
     ...overlay,
     stageSkills: {
@@ -422,16 +424,25 @@ describe('commands', () => {
     expect(log).toHaveBeenCalledWith(expect.stringContaining('Override pontual'));
   });
 
-  it('rejects --tool outside the enum before touching the DB', async () => {
+  it('rejects an unregistered --tool with an actionable registry error', async () => {
+    mockFindResumablePipeline.mockReturnValue({
+      id: 9,
+      repoId: 'repo-1',
+      cwd: '/tmp/resume-repo',
+      autoAdvance: 0,
+    });
+    mockGetAdapter.mockImplementation(() => {
+      throw new Error('Tool "not-a-tool" is not registered. Register it in config.tools or use one of: claude, codex.');
+    });
     const { registerResume } = await import('../../src/commands/resume.js');
     const program = new Command();
-    program.exitOverride();
     registerResume(program);
 
     await expect(
       program.parseAsync(['node', 'msq', 'resume', '9', '--tool', 'not-a-tool']),
-    ).rejects.toThrow();
-    expect(mockFindResumablePipeline).not.toHaveBeenCalled();
+    ).rejects.toThrow('Tool "not-a-tool" is not registered');
+    expect(mockGetPipelineSnapshot).not.toHaveBeenCalled();
+    expect(mockExecuteBacklog).not.toHaveBeenCalled();
   });
 
   it('rejects a valid --tool that is unavailable in the environment, without creating a run or resuming the pipeline', async () => {
@@ -501,6 +512,17 @@ describe('commands', () => {
         }],
       }],
     });
+    mockResolveConfigSnapshot.mockReturnValue({
+      runtime: mockResolveRuntimeConfig(),
+      repoDefaults: {
+        tool: 'claude',
+        model: 'app-model',
+        effort: 'low',
+        skills: ['app-skill'],
+        stageSkills: { implement: ['app-stage-skill'] },
+      },
+      sources: { globalConfigPath: '/tmp/global.json', repoConfigPath: '/tmp/repo/.msq/config.yaml' },
+    });
 
     const { registerConfig } = await import('../../src/commands/config.js');
     const program = new Command();
@@ -509,8 +531,16 @@ describe('commands', () => {
     await program.parseAsync(['node', 'msq', 'config', 'show', '--feature', 'feat-1', '--json']);
 
     const printed = log.mock.calls.at(-1)?.[0] as string;
-    const payload = JSON.parse(printed) as { feature: { id: string; effective: { effort: string } } };
+    const payload = JSON.parse(printed) as {
+      defaults: { project: { tool: string; skills: string[] }; repo?: unknown };
+      feature: { id: string; effective: { effort: string; model?: string; skills: string[]; stageSkills: Record<string, string[]> } };
+    };
     expect(payload.feature.id).toBe('feat-1');
     expect(payload.feature.effective.effort).toBe('high');
+    expect(payload.feature.effective.model).toBeUndefined();
+    expect(payload.feature.effective.skills).toEqual(['implement']);
+    expect(payload.feature.effective.stageSkills).toEqual({ plan: ['speckit-plan'] });
+    expect(payload.defaults.project).toMatchObject({ tool: 'codex', skills: ['implement'] });
+    expect(payload.defaults.repo).toBeUndefined();
   });
 });

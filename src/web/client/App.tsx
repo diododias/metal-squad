@@ -2,7 +2,6 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Sidebar, type SidebarNavItem } from './components/navigation/Sidebar.js';
 import { Modal } from './components/feedback/Modal.js';
 import { NotificationList, type NotificationListItem } from './components/feedback/NotificationList.js';
-import { HelpOverlay } from './HelpOverlay.js';
 import { useIsMobile, MobileTopBar, MobileTabBar } from './Responsive.js';
 import { useWebSocket } from './hooks/useWebSocket.js';
 import { useLocalOutput, type OutputLine } from './hooks/useLocalOutput.js';
@@ -14,7 +13,7 @@ import { RunsPage } from './pages/RunsPage.js';
 import { GatesPage } from './pages/GatesPage.js';
 import { AnalyticsPage } from './pages/AnalyticsPage.js';
 import { ConfigPage } from './pages/ConfigPage.js';
-import type { MsqWebState, WebSocketServerMessage, FeatureConfigPatch, TaskConfigPatch } from '../types.js';
+import type { MsqWebState, WebSocketServerMessage, FeatureConfigPatch, FeatureConfigSaveResult, TaskConfigPatch } from '../types.js';
 import type { RunHistoryEntry, TaskRun } from '../../db/repo.js';
 import type { RunBreakdown } from '../../core/stats.js';
 import type { SessionStatusSnapshot, ToolCallRecord } from '../../core/adapters/types.js';
@@ -34,14 +33,14 @@ function notificationTone(type: 'info' | 'notice'): NotificationListItem['tone']
 export function App(): React.JSX.Element {
   const isMobile = useIsMobile(860);
   const [route, setRoute] = useState<Route>(parseHash(window.location.hash));
-  const [helpOpen, setHelpOpen] = useState(false);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [notificationsOpen, setNotificationsOpen] = useState(false);
   const [state, setState] = useState<MsqWebState | null>(null);
   const [unread, setUnread] = useState(0);
   const [runDetails, setRunDetails] = useState<Record<number, RunDetailData>>({});
   const [runHistories, setRunHistories] = useState<Record<string, RunHistoryEntry[]>>({});
+  const [workflowSaveResults, setWorkflowSaveResults] = useState<Record<string, FeatureConfigSaveResult>>({});
   const { linesByRun, append, clear } = useLocalOutput();
-  const gKeyRef = useRef(false);
   const hasReceivedStateRef = useRef(false);
 
   useEffect(() => {
@@ -91,6 +90,8 @@ export function App(): React.JSX.Element {
         }));
       } else if (message.type === 'run:history') {
         setRunHistories((current) => ({ ...current, [message.payload.featureId]: message.payload.runs }));
+      } else if (message.type === 'featureConfig:saveResult') {
+        setWorkflowSaveResults((current) => ({ ...current, [message.payload.featureId]: message }));
       }
     },
     [append],
@@ -98,43 +99,15 @@ export function App(): React.JSX.Element {
 
   const { send, error: connectionError } = useWebSocket(onMessage);
 
-  useEffect(() => {
-    function onKeyDown(e: KeyboardEvent): void {
-      const tag = (e.target as HTMLElement | null)?.tagName ?? '';
-      if (tag === 'INPUT' || tag === 'SELECT' || tag === 'TEXTAREA') return;
-      if (e.key === '?') {
-        setHelpOpen((o) => !o);
-        return;
-      }
-      if (e.key === 'Escape') {
-        setHelpOpen(false);
-        setNotificationsOpen(false);
-        return;
-      }
-      if (e.key === 'g') {
-        gKeyRef.current = true;
-        setTimeout(() => {
-          gKeyRef.current = false;
-        }, 600);
-        return;
-      }
-      if (gKeyRef.current) {
-        const map: Record<string, string> = { b: '/board', r: '/runs', g: '/gates', a: '/analytics', c: '/config' };
-        const target = map[e.key];
-        if (target) {
-          window.location.hash = target;
-          gKeyRef.current = false;
-        }
-      }
-    }
-    window.addEventListener('keydown', onKeyDown);
-    return (): void => {
-      window.removeEventListener('keydown', onKeyDown);
-    };
-  }, []);
-
   function navigate(path: string): void {
     window.location.hash = path;
+  }
+  function logout(): void {
+    fetch('/logout', { method: 'POST' })
+      .catch(() => undefined)
+      .finally(() => {
+        window.location.href = '/auth';
+      });
   }
   function openRun(featureId: string): void {
     window.location.hash = `/runs/${featureId}`;
@@ -151,7 +124,7 @@ export function App(): React.JSX.Element {
     { path: '/runs', label: 'Runs' },
     { path: '/gates', label: 'Gates', count: state?.gates.length },
     { path: '/analytics', label: 'Analytics' },
-    { path: '/config', label: 'Config' },
+    { path: '/config', label: 'Settings' },
   ];
 
   const totalTokens = (state?.runs ?? []).reduce((s, r) => s + (r.totalTokens ?? 0), 0);
@@ -220,7 +193,15 @@ export function App(): React.JSX.Element {
           send({ type: 'action:startFeature', featureId });
           navigate('/board');
         }}
-        onSaveConfig={(featureId: string, patch: FeatureConfigPatch) => { send({ type: 'action:updateFeatureConfig', featureId, patch }); }}
+        onSaveConfig={(featureId: string, patch: FeatureConfigPatch) => {
+          setWorkflowSaveResults((current) => {
+            return Object.fromEntries(
+              Object.entries(current).filter(([resultFeatureId]) => resultFeatureId !== featureId),
+            );
+          });
+          send({ type: 'action:updateFeatureConfig', featureId, patch });
+        }}
+        workflowSaveResult={workflowSaveResults[route.featureId]}
         onSaveTaskConfig={(featureId: string, taskId: string, patch: TaskConfigPatch) =>
           { send({ type: 'action:updateTaskConfig', featureId, taskId, patch }); }
         }
@@ -237,7 +218,8 @@ export function App(): React.JSX.Element {
 
   return (
     <div
-      style={{ display: 'flex', flexDirection: isMobile ? 'column' : 'row', height: '100vh', width: '100vw', overflow: 'hidden', background: 'var(--bg-base)' }}
+      className="app-root"
+      style={{ display: 'flex', flexDirection: isMobile ? 'column' : 'row', width: '100vw', overflow: 'hidden', background: 'var(--bg-base)' }}
     >
       {!isMobile && (
         <Sidebar
@@ -247,22 +229,24 @@ export function App(): React.JSX.Element {
           live={runningCount > 0}
           notificationCount={unread}
           onNavigate={navigate}
-          onHelp={() => { setHelpOpen(true); }}
+          collapsed={sidebarCollapsed}
+          onToggleCollapsed={() => { setSidebarCollapsed((collapsed) => !collapsed); }}
           onNotifications={() => {
             setNotificationsOpen(true);
             setUnread(0);
           }}
+          onLogout={logout}
         />
       )}
       {isMobile && (
         <MobileTopBar
           live={runningCount > 0}
           notificationCount={unread}
-          onHelp={() => { setHelpOpen(true); }}
           onNotifications={() => {
             setNotificationsOpen(true);
             setUnread(0);
           }}
+          onLogout={logout}
         />
       )}
       <div style={{ flex: 1, minWidth: 0, minHeight: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
@@ -273,7 +257,6 @@ export function App(): React.JSX.Element {
         )}
       </div>
       {isMobile && <MobileTabBar items={navItems} activePath={activePathPrefix} onNavigate={navigate} />}
-      <HelpOverlay open={helpOpen} onClose={() => { setHelpOpen(false); }} />
       <Modal open={notificationsOpen} onClose={() => { setNotificationsOpen(false); }} width={isMobile ? 320 : 440}>
         <div style={{ padding: 18 }}>
           <h2 style={{ margin: '0 0 4px', fontSize: '26px', fontFamily: 'var(--font-display)', fontWeight: 400, letterSpacing: '0.02em' }}>Notifications</h2>

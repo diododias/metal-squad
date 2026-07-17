@@ -9,6 +9,7 @@ import {
 import { loadBacklog, loadBacklogFromCatalog } from '../core/backlog/load.js';
 import type { BacklogV2, Feature } from '../core/backlog/schema.js';
 import { resolveRepo } from '../core/repo.js';
+import { logCaughtError } from '../core/events/logging.js';
 
 interface ConfigShowPayload {
   sources: {
@@ -18,8 +19,7 @@ interface ConfigShowPayload {
   };
   runtime: ReturnType<typeof resolveConfigSnapshot>['runtime'];
   defaults: {
-    repo: ReturnType<typeof resolveConfigSnapshot>['repoDefaults'];
-    backlog?: BacklogV2['defaults'];
+    project?: BacklogV2['defaults'];
     effective?: ResolvedExecutionDefaults;
   };
   feature?: {
@@ -57,7 +57,8 @@ function tryLoadBacklog(cwd: string): BacklogV2 | null {
   }
   try {
     return loadBacklogFromCatalog(resolveRepo(cwd).repoId, cwd);
-  } catch {
+  } catch (error) {
+    logCaughtError('commands/config.tryLoadBacklog', error);
     return null;
   }
 }
@@ -68,16 +69,15 @@ function buildPayload(
   featureId?: string,
 ): ConfigShowPayload {
   const baseDefaults: ResolvedExecutionDefaults = {
-    tool: snapshot.repoDefaults.tool ?? 'claude',
-    model: snapshot.repoDefaults.model,
-    effort: snapshot.repoDefaults.effort ?? 'medium',
-    skills: snapshot.repoDefaults.skills ?? [],
-    stageSkills: snapshot.repoDefaults.stageSkills ?? {},
+    tool: 'claude', effort: 'medium', thinking: 'off', skills: [], stageSkills: {},
   };
   const effectiveDefaults = backlog
     ? mergeExecutionDefaults(baseDefaults, backlog.defaults)
     : baseDefaults;
   const feature = featureId && backlog ? findFeature(backlog, featureId) : null;
+  const featureEffective = feature
+    ? mergeExecutionDefaults(effectiveDefaults, feature)
+    : undefined;
   if (featureId && !feature) {
     throw new Error(`Unknown feature "${featureId}".`);
   }
@@ -88,15 +88,14 @@ function buildPayload(
     },
     runtime: snapshot.runtime,
     defaults: {
-      repo: snapshot.repoDefaults,
-      ...(backlog ? { backlog: backlog.defaults, effective: effectiveDefaults } : {}),
+      ...(backlog ? { project: backlog.defaults, effective: effectiveDefaults } : {}),
     },
-    ...(feature
+    ...(feature && featureEffective
       ? {
           feature: {
             id: feature.id,
             title: feature.title,
-            effective: mergeExecutionDefaults(effectiveDefaults, feature),
+            effective: featureEffective,
           },
         }
       : {}),

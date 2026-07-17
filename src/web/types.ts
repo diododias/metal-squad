@@ -5,7 +5,7 @@ import type { PendingApproval } from '../ui/hooks/useGates.js';
 import type { FeatureCatalogEntry, BacklogSettings } from '../ui/catalog.js';
 import type { RunBreakdown } from '../core/stats.js';
 import type { ThemeRoleName } from '../ui/theme/types.js';
-import type { Config, NotificationChannelConfig } from '../config/index.js';
+import type { AppConfigPatch as ConfigAppConfigPatch, Config, NotificationChannelConfig, NotificationsPatch, ToolRegistryEntry } from '../config/index.js';
 import type { Skill } from '../core/skills/types.js';
 
 export interface TokenStats {
@@ -44,14 +44,35 @@ export interface ThemeSnapshot {
 
 export interface WebNotificationChannel {
   type: NotificationChannelConfig['type'];
+  /** Whether the channel has the credential material it needs, never the material itself. */
+  configured: boolean;
 }
 
-export type WebRuntimeConfig = Omit<Config, 'notifications' | 'telegramChatId'> & {
+export interface RuntimeConfigWritability {
+  dbWritable: boolean;
+  configWritable: boolean;
+}
+
+export type WebRuntimeConfig = Omit<Config, 'notifications'> & {
+  writability: RuntimeConfigWritability;
   notifications: {
     channels: WebNotificationChannel[];
     events: Config['notifications']['events'];
   };
 };
+
+/** Read-only diagnostics collected by the backend for the Settings page. */
+export interface EnvironmentInfo {
+  databasePath: string;
+  databaseSource: 'default' | 'override';
+  dbWritable: boolean;
+  dataDir: string;
+  configDir: string;
+  configWritable: boolean;
+  repoPath?: string;
+  repoId?: string;
+  version?: string;
+}
 
 export interface MsqWebState {
   repoLabel: string;
@@ -62,6 +83,7 @@ export interface MsqWebState {
   timeoutApprovals: TimeoutApprovalState[];
   featureCatalog: Record<string, FeatureCatalogEntry>;
   backlogSettings: BacklogSettings;
+  environment: EnvironmentInfo;
   stats: {
     totalRuns: number;
     doneRuns: number;
@@ -105,18 +127,22 @@ export interface RunChangesPayload {
  * `Partial<Feature>`, so the wire contract can't smuggle in `id`/`tasks`
  * reshaping from an untrusted client. */
 export interface FeatureConfigPatch {
+  spec?: string;
   tool?: string;
   model?: string;
   effort?: string;
+  thinking?: string;
   maxTokens?: number;
   autoStart?: boolean;
   skills?: string[];
   workflow?: {
     mode?: string;
     stages?: string[];
+    autoAdvance?: boolean;
     syncTasksToBacklog?: boolean;
-    approvals?: { autoAdvance?: boolean };
+    approvals?: { channel?: string };
     stepGuidance?: Record<string, { skills?: string[]; prompt?: string }>;
+    sessionPolicy?: { alwaysIsolatedStages?: string[] };
   };
   retry?: { maxAttempts?: number; backoffMs?: number; onFail?: string };
 }
@@ -129,6 +155,58 @@ export interface TaskConfigPatch {
   dependsOn?: string[];
 }
 
+/** Explicit narrow patch shape for `action:updateProjectDefaults` — mirrors
+ * `CatalogDefaultsPatch` on the wire so the client can't smuggle in fields
+ * outside the project defaults/budget contract. */
+export interface ProjectDefaultsPatch {
+  tool?: string;
+  model?: string;
+  effort?: string;
+  thinking?: string;
+  skills?: string[];
+  stageSkills?: Record<string, string[]>;
+  workflow?: {
+    mode?: string;
+    stages?: string[];
+    autoAdvance?: boolean;
+    syncTasksToBacklog?: boolean;
+    approvals?: { channel?: string };
+  };
+  maxTokens?: number;
+  budget?: { maxTokens?: number; perFeatureMaxTokens?: number };
+}
+
+/** Narrow global config patch for the App Budget settings. */
+export interface BudgetConfigPatch {
+  alertAtPercent: number;
+}
+
+/** App-owned runtime config patch accepted by the Settings WebSocket API. */
+export type AppConfigPatch = ConfigAppConfigPatch;
+
+/** Write-only secret input. It is accepted by the WebSocket action but is never
+ * included in state or any server message. */
+export interface SecretPatch {
+  account: string;
+  value: string;
+}
+
+/** Complete App-level tool registry replacement. The server validates this
+ * against ConfigSchema before it is persisted to config.json. */
+export interface ToolsRegistryPatch {
+  tools: ToolRegistryEntry[];
+}
+
+export interface FeatureConfigSaveIssue {
+  path?: string;
+  message: string;
+}
+
+export interface FeatureConfigSaveResult {
+  type: 'featureConfig:saveResult';
+  payload: { featureId: string; ok: boolean; issues?: FeatureConfigSaveIssue[] };
+}
+
 export type WebSocketClientMessage =
   | { type: 'auth'; token: string }
   | {
@@ -137,6 +215,13 @@ export type WebSocketClientMessage =
     }
   | { type: 'action:updateFeatureConfig'; featureId: string; patch: FeatureConfigPatch }
   | { type: 'action:updateTaskConfig'; featureId: string; taskId: string; patch: TaskConfigPatch }
+  | { type: 'action:updateProjectDefaults'; patch: ProjectDefaultsPatch }
+  | { type: 'action:updateBudgetConfig'; patch: BudgetConfigPatch }
+  | { type: 'action:updateNotifications'; patch: NotificationsPatch }
+  | { type: 'action:updateAppConfig'; patch: AppConfigPatch }
+  | { type: 'action:setSecret'; patch: SecretPatch }
+  | { type: 'action:clearSecret'; account: string }
+  | { type: 'action:updateToolsRegistry'; tools: ToolRegistryEntry[] }
   | { type: 'action:pausePipeline'; pipelineId: number }
   | { type: 'action:resumePipeline'; pipelineId: number }
   | { type: 'action:abortPipeline'; pipelineId: number }
@@ -144,6 +229,14 @@ export type WebSocketClientMessage =
   | { type: 'action:resolveGate'; gateId: number; decision: 'approved' | 'skipped' | 'retried' }
   | { type: 'action:forceResolveGate'; gateId: number }
   | { type: 'action:resolveStageRequest'; requestId: number; response: string }
+  | {
+      type: 'action:resumeWithOverride';
+      pipelineId: number;
+      featureId: string;
+      tool?: string;
+      model?: string;
+      effort?: string;
+    }
   | { type: 'subscribe:output'; runId: number }
   | { type: 'unsubscribe:output'; runId: number }
   | { type: 'subscribe:runDetail'; runId: number }
@@ -155,6 +248,7 @@ export type WebSocketClientMessage =
 
 export type WebSocketServerMessage =
   | { type: 'state:full'; payload: MsqWebState }
+  | FeatureConfigSaveResult
   | { type: 'run:detail'; payload: { runId: number; taskRuns: TaskRun[]; breakdown: RunBreakdown | null; sessionStatus: SessionStatusSnapshot | null; statusHistory: SessionStatusSnapshot[]; toolCalls: ToolCallRecord[] } }
   | { type: 'run:history'; payload: { featureId: string; runs: RunHistoryEntry[] } }
   | { type: 'run:changes'; payload: RunChangesPayload }

@@ -12,6 +12,7 @@ const mocks = vi.hoisted(() => ({
   getFeatureCatalog: vi.fn(),
   getBacklogSettings: vi.fn(),
   resolveRuntimeConfig: vi.fn(),
+  collectEnvironmentInfo: vi.fn(),
 }));
 
 vi.mock('../../src/core/repo.js', () => ({
@@ -44,6 +45,10 @@ vi.mock('../../src/config/index.js', () => ({
   resolveRuntimeConfig: mocks.resolveRuntimeConfig,
 }));
 
+vi.mock('../../src/web/environment.js', () => ({
+  collectEnvironmentInfo: mocks.collectEnvironmentInfo,
+}));
+
 describe('buildMsqWebState pendingFeatures projection', () => {
   beforeEach(async () => {
     vi.clearAllMocks();
@@ -67,8 +72,18 @@ describe('buildMsqWebState pendingFeatures projection', () => {
       },
     });
     mocks.getBacklogSettings.mockReturnValue({ stageSkills: {} });
+    mocks.collectEnvironmentInfo.mockReturnValue({
+      databasePath: '/tmp/metal-squad/app.db',
+      databaseSource: 'default',
+      dbWritable: true,
+      dataDir: '/tmp/metal-squad',
+      configDir: '/tmp/metal-squad-config',
+      configWritable: true,
+      repoPath: '/tmp/metal-squad',
+      repoId: 'repo-1',
+      version: '0.0.1',
+    });
     mocks.resolveRuntimeConfig.mockReturnValue({
-      theme: undefined,
       concurrency: 3,
       staleRunThresholdMinutes: 120,
       toolTimeoutMs: 600_000,
@@ -207,6 +222,40 @@ describe('buildMsqWebState pendingFeatures projection', () => {
     ]);
   });
 
+  it('carries requestKind and options through pending stage requests so the web UI can answer real questions', async () => {
+    const { buildMsqWebState } = await import('../../src/web/state.js');
+    mocks.listPendingStageRequests.mockReturnValue([
+      {
+        id: 5,
+        pipelineId: 99,
+        runId: 42,
+        featureId: 'feat-1',
+        stage: 'specify',
+        kind: 'input',
+        prompt: 'Qual estrategia de cache?',
+        options: ['Cache em memoria', 'Cache em SQLite'],
+        status: 'pending',
+        response: null,
+        source: 'manual',
+        createdAt: '2026-07-14T12:00:00.000Z',
+        resolvedAt: null,
+      },
+    ]);
+
+    expect(buildMsqWebState().gates).toEqual([
+      {
+        kind: 'stage',
+        id: 5,
+        featureId: 'feat-1',
+        repoId: '',
+        prompt: 'Qual estrategia de cache?',
+        createdAt: '2026-07-14T12:00:00.000Z',
+        requestKind: 'input',
+        options: ['Cache em memoria', 'Cache em SQLite'],
+      },
+    ]);
+  });
+
   it('removes blocked execution-owned features from pendingFeatures', async () => {
     const { buildMsqWebState } = await import('../../src/web/state.js');
     mocks.listRunsForTui.mockReturnValue([
@@ -325,6 +374,22 @@ describe('buildMsqWebState pendingFeatures projection', () => {
     expect(state.pendingFeatures[0]?.autoStart).toBe(true);
   });
 
+  it('exposes the backend-collected environment diagnostics in the full state', async () => {
+    const { buildMsqWebState } = await import('../../src/web/state.js');
+
+    expect(buildMsqWebState().environment).toEqual({
+      databasePath: '/tmp/metal-squad/app.db',
+      databaseSource: 'default',
+      dbWritable: true,
+      dataDir: '/tmp/metal-squad',
+      configDir: '/tmp/metal-squad-config',
+      configWritable: true,
+      repoPath: '/tmp/metal-squad',
+      repoId: 'repo-1',
+      version: '0.0.1',
+    });
+  });
+
   it('strips notification credentials from runtimeConfig before broadcast', async () => {
     const { buildMsqWebState } = await import('../../src/web/state.js');
     mocks.listRunsForTui.mockReturnValue([]);
@@ -334,17 +399,15 @@ describe('buildMsqWebState pendingFeatures projection', () => {
       staleRunThresholdMinutes: 120,
       toolTimeoutMs: 600_000,
       promptContextCharLimit: 20_000,
-      stageSkills: {},
-      telegramChatId: '123456',
       notifications: {
         channels: [
           { type: 'slack', webhookUrl: 'https://hooks.slack.com/services/T00/B00/secret' },
           { type: 'telegram', chatId: '123456' },
           { type: 'desktop' },
+          { type: 'webhook', url: '' },
         ],
         events: ['run:start', 'run:done'],
       },
-      workflow: { autoAdvanceStages: false, pollIntervalMs: 2_000 },
       budget: { alertAtPercent: 80 },
       web: { host: '127.0.0.1', port: 8743, auth: 'token' },
     });
@@ -352,18 +415,20 @@ describe('buildMsqWebState pendingFeatures projection', () => {
     const state = buildMsqWebState();
 
     expect(state.runtimeConfig.notifications.channels).toEqual([
-      { type: 'slack' },
-      { type: 'telegram' },
-      { type: 'desktop' },
+      { type: 'slack', configured: true },
+      { type: 'telegram', configured: true },
+      { type: 'desktop', configured: true },
+      { type: 'webhook', configured: false },
     ]);
     expect(state.runtimeConfig.notifications.events).toEqual(['run:start', 'run:done']);
+    expect(state.runtimeConfig.writability).toEqual({ dbWritable: true, configWritable: true });
     expect(JSON.stringify(state.runtimeConfig)).not.toContain('secret');
     expect(JSON.stringify(state.runtimeConfig)).not.toContain('123456');
     expect(state.runtimeConfig).not.toHaveProperty('telegramChatId');
   });
 
-  it('caches runtime config between builds until the caches are reset', async () => {
-    const { buildMsqWebState, resetWebStateCaches } = await import('../../src/web/state.js');
+  it('invalidates cached runtime config after a settings write', async () => {
+    const { buildMsqWebState, invalidateRuntimeConfigCache } = await import('../../src/web/state.js');
     mocks.listRunsForTui.mockReturnValue([]);
 
     expect(buildMsqWebState().runtimeConfig.concurrency).toBe(3);
@@ -372,7 +437,7 @@ describe('buildMsqWebState pendingFeatures projection', () => {
     mocks.resolveRuntimeConfig.mockReturnValue(changed);
     expect(buildMsqWebState().runtimeConfig.concurrency).toBe(3);
 
-    resetWebStateCaches();
+    invalidateRuntimeConfigCache();
     expect(buildMsqWebState().runtimeConfig.concurrency).toBe(9);
   });
 });

@@ -13,8 +13,10 @@ export interface SidebarProps {
   live?: boolean;
   notificationCount?: number;
   onNavigate: (path: string) => void;
-  onHelp?: () => void;
+  collapsed: boolean;
+  onToggleCollapsed: () => void;
   onNotifications?: () => void;
+  onLogout?: () => void;
 }
 
 export function Sidebar({
@@ -24,14 +26,16 @@ export function Sidebar({
   live,
   notificationCount = 0,
   onNavigate,
-  onHelp,
+  collapsed,
+  onToggleCollapsed,
   onNotifications,
+  onLogout,
 }: SidebarProps): React.JSX.Element {
   return (
     <div
       style={{
-        width: 'var(--sidebar-width)',
-        minWidth: 'var(--sidebar-width)',
+        width: collapsed ? 48 : 'var(--sidebar-width)',
+        minWidth: collapsed ? 48 : 'var(--sidebar-width)',
         height: '100%',
         background: 'var(--bg-panel)',
         borderRight: '1px solid var(--border-dim)',
@@ -42,7 +46,7 @@ export function Sidebar({
     >
       <div
         style={{
-          padding: '16px 16px',
+          padding: collapsed ? '16px 10px' : '16px',
           borderBottom: '1px solid var(--border-dim)',
           fontWeight: 400,
           fontFamily: 'var(--font-display)',
@@ -52,7 +56,16 @@ export function Sidebar({
           lineHeight: 1,
         }}
       >
-        <span style={{ color: 'var(--accent-info)' }}>&gt;</span> METAL SQUAD
+        <button
+          type="button"
+          onClick={onToggleCollapsed}
+          title={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+          aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+          style={{ border: 0, background: 'transparent', color: 'var(--accent-info)', cursor: 'pointer', font: 'inherit', padding: 0 }}
+        >
+          {collapsed ? '>' : '<'}
+        </button>
+        {!collapsed && ' METAL SQUAD'}
       </div>
 
       <nav style={{ flex: 1, padding: '10px 8px', display: 'flex', flexDirection: 'column', gap: 2 }}>
@@ -68,7 +81,7 @@ export function Sidebar({
               }}
               style={{
                 display: 'flex',
-                justifyContent: 'space-between',
+                justifyContent: collapsed ? 'center' : 'space-between',
                 alignItems: 'center',
                 padding: '8px 10px',
                 borderRadius: 'var(--radius-sm)',
@@ -86,8 +99,8 @@ export function Sidebar({
                 if (!active) e.currentTarget.style.background = 'transparent';
               }}
             >
-              <span>{item.label}</span>
-              {item.count != null && <span style={{ fontSize: 'var(--text-2xs)', color: 'var(--text-faint)' }}>{item.count}</span>}
+              <span>{collapsed ? item.label.slice(0, 1) : item.label}</span>
+              {!collapsed && item.count != null && <span style={{ fontSize: 'var(--text-2xs)', color: 'var(--text-faint)' }}>{item.count}</span>}
             </a>
           );
         })}
@@ -105,7 +118,7 @@ export function Sidebar({
           gap: 8,
         }}
       >
-        <span style={{ display: 'flex', alignItems: 'center', gap: 6, overflow: 'hidden', minWidth: 0 }}>
+          {!collapsed && <span style={{ display: 'flex', alignItems: 'center', gap: 6, overflow: 'hidden', minWidth: 0 }}>
           {live != null && (
             <span
               style={{
@@ -119,7 +132,7 @@ export function Sidebar({
             />
           )}
           <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{statusLine ?? ''}</span>
-        </span>
+          </span>}
 
         <div style={{ display: 'flex', gap: 6, flexShrink: 0 }}>
           {onNotifications && (
@@ -175,28 +188,33 @@ export function Sidebar({
               )}
             </a>
           )}
-          <a
-            href="#help"
-            onClick={(e) => {
-              e.preventDefault();
-              onHelp?.();
-            }}
-            style={{
-              width: 20,
-              height: 20,
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              border: '1px solid var(--border-strong)',
-              borderRadius: 'var(--radius-sm)',
-              color: 'var(--text-dim)',
-              textDecoration: 'none',
-              cursor: 'pointer',
-              flexShrink: 0,
-            }}
-          >
-            ?
-          </a>
+          {onLogout && (
+            <button
+              onClick={onLogout}
+              title="Log out"
+              style={{
+                width: 20,
+                height: 20,
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                border: '1px solid var(--border-strong)',
+                borderRadius: 'var(--radius-sm)',
+                color: 'var(--text-dim)',
+                background: 'transparent',
+                textDecoration: 'none',
+                cursor: 'pointer',
+                flexShrink: 0,
+                padding: 0,
+              }}
+            >
+              <svg width={12} height={12} viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth={1.4} strokeLinecap="round" strokeLinejoin="round">
+                <path d="M6 2H3.5A1.5 1.5 0 0 0 2 3.5v9A1.5 1.5 0 0 0 3.5 14H6" />
+                <path d="M10.5 11.5 14 8l-3.5-3.5" />
+                <path d="M14 8H6" />
+              </svg>
+            </button>
+          )}
         </div>
       </div>
     </div>

@@ -3,6 +3,11 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 const mockRunCli = vi.fn();
 const mockExecFileSync = vi.fn();
 const mockEventEmit = vi.fn();
+const mockResolveToolInvocation = vi.fn(() => ({
+  command: 'codex', baseArgs: [], env: {}, versionCheck: ['--version'],
+  capabilities: { model: true, effort: true, thinking: false },
+  thinkingBudget: { low: 0, medium: 0, high: 0 }, minTimeoutMs: 1_800_000,
+}));
 
 class MockCliTimeoutError extends Error {
   readonly stdout: string;
@@ -27,11 +32,12 @@ class MockCliTimeoutError extends Error {
 }
 
 vi.mock('../../src/config/index.js', () => ({
-  resolveRuntimeConfig: () => ({ toolTimeoutMs: 600_000 }),
+  resolveRuntimeConfig: () => ({ toolTimeoutMs: 600_000, heartbeatMs: 30_000 }),
 }));
 
 vi.mock('../../src/core/adapters/spawn.js', () => ({
   runCli: mockRunCli,
+  resolveToolInvocation: mockResolveToolInvocation,
   CliTimeoutError: MockCliTimeoutError,
 }));
 
@@ -39,6 +45,7 @@ vi.mock('../../src/core/events/index.js', () => ({
   msqEventBus: {
     emit: mockEventEmit,
   },
+  logCaughtError: vi.fn(),
 }));
 
 vi.mock('node:child_process', () => ({
@@ -49,6 +56,11 @@ beforeEach(() => {
   mockRunCli.mockReset();
   mockExecFileSync.mockReset();
   mockEventEmit.mockReset();
+  mockResolveToolInvocation.mockReturnValue({
+    command: 'codex', baseArgs: [], env: {}, versionCheck: ['--version'],
+    capabilities: { model: true, effort: true, thinking: false },
+    thinkingBudget: { low: 0, medium: 0, high: 0 }, minTimeoutMs: 1_800_000,
+  });
 });
 
 describe('codexAdapter timeout observability', () => {
@@ -155,6 +167,103 @@ describe('codexAdapter timeout observability', () => {
       line: 'shell /bin/zsh -lc pwd -> /repo',
       stream: 'stdout',
       source: 'tool',
+      createdAt: expect.any(String),
+      toolName: 'shell',
+    });
+  });
+
+  it('reads thinking capability and minimum timeout from the registry invocation', async () => {
+    mockRunCli.mockResolvedValue({
+      code: 0,
+      stdout: JSON.stringify({
+        type: 'item.completed',
+        item: { type: 'agent_message', text: 'done' },
+      }),
+      stderr: '',
+    });
+
+    const { codexAdapter } = await import('../../src/core/adapters/codex.js');
+    await codexAdapter.runFeature({
+      id: 'feat-04',
+      title: 'Feature',
+      tool: 'codex',
+      effort: 'high',
+      thinking: 'on',
+      dependsOn: [],
+      tasks: [],
+    }, 'prompt', { cwd: '/repo', runId: 11 });
+
+    expect(mockEventEmit).toHaveBeenCalledWith('run:output', expect.objectContaining({
+      runId: 11,
+      featureId: 'feat-04',
+      tool: 'codex',
+      line: 'aviso: codex não suporta thinking; opção ignorada.',
+    }));
+
+    const [, calledArgs] = mockRunCli.mock.calls[0] as [string, string[], unknown];
+    expect(calledArgs).not.toContain('thinking');
+    expect(calledArgs).toEqual(expect.arrayContaining(['-c', 'model_reasoning_effort="high"']));
+    expect(mockRunCli).toHaveBeenCalledWith(expect.any(String), expect.any(Array), expect.objectContaining({
+      timeoutMs: 1_800_000,
+    }));
+  });
+
+  it('flags structured error events with level: error', async () => {
+    mockRunCli.mockImplementation(async (_bin, _args, opts) => {
+      opts.onStdoutLine?.(JSON.stringify({
+        type: 'turn.failed',
+        error: { message: 'boom' },
+      }));
+      return { code: 0, stdout: '', stderr: '' };
+    });
+
+    const { codexAdapter } = await import('../../src/core/adapters/codex.js');
+    await codexAdapter.runFeature({
+      id: 'feat-06',
+      title: 'Feature',
+      tool: 'codex',
+      effort: 'medium',
+      dependsOn: [],
+      tasks: [],
+    }, 'prompt', { cwd: '/repo', runId: 12 });
+
+    expect(mockEventEmit).toHaveBeenCalledWith('run:output', {
+      runId: 12,
+      featureId: 'feat-06',
+      tool: 'codex',
+      line: 'error boom',
+      stream: 'stdout',
+      source: 'tool',
+      createdAt: expect.any(String),
+      level: 'error',
+    });
+  });
+
+  it('flags raw stderr log lines carrying an ERROR level', async () => {
+    mockRunCli.mockImplementation(async (_bin, _args, opts) => {
+      opts.onStderrLine?.('2026-07-16T13:23:27.625650Z ERROR codex_core::tools::router: error=apply_patch verification failed');
+      return { code: 0, stdout: '', stderr: '' };
+    });
+
+    const { codexAdapter } = await import('../../src/core/adapters/codex.js');
+    await codexAdapter.runFeature({
+      id: 'feat-07',
+      title: 'Feature',
+      tool: 'codex',
+      effort: 'medium',
+      dependsOn: [],
+      tasks: [],
+    }, 'prompt', { cwd: '/repo', runId: 13 });
+
+    expect(mockEventEmit).toHaveBeenCalledWith('run:output', {
+      runId: 13,
+      featureId: 'feat-07',
+      tool: 'codex',
+      line: '2026-07-16T13:23:27.625650Z ERROR codex_core::tools::router: error=apply_patch verification failed',
+      stream: 'stderr',
+      source: 'stderr',
+      createdAt: expect.any(String),
+      level: 'error',
     });
   });
 });

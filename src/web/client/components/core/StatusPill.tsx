@@ -5,6 +5,8 @@ export type PillStatus = 'running' | 'done' | 'failed' | 'blocked' | 'aborted';
 export interface StatusPillProps {
   status: PillStatus | (string & {});
   label?: string;
+  /** Animated spinner replaces the static icon while running (default on). */
+  spinner?: boolean;
 }
 
 const ICON: Record<string, string> = { running: '⟳', done: '✓', failed: '✗', blocked: '⊘', aborted: '■' };
@@ -23,8 +25,9 @@ const BG: Record<string, string> = {
   aborted: 'transparent',
 };
 
-export function StatusPill({ status, label }: StatusPillProps): React.JSX.Element {
+export function StatusPill({ status, label, spinner = true }: StatusPillProps): React.JSX.Element {
   const color = COLOR[status] ?? 'var(--text-dim)';
+  const showSpinner = spinner && status === 'running';
   return (
     <span
       style={{
@@ -41,7 +44,7 @@ export function StatusPill({ status, label }: StatusPillProps): React.JSX.Elemen
         whiteSpace: 'nowrap',
       }}
     >
-      {ICON[status] ?? '·'} {label ?? status}
+      {showSpinner ? <span aria-hidden="true" className="msq-status-spinner" /> : (ICON[status] ?? '·')} {label ?? status}
     </span>
   );
 }

@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { ToolCallCard } from './ToolCallCard.js';
+import { formatClockTime } from '../../lib/format.js';
 import type { ToolCallRecord } from '../../../../core/adapters/types.js';
 
 export interface ToolCallGroupProps {
@@ -29,6 +30,7 @@ export function ToolCallGroup({ groupKey, calls, defaultCollapsed = false }: Too
             status={call.phase === 'started' ? 'running' : call.phase === 'failed' ? 'error' : 'done'}
             command={call.arguments == null ? undefined : JSON.stringify(call.arguments)}
             output={call.error ?? call.output ?? undefined}
+            time={formatClockTime(call.startedAt)}
           />
         ))}
       </div>}

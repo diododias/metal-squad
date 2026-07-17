@@ -5,6 +5,7 @@ const mockExecFileSync = vi.fn();
 const mockEventEmit = vi.fn();
 const mockParseControlSignal = vi.fn();
 const mockExistsSync = vi.fn();
+const mockResolveToolInvocation = vi.fn(() => ({ command: 'codex', baseArgs: [], env: {}, versionCheck: ['--version'] }));
 
 class MockCliTimeoutError extends Error {
   readonly stdout: string;
@@ -37,17 +38,19 @@ class MockCliAbortError extends Error {
 }
 
 vi.mock('../../src/config/index.js', () => ({
-  resolveRuntimeConfig: () => ({ toolTimeoutMs: 600_000 }),
+  resolveRuntimeConfig: () => ({ toolTimeoutMs: 600_000, heartbeatMs: 30_000 }),
 }));
 
 vi.mock('../../src/core/adapters/spawn.js', () => ({
   runCli: mockRunCli,
+  resolveToolInvocation: mockResolveToolInvocation,
   CliTimeoutError: MockCliTimeoutError,
   CliAbortError: MockCliAbortError,
 }));
 
 vi.mock('../../src/core/events/index.js', () => ({
   msqEventBus: { emit: mockEventEmit },
+  logCaughtError: vi.fn(),
 }));
 
 vi.mock('node:child_process', () => ({
@@ -77,6 +80,7 @@ beforeEach(() => {
   mockEventEmit.mockReset();
   mockParseControlSignal.mockReset().mockReturnValue(null);
   mockExistsSync.mockReset().mockReturnValue(false);
+  mockResolveToolInvocation.mockReturnValue({ command: 'codex', baseArgs: [], env: {}, versionCheck: ['--version'] });
 });
 
 describe('codexAdapter.effortFlag', () => {
@@ -250,6 +254,7 @@ describe('codexAdapter.runFeature — success path', () => {
 
   it('uses the resume subcommand when a prior session handle is provided', async () => {
     mockRunCli.mockResolvedValue({ code: 0, stdout: '', stderr: '' });
+    mockExistsSync.mockReturnValue(true);
 
     const { codexAdapter } = await import('../../src/core/adapters/codex.js');
     await codexAdapter.runFeature(feature, 'prompt', {
@@ -267,9 +272,19 @@ describe('codexAdapter.runFeature — success path', () => {
     });
 
     const [, args] = mockRunCli.mock.calls[0]!;
-    expect(args.slice(0, 3)).toEqual(['exec', 'resume', '--json']);
-    expect(args).toContain('thread_123');
-    expect(args).toContain('prompt');
+    expect(args).toEqual([
+      'exec',
+      'resume',
+      '--json',
+      '--skip-git-repo-check',
+      '-c',
+      'model_reasoning_effort="medium"',
+      'thread_123',
+      '--',
+      'prompt',
+    ]);
+    expect(args).not.toContain('--sandbox');
+    expect(args).not.toContain('--add-dir');
   });
 
   it('adds .git as a writable directory when repository metadata exists', async () => {

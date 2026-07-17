@@ -1,5 +1,14 @@
-import { describe, expect, it } from 'vitest';
+// @vitest-environment happy-dom
+
+import React, { act, createElement } from 'react';
+import { createRoot, type Root } from 'react-dom/client';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { renderToStaticMarkup } from 'react-dom/server';
+import { App } from '../../src/web/client/App.js';
 import { parseHash } from '../../src/web/client/lib/routes.js';
+import { ConfigPage } from '../../src/web/client/pages/ConfigPage.js';
+import { BoardPage } from '../../src/web/client/pages/BoardPage.js';
+import type { MsqWebState, WebSocketClientMessage } from '../../src/web/types.js';
 import {
   formatDurationMs,
   formatHeartbeatLine,
@@ -14,6 +23,90 @@ import { summarizeTaskRuns } from '../../src/web/client/lib/workflow.js';
 import { normalizeLegacyOpencodePayload, type OutputLine } from '../../src/web/client/hooks/useLocalOutput.js';
 import { subscriptionKey } from '../../src/web/client/hooks/useWebSocket.js';
 import type { RunSummary, TaskRun } from '../../src/db/repo.js';
+
+vi.mock('../../src/web/client/hooks/useWebSocket.js', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../src/web/client/hooks/useWebSocket.js')>()),
+  useWebSocket: () => ({ send: () => undefined, error: null }),
+}));
+
+globalThis.IS_REACT_ACT_ENVIRONMENT = true;
+
+let roots: Root[] = [];
+
+const settingsState = {
+  runtimeConfig: {
+    concurrency: 1,
+    toolTimeoutMs: 60_000,
+    heartbeatMs: 30_000,
+    staleRunThresholdMinutes: 10,
+    promptContextCharLimit: 20_000,
+    writability: { dbWritable: true, configWritable: true },
+    workflow: { autoAdvanceStages: false, pollIntervalMs: 5_000 },
+    web: { host: '127.0.0.1', port: 3000, auth: 'none' },
+    tools: [
+      { id: 'claude', adapter: 'claude', command: 'claude', baseArgs: [], env: {}, versionCheck: ['--version'], capabilities: { model: true, effort: true, thinking: true }, thinkingBudget: { low: 0, medium: 0, high: 0 }, minTimeoutMs: 0 },
+      { id: 'codex-canary', adapter: 'codex', command: 'codex-canary', baseArgs: [], env: {}, versionCheck: ['--version'], capabilities: { model: true, effort: true, thinking: false }, thinkingBudget: { low: 0, medium: 0, high: 0 }, minTimeoutMs: 0 },
+    ],
+    notifications: { channels: [], events: [] },
+    budget: { alertAtPercent: 80, lastResetDate: null },
+  },
+  backlogSettings: {
+    configSources: undefined,
+    resolvedDefaults: undefined,
+    budget: undefined,
+    projectDefaults: {
+      tool: 'codex',
+      effort: 'medium',
+      thinking: 'off',
+      skills: ['speckit-specify'],
+      stageSkills: { specify: ['speckit-specify'] },
+      workflow: {
+        mode: 'staged',
+        stages: ['specify', 'plan'],
+        approvals: { channel: 'telegram', autoAdvance: false },
+        syncTasksToBacklog: true,
+        sessionPolicy: { mode: 'isolated', alwaysIsolatedStages: [] },
+        stepGuidance: {},
+      },
+    },
+  },
+  environment: {
+    databasePath: '/tmp/msq/app.db',
+    databaseSource: 'default',
+    dbWritable: true,
+    dataDir: '/tmp/msq',
+    configDir: '/tmp/config',
+    configWritable: true,
+  },
+  featureCatalog: {},
+  skillsCatalog: [],
+} as unknown as MsqWebState;
+
+function render(element: React.ReactElement): HTMLElement {
+  const container = document.createElement('div');
+  document.body.append(container);
+  const root = createRoot(container);
+  roots.push(root);
+  act(() => {
+    root.render(element);
+  });
+  return container;
+}
+
+function dispatchInputChange(control: HTMLInputElement, value: string): void {
+  const descriptor = Object.getOwnPropertyDescriptor(Object.getPrototypeOf(control), 'value');
+  descriptor?.set?.call(control, value);
+  control.dispatchEvent(new Event('input', { bubbles: true }));
+  control.dispatchEvent(new Event('change', { bubbles: true }));
+}
+
+afterEach(() => {
+  act(() => {
+    roots.forEach((root) => { root.unmount(); });
+  });
+  roots = [];
+  document.body.replaceChildren();
+});
 
 describe('parseHash', () => {
   it('maps hashes to routes', () => {
@@ -30,6 +123,235 @@ describe('parseHash', () => {
   it('falls back to board for unknown hashes', () => {
     expect(parseHash('#/nope')).toEqual({ page: 'board' });
   });
+});
+
+describe('Settings client surfaces', () => {
+  it('keeps the Settings route stable', () => {
+    expect(parseHash('#/config')).toEqual({ page: 'config' });
+  });
+
+  it('renders the Settings heading and preserves all selectable categories', () => {
+    const container = render(React.createElement(ConfigPage, { state: settingsState, isMobile: false, send: () => undefined }));
+
+    expect(container.querySelector('h1')?.textContent).toBe('Settings');
+    expect(Array.from(container.querySelectorAll('button')).map((button) => button.textContent)).toEqual([
+      '[Runtime]',
+      'Defaults',
+      'Tools',
+      'Skills',
+      'Notifications',
+      'Budget',
+      'save runtime',
+    ]);
+    expect(container.textContent).toContain('secrets');
+    expect(container.textContent).toContain('empty');
+  });
+
+  it('renders environment diagnostics without exposing secret values', () => {
+    const state = {
+      ...settingsState,
+      runtimeConfig: {
+        ...settingsState.runtimeConfig,
+        web: { ...settingsState.runtimeConfig.web, auth: 'token' },
+      },
+      environment: {
+        databasePath: '/tmp/msq/app.db',
+        databaseSource: 'override',
+        dbWritable: false,
+        dataDir: '/tmp/msq',
+        configDir: '/tmp/config',
+        configWritable: true,
+        repoPath: '/repo/metal-squad',
+        repoId: 'repo-13',
+        version: '1.2.3',
+      },
+    } as MsqWebState;
+
+    const container = render(React.createElement(ConfigPage, { state, isMobile: false, send: () => undefined }));
+    const text = container.textContent ?? '';
+
+    expect(text).toContain('Environment / Sources');
+    expect(text).toContain('/tmp/msq/app.db · read-only');
+    expect(text).toContain('[override]');
+    expect(text).toContain('/tmp/config · writable');
+    expect(text).toContain('/repo/metal-squad · repo-13');
+    expect(text).toContain('DB (importado via backlog load)');
+    expect(text).toContain('127.0.0.1:3000 · token');
+    expect(text).toContain('secrets');
+    expect(text).toContain('configured');
+    expect(text).toContain('1.2.3');
+  });
+
+  it('saves only the changed project default through the websocket action', () => {
+    const messages: WebSocketClientMessage[] = [];
+    const container = render(React.createElement(ConfigPage, {
+      state: settingsState,
+      isMobile: false,
+      send: (message: WebSocketClientMessage) => { messages.push(message); },
+    }));
+
+    act(() => {
+      Array.from(container.querySelectorAll('button')).find((button) => button.textContent === 'Defaults')?.click();
+    });
+    const effort = container.querySelector('#defaults-effort') as HTMLSelectElement;
+    act(() => {
+      effort.value = 'high';
+      effort.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+    act(() => {
+      Array.from(container.querySelectorAll('button')).find((button) => button.textContent === 'save defaults')?.click();
+    });
+
+    expect(messages).toEqual([{ type: 'action:updateProjectDefaults', patch: { effort: 'high' } }]);
+  });
+
+  it('saves a valid App budget alert without rendering project token limits', () => {
+    const messages: WebSocketClientMessage[] = [];
+    const container = render(React.createElement(ConfigPage, {
+      state: settingsState,
+      isMobile: false,
+      send: (message: WebSocketClientMessage) => { messages.push(message); },
+    }));
+
+    act(() => {
+      Array.from(container.querySelectorAll('button')).find((button) => button.textContent === 'Budget')?.click();
+    });
+    expect(container.textContent).not.toContain('maxTokens (backlog)');
+    expect(container.textContent).not.toContain('perFeatureMaxTokens (backlog)');
+
+    const alertAtPercent = container.querySelector('#budget-alert-at-percent') as HTMLInputElement;
+    act(() => {
+      dispatchInputChange(alertAtPercent, '0');
+    });
+    act(() => {
+      Array.from(container.querySelectorAll('button')).find((button) => button.textContent === 'save budget')?.click();
+    });
+
+    expect(messages).toEqual([{ type: 'action:updateBudgetConfig', patch: { alertAtPercent: 0 } }]);
+  });
+
+  it('rejects an out-of-range App budget alert in the UI', () => {
+    const messages: WebSocketClientMessage[] = [];
+    const container = render(React.createElement(ConfigPage, {
+      state: settingsState,
+      isMobile: false,
+      send: (message: WebSocketClientMessage) => { messages.push(message); },
+    }));
+
+    act(() => {
+      Array.from(container.querySelectorAll('button')).find((button) => button.textContent === 'Budget')?.click();
+    });
+    const alertAtPercent = container.querySelector('#budget-alert-at-percent') as HTMLInputElement;
+    act(() => {
+      dispatchInputChange(alertAtPercent, '101');
+    });
+
+    expect(container.textContent).toContain('Enter a whole number from 0 to 100.');
+    expect((Array.from(container.querySelectorAll('button')).find((button) => button.textContent === 'save budget') as HTMLButtonElement).disabled).toBe(true);
+    expect(messages).toEqual([]);
+  });
+
+  it('saves editable notification channels without reading configured credentials', () => {
+    const messages: WebSocketClientMessage[] = [];
+    const state = {
+      ...settingsState,
+      runtimeConfig: {
+        ...settingsState.runtimeConfig,
+        notifications: {
+          channels: [{ type: 'webhook', configured: true }],
+          events: ['run:start'],
+        },
+      },
+    } as MsqWebState;
+    const container = render(React.createElement(ConfigPage, {
+      state,
+      isMobile: false,
+      send: (message: WebSocketClientMessage) => { messages.push(message); },
+    }));
+
+    act(() => {
+      Array.from(container.querySelectorAll('button')).find((button) => button.textContent === 'Notifications')?.click();
+    });
+    expect(container.textContent).toContain('configured');
+    expect((container.querySelector('#notification-channel-0-credential') as HTMLInputElement).value).toBe('');
+
+    const done = container.querySelector('[id="notification-event-run:done"]') as HTMLInputElement;
+    act(() => {
+      done.click();
+      Array.from(container.querySelectorAll('button')).find((button) => button.textContent === 'save notifications')?.click();
+    });
+
+    expect(messages).toEqual([{
+      type: 'action:updateNotifications',
+      patch: { channels: [{ type: 'webhook' }], events: ['run:start', 'run:done'] },
+    }]);
+  });
+
+  it('saves changed App runtime settings and removes global workflow controls', () => {
+    const messages: WebSocketClientMessage[] = [];
+    const container = render(React.createElement(ConfigPage, {
+      state: settingsState,
+      isMobile: false,
+      send: (message: WebSocketClientMessage) => { messages.push(message); },
+    }));
+
+    expect(container.textContent).not.toContain('workflow.autoAdvanceStages');
+    expect(container.textContent).not.toContain('workflow.pollIntervalMs');
+
+    const concurrency = container.querySelector('#runtime-concurrency') as HTMLInputElement;
+    const port = container.querySelector('#runtime-web-port') as HTMLInputElement;
+    act(() => {
+      Object.getOwnPropertyDescriptor(Object.getPrototypeOf(concurrency), 'value')?.set?.call(concurrency, '5');
+      concurrency.dispatchEvent(new Event('input', { bubbles: true }));
+      concurrency.dispatchEvent(new Event('change', { bubbles: true }));
+      Object.getOwnPropertyDescriptor(Object.getPrototypeOf(port), 'value')?.set?.call(port, '8080');
+      port.dispatchEvent(new Event('input', { bubbles: true }));
+      port.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+    act(() => {
+      Array.from(container.querySelectorAll('button')).find((button) => button.textContent === 'save runtime')?.click();
+    });
+
+    expect(messages).toEqual([{
+      type: 'action:updateAppConfig',
+      patch: { concurrency: 5, web: { port: 8080 } },
+    }]);
+  });
+
+  it('disables runtime controls when config.json is not writable', () => {
+    const state = {
+      ...settingsState,
+      runtimeConfig: {
+        ...settingsState.runtimeConfig,
+        writability: { dbWritable: true, configWritable: false },
+      },
+      environment: { ...settingsState.environment, configWritable: false },
+    } as MsqWebState;
+    const container = render(React.createElement(ConfigPage, { state, isMobile: false, send: () => undefined }));
+
+    expect((container.querySelector('#runtime-concurrency') as HTMLInputElement).disabled).toBe(true);
+    expect((container.querySelector('#runtime-web-auth') as HTMLSelectElement).disabled).toBe(true);
+    expect(Array.from(container.querySelectorAll('button')).find((button) => button.textContent === 'save runtime')?.disabled).toBe(true);
+    expect(container.textContent).toContain('config.json is read-only');
+  });
+
+  it('shows registered tools and sends a complete registry update', () => {
+    const messages: WebSocketClientMessage[] = [];
+    const container = render(React.createElement(ConfigPage, { state: settingsState, isMobile: false, send: (message: WebSocketClientMessage) => { messages.push(message); } }));
+    act(() => { Array.from(container.querySelectorAll('button')).find((button) => button.textContent === 'Tools')?.click(); });
+    expect(container.textContent).toContain('Tools registry');
+    expect(container.textContent).toContain('claude');
+    act(() => { Array.from(container.querySelectorAll('button')).filter((button) => button.textContent === 'remove')[1]?.click(); });
+    expect(messages).toEqual([{ type: 'action:updateToolsRegistry', tools: [settingsState.runtimeConfig.tools[0]] }]);
+  });
+
+  it('renders Settings in the main navigation while retaining the config route', () => {
+    const container = render(React.createElement(App));
+
+    expect(container.textContent).toContain('Settings');
+    expect(parseHash('#/config')).toEqual({ page: 'config' });
+  });
+
 });
 
 describe('format helpers', () => {
@@ -169,5 +491,64 @@ describe('subscriptionKey', () => {
   it('returns null for non-subscription messages', () => {
     expect(subscriptionKey({ type: 'auth', token: 't' })).toBeNull();
     expect(subscriptionKey({ type: 'action:startFeature', featureId: 'feat-1' })).toBeNull();
+  });
+});
+
+describe('BoardPage feature-specific workflows', () => {
+  it('renders each TODO and run with only the workflow configured for its feature', () => {
+    const state = {
+      runs: [
+        { runId: 1, featureId: 'feature-a', status: 'running', stage: 'implement', tool: 'codex', totalTokens: 0 },
+        { runId: 2, featureId: 'feature-b', status: 'running', stage: 'plan', tool: 'codex', totalTokens: 0 },
+      ],
+      pendingFeatures: [
+        { id: 'feature-todo', title: 'Todo workflow', tool: 'codex', effort: 'high', workflow: { stages: ['draft', 'approve'] } },
+      ],
+      featureCatalog: {
+        'feature-a': { id: 'feature-a', title: 'Feature A', workflow: { stages: ['specify', 'implement'] } },
+        'feature-b': { id: 'feature-b', title: 'Feature B', workflow: { stages: ['plan', 'validate'] } },
+        'feature-todo': { id: 'feature-todo', title: 'Todo workflow', tool: 'codex', effort: 'high', workflow: { stages: ['draft', 'approve'] } },
+      },
+    } as unknown as MsqWebState;
+
+    const html = renderToStaticMarkup(createElement(BoardPage, { state, isMobile: false, onOpenRun: () => {}, onOpenBacklogItem: () => {} }));
+
+    // Feature A: stage=implement on [specify, implement] → full bar, current label.
+    expect(html).toContain('implement <span');
+    expect(html).toContain('(2/2)');
+    // Feature B: stage=plan on [plan, validate] → half bar.
+    expect(html).toContain('plan <span');
+    expect(html).toContain('(1/2)');
+    // Todo feature: all segments pending on its own two-stage workflow.
+    expect(html).toContain('todo <span');
+    expect(html).toContain('(0/2)');
+  });
+
+  it('keeps unknown catalog runs usable without inventing workflow stages', () => {
+    const state = {
+      runs: [{ runId: 3, featureId: 'unknown-feature', status: 'running', stage: 'implement', tool: 'codex', totalTokens: 0 }],
+      pendingFeatures: [],
+      featureCatalog: {},
+    } as unknown as MsqWebState;
+
+    const html = renderToStaticMarkup(createElement(BoardPage, { state, isMobile: false, onOpenRun: () => {}, onOpenBacklogItem: () => {} }));
+
+    expect(html).toContain('IN PROGRESS / BLOCKED (1)');
+    expect(html).not.toContain('▸ implement');
+  });
+
+  it('preserves an explicit empty configured workflow without rendering fallback stages', () => {
+    const state = {
+      runs: [{ runId: 4, featureId: 'empty-workflow', status: 'running', stage: 'implement', tool: 'codex', totalTokens: 0 }],
+      pendingFeatures: [],
+      featureCatalog: {
+        'empty-workflow': { id: 'empty-workflow', title: 'Empty workflow', workflow: { stages: [] } },
+      },
+    } as unknown as MsqWebState;
+
+    const html = renderToStaticMarkup(createElement(BoardPage, { state, isMobile: false, onOpenRun: () => {}, onOpenBacklogItem: () => {} }));
+
+    expect(html).toContain('Empty workflow');
+    expect(html).not.toContain('▸ implement');
   });
 });

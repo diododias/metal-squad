@@ -7,7 +7,7 @@ import {
   type RunSummary,
   type TaskRun,
 } from '../../db/repo.js';
-import { msqEventBus } from '../../core/events/index.js';
+import { msqEventBus, logCaughtError } from '../../core/events/index.js';
 import { resolveRepo } from '../../core/repo.js';
 
 export function useRuns(intervalMs = 2000): RunSummary[] {
@@ -15,7 +15,8 @@ export function useRuns(intervalMs = 2000): RunSummary[] {
   const [runs, setRuns] = useState<RunSummary[]>(() => {
     try {
       return listRunsForTui(50, repoId);
-    } catch {
+    } catch (error) {
+      logCaughtError('useRuns.initialRuns', error);
       return [];
     }
   });
@@ -24,8 +25,9 @@ export function useRuns(intervalMs = 2000): RunSummary[] {
     const refresh = (): void => {
       try {
         setRuns(listRunsForTui(50, repoId));
-      } catch {
+      } catch (error) {
         // DB locked or unavailable — keep stale data
+        logCaughtError('useRuns.refresh', error);
       }
     };
 
@@ -55,7 +57,8 @@ export function useTaskRuns(runId: number | null): TaskRun[] {
     if (runId === null) return [];
     try {
       return listTaskRunsForRun(runId);
-    } catch {
+    } catch (error) {
+      logCaughtError('useTaskRuns.initialTaskRuns', error);
       return [];
     }
   });
@@ -68,15 +71,17 @@ export function useTaskRuns(runId: number | null): TaskRun[] {
 
     try {
       setTaskRuns(listTaskRunsForRun(runId));
-    } catch {
+    } catch (error) {
+      logCaughtError('useTaskRuns.onRunIdChange', error);
       setTaskRuns([]);
     }
 
     const refresh = (): void => {
       try {
         setTaskRuns(listTaskRunsForRun(runId));
-      } catch {
+      } catch (error) {
         // DB locked or unavailable — keep stale data
+        logCaughtError('useTaskRuns.refresh', error);
       }
     };
 
@@ -138,7 +143,8 @@ export function useRunningTasks(intervalMs = 2000): RunningTaskSummary[] {
   const [runningTasks, setRunningTasks] = useState<RunningTaskSummary[]>(() => {
     try {
       return listRunningTaskRuns(20);
-    } catch {
+    } catch (error) {
+      logCaughtError('useRunningTasks.initialRunningTasks', error);
       return [];
     }
   });
@@ -147,8 +153,9 @@ export function useRunningTasks(intervalMs = 2000): RunningTaskSummary[] {
     const refresh = (): void => {
       try {
         setRunningTasks(listRunningTaskRuns(20));
-      } catch {
+      } catch (error) {
         // DB locked or unavailable — keep stale data
+        logCaughtError('useRunningTasks.refresh', error);
       }
     };
 

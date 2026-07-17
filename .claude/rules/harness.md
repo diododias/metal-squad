@@ -27,6 +27,31 @@ MSQ_DB_PATH="$(pwd)/.metal-squad/app.db" rtk node dist/index.js status --limit 5
 
 Nao use esse override como padrao para desenvolvimento real de features — isso fragmenta o historico de runs por worktree e faz features ja concluidas reaparecerem como pendentes quando a TUI le o banco global.
 
+## Sandbox de banco do gate (build/hooks)
+
+`npm run build` e **puro**: apenas compila/empacota, nunca migra banco. A migracao e sempre explicita via `npm run migrate:db` (operacao real, banco global) ou dentro do gate sandboxado.
+
+Os hooks e a bateria de qualidade nunca tocam o catalogo real:
+
+- `npm run gate:fast` (pre-commit): typecheck + lint + testes apenas do que esta staged (`vitest related`). Sem build, sem DB.
+- `npm run gate:full` (pre-push / CI futuro): bateria completa (build → migrate:db → typecheck → lint → test → coverage gate → verify:repo → smoke da CLI) executada por `scripts/with-sandbox-db.mjs`, que exporta `MSQ_DB_PATH` para um banco descartavel em `.metal-squad/harness/<uuid>/app.db`, limpa em sucesso e preserva o caminho em falha para diagnostico.
+
+`scripts/gate.mjs full` se recusa a rodar sem `MSQ_DB_PATH` definido — nunca contorne isso apontando para o banco global. Nao use `--no-verify`: hook falhou, nao publica. Os contratos dessa protecao vivem em `tests/harness/`.
+
+## Fixtures deterministicas (E2E/Web)
+
+Fixtures sao um recurso separado do gate: o gate usa banco **vazio**; dados mockados existem apenas para fluxos E2E/Web que precisem deles.
+
+- `npm run db:fixture -- --scenario settings` semeia o cenario deterministico de settings (defaults de projeto + feature com overrides completos + tasks com dependsOn) definido em `tests/fixtures/scenarios/settings.backlog.yaml`.
+- A logica vive em `src/db/fixtures.ts` e **recusa o banco global**: exige `MSQ_DB_PATH` sandbox. Exemplo de uso combinado:
+
+```bash
+rtk node scripts/with-sandbox-db.mjs npm run db:fixture -- --scenario settings
+```
+
+- Ids de features da fixture sao manuais e estaveis (`fix-set-*`); a aplicacao e idempotente.
+- Factories de teste continuam criando dados por teste; nenhum script de teste copia ou le `~/.local/share/metal-squad/app.db`.
+
 ## Anti-recursao
 
 Dentro de uma sessao ja spawnada pelo `msq`, e proibido:

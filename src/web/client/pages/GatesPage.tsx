@@ -1,5 +1,6 @@
 import React from 'react';
 import { Button } from '../components/core/Button.js';
+import { QuestionBanner } from '../components/feedback/QuestionBanner.js';
 import { PageHeader } from '../PageHeader.js';
 import type { MsqWebState, WebSocketClientMessage } from '../../types.js';
 
@@ -18,6 +19,10 @@ export function GatesPage({ state, send }: GatesPageProps): React.JSX.Element {
     }
   }
 
+  function resolveQuestion(requestId: number, response: string): void {
+    send({ type: 'action:resolveStageRequest', requestId, response });
+  }
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
       <PageHeader title="Gates" breadcrumb={`${String(state.gates.length)} awaiting decision across all features`} />
@@ -33,20 +38,29 @@ export function GatesPage({ state, send }: GatesPageProps): React.JSX.Element {
                   </a>
                   <span style={{ fontSize: 'var(--text-2xs)', color: 'var(--text-faint)', textTransform: 'uppercase', letterSpacing: 'var(--tracking-wide)' }}>{g.kind}</span>
                 </div>
-                <div style={{ fontSize: 'var(--text-sm)', color: 'var(--text-dim)' }}>{g.prompt || 'Awaiting approval to advance.'}</div>
+                <div style={{ fontSize: 'var(--text-sm)', color: 'var(--text-dim)' }}>
+                  {g.requestKind !== 'input' && (g.prompt || 'Awaiting approval to advance.')}
+                </div>
               </div>
-              <div style={{ display: 'flex', gap: 8, flexShrink: 0, flexWrap: 'wrap' }}>
-                <Button variant="primary" size="sm" onClick={() => { resolve(g.id, g.kind, 'advance'); }}>
-                  advance
-                </Button>
-                <Button variant="recovery" size="sm" onClick={() => { resolve(g.id, g.kind, 'retry'); }}>
-                  retry
-                </Button>
-                <Button variant="neutral" size="sm" onClick={() => { resolve(g.id, g.kind, 'hold'); }}>
-                  hold
-                </Button>
-              </div>
+              {g.requestKind !== 'input' && (
+                <div style={{ display: 'flex', gap: 8, flexShrink: 0, flexWrap: 'wrap' }}>
+                  <Button variant="primary" size="sm" onClick={() => { resolve(g.id, g.kind, 'advance'); }}>
+                    advance
+                  </Button>
+                  <Button variant="recovery" size="sm" onClick={() => { resolve(g.id, g.kind, 'retry'); }}>
+                    retry
+                  </Button>
+                  <Button variant="neutral" size="sm" onClick={() => { resolve(g.id, g.kind, 'hold'); }}>
+                    hold
+                  </Button>
+                </div>
+              )}
             </div>
+            {g.requestKind === 'input' && (
+              <div style={{ marginTop: 10 }}>
+                <QuestionBanner prompt={g.prompt} options={g.options} onAnswer={(response) => { resolveQuestion(g.id, response); }} />
+              </div>
+            )}
           </div>
         ))}
       </div>

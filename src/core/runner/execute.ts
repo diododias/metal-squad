@@ -14,6 +14,7 @@ import {
   shouldEvaluateNextCandidate,
 } from '../orchestrator/autoPilot.js';
 import type { AutoPilotOutcomeKind } from '../events/types.js';
+import { logCaughtError } from '../events/logging.js';
 import { getAdapter } from '../adapters/index.js';
 import { resolveRepo } from '../repo.js';
 import {
@@ -45,6 +46,7 @@ import {
   updateRunTool,
   updateStageTransitionDecisionNextSessionId,
   type PipelineStatus,
+  type PipelineWorkflowRevisions,
   type StageRequestRow,
 } from '../../db/repo.js';
 import { getCatalogFeature } from '../../db/backlogCatalog.js';
@@ -72,6 +74,7 @@ import {
 import { loadBudgetState, saveBudgetState } from '../../db/repo.js';
 import { saveConfig } from '../../config/index.js';
 import { verifyPublishContract } from '../git/publish.js';
+import { resolveDependencyPublications, type DependencyPublication } from '../git/dependencies.js';
 import { updateRunPublishState } from '../../db/repo.js';
 
 export interface ResumeOverride {
@@ -85,9 +88,58 @@ export interface ExecuteOptions {
   cwd: string;
   concurrency: number;
   featureId?: string;
-  autoAdvanceStages?: boolean;
   resumePipelineId?: number;
   resumeOverride?: ResumeOverride;
+}
+
+function captureWorkflowRevisions(features: Feature[]): PipelineWorkflowRevisions {
+  return Object.fromEntries(features.map((feature) => [feature.id, {
+    mode: feature.workflow.mode,
+    stages: [...feature.workflow.stages],
+    syncTasksToBacklog: feature.workflow.syncTasksToBacklog,
+    sessionPolicy: {
+      ...feature.workflow.sessionPolicy,
+      alwaysIsolatedStages: [...feature.workflow.sessionPolicy.alwaysIsolatedStages],
+    },
+    stepGuidance: Object.fromEntries(Object.entries(
+      Object.hasOwn(feature.workflow, 'stepGuidance') ? feature.workflow.stepGuidance : {},
+    ).map(([stage, guidance]) => [stage, {
+      ...guidance,
+      ...(guidance.skills ? { skills: [...guidance.skills] } : {}),
+    }])),
+  }]));
+}
+
+function applyWorkflowRevisions(features: Feature[], revisions: PipelineWorkflowRevisions | undefined): Feature[] {
+  if (!revisions || Object.keys(revisions).length === 0) return features;
+  return features.map((feature) => {
+    const revision = revisions[feature.id];
+    if (!revision) return feature;
+    return {
+      ...feature,
+      workflow: {
+        ...revision,
+        autoAdvance: feature.workflow.autoAdvance,
+        // Approval transitions are intentionally resolved from the current
+        // catalog, even when the structural workflow is frozen for resume.
+        approvals: feature.workflow.approvals,
+      },
+    };
+  });
+}
+
+export function rehydrateBacklogWorkflowRevisions<T extends Backlog>(
+  backlog: T,
+  revisions: PipelineWorkflowRevisions | undefined,
+): T {
+  if (!revisions || Object.keys(revisions).length === 0) return backlog;
+  return {
+    ...backlog,
+    epics: backlog.epics.map((epic) => ({
+      ...epic,
+      features: applyWorkflowRevisions(epic.features, revisions),
+    })),
+  };
 }
 
 export async function executeBacklog(
@@ -102,11 +154,17 @@ export async function executeBacklog(
   const activeControllers = new Map<string, AbortController>();
   const lastRunIdByFeature = new Map<string, number>();
   const featureMaxTokens = new Map<string, number>();
+  // The `--feature` path clears `dependsOn` on the resolved plan (see below), so
+  // capture the original dependency edges here to recover dependency PRs later.
+  const dependsOnByFeature = new Map<string, string[]>();
   for (const epic of backlog.epics) {
     for (const feature of epic.features) {
       if (feature.maxTokens !== undefined) featureMaxTokens.set(feature.id, feature.maxTokens);
+      dependsOnByFeature.set(feature.id, feature.dependsOn);
     }
   }
+  const dependencyPublicationsFor = (featureId: string): DependencyPublication[] =>
+    resolveDependencyPublications(repoId, dependsOnByFeature.get(featureId) ?? []);
   const budget = createBudgetTracker(resolveBudgetLimits(
     backlog.version === 2 ? backlog.budget : undefined,
     config.budget,
@@ -120,7 +178,7 @@ export async function executeBacklog(
   let autoPilotProtectiveStop = false;
 
   const repoStageSkills = backlog.version === 2 ? backlog.defaults.stageSkills : {};
-  const effectiveStageSkills = collectEffectiveStageSkills(repoStageSkills, config.stageSkills);
+  const effectiveStageSkills = collectEffectiveStageSkills(repoStageSkills);
   const completedFeatureIds = listCompletedFeatureIds(repoId);
 
   const resolvedPlan = opts.featureId
@@ -140,6 +198,7 @@ export async function executeBacklog(
     pending: resolvedPlan.map((feature) => feature.id),
     active: [] as string[],
     aborted: [] as string[],
+    workflowRevisions: captureWorkflowRevisions(resolvedPlan),
   };
 
   const pipelineId = opts.resumePipelineId
@@ -152,7 +211,7 @@ export async function executeBacklog(
     : createPipeline(
         repoId,
         opts.featureId ?? resolvedPlan[resolvedPlan.length - 1]?.id ?? 'backlog',
-        Boolean(opts.autoAdvanceStages),
+        Boolean(resolvedPlan[resolvedPlan.length - 1]?.workflow.autoAdvance),
         { cwd: opts.cwd, snapshot: initialSnapshot },
       );
   const persistedPipeline = getPipeline(pipelineId);
@@ -166,7 +225,10 @@ export async function executeBacklog(
     ...persistedSnapshot.active,
     ...persistedSnapshot.aborted,
   ]);
-  const ordered = resolvedPlan.filter((feature) => remainingIds.has(feature.id));
+  const ordered = applyWorkflowRevisions(
+    resolvedPlan.filter((feature) => remainingIds.has(feature.id)),
+    persistedSnapshot.workflowRevisions,
+  );
 
   const registry = createSkillRegistry();
   const detachPersistence = attachRunPersistence();
@@ -251,8 +313,14 @@ export async function executeBacklog(
         signal: abortSignal,
         session,
         resumeOverride: opts.resumeOverride?.featureId === feature.id ? opts.resumeOverride : undefined,
+        stageSkills: effectiveStageSkills,
       });
-      const res = applyImplementPublishGate(initialRes, stage, opts.cwd);
+      const res = applyImplementPublishGate(
+        initialRes,
+        stage,
+        opts.cwd,
+        dependencyPublicationsFor(feature.id).map((pub) => pub.branchName),
+      );
       if (res.usage) {
         recordUsage(runId, res.usage);
         applyBudgetUsage(feature, res.usage, runId);
@@ -424,6 +492,7 @@ export async function executeBacklog(
     }
     const controller = new AbortController();
     activeControllers.set(feature.id, controller);
+    const dependencyPublications = dependencyPublicationsFor(feature.id);
     // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- workflow set by Zod default, but callers may pass raw objects
     if (feature.workflow?.mode === 'staged') {
       try {
@@ -436,6 +505,7 @@ export async function executeBacklog(
           executeStageRun,
           effectiveStageSkills,
           controller.signal,
+          dependencyPublications,
         );
       } finally {
         activeControllers.delete(feature.id);
@@ -445,6 +515,7 @@ export async function executeBacklog(
     const skills = registry.resolve(feature.skills ?? [], opts.cwd);
     const prompt = buildPrompt(feature, skills, opts.cwd, {
       maxContextChars: config.promptContextCharLimit,
+      dependencyPublications,
     });
     try {
       const { res } = await executeStageRun(feature, prompt, undefined, controller.signal);
@@ -686,6 +757,7 @@ interface RetryRunOptions {
   signal?: AbortSignal;
   session?: RunFeatureOptions['session'];
   resumeOverride?: ResumeOverride;
+  stageSkills?: Record<string, string[]>;
 }
 
 interface RetryCandidate {
@@ -745,6 +817,7 @@ async function runWithRetry(
         runId: opts.runId,
         signal: opts.signal,
         session,
+        ...(opts.stageSkills && Object.keys(opts.stageSkills).length > 0 ? { stageSkills: opts.stageSkills } : {}),
       });
 
       if (res.ok || res.control?.type === 'needs_input') {
@@ -791,26 +864,27 @@ async function executeStagedFeature(
   executeStageRun: StageExecutor,
   stageSkills: Record<string, string[]>,
   abortSignal?: AbortSignal,
+  dependencyPublications: DependencyPublication[] = [],
 ): Promise<RunResult> {
   const workflow = feature.workflow;
   const sessionPolicy = workflow.sessionPolicy;
-  // Re-read `approvals.autoAdvance` from the catalog at each transition
+  // Re-read `workflow.autoAdvance` from the catalog at each transition
   // rather than caching it once — the web UI lets the user flip this
   // checkbox while a run is already in flight, and that edit must take
   // effect on the very next stage transition instead of only on future runs.
   const resolveAutoAdvance = (): boolean => {
-    if (opts.autoAdvanceStages !== undefined) return opts.autoAdvanceStages;
-    let featureAutoAdvance = workflow.approvals.autoAdvance;
+    let autoAdvance = workflow.autoAdvance;
     try {
       const { repoId } = resolveRepo(opts.cwd);
       const liveFeature = getCatalogFeature(repoId, feature.id);
-      if (liveFeature) featureAutoAdvance = liveFeature.workflow.approvals.autoAdvance;
-    } catch {
+      if (liveFeature) autoAdvance = liveFeature.workflow.autoAdvance;
+    } catch (error) {
       // catalog read failed (e.g. sandboxed harness DB) — fall back to the
       // value captured when this run started rather than aborting a stage
       // transition over a config re-check.
+      logCaughtError('execute.resolveAutoAdvance', error);
     }
-    return featureAutoAdvance || config.workflow.autoAdvanceStages;
+    return autoAdvance;
   };
   const stages = workflow.stages;
   const persistedRequests = listStageRequestsForFeature(pipelineId, feature.id);
@@ -842,6 +916,7 @@ async function executeStagedFeature(
       opts.cwd,
       config.promptContextCharLimit,
       stageInputs.get(stage) ?? [],
+      dependencyPublications,
     );
     const { runId, res } = await executeStageRun(feature, prompt, stage, abortSignal, nextStageSession);
     if (pendingTransitionDecisionId !== null) {
@@ -862,8 +937,24 @@ async function executeStagedFeature(
         res.control.prompt,
         { runId, options: res.control.options },
       );
-      const response = await waitForStageRequestResponse(requestId, config.workflow.pollIntervalMs);
+      const response = await waitForStageRequestResponse(requestId, 2_000);
       stageInputs.set(stage, [...(stageInputs.get(stage) ?? []), response]);
+      // Reuse the same resume-vs-new-session policy as a normal stage
+      // transition instead of always forcing a fresh session — a needs_input
+      // retry is answering the same stage, not moving to a new one, so
+      // discarding `res.session` here would burn tokens re-deriving context
+      // the adapter already paid for just to receive the human's answer.
+      const retryPlan = decideStageTransition({
+        policy: sessionPolicy,
+        telemetry: getRunContextTelemetry(runId),
+        nextStage: stage,
+        expectedTool: resolvePrimaryTool(
+          feature,
+          opts.resumeOverride?.featureId === feature.id ? opts.resumeOverride : undefined,
+        ),
+        previousSession: res.session,
+      });
+      nextStageSession = retryPlan.session.mode === 'resume' ? retryPlan.session : undefined;
       index -= 1;
       continue;
     }
@@ -880,8 +971,9 @@ async function executeStagedFeature(
       try {
         const tasksFile = resolveGeneratedTasksFile(feature, opts.cwd);
         syncFeatureTasksToBacklog(feature.id, tasksFile, opts.cwd);
-      } catch {
+      } catch (error) {
         // tasks file not yet generated — skip silently
+        logCaughtError('execute.syncFeatureTasksToBacklog', error);
       }
     }
 
@@ -927,6 +1019,7 @@ async function executeStagedFeature(
           runId,
           response: 'advance',
           source: 'auto',
+          approvalChannel: workflow.approvals.channel,
         },
       );
       continue;
@@ -938,7 +1031,7 @@ async function executeStagedFeature(
       stage,
       'approval',
       `Advance to stage ${nextStage}?`,
-      { runId },
+      { runId, approvalChannel: workflow.approvals.channel },
     );
     const decision = await waitForStageApproval(
       requestId,
@@ -946,8 +1039,9 @@ async function executeStagedFeature(
       feature.id,
       stage,
       nextStage,
-      config.workflow.pollIntervalMs,
+      2_000,
       runId,
+      workflow.approvals.channel,
     );
     if (decision === 'retry') {
       pendingTransitionDecisionId = null;
@@ -990,11 +1084,13 @@ function buildStagePrompt(
   cwd: string,
   maxContextChars: number,
   adminInputs: string[],
+  dependencyPublications: DependencyPublication[] = [],
 ): string {
   const basePrompt = buildPrompt(feature, skills, cwd, {
     maxContextChars,
     activeStage: stage,
     stepGuidanceSkills,
+    dependencyPublications,
   });
   const stageNotes = [
     `Current workflow stage: ${stage}.`,
@@ -1013,23 +1109,31 @@ function buildStagePrompt(
       ].join('\n'));
     }
   }
-  if (adminInputs.length > 0) {
-    stageNotes.push(`Admin inputs already collected for this stage:\n- ${adminInputs.join('\n- ')}`);
-  }
   if (stage === 'implement') {
+    const stackedBase = dependencyPublications[0]?.branchName;
+    const branchLine = stackedBase
+      ? `- create your working branch from the dependency branch ${stackedBase} (not develop)`
+      : `- work on a named branch that is not develop`;
+    const prLine = stackedBase
+      ? `- open a pull request targeting the dependency branch ${stackedBase} (stacked PR), not develop`
+      : '- open a pull request targeting develop';
     stageNotes.push([
       'Implementation exit contract:',
-      `- work on a named branch that is not develop`,
+      branchLine,
       '- complete the implementation in this session',
       '- run the relevant validation commands before finishing',
       '- create a commit for the implementation',
       '- push the branch to its remote upstream',
-      '- open a pull request targeting develop',
+      prLine,
       '- do not claim the stage is complete unless all items above were actually completed',
     ].join('\n'));
   }
 
-  const appendedSections = [stageNotes.join('\n'), ...stageContext].filter((section) => section.trim().length > 0);
+  const adminInputSection = adminInputs.length > 0
+    ? `Admin inputs already collected for this stage:\n- ${adminInputs.join('\n- ')}`
+    : null;
+  const appendedSections = [stageNotes.join('\n'), ...stageContext, adminInputSection]
+    .filter((section): section is string => Boolean(section?.trim()));
   return `${basePrompt}\n\n---\n\n${appendedSections.join('\n\n')}`.trim();
 }
 
@@ -1037,10 +1141,14 @@ function applyImplementPublishGate(
   result: RunResult,
   stage: string | undefined,
   cwd: string,
+  dependencyBranches: string[] = [],
 ): RunResult {
   if (stage !== 'implement' || !result.ok) return result;
 
-  const verification = verifyPublishContract(cwd);
+  // A dependent feature may stack its PR on top of any dependency branch, so
+  // accept those as valid PR bases alongside develop.
+  const allowedBases = [...dependencyBranches, 'develop'];
+  const verification = verifyPublishContract(cwd, allowedBases);
   return {
     ...result,
     ok: verification.ok,
@@ -1066,7 +1174,7 @@ function resolveStepGuidanceSkills(
 function buildSpecifyStageDescription(
   feature: Feature,
   cwd: string,
-  maxContextChars: number,
+  _maxContextChars: number,
 ): string | null {
   const parts = [`Feature: ${feature.title}`];
 
@@ -1075,22 +1183,13 @@ function buildSpecifyStageDescription(
   }
 
   if (feature.specFile && existsSync(resolve(cwd, feature.specFile))) {
-    const specFileContent = truncateForStageContext(readFileSync(resolve(cwd, feature.specFile), 'utf8'), maxContextChars);
+    const specFileContent = readFileSync(resolve(cwd, feature.specFile), 'utf8');
     if (specFileContent) {
       parts.push(`Existing feature brief from ${feature.specFile}:\n${specFileContent}`);
     }
   }
 
   return parts.join('\n\n').trim() || null;
-}
-
-function truncateForStageContext(content: string, maxChars: number): string | null {
-  if (!content) return null;
-  if (content.length <= maxChars) return content;
-
-  const notice = '\n\n[truncated to respect promptContextCharLimit]';
-  const sliceLength = Math.max(0, maxChars - notice.length);
-  return `${content.slice(0, sliceLength)}${notice}`.trim();
 }
 
 function resolveGeneratedTasksFile(feature: Feature, cwd: string): string {
@@ -1134,6 +1233,7 @@ async function waitForStageApproval(
   nextStage: string,
   pollIntervalMs: number,
   runId: number,
+  approvalChannel: string,
 ): Promise<'advance' | 'retry'> {
   let pendingRequestId = requestId;
 
@@ -1146,7 +1246,7 @@ async function waitForStageApproval(
       stage,
       'approval',
       `Stage ${stage} still pending. Advance to ${nextStage}?`,
-      { runId },
+      { runId, approvalChannel },
     );
   }
 }

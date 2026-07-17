@@ -25,3 +25,12 @@ html, body {
 
 a { color: var(--accent-info); text-decoration: none; }
 a:hover { color: var(--gray-7); text-decoration: underline; }
+
+/* iOS Safari (non-standalone, incl. Add to Home Screen bookmarks) keeps 100vh
+   taller than the visible viewport while the toolbar is shown, pushing fixed
+   bottom UI (e.g. the mobile tab bar) off-screen. 100dvh tracks the real
+   visible height; 100vh stays as the fallback for browsers without dvh support. */
+.app-root {
+  height: 100vh;
+  height: 100dvh;
+}

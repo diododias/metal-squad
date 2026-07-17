@@ -76,6 +76,7 @@ vi.mock('../../src/db/repo.js', () => ({
   saveBudgetState: vi.fn(),
   listCompletedFeatureIds: mockListCompletedFeatureIds,
   listRunsForTui: mockListRunsForTui,
+  getLatestPublishedRunForFeature: vi.fn(() => null),
 }));
 
 vi.mock('node:child_process', async (importOriginal) => {
@@ -99,6 +100,7 @@ vi.mock('../../src/core/events/index.js', () => ({
   msqEventBus: {
     emit: mockEventEmit,
   },
+  logCaughtError: vi.fn(),
   attachDefaultEventLogger: mockAttachDefaultEventLogger,
   attachEventNotifications: mockAttachEventNotifications,
   attachRunPersistence: mockAttachRunPersistence,
@@ -177,6 +179,7 @@ beforeEach(() => {
     pendingJson: '[]',
     activeJson: '[]',
     abortedJson: '[]',
+    workflowSnapshotJson: '{}',
     requestedAbortFeatureId: null,
     resumeCount: 0,
     resumeSummary: null,
@@ -195,6 +198,7 @@ beforeEach(() => {
       pendingJson: JSON.stringify(opts?.snapshot?.pending ?? []),
       activeJson: JSON.stringify(opts?.snapshot?.active ?? []),
       abortedJson: JSON.stringify(opts?.snapshot?.aborted ?? []),
+      workflowSnapshotJson: JSON.stringify(opts?.snapshot?.workflowRevisions ?? {}),
     };
     return 9;
   });
@@ -213,6 +217,7 @@ beforeEach(() => {
     pending: JSON.parse(row.pendingJson),
     active: JSON.parse(row.activeJson),
     aborted: JSON.parse(row.abortedJson),
+    workflowRevisions: JSON.parse(row.workflowSnapshotJson ?? '{}'),
   }));
   mockUpdatePipelineSnapshot.mockImplementation((_pipelineId, patch, opts = {}) => {
     const current = mockGetPipelineSnapshot(pipelineRow);
@@ -224,6 +229,7 @@ beforeEach(() => {
       pendingJson: JSON.stringify(next.pending),
       activeJson: JSON.stringify(next.active),
       abortedJson: JSON.stringify(next.aborted),
+      workflowSnapshotJson: JSON.stringify(next.workflowRevisions ?? {}),
       status: opts.status ?? pipelineRow.status,
       requestedAbortFeatureId: opts.clearAbortRequest ? null : pipelineRow.requestedAbortFeatureId,
     };
@@ -334,7 +340,7 @@ describe('executeBacklog failure persistence', () => {
       executeBacklog(createImplementStageBacklog(), { cwd: '/repo', concurrency: 1 }),
     ).resolves.toBeUndefined();
 
-    expect(mockVerifyPublishContract).toHaveBeenCalledWith('/repo');
+    expect(mockVerifyPublishContract).toHaveBeenCalledWith('/repo', ['develop']);
     expect(mockUpdateRunPublishState).toHaveBeenCalledWith(7, {
       verified: true,
       error: null,
@@ -449,7 +455,18 @@ describe('executeBacklog failure persistence', () => {
     expect(mockRunFeature).toHaveBeenCalledWith(
       expect.any(Object),
       expect.any(String),
-      { cwd: '/repo', runId: 7, signal: expect.any(AbortSignal) },
+      {
+        cwd: '/repo',
+        runId: 7,
+        signal: expect.any(AbortSignal),
+        stageSkills: {
+          specify: ['speckit-specify'],
+          plan: ['speckit-plan'],
+          tasks: ['speckit-tasks'],
+          implement: ['speckit-implement', 'dev-flow'],
+          validate: ['review'],
+        },
+      },
     );
     expect(mockAttachDefaultEventLogger).toHaveBeenCalled();
     expect(mockAttachEventNotifications).toHaveBeenCalled();
@@ -530,7 +547,21 @@ describe('executeBacklog failure persistence', () => {
     const backlog: Backlog = {
       version: 2,
       repo: 'repo',
-      defaults: { tool: 'claude', effort: 'medium', skills: ['implement'], stageSkills: {} },
+      defaults: {
+        tool: 'claude',
+        effort: 'medium',
+        thinking: 'off',
+        skills: ['implement'],
+        stageSkills: {},
+        workflow: {
+          mode: 'staged',
+          stages: ['specify', 'plan', 'tasks', 'implement', 'validate'],
+          approvals: { channel: 'telegram', autoAdvance: false },
+          syncTasksToBacklog: true,
+          sessionPolicy: { mode: 'isolated', alwaysIsolatedStages: [] },
+          stepGuidance: {},
+        },
+      },
       epics: [
         {
           id: 'epic-1',
@@ -592,7 +623,21 @@ describe('executeBacklog failure persistence', () => {
     const backlog: Backlog = {
       version: 2,
       repo: 'repo',
-      defaults: { tool: 'claude', effort: 'medium', skills: ['implement'], stageSkills: {} },
+      defaults: {
+        tool: 'claude',
+        effort: 'medium',
+        thinking: 'off',
+        skills: ['implement'],
+        stageSkills: {},
+        workflow: {
+          mode: 'staged',
+          stages: ['specify', 'plan', 'tasks', 'implement', 'validate'],
+          approvals: { channel: 'telegram', autoAdvance: false },
+          syncTasksToBacklog: true,
+          sessionPolicy: { mode: 'isolated', alwaysIsolatedStages: [] },
+          stepGuidance: {},
+        },
+      },
       epics: [
         {
           id: 'epic-1',
@@ -810,7 +855,17 @@ describe('executeBacklog failure persistence', () => {
       'repo-1',
       'feat-27',
       false,
-      expect.objectContaining({ cwd: '/repo' }),
+      expect.objectContaining({
+        cwd: '/repo',
+        snapshot: expect.objectContaining({
+          workflowRevisions: {
+            'feat-27': expect.objectContaining({
+              stages: ['specify', 'plan'],
+              stepGuidance: { plan: { prompt: 'Focus only on planning output.' } },
+            }),
+          },
+        }),
+      }),
     );
     expect(mockCreateRun).toHaveBeenNthCalledWith(1, 'repo-1', 'feat-27', 'codex', {
       pipelineId: 9,
@@ -826,18 +881,63 @@ describe('executeBacklog failure persistence', () => {
       'specify',
       'approval',
       'Advance to stage plan?',
-      { runId: 7 },
+      { runId: 7, approvalChannel: 'telegram' },
     );
     expect(mockRunFeature).toHaveBeenNthCalledWith(
       1,
       expect.any(Object),
       expect.stringContaining('Treat the following block as the exact feature description passed to `/speckit-specify`:'),
-      { cwd: '/repo', runId: 7, signal: expect.any(AbortSignal) },
+      {
+        cwd: '/repo',
+        runId: 7,
+        signal: expect.any(AbortSignal),
+        stageSkills: {
+          specify: ['speckit-specify'],
+          plan: ['speckit-plan'],
+          tasks: ['speckit-tasks'],
+          implement: ['speckit-implement', 'dev-flow'],
+          validate: ['review'],
+        },
+      },
     );
     expect(mockRunFeature.mock.calls[0]?.[1]).toContain('Feature: Feature');
     expect(mockRunFeature.mock.calls[0]?.[1]).toContain('Summary:\nspec');
     expect(mockRunFeature.mock.calls[1]?.[1]).toContain('Focus only on planning output.');
     expect(mockFinishPipeline).toHaveBeenCalledWith(9, 'done');
+  });
+
+  it('rehydrates the pre-save workflow order while retaining live approvals after a later reorder', async () => {
+    const backlog: Backlog = {
+      version: 2,
+      repo: 'repo',
+      defaults: { tool: 'codex', effort: 'medium', skills: ['implement'], stageSkills: {} },
+      epics: [{
+        id: 'epic-1',
+        title: 'Epic',
+        features: [{
+          id: 'feat-27', title: 'Feature', spec: 'spec', tasks: [], tool: 'codex', effort: 'medium', dependsOn: [],
+          workflow: {
+            mode: 'staged', stages: ['plan', 'specify', 'implement'], approvals: { channel: 'telegram' }, autoAdvance: true,
+            syncTasksToBacklog: false, sessionPolicy: { mode: 'adaptive', alwaysIsolatedStages: [] },
+          },
+        }],
+      }],
+    };
+    const { rehydrateBacklogWorkflowRevisions } = await import('../../src/core/runner/execute.js');
+
+    const restored = rehydrateBacklogWorkflowRevisions(backlog, {
+      'feat-27': {
+        mode: 'staged', stages: ['specify', 'plan', 'implement'], syncTasksToBacklog: true,
+        sessionPolicy: { mode: 'isolated', alwaysIsolatedStages: ['plan'] },
+        stepGuidance: { plan: { prompt: 'Revision A.' } },
+      },
+    });
+
+    expect(restored.epics[0]?.features[0]?.workflow).toEqual({
+      mode: 'staged', stages: ['specify', 'plan', 'implement'], approvals: { channel: 'telegram' }, autoAdvance: true,
+      syncTasksToBacklog: true, sessionPolicy: { mode: 'isolated', alwaysIsolatedStages: ['plan'] },
+      stepGuidance: { plan: { prompt: 'Revision A.' } },
+    });
   });
 
   it('honors autoAdvance toggled mid-run via the catalog instead of the value captured at run start', async () => {
@@ -862,7 +962,8 @@ describe('executeBacklog failure persistence', () => {
                 mode: 'staged',
                 stages: ['specify', 'plan'],
                 // Run started with autoAdvance disabled...
-                approvals: { channel: 'telegram', autoAdvance: false },
+                approvals: { channel: 'telegram' },
+                autoAdvance: false,
                 syncTasksToBacklog: false,
                 sessionPolicy: { mode: 'isolated', alwaysIsolatedStages: [] },
               },
@@ -875,7 +976,7 @@ describe('executeBacklog failure persistence', () => {
     // ...but the user flips the checkbox in the web UI while the run is in
     // flight, which patches the catalog row read by `getCatalogFeature`.
     mockGetCatalogFeature.mockReturnValue({
-      workflow: { approvals: { autoAdvance: true } },
+      workflow: { autoAdvance: true },
     });
 
     mockRunFeature
@@ -897,7 +998,7 @@ describe('executeBacklog failure persistence', () => {
       'specify',
       'approval',
       'Auto-advance enabled; next stage: plan.',
-      { runId: 7, response: 'advance', source: 'auto' },
+      { runId: 7, response: 'advance', source: 'auto', approvalChannel: 'telegram' },
     );
     expect(mockGetStageRequest).not.toHaveBeenCalled();
     expect(mockFinishPipeline).toHaveBeenCalledWith(9, 'done');
@@ -950,6 +1051,12 @@ describe('executeBacklog failure persistence', () => {
     ).resolves.toBeUndefined();
 
     expect(mockCreateRun).toHaveBeenCalledTimes(2);
+    const resumedPrompt = mockRunFeature.mock.calls[1]?.[1] ?? '';
+    expect(resumedPrompt).toContain('/speckit-specify');
+    expect(resumedPrompt).toContain('Feature summary:\nspec');
+    expect(resumedPrompt).toContain('Admin inputs already collected for this stage:\n- Nome final');
+    expect(resumedPrompt.lastIndexOf('Nome final')).toBeGreaterThan(resumedPrompt.indexOf('Feature summary:\nspec'));
+    expect(resumedPrompt.endsWith('- Nome final')).toBe(true);
     expect(mockFinishRun).toHaveBeenCalledWith(
       7,
       'blocked',
@@ -1024,6 +1131,87 @@ describe('executeBacklog failure persistence', () => {
       'Qual estrategia de cache?',
       { runId: 7, options: ['Cache em memoria', 'Cache em SQLite'] },
     );
+  });
+
+  it('resumes the previous adapter session when retrying a stage after needs_input is answered', async () => {
+    const backlog: Backlog = {
+      version: 2,
+      repo: 'repo',
+      defaults: { tool: 'codex', effort: 'medium', skills: ['implement'], stageSkills: {} },
+      epics: [
+        {
+          id: 'epic-1',
+          title: 'Epic',
+          features: [
+            {
+              id: 'feat-27',
+              title: 'Feature',
+              spec: 'spec',
+              tasks: [],
+              tool: 'codex',
+              effort: 'medium',
+              dependsOn: [],
+              workflow: {
+                mode: 'staged',
+                stages: ['specify'],
+                approvals: { channel: 'telegram', autoAdvance: false },
+                syncTasksToBacklog: false,
+                sessionPolicy: { mode: 'adaptive', alwaysIsolatedStages: [] },
+              },
+            },
+          ],
+        },
+      ],
+    };
+
+    mockRunFeature
+      .mockResolvedValueOnce({
+        ok: true,
+        summary: 'MSQ_INPUT_REQUIRED: Qual o nome da feature?',
+        control: { type: 'needs_input', prompt: 'Qual o nome da feature?' },
+        session: {
+          tool: 'codex',
+          sessionId: 'thread_q',
+          capturedFromRunId: 7,
+          capturedAt: '2026-07-11T11:00:00Z',
+        },
+      })
+      .mockResolvedValueOnce({ ok: true, summary: 'spec ok' });
+    mockGetStageRequest.mockReturnValue({ status: 'resolved', response: 'Nome final' });
+    mockGetRunContextTelemetry.mockReturnValue({
+      runId: 7,
+      stage: 'specify',
+      contextWindowPercent: 20,
+      reliable: true,
+    });
+
+    const { executeBacklog } = await import('../../src/core/runner/execute.js');
+
+    await expect(
+      executeBacklog(backlog, { cwd: '/repo', concurrency: 1 }),
+    ).resolves.toBeUndefined();
+
+    expect(mockRunFeature.mock.calls[1]?.[2]).toEqual({
+      cwd: '/repo',
+      runId: 7,
+      signal: expect.any(AbortSignal),
+      session: {
+        mode: 'resume',
+        handle: {
+          tool: 'codex',
+          sessionId: 'thread_q',
+          capturedFromRunId: 7,
+          capturedAt: '2026-07-11T11:00:00Z',
+        },
+      },
+      stageSkills: {
+        specify: ['speckit-specify'],
+        plan: ['speckit-plan'],
+        tasks: ['speckit-tasks'],
+        implement: ['speckit-implement', 'dev-flow'],
+        validate: ['review'],
+      },
+    });
   });
 
   it('resumes a staged workflow from the next stage after an approved checkpoint', async () => {
@@ -1161,6 +1349,13 @@ describe('executeBacklog failure persistence', () => {
           capturedAt: '2026-07-11T11:00:00Z',
         },
       },
+      stageSkills: {
+        specify: ['speckit-specify'],
+        plan: ['speckit-plan'],
+        tasks: ['speckit-tasks'],
+        implement: ['speckit-implement', 'dev-flow'],
+        validate: ['review'],
+      },
     });
     expect(mockUpdateStageTransitionDecisionNextSessionId).toHaveBeenCalledWith(101, 'thread_1');
   });
@@ -1221,6 +1416,13 @@ describe('executeBacklog failure persistence', () => {
           capturedAt: '2026-07-11T11:10:00Z',
         },
       },
+      stageSkills: {
+        specify: ['speckit-specify'],
+        plan: ['speckit-plan'],
+        tasks: ['speckit-tasks'],
+        implement: ['speckit-implement', 'dev-flow'],
+        validate: ['review'],
+      },
     });
   });
 
@@ -1257,6 +1459,13 @@ describe('executeBacklog failure persistence', () => {
       cwd: '/repo',
       runId: 7,
       signal: expect.any(AbortSignal),
+      stageSkills: {
+        specify: ['speckit-specify'],
+        plan: ['speckit-plan'],
+        tasks: ['speckit-tasks'],
+        implement: ['speckit-implement', 'dev-flow'],
+        validate: ['review'],
+      },
     });
   });
 
@@ -1297,6 +1506,13 @@ describe('executeBacklog failure persistence', () => {
       cwd: '/repo',
       runId: 7,
       signal: expect.any(AbortSignal),
+      stageSkills: {
+        specify: ['speckit-specify'],
+        plan: ['speckit-plan'],
+        tasks: ['speckit-tasks'],
+        implement: ['speckit-implement', 'dev-flow'],
+        validate: ['review'],
+      },
     });
   });
 
@@ -1337,6 +1553,13 @@ describe('executeBacklog failure persistence', () => {
       cwd: '/repo',
       runId: 7,
       signal: expect.any(AbortSignal),
+      stageSkills: {
+        specify: ['speckit-specify'],
+        plan: ['speckit-plan'],
+        tasks: ['speckit-tasks'],
+        implement: ['speckit-implement', 'dev-flow'],
+        validate: ['review'],
+      },
     });
   });
 
@@ -1378,6 +1601,13 @@ describe('executeBacklog failure persistence', () => {
       cwd: '/repo',
       runId: 7,
       signal: expect.any(AbortSignal),
+      stageSkills: {
+        specify: ['speckit-specify'],
+        plan: ['speckit-plan'],
+        tasks: ['speckit-tasks'],
+        implement: ['speckit-implement', 'dev-flow'],
+        validate: ['review'],
+      },
     });
   });
 
@@ -1419,6 +1649,13 @@ describe('executeBacklog failure persistence', () => {
       cwd: '/repo',
       runId: 7,
       signal: expect.any(AbortSignal),
+      stageSkills: {
+        specify: ['speckit-specify'],
+        plan: ['speckit-plan'],
+        tasks: ['speckit-tasks'],
+        implement: ['speckit-implement', 'dev-flow'],
+        validate: ['review'],
+      },
     });
   });
 
@@ -1692,7 +1929,7 @@ describe('executeBacklog auto-pilot', () => {
     }));
   });
 
-  it('continues to the next autoStart feature after an ordinary execution failure', async () => {
+  it('stops auto-pilot and notifies a human after an execution failure', async () => {
     const backlog = twoFeatureAutoStartBacklog({
       feat01Retry: { maxAttempts: 1, backoffMs: 0, onFail: 'continue', fallback: [] },
     });
@@ -1701,15 +1938,14 @@ describe('executeBacklog auto-pilot', () => {
     const { executeBacklog } = await import('../../src/core/runner/execute.js');
     await executeBacklog(backlog, { cwd: '/repo', concurrency: 1, featureId: 'feat-01' });
 
-    expect(mockSpawn).toHaveBeenCalledWith(
-      expect.any(String),
-      expect.arrayContaining(['run', '--feature', 'feat-02']),
-      expect.any(Object),
-    );
+    expect(mockSpawn).not.toHaveBeenCalled();
+    expect(mockEventEmit).toHaveBeenCalledWith('run:failed', expect.objectContaining({
+      featureId: 'feat-01',
+      error: 'boom',
+    }));
     expect(mockEventEmit).toHaveBeenCalledWith('autopilot:decision', expect.objectContaining({
       triggerKind: 'failed-execution',
-      action: 'start',
-      selectedFeatureId: 'feat-02',
+      action: 'stop',
     }));
   });
 
@@ -1723,7 +1959,7 @@ describe('executeBacklog auto-pilot', () => {
     expect(mockSpawn).not.toHaveBeenCalled();
     expect(mockEventEmit).toHaveBeenCalledWith('autopilot:decision', expect.objectContaining({
       triggerKind: 'aborted-manual',
-      action: 'idle',
+      action: 'stop',
     }));
   });
 

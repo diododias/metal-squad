@@ -5,6 +5,18 @@ const mockRunCli = vi.fn();
 const mockSpawn = vi.fn();
 const mockExecFileSync = vi.fn();
 const mockEventEmit = vi.fn();
+const mockResolveRuntimeConfig = vi.fn();
+
+const DEFAULT_TOOLS = [
+  { id: 'claude', adapter: 'claude', command: 'claude', baseArgs: [], env: {}, versionCheck: ['--version'] },
+  { id: 'codex', adapter: 'codex', command: 'codex', baseArgs: [], env: {}, versionCheck: ['--version'] },
+  { id: 'opencode', adapter: 'opencode', command: 'opencode', baseArgs: [], env: {}, versionCheck: ['--version'] },
+];
+
+vi.mock('../../src/config/index.js', async () => {
+  const actual = await vi.importActual<typeof import('../../src/config/index.js')>('../../src/config/index.js');
+  return { ...actual, resolveRuntimeConfig: mockResolveRuntimeConfig };
+});
 
 vi.mock('../../src/core/adapters/spawn.js', async () => {
   const actual = await vi.importActual<typeof import('../../src/core/adapters/spawn.js')>('../../src/core/adapters/spawn.js');
@@ -23,10 +35,16 @@ vi.mock('../../src/core/events/index.js', () => ({
   msqEventBus: {
     emit: mockEventEmit,
   },
+  logCaughtError: vi.fn(),
 }));
 
 beforeEach(() => {
   vi.clearAllMocks();
+  mockResolveRuntimeConfig.mockReturnValue({
+    toolTimeoutMs: 600_000,
+    idleThresholdMs: 30_000,
+    tools: DEFAULT_TOOLS,
+  });
   mockExecFileSync.mockReset();
   mockEventEmit.mockReset();
 });
@@ -45,13 +63,65 @@ describe('adapter registry', () => {
   });
 });
 
+describe('tool registry spawn resolution', () => {
+  it('uses adapter defaults when a legacy registry entry omits runtime settings', async () => {
+    const { resolveToolInvocation } = await import('../../src/core/adapters/spawn.js');
+
+    expect(resolveToolInvocation('codex', '/repo')).toMatchObject({
+      capabilities: { model: true, effort: true, thinking: false },
+      thinkingBudget: { low: 0, medium: 0, high: 0 },
+      minTimeoutMs: 1_800_000,
+    });
+  });
+
+  it('launches the configured command with baseArgs and merged env', async () => {
+    mockResolveRuntimeConfig.mockReturnValue({
+      toolTimeoutMs: 600_000,
+      idleThresholdMs: 30_000,
+      tools: [
+        DEFAULT_TOOLS[0],
+        {
+          ...DEFAULT_TOOLS[1],
+          command: 'codex-canary',
+          baseArgs: ['--registry-flag'],
+          env: { CODEX_CHANNEL: 'canary' },
+          versionCheck: ['version', '--json'],
+          minTimeoutMs: 1_900_000,
+        },
+        DEFAULT_TOOLS[2],
+      ],
+    });
+    mockRunCli.mockResolvedValue({ code: 0, stdout: '', stderr: '' });
+    const { codexAdapter } = await import('../../src/core/adapters/codex.js');
+
+    await codexAdapter.runFeature(
+      { id: 'feat-1', title: 'Feature', tool: 'codex', effort: 'medium', dependsOn: [], tasks: [] },
+      'PROMPT',
+      { cwd: '/repo', runId: 1 },
+    );
+
+    expect(mockRunCli).toHaveBeenCalledWith(
+      'codex-canary',
+      expect.arrayContaining(['--registry-flag', 'exec']),
+      expect.objectContaining({ env: { CODEX_CHANNEL: 'canary' }, timeoutMs: 1_900_000 }),
+    );
+
+    codexAdapter.isAvailable?.();
+    expect(mockExecFileSync).toHaveBeenCalledWith(
+      'codex-canary',
+      ['version', '--json'],
+      { stdio: 'ignore' },
+    );
+  });
+});
+
 describe('claude adapter', () => {
-  it('maps effort tiers to models', async () => {
+  it('keeps effortFlag empty since effort no longer selects a model tier', async () => {
     const { claudeAdapter } = await import('../../src/core/adapters/claude.js');
 
-    expect(claudeAdapter.effortFlag('low')).toEqual(['--model', 'haiku']);
-    expect(claudeAdapter.effortFlag('medium')).toEqual(['--model', 'sonnet']);
-    expect(claudeAdapter.effortFlag('high')).toEqual(['--model', 'opus']);
+    expect(claudeAdapter.effortFlag('low')).toEqual([]);
+    expect(claudeAdapter.effortFlag('medium')).toEqual([]);
+    expect(claudeAdapter.effortFlag('high')).toEqual([]);
   });
 
   it('returns failed result when cli exits with non-zero code', async () => {
@@ -95,6 +165,7 @@ describe('claude adapter', () => {
           title: 'Feature',
           tool: 'claude',
           effort: 'medium',
+          thinking: 'off',
           model: 'custom',
           dependsOn: [],
           tasks: [],
@@ -116,6 +187,7 @@ describe('claude adapter', () => {
       expect.arrayContaining(['--print', '--output-format', 'stream-json', '--verbose', '--dangerously-skip-permissions', '--model', 'custom', '--', 'PROMPT']),
       expect.objectContaining({
         cwd: '/repo',
+        env: { MAX_THINKING_TOKENS: '0' },
         idleThresholdMs: 30_000,
         onStatus: expect.any(Function),
         onStdoutLine: expect.any(Function),
@@ -132,6 +204,51 @@ describe('claude adapter', () => {
       output: 3,
       total: 5,
     });
+  });
+
+  it('coexists model, effort and thinking=on in the spawn', async () => {
+    mockResolveRuntimeConfig.mockReturnValue({
+      toolTimeoutMs: 600_000,
+      idleThresholdMs: 30_000,
+      tools: [
+        { ...DEFAULT_TOOLS[0], thinkingBudget: { low: 1_234, medium: 5_678, high: 9_876 } },
+        DEFAULT_TOOLS[1],
+        DEFAULT_TOOLS[2],
+      ],
+    });
+    const resultLine = JSON.stringify({
+      type: 'result',
+      subtype: 'success',
+      result: 'done',
+      usage: { input_tokens: 2, output_tokens: 3 },
+    });
+    mockRunCli.mockResolvedValue({
+      code: 0,
+      stdout: resultLine,
+      stderr: '',
+    });
+    const { claudeAdapter } = await import('../../src/core/adapters/claude.js');
+
+    await claudeAdapter.runFeature(
+      {
+        id: 'feat-1',
+        title: 'Feature',
+        tool: 'claude',
+        effort: 'high',
+        thinking: 'on',
+        model: 'custom',
+        dependsOn: [],
+        tasks: [],
+      },
+      'PROMPT',
+      { cwd: '/repo', runId: 4 },
+    );
+
+    expect(mockRunCli).toHaveBeenCalledWith(
+      'claude',
+      expect.arrayContaining(['--model', 'custom']),
+      expect.objectContaining({ env: { MAX_THINKING_TOKENS: '9876' } }),
+    );
   });
 
   it('handles malformed JSON and max-turn errors', async () => {
@@ -204,6 +321,7 @@ describe('claude adapter', () => {
       line: 'Atualizando prompt builder agora.',
       stream: 'stdout',
       source: 'agent',
+      createdAt: expect.any(String),
     });
     expect(mockEventEmit).toHaveBeenCalledWith('run:output', {
       runId: 4,
@@ -212,6 +330,7 @@ describe('claude adapter', () => {
       line: 'warning: still running',
       stream: 'stderr',
       source: 'stderr',
+      createdAt: expect.any(String),
     });
   });
 
@@ -354,6 +473,45 @@ describe('claude adapter', () => {
 });
 
 describe('opencode adapter', () => {
+  it('reads capabilities from the resolved registry entry', async () => {
+    mockRunCli.mockResolvedValue({
+      code: 0,
+      stdout: JSON.stringify({ response: 'done' }),
+      stderr: '',
+    });
+    const { opencodeAdapter } = await import('../../src/core/adapters/opencode.js');
+
+    await opencodeAdapter.runFeature(
+      {
+        id: 'feat-1',
+        title: 'Feature',
+        tool: 'opencode',
+        effort: 'high',
+        thinking: 'on',
+        dependsOn: [],
+        tasks: [],
+      },
+      'test-prompt',
+      { cwd: '/repo', runId: 20 },
+    );
+
+    expect(mockEventEmit).toHaveBeenCalledWith('run:output', expect.objectContaining({
+      runId: 20,
+      featureId: 'feat-1',
+      tool: 'opencode',
+      line: 'aviso: opencode não suporta effort; opção ignorada.',
+    }));
+    expect(mockEventEmit).toHaveBeenCalledWith('run:output', expect.objectContaining({
+      runId: 20,
+      featureId: 'feat-1',
+      tool: 'opencode',
+      line: 'aviso: opencode não suporta thinking; opção ignorada.',
+    }));
+
+    const [, calledArgs] = mockRunCli.mock.calls[0] as [string, string[], unknown];
+    expect(calledArgs).not.toContain('--thinking');
+  });
+
   it('keeps effortFlag empty and handles cli failures', async () => {
     mockRunCli.mockResolvedValue({ code: 2, stdout: '', stderr: 'bad' });
     const { opencodeAdapter } = await import('../../src/core/adapters/opencode.js');

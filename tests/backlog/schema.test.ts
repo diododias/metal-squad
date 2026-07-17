@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { BacklogInputSchema, BacklogSchema, BacklogV1Schema, BacklogV2Schema, EpicSchema, FallbackAlternativeSchema, RetrySchema } from '../../src/core/backlog/schema.js';
+import { BacklogInputSchema, BacklogSchema, BacklogV1Schema, BacklogV2Schema, createRegisteredToolSchema, EpicSchema, FallbackAlternativeSchema, RetrySchema } from '../../src/core/backlog/schema.js';
 
 const V1_YAML_OBJ = {
   version: 1,
@@ -88,7 +88,44 @@ describe('BacklogV1Schema', () => {
   });
 });
 
+describe('tool registry references', () => {
+  it('accepts multiple registered ids for the same adapter', () => {
+    const schema = createRegisteredToolSchema(['codex', 'codex-canary']);
+
+    expect(schema.safeParse('codex').success).toBe(true);
+    expect(schema.safeParse('codex-canary').success).toBe(true);
+  });
+
+  it('rejects an unregistered tool with an actionable error', () => {
+    const result = createRegisteredToolSchema(['claude', 'codex']).safeParse('missing-tool');
+
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.error.issues[0]?.message).toContain('Tool "missing-tool" is not registered');
+      expect(result.error.issues[0]?.message).toContain('claude, codex');
+    }
+  });
+});
+
 describe('BacklogV2Schema', () => {
+  it('accepts an approval channel that references a configured notification type', () => {
+    const result = BacklogV2Schema.safeParse({
+      ...V2_YAML_OBJ,
+      epics: [{
+        ...V2_YAML_OBJ.epics[0],
+        features: [{
+          ...V2_YAML_OBJ.epics[0].features[0],
+          workflow: {
+            ...V2_YAML_OBJ.epics[0].features[0].workflow,
+            approvals: { channel: 'slack', autoAdvance: false },
+          },
+        }],
+      }],
+    });
+    expect(result.success).toBe(true);
+    if (result.success) expect(result.data.epics[0]?.features[0]?.workflow.approvals.channel).toBe('slack');
+  });
+
   it('parses a valid v2 object', () => {
     const result = BacklogV2Schema.safeParse(V2_YAML_OBJ);
     expect(result.success).toBe(true);
@@ -99,6 +136,13 @@ describe('BacklogV2Schema', () => {
     }
   });
 
+  it('migrates approvals.autoAdvance to the unified workflow.autoAdvance field', () => {
+    const result = BacklogV2Schema.parse(V2_YAML_OBJ);
+    const workflow = result.epics[0]?.features[0]?.workflow;
+    expect(workflow?.autoAdvance).toBe(false);
+    expect(workflow?.approvals).toEqual({ channel: 'telegram' });
+  });
+
   it('applies defaults when defaults block is missing', () => {
     const obj = { version: 2, repo: 'test-repo', epics: [] };
     const result = BacklogV2Schema.safeParse(obj);
@@ -106,8 +150,43 @@ describe('BacklogV2Schema', () => {
     if (result.success) {
       expect(result.data.defaults.tool).toBe('claude');
       expect(result.data.defaults.effort).toBe('medium');
+      expect(result.data.defaults.thinking).toBe('off');
       expect(result.data.defaults.skills).toEqual([]);
     }
+  });
+
+  it('accepts model, effort and thinking as independent fields on defaults and feature', () => {
+    const result = BacklogV2Schema.safeParse({
+      ...V2_YAML_OBJ,
+      defaults: { tool: 'claude', model: 'opus', effort: 'high', thinking: 'on' },
+      epics: [
+        {
+          ...V2_YAML_OBJ.epics[0],
+          features: [
+            {
+              ...V2_YAML_OBJ.epics[0].features[0],
+              model: 'sonnet',
+              effort: 'low',
+              thinking: 'on',
+            },
+          ],
+        },
+      ],
+    });
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.defaults).toMatchObject({ model: 'opus', effort: 'high', thinking: 'on' });
+      const feat = result.data.epics[0]?.features[0];
+      expect(feat).toMatchObject({ model: 'sonnet', effort: 'low', thinking: 'on' });
+    }
+  });
+
+  it('rejects an invalid thinking value', () => {
+    const result = BacklogV2Schema.safeParse({
+      ...V2_YAML_OBJ,
+      defaults: { tool: 'claude', thinking: 'maybe' },
+    });
+    expect(result.success).toBe(false);
   });
 
   it('rejects version 1', () => {

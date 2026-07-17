@@ -6,6 +6,9 @@ export interface OutputLine {
   tool?: string;
   source?: string;
   line: string;
+  createdAt?: string;
+  toolName?: string;
+  level?: 'error' | 'warn';
   [key: string]: unknown;
 }
 
