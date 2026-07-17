@@ -449,7 +449,7 @@ function emitToolCall(opts: RunFeatureOptions, feature: Feature, partial: Omit<T
 }
 
 function normalizeSnippet(text: unknown): string {
-  return String(text ?? '').replace(/\s+/g, ' ').trim().slice(0, 140); // eslint-disable-line @typescript-eslint/no-base-to-string
+  return String(text ?? '').replace(/\s+/g, ' ').trim(); // eslint-disable-line @typescript-eslint/no-base-to-string
 }
 
 function deriveCodexToolName(evt: CodexEvent): string | null {

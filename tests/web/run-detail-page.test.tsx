@@ -381,6 +381,53 @@ describe('RunDetailPage error output', () => {
   });
 });
 
+describe('RunDetailPage complete live output', () => {
+  it('keeps full agent, tool-call, and error messages available in the transcript', () => {
+    const run = makeRun();
+    const container = document.createElement('div');
+    document.body.append(container);
+    const root = createRoot(container);
+    roots.push(root);
+    const agentMessage = `agent ${'progress '.repeat(40)}`;
+    const command = `command ${'argument '.repeat(40)}`;
+    const toolOutput = `tool-output ${'detail '.repeat(40)}`;
+    const errorMessage = `ERROR ${'failure detail '.repeat(40)}`;
+
+    act(() => {
+      root.render(
+        <RunDetailPage
+          state={makeState(run)}
+          featureId="feat-1"
+          runDetails={{
+            1: {
+              taskRuns: [], breakdown: null, sessionStatus: null, statusHistory: [],
+              toolCalls: [
+                { id: 'tool-output', runId: 1, featureId: 'feat-1', tool: 'codex', sequence: 1, phase: 'completed', name: 'shell', arguments: { command }, output: toolOutput, step: null, startedAt: '2026-07-16T13:50:37.000Z', completedAt: null, error: null },
+                { id: 'tool-error', runId: 1, featureId: 'feat-1', tool: 'codex', sequence: 2, phase: 'failed', name: 'apply_patch', arguments: null, output: null, step: null, startedAt: '2026-07-16T13:50:38.000Z', completedAt: null, error: errorMessage },
+              ],
+            },
+          } as unknown as Parameters<typeof RunDetailPage>[0]['runDetails']}
+          linesByRun={{ 1: [{ runId: 1, source: 'agent', line: agentMessage, createdAt: '2026-07-16T13:50:36.000Z' }] }}
+          onSubscribeRun={() => () => undefined}
+          onBack={() => undefined}
+          send={vi.fn()}
+        />,
+      );
+    });
+
+    const outputTab = Array.from(container.querySelectorAll('button, [role="tab"]')).find((el) => el.textContent === 'Live Output');
+    act(() => { (outputTab as HTMLElement)?.click(); });
+
+    expect(container.textContent).toContain(agentMessage);
+    expect(container.textContent).toContain(command);
+    for (const toggle of Array.from(container.querySelectorAll('div')).filter((el) => el.children.length === 0 && el.textContent?.startsWith('▸ show output'))) {
+      act(() => { (toggle as HTMLElement).click(); });
+    }
+    expect(container.textContent).toContain(toolOutput);
+    expect(container.textContent).toContain(errorMessage);
+  });
+});
+
 describe('RunDetailPage mobile close control', () => {
   afterEach(() => {
     window.history.replaceState(null, '', '/');
