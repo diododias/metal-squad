@@ -378,7 +378,7 @@ export function listRunToolCalls(runId: number, limit = 200): RunToolCallRow[] {
 export function getRunSessionStatus(runId: number): SessionStatusSnapshot | null {
   if (!hasDbFile()) return null;
   const row = getDb('readonly').prepare(
-    `SELECT run_id AS runId, feature_id AS featureId, tool, session_status AS status,
+    `SELECT id AS runId, feature_id AS featureId, tool, session_status AS status,
             session_started_at AS startedAt, session_updated_at AS updatedAt,
             session_elapsed_ms AS elapsedMs, session_last_output_at AS lastOutputAt,
             session_idle_ms AS idleMs, session_reason AS reason, session_terminal AS terminal
