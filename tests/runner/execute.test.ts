@@ -76,6 +76,7 @@ vi.mock('../../src/db/repo.js', () => ({
   saveBudgetState: vi.fn(),
   listCompletedFeatureIds: mockListCompletedFeatureIds,
   listRunsForTui: mockListRunsForTui,
+  getLatestPublishedRunForFeature: vi.fn(() => null),
 }));
 
 vi.mock('node:child_process', async (importOriginal) => {
@@ -338,7 +339,7 @@ describe('executeBacklog failure persistence', () => {
       executeBacklog(createImplementStageBacklog(), { cwd: '/repo', concurrency: 1 }),
     ).resolves.toBeUndefined();
 
-    expect(mockVerifyPublishContract).toHaveBeenCalledWith('/repo');
+    expect(mockVerifyPublishContract).toHaveBeenCalledWith('/repo', ['develop']);
     expect(mockUpdateRunPublishState).toHaveBeenCalledWith(7, {
       verified: true,
       error: null,

@@ -277,6 +277,59 @@ describe('verifyPublishContract', () => {
     });
   });
 
+  it('accepts a stacked PR whose base is an allowed dependency branch', async () => {
+    mockExecFileSync.mockImplementation((command: string, args?: string[]) => {
+      const joined = `${command} ${(args ?? []).join(' ')}`;
+      if (joined === 'git rev-parse --abbrev-ref HEAD') return 'feat/child\n';
+      if (joined === 'git rev-parse HEAD') return 'abc1234\n';
+      if (joined === 'git rev-parse --abbrev-ref --symbolic-full-name @{u}') return 'origin/feat/child\n';
+      if (joined === 'git rev-parse --verify feat/dep-a') return 'depbase1\n';
+      if (joined === 'git rev-list --count feat/dep-a..HEAD') return '3\n';
+      if (joined === 'gh --version') return '2.0.0\n';
+      if (joined === 'gh pr view --json number,url,state,baseRefName,headRefName') {
+        return JSON.stringify({
+          number: 55,
+          url: 'https://example.test/pr/55',
+          state: 'OPEN',
+          baseRefName: 'feat/dep-a',
+          headRefName: 'feat/child',
+        });
+      }
+      throw new Error(`unexpected command: ${joined}`);
+    });
+
+    const { verifyPublishContract } = await import('../../src/core/git/publish.js');
+    expect(verifyPublishContract('/repo', ['feat/dep-a', 'develop'])).toMatchObject({
+      ok: true,
+      status: 'done',
+      summary: 'implement publish verified on feat/child (https://example.test/pr/55).',
+      evidence: { branch: 'feat/child', baseBranch: 'feat/dep-a', prNumber: 55 },
+    });
+  });
+
+  it('fails when the PR base is outside the allowed set of bases', async () => {
+    mockExecFileSync.mockImplementation((command: string, args?: string[]) => {
+      const joined = `${command} ${(args ?? []).join(' ')}`;
+      if (joined === 'git rev-parse --abbrev-ref HEAD') return 'feat/child\n';
+      if (joined === 'git rev-parse HEAD') return 'abc1234\n';
+      if (joined === 'git rev-parse --abbrev-ref --symbolic-full-name @{u}') return 'origin/feat/child\n';
+      if (joined === 'git rev-parse --verify feat/dep-a') return 'depbase1\n';
+      if (joined === 'git rev-list --count feat/dep-a..HEAD') return '3\n';
+      if (joined === 'gh --version') return '2.0.0\n';
+      if (joined === 'gh pr view --json number,url,state,baseRefName,headRefName') {
+        return JSON.stringify({ number: 56, url: 'https://example.test/pr/56', state: 'OPEN', baseRefName: 'main' });
+      }
+      throw new Error(`unexpected command: ${joined}`);
+    });
+
+    const { verifyPublishContract } = await import('../../src/core/git/publish.js');
+    expect(verifyPublishContract('/repo', ['feat/dep-a', 'develop'])).toMatchObject({
+      ok: false,
+      status: 'failed',
+      summary: 'implement: pull request base is main, expected feat/dep-a or develop.',
+    });
+  });
+
   it('fails when the PR is not open', async () => {
     mockExecFileSync.mockImplementation((command: string, args?: string[]) => {
       const joined = `${command} ${(args ?? []).join(' ')}`;

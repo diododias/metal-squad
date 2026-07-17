@@ -90,14 +90,28 @@ function resolvePullRequest(cwd: string): GhPullRequestView | null {
   return parsePrView(raw);
 }
 
-export function verifyPublishContract(cwd: string, baseBranch = 'develop'): PublishVerification {
+export function verifyPublishContract(
+  cwd: string,
+  allowedBaseBranches: string[] = ['develop'],
+): PublishVerification {
+  // The set of acceptable PR base branches: always `develop`, plus any
+  // dependency branch a dependent feature may stack its PR on top of.
+  const allowedBases = allowedBaseBranches.length > 0 ? allowedBaseBranches : ['develop'];
+  const primaryBase = allowedBases[0] ?? 'develop';
+  const allowedLabel = allowedBases.join(' or ');
   const branch = tryRunGit(['rev-parse', '--abbrev-ref', 'HEAD'], cwd);
   const commitSha = tryRunGit(['rev-parse', 'HEAD'], cwd);
   const remoteBranch = resolveRemoteBranch(cwd);
   const pr = resolvePullRequest(cwd);
+  // The effective base is the PR's actual base when it is one of the allowed
+  // branches (agent may have chosen any dependency branch); otherwise fall back
+  // to the primary base for reporting/comparison.
+  const effectiveBase = typeof pr?.baseRefName === 'string' && allowedBases.includes(pr.baseRefName)
+    ? pr.baseRefName
+    : primaryBase;
   const evidence: PublishEvidence = {
     branch,
-    baseBranch,
+    baseBranch: effectiveBase,
     commitSha,
     remoteBranch,
     prNumber: typeof pr?.number === 'number' ? pr.number : null,
@@ -113,21 +127,21 @@ export function verifyPublishContract(cwd: string, baseBranch = 'develop'): Publ
     };
   }
 
-  if (branch === baseBranch) {
+  if (allowedBases.includes(branch)) {
     return {
       ok: false,
       status: 'failed',
-      summary: `implement: branch must not be ${baseBranch}.`,
+      summary: `implement: branch must not be ${branch}.`,
       evidence,
     };
   }
 
-  const commitsAhead = countCommitsAheadOfBase(cwd, baseBranch);
+  const commitsAhead = countCommitsAheadOfBase(cwd, effectiveBase);
   if (commitsAhead === null) {
     return {
       ok: false,
       status: 'blocked',
-      summary: `implement: could not compare HEAD against ${baseBranch}.`,
+      summary: `implement: could not compare HEAD against ${effectiveBase}.`,
       evidence,
     };
   }
@@ -136,7 +150,7 @@ export function verifyPublishContract(cwd: string, baseBranch = 'develop'): Publ
     return {
       ok: false,
       status: 'failed',
-      summary: `implement: branch has no commits ahead of ${baseBranch}.`,
+      summary: `implement: branch has no commits ahead of ${effectiveBase}.`,
       evidence,
     };
   }
@@ -163,16 +177,16 @@ export function verifyPublishContract(cwd: string, baseBranch = 'develop'): Publ
     return {
       ok: false,
       status: 'blocked',
-      summary: `implement: no pull request is open for the current branch against ${baseBranch}.`,
+      summary: `implement: no pull request is open for the current branch against ${allowedLabel}.`,
       evidence,
     };
   }
 
-  if (pr.baseRefName !== baseBranch) {
+  if (!pr.baseRefName || !allowedBases.includes(pr.baseRefName)) {
     return {
       ok: false,
       status: 'failed',
-      summary: `implement: pull request base is ${pr.baseRefName ?? 'unknown'}, expected ${baseBranch}.`,
+      summary: `implement: pull request base is ${pr.baseRefName ?? 'unknown'}, expected ${allowedLabel}.`,
       evidence,
     };
   }

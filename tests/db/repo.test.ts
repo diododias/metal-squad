@@ -481,3 +481,43 @@ describe('getRunAccumulatedTokens', () => {
     expect(getRunAccumulatedTokens(99)).toBe(0);
   });
 });
+
+describe('getLatestPublishedRunForFeature', () => {
+  const publishColumns = [
+    { name: 'pr_url' },
+    { name: 'pr_number' },
+    { name: 'branch_name' },
+    { name: 'remote_branch' },
+    { name: 'base_branch' },
+  ];
+
+  it('returns the most recent published run for the feature', async () => {
+    mockAll.mockReturnValue(publishColumns);
+    const row = {
+      featureId: 'feat-a',
+      prNumber: 42,
+      prUrl: 'https://example.test/pr/42',
+      branchName: 'feat/a',
+      remoteBranch: 'origin/feat/a',
+      baseBranch: 'develop',
+      startedAt: '2026-07-06T10:00:00',
+    };
+    mockGet.mockReturnValue(row);
+    const { getLatestPublishedRunForFeature } = await import('../../src/db/repo.js');
+    expect(getLatestPublishedRunForFeature('repo1', 'feat-a')).toEqual(row);
+  });
+
+  it('returns null when no published run exists', async () => {
+    mockAll.mockReturnValue(publishColumns);
+    mockGet.mockReturnValue(undefined);
+    const { getLatestPublishedRunForFeature } = await import('../../src/db/repo.js');
+    expect(getLatestPublishedRunForFeature('repo1', 'feat-a')).toBeNull();
+  });
+
+  it('returns null when the runs table has no pr_url column', async () => {
+    mockAll.mockReturnValue([{ name: 'feature_id' }]);
+    const { getLatestPublishedRunForFeature } = await import('../../src/db/repo.js');
+    expect(getLatestPublishedRunForFeature('repo1', 'feat-a')).toBeNull();
+    expect(mockGet).not.toHaveBeenCalled();
+  });
+});

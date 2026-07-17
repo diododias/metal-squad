@@ -73,6 +73,7 @@ import {
 import { loadBudgetState, saveBudgetState } from '../../db/repo.js';
 import { saveConfig } from '../../config/index.js';
 import { verifyPublishContract } from '../git/publish.js';
+import { resolveDependencyPublications, type DependencyPublication } from '../git/dependencies.js';
 import { updateRunPublishState } from '../../db/repo.js';
 
 export interface ResumeOverride {
@@ -152,11 +153,17 @@ export async function executeBacklog(
   const activeControllers = new Map<string, AbortController>();
   const lastRunIdByFeature = new Map<string, number>();
   const featureMaxTokens = new Map<string, number>();
+  // The `--feature` path clears `dependsOn` on the resolved plan (see below), so
+  // capture the original dependency edges here to recover dependency PRs later.
+  const dependsOnByFeature = new Map<string, string[]>();
   for (const epic of backlog.epics) {
     for (const feature of epic.features) {
       if (feature.maxTokens !== undefined) featureMaxTokens.set(feature.id, feature.maxTokens);
+      dependsOnByFeature.set(feature.id, feature.dependsOn);
     }
   }
+  const dependencyPublicationsFor = (featureId: string): DependencyPublication[] =>
+    resolveDependencyPublications(repoId, dependsOnByFeature.get(featureId) ?? []);
   const budget = createBudgetTracker(resolveBudgetLimits(
     backlog.version === 2 ? backlog.budget : undefined,
     config.budget,
@@ -307,7 +314,12 @@ export async function executeBacklog(
         resumeOverride: opts.resumeOverride?.featureId === feature.id ? opts.resumeOverride : undefined,
         stageSkills: effectiveStageSkills,
       });
-      const res = applyImplementPublishGate(initialRes, stage, opts.cwd);
+      const res = applyImplementPublishGate(
+        initialRes,
+        stage,
+        opts.cwd,
+        dependencyPublicationsFor(feature.id).map((pub) => pub.branchName),
+      );
       if (res.usage) {
         recordUsage(runId, res.usage);
         applyBudgetUsage(feature, res.usage, runId);
@@ -479,6 +491,7 @@ export async function executeBacklog(
     }
     const controller = new AbortController();
     activeControllers.set(feature.id, controller);
+    const dependencyPublications = dependencyPublicationsFor(feature.id);
     // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- workflow set by Zod default, but callers may pass raw objects
     if (feature.workflow?.mode === 'staged') {
       try {
@@ -491,6 +504,7 @@ export async function executeBacklog(
           executeStageRun,
           effectiveStageSkills,
           controller.signal,
+          dependencyPublications,
         );
       } finally {
         activeControllers.delete(feature.id);
@@ -500,6 +514,7 @@ export async function executeBacklog(
     const skills = registry.resolve(feature.skills ?? [], opts.cwd);
     const prompt = buildPrompt(feature, skills, opts.cwd, {
       maxContextChars: config.promptContextCharLimit,
+      dependencyPublications,
     });
     try {
       const { res } = await executeStageRun(feature, prompt, undefined, controller.signal);
@@ -848,6 +863,7 @@ async function executeStagedFeature(
   executeStageRun: StageExecutor,
   stageSkills: Record<string, string[]>,
   abortSignal?: AbortSignal,
+  dependencyPublications: DependencyPublication[] = [],
 ): Promise<RunResult> {
   const workflow = feature.workflow;
   const sessionPolicy = workflow.sessionPolicy;
@@ -898,6 +914,7 @@ async function executeStagedFeature(
       opts.cwd,
       config.promptContextCharLimit,
       stageInputs.get(stage) ?? [],
+      dependencyPublications,
     );
     const { runId, res } = await executeStageRun(feature, prompt, stage, abortSignal, nextStageSession);
     if (pendingTransitionDecisionId !== null) {
@@ -1064,11 +1081,13 @@ function buildStagePrompt(
   cwd: string,
   maxContextChars: number,
   adminInputs: string[],
+  dependencyPublications: DependencyPublication[] = [],
 ): string {
   const basePrompt = buildPrompt(feature, skills, cwd, {
     maxContextChars,
     activeStage: stage,
     stepGuidanceSkills,
+    dependencyPublications,
   });
   const stageNotes = [
     `Current workflow stage: ${stage}.`,
@@ -1088,14 +1107,21 @@ function buildStagePrompt(
     }
   }
   if (stage === 'implement') {
+    const stackedBase = dependencyPublications[0]?.branchName;
+    const branchLine = stackedBase
+      ? `- create your working branch from the dependency branch ${stackedBase} (not develop)`
+      : `- work on a named branch that is not develop`;
+    const prLine = stackedBase
+      ? `- open a pull request targeting the dependency branch ${stackedBase} (stacked PR), not develop`
+      : '- open a pull request targeting develop';
     stageNotes.push([
       'Implementation exit contract:',
-      `- work on a named branch that is not develop`,
+      branchLine,
       '- complete the implementation in this session',
       '- run the relevant validation commands before finishing',
       '- create a commit for the implementation',
       '- push the branch to its remote upstream',
-      '- open a pull request targeting develop',
+      prLine,
       '- do not claim the stage is complete unless all items above were actually completed',
     ].join('\n'));
   }
@@ -1112,10 +1138,14 @@ function applyImplementPublishGate(
   result: RunResult,
   stage: string | undefined,
   cwd: string,
+  dependencyBranches: string[] = [],
 ): RunResult {
   if (stage !== 'implement' || !result.ok) return result;
 
-  const verification = verifyPublishContract(cwd);
+  // A dependent feature may stack its PR on top of any dependency branch, so
+  // accept those as valid PR bases alongside develop.
+  const allowedBases = [...dependencyBranches, 'develop'];
+  const verification = verifyPublishContract(cwd, allowedBases);
   return {
     ...result,
     ok: verification.ok,
