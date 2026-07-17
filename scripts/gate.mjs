@@ -77,7 +77,7 @@ function ensureDependenciesInstalled() {
     return;
   }
 
-  run('rtk', ['npm', 'ci']);
+  run('npm', ['ci']);
   mkdirSync(dirname(stampPath), { recursive: true });
   writeFileSync(stampPath, `${digest}\n`);
 }
@@ -94,12 +94,12 @@ function runFastTests() {
     return;
   }
 
-  run('rtk', ['npx', 'vitest', ...testArgs]);
+  run('npx', ['vitest', ...testArgs]);
 }
 
 function runFast() {
-  run('rtk', ['npm', 'run', 'typecheck']);
-  run('rtk', ['npm', 'run', 'lint']);
+  run('npm', ['run', 'typecheck']);
+  run('npm', ['run', 'lint']);
   runFastTests();
 }
 
@@ -110,14 +110,14 @@ function runFull() {
     );
   }
 
-  run('rtk', ['npm', 'run', 'build']);
-  run('rtk', ['npm', 'run', 'migrate:db']);
-  run('rtk', ['npm', 'run', 'typecheck']);
-  run('rtk', ['npm', 'run', 'lint']);
-  run('rtk', ['npm', 'test']);
-  run('rtk', ['npm', 'run', 'test:coverage:gate']);
-  run('rtk', ['npm', 'run', 'verify:repo']);
-  run('rtk', ['node', 'dist/index.js', '--help']);
+  run('npm', ['run', 'build']);
+  run('npm', ['run', 'migrate:db']);
+  run('npm', ['run', 'typecheck']);
+  run('npm', ['run', 'lint']);
+  run('npm', ['test']);
+  run('npm', ['run', 'test:coverage:gate']);
+  run('npm', ['run', 'verify:repo']);
+  run('node', ['dist/index.js', '--help']);
 }
 
 function main() {
