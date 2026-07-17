@@ -3,6 +3,7 @@ import { detectStderrLevel, sanitizeToolCallRecord, type SessionHandle, type Too
 import type { Effort, Feature } from '../backlog/schema.js';
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
+import { logCaughtError } from '../events/logging.js';
 import { resolveRuntimeConfig } from '../../config/index.js';
 import { CliAbortError, CliTimeoutError, resolveToolInvocation, runCli } from './spawn.js';
 import { msqEventBus } from '../events/index.js';
@@ -287,7 +288,8 @@ function summarizePartialOutput(stdout: string, stderr: string, touchedFiles: st
 function safeJson<T>(s: string): T | null { // eslint-disable-line @typescript-eslint/no-unnecessary-type-parameters
   try {
     return JSON.parse(s) as T;
-  } catch {
+  } catch (error) {
+    logCaughtError('adapters/codex.safeJson', error);
     return null;
   }
 }
@@ -303,7 +305,8 @@ function detectTouchedFiles(cwd: string): string[] {
       .split('\n')
       .map((line) => parseGitStatusPath(line))
       .filter((path): path is string => Boolean(path));
-  } catch {
+  } catch (error) {
+    logCaughtError('adapters/codex.detectTouchedFiles', error);
     return [];
   }
 }
@@ -492,7 +495,8 @@ function serializeToolPayload(payload: unknown): string {
   if (!payload) return '';
   try {
     return normalizeSnippet(JSON.stringify(payload));
-  } catch {
+  } catch (error) {
+    logCaughtError('adapters/codex.serializeToolPayload', error);
     return normalizeSnippet(String(payload)); // eslint-disable-line @typescript-eslint/no-base-to-string
   }
 }

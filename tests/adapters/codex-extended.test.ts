@@ -50,6 +50,7 @@ vi.mock('../../src/core/adapters/spawn.js', () => ({
 
 vi.mock('../../src/core/events/index.js', () => ({
   msqEventBus: { emit: mockEventEmit },
+  logCaughtError: vi.fn(),
 }));
 
 vi.mock('node:child_process', () => ({

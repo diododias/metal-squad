@@ -188,6 +188,7 @@ vi.mock('../../src/core/events/index.js', () => ({
     emit: mockEventBusEmit,
     subscribe: vi.fn(() => () => {}),
   },
+  logCaughtError: vi.fn(),
 }));
 
 vi.mock('node:child_process', async () => {

@@ -3,6 +3,7 @@ import { execFileSync } from 'node:child_process';
 import { detectStderrLevel, sanitizeToolCallRecord, type SessionHandle, type ToolAdapter, type RunResult, type RunFeatureOptions, type TokenUsage, type ToolCallRecord } from './types.js';
 import type { Effort, Feature } from '../backlog/schema.js';
 import { CliAbortError, CliTimeoutError, resolveToolInvocation, runCli } from './spawn.js';
+import { logCaughtError } from '../events/logging.js';
 import { msqEventBus } from '../events/index.js';
 import { parseControlSignal } from './control.js';
 import { resolveRuntimeConfig } from '../../config/index.js';
@@ -180,7 +181,8 @@ function sanitizeTimeoutProgress(value: string): string {
 function safeJson<T>(s: string): T | null { // eslint-disable-line @typescript-eslint/no-unnecessary-type-parameters
   try {
     return JSON.parse(s) as T;
-  } catch {
+  } catch (error) {
+    logCaughtError('adapters/claude.safeJson', error);
     return null;
   }
 }
@@ -255,7 +257,8 @@ function detectTouchedFiles(cwd: string): string[] {
       .split('\n')
       .map((line) => parseGitStatusPath(line))
       .filter((path): path is string => Boolean(path));
-  } catch {
+  } catch (error) {
+    logCaughtError('adapters/claude.detectTouchedFiles', error);
     return [];
   }
 }

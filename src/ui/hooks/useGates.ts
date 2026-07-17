@@ -8,7 +8,7 @@ import {
   type GateRow,
   type GateDecision,
 } from '../../db/repo.js';
-import { msqEventBus } from '../../core/events/index.js';
+import { msqEventBus, logCaughtError } from '../../core/events/index.js';
 
 export type ApprovalKind = 'gate' | 'stage';
 
@@ -69,7 +69,8 @@ export function useGates(intervalMs = 2000): UseGatesResult {
   const [gates, setGates] = useState<PendingApproval[]>(() => {
     try {
       return collectApprovals();
-    } catch {
+    } catch (error) {
+      logCaughtError('useGates.initialGates', error);
       return [];
     }
   });
@@ -77,8 +78,9 @@ export function useGates(intervalMs = 2000): UseGatesResult {
   const poll = useCallback((): void => {
     try {
       setGates(collectApprovals());
-    } catch {
+    } catch (error) {
       // DB locked or unavailable — keep stale data
+      logCaughtError('useGates.poll', error);
     }
   }, []);
 

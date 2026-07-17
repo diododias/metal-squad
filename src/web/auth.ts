@@ -1,5 +1,6 @@
 import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
 import { networkInterfaces } from 'node:os';
+import { logCaughtError } from '../core/events/logging.js';
 
 export const SESSION_COOKIE_NAME = 'msq_session';
 export const SESSION_COOKIE_MAX_AGE_SECONDS = 7 * 24 * 60 * 60;
@@ -81,7 +82,8 @@ export function isAllowedHostHeader(hostHeader: string | undefined, boundHost: s
   let hostname: string;
   try {
     hostname = new URL(`http://${hostHeader}`).hostname;
-  } catch {
+  } catch (error) {
+    logCaughtError('web/auth.isAllowedHostHeader', error);
     return false;
   }
   return isAllowedHostname(hostname, boundHost);
@@ -94,7 +96,8 @@ export function isAllowedOrigin(originHeader: string | undefined, boundHost: str
   let url: URL;
   try {
     url = new URL(originHeader);
-  } catch {
+  } catch (error) {
+    logCaughtError('web/auth.isAllowedOrigin', error);
     return false;
   }
   if (url.protocol !== 'http:' && url.protocol !== 'https:') return false;

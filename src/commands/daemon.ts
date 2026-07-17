@@ -4,6 +4,7 @@ import { existsSync, readFileSync, writeFileSync, unlinkSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { getOrCreateWebToken, resolveWebConfig } from '../web/token.js';
+import { logCaughtError } from '../core/events/logging.js';
 
 const PID_PATH = join(homedir(), '.local', 'share', 'metal-squad', 'daemon.pid');
 
@@ -21,7 +22,8 @@ function readPid(): number | null {
   try {
     const pid = Number(readFileSync(PID_PATH, 'utf8').trim());
     return Number.isInteger(pid) && pid > 0 ? pid : null;
-  } catch {
+  } catch (error) {
+    logCaughtError('commands/daemon.readPid', error);
     return null;
   }
 }
@@ -33,8 +35,8 @@ function writePid(pid: number): void {
 function removePid(): void {
   try {
     unlinkSync(PID_PATH);
-  } catch {
-    // ignore
+  } catch (error) {
+    logCaughtError('commands/daemon.removePid', error);
   }
 }
 

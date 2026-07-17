@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { listRunEvents } from '../../db/repo.js';
 import { computeRunBreakdown, type RunBreakdown } from '../../core/stats.js';
+import { logCaughtError } from '../../core/events/index.js';
 
 export function useRunBreakdown(
   runId: number | null,
@@ -17,8 +18,9 @@ export function useRunBreakdown(
     }
     try {
       setBreakdown(computeRunBreakdown(listRunEvents(runId), startedAt, endedAt));
-    } catch {
+    } catch (error) {
       // DB locked or unavailable — keep stale data
+      logCaughtError('useRunBreakdown.refresh', error);
     }
   }, [endedAt, runId, startedAt]);
 

@@ -1,6 +1,7 @@
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import type { NotificationChannel } from './types.js';
+import { logCaughtError } from '../events/logging.js';
 
 const execFileAsync = promisify(execFile);
 const TITLE = 'metal-squad';
@@ -29,8 +30,9 @@ export class DesktopChannel implements NotificationChannel {
         ].join('; ');
         await execFileAsync('powershell', ['-Command', ps]);
       }
-    } catch {
-      // silently ignore — desktop notifications are best-effort
+    } catch (error) {
+      // best-effort — a failed desktop notification must not break the run
+      logCaughtError('notify/desktop.send', error);
     }
   }
 }

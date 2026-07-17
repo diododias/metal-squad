@@ -2,7 +2,7 @@ import { existsSync } from 'node:fs';
 import { getDb, withTransaction } from './index.js';
 import { sanitizeToolCallRecord, type PublishEvidence, type SessionStatusSnapshot, type TokenUsage, type ToolCallRecord } from '../core/adapters/types.js';
 import { resolveDbPath } from '../config/index.js';
-import { msqEventBus } from '../core/events/index.js';
+import { msqEventBus, logCaughtError } from '../core/events/index.js';
 import type {
   ContextQueryEvent,
   ContextQueryKind,
@@ -388,7 +388,12 @@ export function getRunSessionStatus(runId: number): SessionStatusSnapshot | null
 }
 
 function parseJsonValue(value: string): unknown {
-  try { return JSON.parse(value) as unknown; } catch { return null; }
+  try {
+    return JSON.parse(value) as unknown;
+  } catch (error) {
+    logCaughtError('db/repo.parseJsonValue', error);
+    return null;
+  }
 }
 
 export function cleanupStaleRuns(olderThanMinutes: number): number {
@@ -1234,7 +1239,8 @@ function safeJsonParse(value: string): Record<string, unknown> | null {
   try {
     const parsed = JSON.parse(value) as unknown;
     return parsed && typeof parsed === 'object' ? parsed as Record<string, unknown> : null;
-  } catch {
+  } catch (error) {
+    logCaughtError('db/repo.safeJsonParse', error);
     return null;
   }
 }
@@ -1953,7 +1959,8 @@ function decodeWorkflowRevisions(json: string | undefined): PipelineWorkflowRevi
         && Array.isArray(Reflect.get(revision, 'stages'))
       )),
     );
-  } catch {
+  } catch (error) {
+    logCaughtError('db/repo.parseStageRevisions', error);
     return {};
   }
 }
@@ -2035,7 +2042,8 @@ function decodeStageRequestOptions(value: unknown): string[] | undefined {
     if (!Array.isArray(parsed)) return undefined;
     const options = parsed.filter((entry): entry is string => typeof entry === 'string');
     return options.length > 0 ? options : undefined;
-  } catch {
+  } catch (error) {
+    logCaughtError('db/repo.decodeStageRequestOptions', error);
     return undefined;
   }
 }
@@ -2366,7 +2374,8 @@ function decodeJsonArray(value: string | null | undefined): string[] {
   try {
     const parsed = JSON.parse(value) as unknown;
     return Array.isArray(parsed) ? parsed.filter((entry): entry is string => typeof entry === 'string') : [];
-  } catch {
+  } catch (error) {
+    logCaughtError('db/repo.decodeJsonArray', error);
     return [];
   }
 }

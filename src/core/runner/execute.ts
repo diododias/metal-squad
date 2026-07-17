@@ -14,6 +14,7 @@ import {
   shouldEvaluateNextCandidate,
 } from '../orchestrator/autoPilot.js';
 import type { AutoPilotOutcomeKind } from '../events/types.js';
+import { logCaughtError } from '../events/logging.js';
 import { getAdapter } from '../adapters/index.js';
 import { resolveRepo } from '../repo.js';
 import {
@@ -877,10 +878,11 @@ async function executeStagedFeature(
       const { repoId } = resolveRepo(opts.cwd);
       const liveFeature = getCatalogFeature(repoId, feature.id);
       if (liveFeature) autoAdvance = liveFeature.workflow.autoAdvance;
-    } catch {
+    } catch (error) {
       // catalog read failed (e.g. sandboxed harness DB) — fall back to the
       // value captured when this run started rather than aborting a stage
       // transition over a config re-check.
+      logCaughtError('execute.resolveAutoAdvance', error);
     }
     return autoAdvance;
   };
@@ -969,8 +971,9 @@ async function executeStagedFeature(
       try {
         const tasksFile = resolveGeneratedTasksFile(feature, opts.cwd);
         syncFeatureTasksToBacklog(feature.id, tasksFile, opts.cwd);
-      } catch {
+      } catch (error) {
         // tasks file not yet generated — skip silently
+        logCaughtError('execute.syncFeatureTasksToBacklog', error);
       }
     }
 

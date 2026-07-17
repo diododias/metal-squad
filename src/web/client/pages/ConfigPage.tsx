@@ -413,7 +413,8 @@ function ToolEditor({ tool, idReadOnly = false, onSave, onCancel }: { tool: Tool
       const parsed: unknown = JSON.parse(env);
       if (!parsed || Array.isArray(parsed) || typeof parsed !== 'object' || Object.values(parsed).some((value) => typeof value !== 'string')) throw new Error();
       parsedEnv = parsed as Record<string, string>;
-    } catch {
+    } catch (error) {
+      console.error('[ConfigPage] invalid env JSON', error);
       setIssue('env must be a JSON object with string values.');
       return;
     }

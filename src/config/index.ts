@@ -7,6 +7,7 @@ import type { Defaults, Feature } from '../core/backlog/schema.js';
 import { AdapterSchema, EffortSchema, ThinkingSchema, ToolSchema } from '../core/backlog/schema.js';
 import { getCatalogMeta, updateCatalogDefaults } from '../db/backlogCatalog.js';
 import { resolveRepo } from '../core/repo.js';
+import { logCaughtError } from '../core/events/logging.js';
 
 export const CONFIG_DIR = join(homedir(), '.config', 'metal-squad');
 export const DATA_DIR = join(homedir(), '.local', 'share', 'metal-squad');
@@ -343,7 +344,8 @@ export function configWritable(): boolean {
   try {
     accessSync(probePath, constants.W_OK);
     return true;
-  } catch {
+  } catch (error) {
+    logCaughtError('config/index.isPathWritable', error);
     return false;
   }
 }
@@ -445,9 +447,10 @@ function migrateLegacyStageSkills(cwd: string): void {
     if (!getCatalogMeta(repoId)) return;
     updateCatalogDefaults(repoId, { stageSkills: stageSkills.data });
     writeFileSync(CONFIG_PATH, `${JSON.stringify(normalizeLegacyConfig(raw), null, 2)}\n`);
-  } catch {
+  } catch (error) {
     // Legacy config must never prevent startup. Invalid JSON is reported by
     // loadConfig with its actionable path-specific error instead.
+    logCaughtError('config/index.migrateLegacyStageSkills', error);
   }
 }
 

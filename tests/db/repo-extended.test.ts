@@ -20,6 +20,7 @@ vi.mock('../../src/config/index.js', () => ({
 }));
 vi.mock('../../src/core/events/index.js', () => ({
   msqEventBus: { emit: mockEmit },
+  logCaughtError: vi.fn(),
 }));
 
 beforeEach(async () => {

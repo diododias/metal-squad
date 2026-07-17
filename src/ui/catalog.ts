@@ -6,6 +6,7 @@ import { loadBacklogFromCatalog } from '../core/backlog/load.js';
 import { resolveRepo } from '../core/repo.js';
 import { getCatalogMeta } from '../db/backlogCatalog.js';
 import { DefaultsSchema, type Budget, type Defaults, type Retry, type Task, type Workflow } from '../core/backlog/schema.js';
+import { logCaughtError } from '../core/events/index.js';
 
 const DESCRIPTION_CHAR_LIMIT = 4000;
 
@@ -94,7 +95,8 @@ function readFeatureDescription(
     if (!existsSync(abs)) return null;
     const content = readFileSync(abs, 'utf8').trim();
     return content ? truncateDescription(content) : null;
-  } catch {
+  } catch (error) {
+    logCaughtError('ui/catalog.readFeatureDescription', error);
     return null;
   }
 }
@@ -153,7 +155,8 @@ function loadCatalogAndSettings(cwd: string): void {
       resolvedDefaults,
       projectDefaults,
     };
-  } catch {
+  } catch (error) {
+    logCaughtError('ui/catalog.loadCatalogAndSettings', error);
     cachedCatalog = {};
     cachedSettings = DEFAULT_BACKLOG_SETTINGS;
   }

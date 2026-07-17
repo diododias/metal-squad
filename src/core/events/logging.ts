@@ -2,6 +2,14 @@ import { msqEventBus } from './bus.js';
 import type { TypedEventBus } from './bus.js';
 import type { MsqEvents, OutputSource } from './types.js';
 
+/** Logs a caught error with context instead of letting it disappear silently into a fallback. */
+export function logCaughtError(context: string, error: unknown): void {
+  const message = error instanceof Error ? error.message : String(error);
+  const stack = error instanceof Error ? error.stack : undefined;
+  console.error(`[${context}] error: ${message}`);
+  if (stack) console.error(stack);
+}
+
 export function attachDefaultEventLogger(
   eventBus: TypedEventBus<MsqEvents> = msqEventBus,
 ): () => void {

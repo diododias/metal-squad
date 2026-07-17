@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { listCompletedFeatureIds } from '../../db/repo.js';
-import { msqEventBus } from '../../core/events/index.js';
+import { msqEventBus, logCaughtError } from '../../core/events/index.js';
 import { resolveRepo } from '../../core/repo.js';
 
 export function useCompletedFeatures(intervalMs = 2000): Set<string> {
@@ -8,7 +8,8 @@ export function useCompletedFeatures(intervalMs = 2000): Set<string> {
   const [doneFeatureIds, setDoneFeatureIds] = useState<Set<string>>(() => {
     try {
       return listCompletedFeatureIds(repoId);
-    } catch {
+    } catch (error) {
+      logCaughtError('useCompletedFeatures.initialFeatures', error);
       return new Set();
     }
   });
@@ -17,8 +18,9 @@ export function useCompletedFeatures(intervalMs = 2000): Set<string> {
     const refresh = (): void => {
       try {
         setDoneFeatureIds(listCompletedFeatureIds(repoId));
-      } catch {
+      } catch (error) {
         // DB locked or unavailable — keep stale data
+        logCaughtError('useCompletedFeatures.refresh', error);
       }
     };
 
