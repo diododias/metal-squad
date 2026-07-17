@@ -85,7 +85,7 @@ export function formatHeartbeatLine(line: string, maxWidth: number): string {
   return truncateText(suffix || 'thinking...', maxWidth);
 }
 
-function parseTimestampMs(value: string | null | undefined): number | null {
+export function parseTimestampMs(value: string | null | undefined): number | null {
   if (!value) return null;
   const trimmed = value.trim();
   const normalized = /^\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}:\d{2}(?:\.\d+)?$/.test(trimmed)

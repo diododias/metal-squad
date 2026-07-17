@@ -9,7 +9,7 @@ import { RunStatusStrip } from '../components/status/RunStatusStrip.js';
 import { FeatureConfigDetail } from '../components/FeatureConfigDetail.js';
 import { PageHeader } from '../PageHeader.js';
 import { useIsMobile } from '../Responsive.js';
-import { formatClockTime, formatElapsed, formatPercent, formatPublishTarget, formatTokens, getPublishStatusLabel, getRunStatusLabel } from '../lib/format.js';
+import { formatClockTime, formatElapsed, formatPercent, formatPublishTarget, formatTokens, getPublishStatusLabel, getRunStatusLabel, parseTimestampMs } from '../lib/format.js';
 import { summarizeTaskRuns } from '../lib/workflow.js';
 import type { MsqWebState, FeatureConfigPatch, WebSocketClientMessage } from '../../types.js';
 import type { TaskRun } from '../../../db/repo.js';
@@ -63,7 +63,7 @@ function outputToTranscript(lines: OutputLine[]): TimedEntry[] {
       text,
       command: type === 'tool' ? text : undefined,
       time: formatClockTime(line.createdAt),
-      sortKey: line.createdAt ? Date.parse(line.createdAt) : i,
+      sortKey: parseTimestampMs(line.createdAt) ?? i,
     };
   });
 }
@@ -77,7 +77,7 @@ function toolCallsToTranscript(calls: ToolCallRecord[]): TimedEntry[] {
     command: call.arguments == null ? undefined : JSON.stringify(call.arguments),
     output: call.error ?? call.output ?? undefined,
     time: formatClockTime(call.startedAt),
-    sortKey: Date.parse(call.startedAt) || call.sequence,
+    sortKey: parseTimestampMs(call.startedAt) ?? call.sequence,
   }));
 }
 
