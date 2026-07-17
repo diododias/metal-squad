@@ -5,7 +5,6 @@ import { Tabs } from '../components/navigation/Tabs.js';
 import { ApprovalBanner } from '../components/feedback/ApprovalBanner.js';
 import { QuestionBanner } from '../components/feedback/QuestionBanner.js';
 import { AgentTranscript, type TranscriptEntry } from '../components/transcript/AgentTranscript.js';
-import { ToolCallGroup } from '../components/transcript/ToolCallGroup.js';
 import { RunStatusStrip } from '../components/status/RunStatusStrip.js';
 import { FeatureConfigDetail } from '../components/FeatureConfigDetail.js';
 import { PageHeader } from '../PageHeader.js';
@@ -48,7 +47,9 @@ const inputStyle: React.CSSProperties = {
   padding: '6px 9px',
 };
 
-function outputToTranscript(lines: OutputLine[]): TranscriptEntry[] {
+type TimedEntry = TranscriptEntry & { sortKey: number };
+
+function outputToTranscript(lines: OutputLine[]): TimedEntry[] {
   return lines.map((line, i) => {
     const source = line.source ?? 'stdout';
     const isError = line.level === 'error';
@@ -62,8 +63,22 @@ function outputToTranscript(lines: OutputLine[]): TranscriptEntry[] {
       text,
       command: type === 'tool' ? text : undefined,
       time: formatClockTime(line.createdAt),
+      sortKey: line.createdAt ? Date.parse(line.createdAt) : i,
     };
   });
+}
+
+function toolCallsToTranscript(calls: ToolCallRecord[]): TimedEntry[] {
+  return calls.map((call) => ({
+    id: `tool-${call.id}`,
+    type: 'tool',
+    status: call.phase === 'started' ? 'running' : call.phase === 'failed' ? 'error' : 'done',
+    tool: call.name,
+    command: call.arguments == null ? undefined : JSON.stringify(call.arguments),
+    output: call.error ?? call.output ?? undefined,
+    time: formatClockTime(call.startedAt),
+    sortKey: Date.parse(call.startedAt) || call.sequence,
+  }));
 }
 
 export function RunDetailPage({
@@ -93,8 +108,14 @@ export function RunDetailPage({
 
   const detail = run ? runDetails[run.runId] : undefined;
   const stageGroups = useMemo(() => summarizeTaskRuns(detail?.taskRuns ?? [], feature?.workflow.stages), [detail, feature]);
-  const transcript = useMemo(() => outputToTranscript(run ? (linesByRun[run.runId] ?? []) : []), [run, linesByRun]);
-  const toolCalls = detail?.toolCalls ?? [];
+  const toolCalls = useMemo(() => detail?.toolCalls ?? [], [detail]);
+  const combinedOutput = useMemo(() => {
+    const lineEntries = outputToTranscript(run ? (linesByRun[run.runId] ?? []) : []).filter(
+      (entry) => entry.type !== 'tool' || toolCalls.length === 0,
+    );
+    const toolEntries = toolCallsToTranscript(toolCalls);
+    return [...lineEntries, ...toolEntries].sort((a, b) => a.sortKey - b.sortKey);
+  }, [run, linesByRun, toolCalls]);
   const toolIds = state.runtimeConfig.tools.map((tool) => tool.id);
 
   useEffect(() => {
@@ -102,7 +123,7 @@ export function RunDetailPage({
     const el = scrollRef.current;
     if (!el || !stickToBottomRef.current) return;
     el.scrollTop = el.scrollHeight;
-  }, [activeTab, transcript, toolCalls.length]);
+  }, [activeTab, combinedOutput]);
 
   if (!run) {
     return (
@@ -251,8 +272,11 @@ export function RunDetailPage({
     ),
     output: (
       <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-        {toolCalls.length > 0 && <ToolCallGroup groupKey={`${String(runId ?? 0)}:${run.stage ?? 'run'}:0`} calls={toolCalls} />}
-        {transcript.length > 0 ? <AgentTranscript entries={transcript.filter((entry) => entry.type !== 'tool' || toolCalls.length === 0)} /> : toolCalls.length === 0 && <div style={{ color: 'var(--text-faint)', fontSize: 'var(--text-sm)' }}>No output captured for this run yet.</div>}
+        {combinedOutput.length > 0 ? (
+          <AgentTranscript entries={combinedOutput} />
+        ) : (
+          <div style={{ color: 'var(--text-faint)', fontSize: 'var(--text-sm)' }}>No output captured for this run yet.</div>
+        )}
       </div>
     ),
   };
