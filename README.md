@@ -738,6 +738,50 @@ The poller reads Telegram updates and resolves:
 - stage approvals
 - stage input requests
 
+#### Enabling per-feature topics (step by step)
+
+Making the bot an "administrator" is **not** enough on its own — Telegram gates
+topic creation behind a specific permission that is not granted by default. If
+it is missing, every notification tied to a `featureId` (including questions
+that need your input) fails silently: it is logged to the server console but
+never reaches the chat.
+
+1. In the target Telegram group, open **Group settings → Topics** and enable
+   **Topics** (this converts the group into a forum-enabled supergroup; the
+   Telegram API reports this as `type: supergroup` + `is_forum: true`).
+2. Open **Group settings → Administrators** and add the bot (or edit its
+   existing admin entry).
+3. In the bot's permission list, explicitly enable **Manage Topics** (labeled
+   "Manage Topics" in English clients, may read differently in other
+   languages). Being promoted to administrator does **not** enable this
+   permission automatically — it must be toggled on by hand unless the bot is
+   the group's creator.
+4. Also keep **Send Messages** enabled for the bot.
+5. Set the group's numeric id as `telegramChatId` / `notifications.channels[].chatId`.
+   Supergroup ids are negative and typically start with `-100`.
+
+If the permission was missing before, the next feature run/notification
+automatically retries topic creation — no restart or cache clear is needed.
+
+##### Verifying topic health
+
+Metal Squad persists one row per `(chatId, featureId)` in the
+`feature_topic_associations` table, including the last Telegram API error.
+To check whether topics are actually being created:
+
+```bash
+sqlite3 -header -column ~/.local/share/metal-squad/app.db \
+  "SELECT feature_id, state, last_error, updated_at
+     FROM feature_topic_associations
+    ORDER BY updated_at DESC LIMIT 20;"
+```
+
+- `state = 'active'` with a non-null `thread_id` means the topic exists and
+  notifications for that feature should be delivering normally.
+- `state = 'error'` with `last_error` containing
+  `createForumTopic: Bad Request: not enough rights to create a topic` means
+  the bot is missing the **Manage Topics** permission — revisit step 3 above.
+
 ## Legacy TUI Usage
 
 Start it with:
@@ -848,6 +892,17 @@ Check:
 - the bot token is stored in keychain under `telegram-bot-token`
 - the configured chat id is correct
 - `stage:approval`, `stage:input`, or `gate:created` are enabled in `notifications.events`
+
+### Notifications (including questions) silently stop arriving
+
+If per-feature topics were recently enabled and notifications for some or all
+features stopped showing up in Telegram — with no visible error to the
+user — the bot is very likely missing the **Manage Topics** admin permission
+on the forum supergroup. Topic creation then fails on Telegram's side, the
+failure is only logged server-side, and the notification for that `featureId`
+is dropped instead of delivered. See
+[Enabling per-feature topics](#enabling-per-feature-topics-step-by-step) and
+[Verifying topic health](#verifying-topic-health) above to diagnose and fix it.
 
 ## Repository Structure
 
