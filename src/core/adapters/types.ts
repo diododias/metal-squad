@@ -47,16 +47,17 @@ export function detectStderrLevel(line: string): 'error' | 'warn' | undefined {
   return match[1] === 'ERROR' ? 'error' : 'warn';
 }
 
-export function sanitizeToolCallValue(value: unknown, depth = 0): unknown {
-  if (depth > 4) return '[truncated]';
+export function sanitizeToolCallValue(value: unknown, seen = new WeakSet<object>()): unknown {
   if (value == null || typeof value === 'number' || typeof value === 'boolean') return value;
-  if (typeof value === 'string') return value.slice(0, 2_000);
-  if (Array.isArray(value)) return value.slice(0, 50).map((entry) => sanitizeToolCallValue(entry, depth + 1));
+  if (typeof value === 'string') return value;
+  if (Array.isArray(value)) return value.map((entry) => sanitizeToolCallValue(entry, seen));
   if (typeof value === 'object') {
+    if (seen.has(value)) return '[circular]';
+    seen.add(value);
     return Object.fromEntries(
-      Object.entries(value).slice(0, 50).map(([key, entry]) => [
+      Object.entries(value).map(([key, entry]) => [
         key,
-        SENSITIVE_KEY.test(key) ? '[REDACTED]' : sanitizeToolCallValue(entry, depth + 1),
+        SENSITIVE_KEY.test(key) ? '[REDACTED]' : sanitizeToolCallValue(entry, seen),
       ]),
     );
   }
@@ -69,9 +70,9 @@ export function sanitizeToolCallRecord(record: ToolCallRecord): ToolCallRecord {
     id: record.id.slice(0, 200),
     name: record.name.slice(0, 200),
     arguments: sanitizeToolCallValue(record.arguments),
-    output: record.output?.slice(0, 20_000) ?? null,
+    output: record.output ?? null,
     step: record.step?.slice(0, 200) ?? null,
-    error: record.error?.slice(0, 500) ?? null,
+    error: record.error ?? null,
   };
 }
 

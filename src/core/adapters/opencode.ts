@@ -248,7 +248,7 @@ function safeJson<T>(s: string): T | null { // eslint-disable-line @typescript-e
 }
 
 function normalizeSnippet(text: string): string {
-  return text.replace(/\s+/g, ' ').trim().slice(0, 160);
+  return text.replace(/\s+/g, ' ').trim();
 }
 
 function pickTextSnippet(...values: unknown[]): string {

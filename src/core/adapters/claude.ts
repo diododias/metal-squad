@@ -282,7 +282,7 @@ function formatTouchedFiles(files: string[]): string {
 }
 
 function normalizeSnippet(text: string): string {
-  return text.replace(/\s+/g, ' ').trim().slice(0, 160);
+  return text.replace(/\s+/g, ' ').trim();
 }
 
 interface ProgressUpdate {
