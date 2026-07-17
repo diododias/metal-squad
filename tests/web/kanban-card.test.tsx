@@ -122,6 +122,15 @@ describe('KanbanCard workflow steps bar', () => {
     expect(html).toContain('(0/3)');
   });
 
+  it('shows a running workflow without a persisted stage as starting at zero progress', () => {
+    const html = renderToStaticMarkup(
+      <KanbanCard run={{ ...run, status: 'running', stages: ['implement'] }} />,
+    );
+    expect(html).toContain('starting');
+    expect(html).toContain('(0/1)');
+    expect(html).not.toContain('complete');
+  });
+
   it('renders without a steps bar when stages is absent or empty', () => {
     const noStages = renderToStaticMarkup(<KanbanCard run={{ ...run, status: 'running', stage: 'implement' }} />);
     const emptyStages = renderToStaticMarkup(<KanbanCard run={{ ...run, status: 'running', stage: 'implement', stages: [] }} />);

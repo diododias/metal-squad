@@ -193,7 +193,7 @@ export function RunDetailPage({
   const tabContent: Record<string, React.ReactNode> = {
     summary: (
       <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-        <WorkflowStepper stages={stages} currentStage={run.pipelineCurrentStage ?? run.stage} />
+        <WorkflowStepper stages={stages} currentStage={run.pipelineCurrentStage ?? run.stage} completed={run.status === 'done'} />
         <div style={{ marginTop: 14, display: 'flex', flexDirection: 'column', gap: 6 }}>
           {stageGroups.map((g) => (
             <div key={g.stage} style={{ display: 'flex', justifyContent: 'space-between', fontSize: 'var(--text-sm)', color: 'var(--text-dim)' }}>
