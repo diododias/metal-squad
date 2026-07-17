@@ -311,6 +311,74 @@ describe('RunDetailPage error output', () => {
 
     expect(container.textContent ?? '').toContain(errorLine);
   });
+
+  it('detects error lines from raw stderr log text even when no `level` was persisted', () => {
+    // Rows written before run:output carried a `level` column (or any producer that
+    // forgets to tag it) still have the raw "<ts> ERROR ..." log line as `line.line`.
+    // The transcript must recognize these from the text itself, not only via `level`.
+    const run = makeRun();
+    const container = document.createElement('div');
+    document.body.append(container);
+    const root = createRoot(container);
+    roots.push(root);
+
+    const rawLine = '2026-07-16T13:59:08.225109Z ERROR codex_core::tools::router: error=apply_patch verification failed: invalid hunk at line 44, Expected update';
+
+    act(() => {
+      root.render(
+        <RunDetailPage
+          state={makeState(run)}
+          featureId="feat-1"
+          runDetails={{
+            1: {
+              taskRuns: [],
+              breakdown: null,
+              sessionStatus: null,
+              statusHistory: [],
+              toolCalls: [
+                {
+                  id: 'tool-a',
+                  runId: 1,
+                  featureId: 'feat-1',
+                  tool: 'codex',
+                  sequence: 1,
+                  phase: 'completed',
+                  name: 'command_execution',
+                  arguments: null,
+                  output: null,
+                  step: null,
+                  startedAt: '2026-07-16T13:58:44.000Z',
+                  completedAt: null,
+                  error: null,
+                },
+              ],
+            },
+          } as unknown as Parameters<typeof RunDetailPage>[0]['runDetails']}
+          linesByRun={{
+            1: [
+              { runId: 1, source: 'stderr', line: rawLine, createdAt: '2026-07-16 13:59:08' },
+            ],
+          }}
+          onSubscribeRun={() => () => undefined}
+          onBack={() => undefined}
+          send={vi.fn()}
+        />,
+      );
+    });
+
+    const outputTab = Array.from(container.querySelectorAll('button, [role="tab"]')).find((el) => el.textContent === 'Live Output');
+    act(() => { (outputTab as HTMLElement)?.click(); });
+
+    expect(container.textContent ?? '').not.toContain(rawLine);
+    const toggle = Array.from(container.querySelectorAll('div')).find(
+      (el) => el.children.length === 0 && el.textContent?.startsWith('▸ show output'),
+    );
+    expect(toggle).toBeDefined();
+
+    act(() => { (toggle as HTMLElement).click(); });
+
+    expect(container.textContent ?? '').toContain(rawLine);
+  });
 });
 
 describe('RunDetailPage mobile close control', () => {
