@@ -9,7 +9,8 @@ import { ToolCallGroup } from '../components/transcript/ToolCallGroup.js';
 import { RunStatusStrip } from '../components/status/RunStatusStrip.js';
 import { FeatureConfigDetail } from '../components/FeatureConfigDetail.js';
 import { PageHeader } from '../PageHeader.js';
-import { formatClockTime, formatElapsed, formatPercent, formatPublishTarget, formatTokens, getPublishStatusLabel, getRunStatusLabel } from '../lib/format.js';
+import { useIsMobile } from '../Responsive.js';
+import { formatElapsed, formatPercent, formatPublishTarget, formatTokens, getPublishStatusLabel, getRunStatusLabel } from '../lib/format.js';
 import { summarizeTaskRuns } from '../lib/workflow.js';
 import type { MsqWebState, FeatureConfigPatch, WebSocketClientMessage } from '../../types.js';
 import type { TaskRun } from '../../../db/repo.js';
@@ -75,6 +76,7 @@ export function RunDetailPage({
   send,
 }: RunDetailPageProps): React.JSX.Element {
   const [activeTab, setActiveTab] = useState('summary');
+  const isMobile = useIsMobile();
   const [overrideTool, setOverrideTool] = useState('');
   const [overrideModel, setOverrideModel] = useState('');
   const [overrideEffort, setOverrideEffort] = useState('');
@@ -257,6 +259,7 @@ export function RunDetailPage({
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+      <div style={{ position: 'relative', flexShrink: 0 }}>
       <PageHeader
         title={feature?.title ?? featureId}
         breadcrumb={
@@ -302,13 +305,43 @@ export function RunDetailPage({
                 abort
               </Button>
             )}
-            <Button variant="neutral" size="sm" onClick={onBack}>
-              close
-            </Button>
+            {!isMobile && (
+              <Button variant="neutral" size="sm" onClick={onBack}>
+                close
+              </Button>
+            )}
           </>
         }
       />
-      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0, padding: 20 }}>
+      {isMobile && (
+        <button
+          aria-label="Close run detail"
+          title="Close"
+          onClick={onBack}
+          style={{
+            position: 'absolute',
+            top: 'calc(12px + env(safe-area-inset-top, 0px))',
+            right: 12,
+            width: 28,
+            height: 28,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            border: '1px solid var(--border-strong)',
+            borderRadius: 'var(--radius-sm)',
+            color: 'var(--text-dim)',
+            background: 'var(--bg-panel)',
+            cursor: 'pointer',
+            fontFamily: 'var(--font-mono)',
+            fontSize: 'var(--text-sm)',
+            lineHeight: 1,
+          }}
+        >
+          ✕
+        </button>
+      )}
+      </div>
+      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0, padding: isMobile ? 12 : 20 }}>
         {pendingPrompt && (
           <div style={{ marginBottom: 16 }}>
             {run.pendingStageRequestKind === 'input' ? (
