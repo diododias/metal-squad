@@ -261,6 +261,15 @@ describe('live run persistence helpers', () => {
     expect(mockAll).toHaveBeenCalledWith(7, 20);
   });
 
+  it('lists the most recent tool calls, not the oldest, so they interleave with the recent output window', async () => {
+    mockAll.mockReturnValue([{ id: 1, sequence: 1, startedAt: '2026-07-15T12:00:01.000Z' }]);
+    const { listRunToolCalls } = await import('../../src/db/repo.js');
+    listRunToolCalls(7, 200);
+    expect(mockPrepare).toHaveBeenCalledWith(expect.stringContaining('ORDER BY sequence DESC, started_at DESC'));
+    expect(mockPrepare).toHaveBeenCalledWith(expect.stringMatching(/ORDER BY sequence ASC, started_at ASC\s*$/));
+    expect(mockAll).toHaveBeenCalledWith(7, 200);
+  });
+
   it('stores context query rows', async () => {
     const { recordContextQuery } = await import('../../src/db/repo.js');
     recordContextQuery({

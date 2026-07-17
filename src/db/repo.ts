@@ -367,7 +367,14 @@ export function listRunToolCalls(runId: number, limit = 200): RunToolCallRow[] {
     `SELECT run_id AS runId, id, feature_id AS featureId, tool, sequence, phase, name,
             arguments_json AS argumentsJson, output, step, started_at AS startedAt,
             completed_at AS completedAt, error
-       FROM run_tool_calls WHERE run_id = ? ORDER BY sequence ASC, started_at ASC LIMIT ?`,
+       FROM (
+         SELECT *
+         FROM run_tool_calls
+         WHERE run_id = ?
+         ORDER BY sequence DESC, started_at DESC
+         LIMIT ?
+       ) recent
+       ORDER BY sequence ASC, started_at ASC`,
   ).all(runId, limit) as RawToolCallRow[];
   return rows.map(({ argumentsJson, ...row }) => ({
     ...row,
