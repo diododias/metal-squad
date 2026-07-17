@@ -29,10 +29,16 @@ Leia nesta ordem quando precisar de contexto funcional:
 
 1. `README.md` para setup e comandos reais
 2. `backlog.yaml` para configuracao executavel atual
-3. `docs/features/Fxx-*.md` para escopo de feature ainda valido no repo
+3. `docs/features/Fxx-*.md` e specs versionadas em `docs/epics/*/features/` para escopo ainda valido no repo
 4. `docs/hotfixes/Hxx-*.md` para bugs operacionais ja descobertos
 5. codigo e testes em `src/` e `tests/`
 6. `docs/ROADMAP.md` apenas como aviso de transicao, nunca como backlog vivo
+
+Para o épico Projetos, essa ordem tem uma distinção obrigatória: o SQLite é a
+fonte do estado operacional persistido; specs, ADRs e a constituição são a
+fonte da intenção e da governança; `backlog.yaml` é somente seed de importação.
+Importação deve ter dry-run, conflitos explícitos e nenhuma reconciliação
+destrutiva. Backup/export são necessários para migração e recuperação.
 
 ## Fontes que hoje NAO sao verdade
 
@@ -53,6 +59,21 @@ Leia nesta ordem quando precisar de contexto funcional:
 - `tests/`: suites por area
 - `.claude/skills/`: fonte canonica das skills locais do repo
 - `.agents/skills/`: apenas shim de compatibilidade para discovery legado
+
+## Vocabulário do épico Projetos
+
+O modelo canônico é `Project -> Epic -> Work Item -> Task`. Project agrupa
+Repositories e Epics e possui o mapa de tipo para workflow template. Epic não
+possui Repository operacional. Work Item pertence a exatamente um Repository
+do Project do Epic; `feature` e `bug` são valores de `WorkItemType`.
+
+Defaults de execução por Repository são chamados **Repository defaults** e a
+herança tem dois níveis: Work Item -> Repository defaults. `projectDefaults`,
+`backlog_features`, `feature_id`, `FeatureSchema` e aliases `Feature*` continuam
+permitidos somente como compatibilidade legada, sempre marcados como tal.
+`Demand` e `Backlog Item` não são entidades do domínio. Contratos novos usam
+`WorkItem`, `WorkItemCatalogEntry`, `workItemId`, `action:createWorkItem` e
+`msq work-items`.
 
 ## Como categorizar uma mudanca
 

@@ -1,23 +1,23 @@
 <!--
 Sync Impact Report
-- Version change: unratified template -> 1.0.0
-- Modified principles: PRINCIPLE_1_NAME -> I. Backlog-Driven and Traceable Delivery;
-  PRINCIPLE_2_NAME -> II. Layered Ownership and Small Boundaries;
-  PRINCIPLE_3_NAME -> III. Validation Gates and Test Discipline;
-  PRINCIPLE_4_NAME -> IV. Observable and Recoverable Runtime;
-  PRINCIPLE_5_NAME -> V. Safe Execution and Harness Separation.
-- Added sections: concrete Additional Constraints and Development Workflow content.
-- Removed sections: none; all template sections were retained.
+- Version change: 1.0.0 -> 1.1.0
+- Modified principles: I. Backlog-Driven and Traceable Delivery (expanded with
+  operational DB authority, versioned intent, and non-destructive seed import).
+- Added sections: explicit Project/Repository/Work Item terminology and
+  compatibility constraints in Additional Constraints.
+- Removed sections: none.
 - Templates requiring updates:
   - updated: .specify/templates/plan-template.md
+  - updated: .specify/templates/spec-template.md
   - updated: .specify/templates/tasks-template.md
-  - reviewed: .specify/templates/spec-template.md (no change required)
+  - reviewed: .specify/templates/checklist-template.md (no change required)
+  - reviewed: .specify/templates/constitution-template.md (no change required)
   - not present: .specify/templates/commands/*.md
 - Runtime guidance requiring updates:
   - updated: README.md
-  - updated: .claude/rules/git-workflow.md
-  - updated: .claude/skills/dev-flow/SKILL.md
-  - reviewed: .claude/rules/{repo-context.md,architecture.md,testing.md,harness.md}
+  - updated: .claude/rules/repo-context.md
+  - reviewed: .claude/rules/{architecture.md,git-workflow.md,testing.md,harness.md}
+- Governance artifact added: docs/adr/ADR-001-governanca-fonte-de-verdade-terminologia.md
 - Follow-up TODOs: record the original adoption date and replace TODO(RATIFICATION_DATE).
 -->
 
@@ -30,7 +30,11 @@ Every feature, hotfix, harness change, and observable behavior change MUST have 
 versioned source-of-truth artifact in the appropriate backlog, feature, hotfix,
 skill, or rules location. Changes to observable behavior MUST update the related
 feature or hotfix documentation. Changes to the executable backlog MUST keep the
-loaded runtime catalog synchronized before web or runtime verification.
+loaded runtime catalog synchronized before web or runtime verification. The
+SQLite database is authoritative for operational state; versioned specs, ADRs,
+and the constitution express intent and governance. `backlog.yaml` is an import
+seed and MUST be loaded with explicit conflicts and without destructive
+reconciliation.
 
 Rationale: `metal-squad` coordinates work from versioned intent, so implementation,
 runtime behavior, and operational knowledge must remain traceable.
@@ -96,6 +100,19 @@ subject under test and its failures remain visible as product work.
   contract.
 - `.claude/` is the canonical repository skill and rules location. `.agents/` may
   provide compatibility shims but MUST NOT become a conflicting source of truth.
+- The Projects domain uses `Project`, `Epic`, `Work Item`, and `Task`. `feature`
+  and `bug` are `WorkItemType` values. New contracts MUST use `WorkItem`,
+  `WorkItemCatalogEntry`, `workItemId`, `action:createWorkItem`, and
+  `msq work-items`.
+- Defaults inherited by a Work Item are **Repository defaults**, with exactly two
+  execution levels: Work Item -> Repository defaults. Existing names such as
+  `projectDefaults`, `backlog_features`, `feature_id`, and `FeatureSchema` are
+  compatibility aliases only and MUST be marked as legacy when documented.
+- `Demand` and `Backlog Item` MUST NOT be used as domain entity names. Backlog is
+  a view/state containing Work Items.
+- Project, Epic, Work Item, Repository, and template identities MUST be opaque
+  UUID v4 values. A Repository belongs to at most one Project; an Epic has no
+  operational Repository; cross-Repository dependencies are out of scope.
 
 ## Development Workflow
 
@@ -128,4 +145,4 @@ The original adoption date is not recorded in repository history:
 `TODO(RATIFICATION_DATE): record the original constitution adoption date.` Until
 that date is known, the TODO is the only intentionally deferred governance field.
 
-**Version**: 1.0.0 | **Ratified**: TODO(RATIFICATION_DATE) | **Last Amended**: 2026-07-13
+**Version**: 1.1.0 | **Ratified**: TODO(RATIFICATION_DATE) | **Last Amended**: 2026-07-17
