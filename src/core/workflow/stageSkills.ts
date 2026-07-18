@@ -1,6 +1,8 @@
+import { STAGE_ORDER } from './stageOrder.js';
+
 /** Project-owned defaults retained for existing Spec Kit projects. */
 export const DEFAULT_PROJECT_TEMPLATE: { stages: string[]; stageSkills: Record<string, string[]> } = {
-  stages: ['specify', 'plan', 'tasks', 'implement', 'validate'],
+  stages: [...STAGE_ORDER],
   stageSkills: {
     specify: ['speckit-specify'],
     plan: ['speckit-plan'],

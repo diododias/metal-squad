@@ -1,6 +1,5 @@
 import type { TaskRun } from '../../../db/repo.js';
-
-const STAGE_ORDER = ['specify', 'plan', 'tasks', 'implement', 'validate'];
+import { STAGE_ORDER } from '../../../core/workflow/stageOrder.js';
 
 const TASK_STATUS_ORDER: Record<TaskRun['status'], number> = {
   running: 0,
@@ -25,7 +24,7 @@ export interface StageGroup {
   skipped: number;
 }
 
-function stageOrder(stage: string, stages: string[]): number {
+function stageOrder(stage: string, stages: readonly string[]): number {
   const index = stages.indexOf(stage);
   return index === -1 ? stages.length : index;
 }
@@ -34,7 +33,7 @@ function taskOrder(status: TaskRun['status']): number {
   return TASK_STATUS_ORDER[status];
 }
 
-export function summarizeTaskRuns(taskRuns: TaskRun[], stages: string[] = STAGE_ORDER): StageGroup[] {
+export function summarizeTaskRuns(taskRuns: TaskRun[], stages: readonly string[] = STAGE_ORDER): StageGroup[] {
   const groups = new Map<string, TaskRun[]>();
 
   for (const task of taskRuns) {
