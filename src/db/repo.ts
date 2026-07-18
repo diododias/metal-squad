@@ -182,7 +182,7 @@ export interface PipelineSnapshot {
   workflowRevisions?: PipelineWorkflowRevisions;
 }
 
-export type PipelineWorkflowRevision = Pick<Workflow, 'mode' | 'stages' | 'syncTasksToBacklog' | 'sessionPolicy' | 'stepGuidance'>;
+export type PipelineWorkflowRevision = Pick<Workflow, 'mode' | 'stages' | 'syncTasksToBacklog' | 'sessionPolicy' | 'stepGuidance' | 'stagePublishes'>;
 export type PipelineWorkflowRevisions = Record<string, PipelineWorkflowRevision>;
 
 export function createRun(
