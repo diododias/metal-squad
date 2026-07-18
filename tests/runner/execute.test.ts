@@ -1031,6 +1031,26 @@ describe('executeBacklog failure persistence', () => {
     };
 
     mockCreateRun.mockReturnValueOnce(7).mockReturnValueOnce(8);
+    mockGetLatestPublishedRunForFeature.mockImplementation((_repoId, featureId) => (
+      featureId === 'feat-11'
+        ? {
+            featureId,
+            prNumber: 11,
+            prUrl: 'https://example.test/pr/11',
+            branchName: 'feat/11',
+            remoteBranch: 'origin/feat/11',
+            baseBranch: 'develop',
+            startedAt: '2026-07-18T10:00:00Z',
+          }
+        : null
+    ));
+    mockResolveDependencyPublications.mockReturnValue([{
+      featureId: 'feat-11',
+      prNumber: 11,
+      prUrl: 'https://example.test/pr/11',
+      branchName: 'feat/11',
+      remoteBranch: 'origin/feat/11',
+    }]);
     mockRunFeature
       .mockResolvedValueOnce({ ok: false, summary: 'falha tolerada' })
       .mockResolvedValueOnce({ ok: true, summary: 'ok' });
@@ -2352,6 +2372,61 @@ describe('executeBacklog auto-pilot', () => {
 });
 
 describe('executeBacklog dependency-aware manual start', () => {
+  it('blocks before spawning when a stack dependency has no published PR', async () => {
+    const backlog: Backlog = {
+      version: 2,
+      repo: 'repo',
+      defaults: { tool: 'codex', effort: 'medium', skills: [], stageSkills: {} },
+      epics: [{
+        id: 'epic-1',
+        title: 'Epic',
+        features: [{
+          id: 'feat-parent',
+          title: 'Parent',
+          spec: 'spec',
+          tasks: [],
+          tool: 'codex',
+          effort: 'medium',
+          dependsOn: [],
+          workflow: { mode: 'single', stages: [], approvals: { channel: 'telegram', autoAdvance: false }, syncTasksToBacklog: true, sessionPolicy: { mode: 'isolated', alwaysIsolatedStages: [] } },
+        }, {
+          id: 'feat-child',
+          title: 'Child',
+          spec: 'spec',
+          tasks: [],
+          tool: 'codex',
+          effort: 'medium',
+          dependsOn: ['feat-parent'],
+          dependencyTypes: { 'feat-parent': 'stack' },
+          autoStart: true,
+          workflow: { mode: 'single', stages: [], approvals: { channel: 'telegram', autoAdvance: false }, syncTasksToBacklog: true, sessionPolicy: { mode: 'isolated', alwaysIsolatedStages: [] } },
+        }],
+      }],
+    };
+    mockListCompletedFeatureIds.mockReturnValue(new Set(['feat-parent']));
+
+    const { executeBacklog } = await import('../../src/core/runner/execute.js');
+    await expect(executeBacklog(backlog, { cwd: '/repo', concurrency: 1, featureId: 'feat-child' })).rejects.toThrow(
+      'Feature feat-child falhou: dependency_unavailable: feat-parent',
+    );
+
+    expect(mockRunFeature).not.toHaveBeenCalled();
+    expect(mockFinishRun).toHaveBeenCalledWith(7, 'blocked', 'dependency_unavailable: feat-parent');
+    expect(mockEventEmit).toHaveBeenCalledWith('run:blocked', {
+      runId: 7,
+      featureId: 'feat-child',
+      tool: 'codex',
+      reason: 'gate',
+      code: 'dependency_unavailable',
+      summary: 'dependency_unavailable: feat-parent',
+    });
+    expect(mockSpawn).not.toHaveBeenCalled();
+    expect(mockEventEmit).toHaveBeenCalledWith('autopilot:decision', expect.objectContaining({
+      triggerFeatureId: 'feat-child',
+      action: 'stop',
+    }));
+  });
+
   it('uses only stack dependencies when resolving a PR base', async () => {
     const backlog: Backlog = {
       version: 2,
@@ -2426,6 +2501,22 @@ describe('executeBacklog dependency-aware manual start', () => {
       ],
     } as unknown as Backlog;
     mockListCompletedFeatureIds.mockReturnValue(new Set(['feat-parent']));
+    mockGetLatestPublishedRunForFeature.mockReturnValue({
+      featureId: 'feat-parent',
+      prNumber: 1,
+      prUrl: 'https://example.test/pr/1',
+      branchName: 'feat/parent',
+      remoteBranch: 'origin/feat/parent',
+      baseBranch: 'develop',
+      startedAt: '2026-07-18T10:00:00Z',
+    });
+    mockResolveDependencyPublications.mockReturnValue([{
+      featureId: 'feat-parent',
+      prNumber: 1,
+      prUrl: 'https://example.test/pr/1',
+      branchName: 'feat/parent',
+      remoteBranch: 'origin/feat/parent',
+    }]);
     mockRunFeature.mockResolvedValue({ ok: true, summary: 'done' });
 
     const { executeBacklog } = await import('../../src/core/runner/execute.js');
