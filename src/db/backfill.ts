@@ -39,27 +39,24 @@ export function backfillProjects(db: Database.Database): BackfillProjectsResult 
     pipelinesBackfilled: 0,
   };
 
-  const run = db.transaction(() => {
-    linkReposToImplicitProjects(db, result);
-    backfillEpicProjectIds(db, result);
-    backfillSnapshotProjectIds(db, result);
-    rebuildBacklogEpicsTable(db);
+  const rebuildRequired = backlogEpicsRebuildRequired(db);
+  // SQLite only applies this pragma outside a transaction. Keep it disabled
+  // for no longer than the atomic create-copy-drop-rename transaction, then
+  // verify all references before committing and restore it immediately after.
+  const foreignKeysWereEnabled = foreignKeysEnabled(db);
+  if (rebuildRequired && foreignKeysWereEnabled) db.pragma('foreign_keys = OFF');
 
-    const fkViolations = db.pragma('foreign_key_check') as unknown[];
-    if (fkViolations.length > 0) {
-      throw new BackfillIntegrityError(
-        `Backfill aborted: foreign_key_check found ${String(fkViolations.length)} violation(s) after rebuild.`,
-      );
-    }
-    const integrity = db.pragma('integrity_check') as { integrity_check: string }[];
-    if (integrity.length !== 1 || integrity[0]?.integrity_check !== 'ok') {
-      throw new BackfillIntegrityError(
-        `Backfill aborted: integrity_check failed after rebuild: ${JSON.stringify(integrity)}`,
-      );
-    }
-  });
-
-  run();
+  try {
+    db.transaction(() => {
+      linkReposToImplicitProjects(db, result);
+      backfillEpicProjectIds(db, result);
+      backfillSnapshotProjectIds(db, result);
+      if (rebuildRequired) rebuildBacklogEpicsTable(db);
+      assertDatabaseIntegrity(db);
+    })();
+  } finally {
+    if (rebuildRequired && foreignKeysWereEnabled) db.pragma('foreign_keys = ON');
+  }
   return result;
 }
 
@@ -125,7 +122,7 @@ function backfillEpicProjectIds(db: Database.Database, result: BackfillProjectsR
       `SELECT e.epic_id AS epicId, e.repo_id AS repoId
        FROM backlog_epics e
        LEFT JOIN repos r ON r.repo_id = e.repo_id
-       WHERE e.project_id IS NULL AND r.repo_id IS NULL`,
+       WHERE e.repo_id IS NOT NULL AND r.repo_id IS NULL`,
     )
     .all() as { epicId: string; repoId: string }[];
 
@@ -173,8 +170,6 @@ function backfillSnapshotProjectIds(db: Database.Database, result: BackfillProje
 }
 
 function rebuildBacklogEpicsTable(db: Database.Database): void {
-  db.pragma('foreign_keys = OFF');
-
   db.exec(`
     CREATE TABLE backlog_epics_new (
       epic_id     TEXT PRIMARY KEY,
@@ -206,8 +201,33 @@ function rebuildBacklogEpicsTable(db: Database.Database): void {
     CREATE INDEX IF NOT EXISTS idx_backlog_epics_project ON backlog_epics(project_id);
     CREATE INDEX IF NOT EXISTS idx_backlog_epics_deleted_at ON backlog_epics(deleted_at);
   `);
+}
 
-  db.pragma('foreign_keys = ON');
+function backlogEpicsRebuildRequired(db: Database.Database): boolean {
+  const columns = db.prepare(`PRAGMA table_info(backlog_epics)`).all() as { name: string; notnull: number }[];
+  const projectId = columns.find((column) => column.name === 'project_id');
+  const repoId = columns.find((column) => column.name === 'repo_id');
+  return projectId?.notnull !== 1 || repoId?.notnull !== 0;
+}
+
+function foreignKeysEnabled(db: Database.Database): boolean {
+  const row = db.pragma('foreign_keys') as { foreign_keys?: number }[];
+  return row[0]?.foreign_keys === 1;
+}
+
+function assertDatabaseIntegrity(db: Database.Database): void {
+  const fkViolations = db.pragma('foreign_key_check') as unknown[];
+  if (fkViolations.length > 0) {
+    throw new BackfillIntegrityError(
+      `Backfill aborted: foreign_key_check found ${String(fkViolations.length)} violation(s) after rebuild.`,
+    );
+  }
+  const integrity = db.pragma('integrity_check') as { integrity_check: string }[];
+  if (integrity.length !== 1 || integrity[0]?.integrity_check !== 'ok') {
+    throw new BackfillIntegrityError(
+      `Backfill aborted: integrity_check failed after rebuild: ${JSON.stringify(integrity)}`,
+    );
+  }
 }
 
 function implicitProjectName(catalogRepoName: string | undefined, repoPath: string, repoId: string): string {

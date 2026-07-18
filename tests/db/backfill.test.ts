@@ -119,6 +119,22 @@ describe('backfillProjects', () => {
     expect(row).toMatchObject({ epic_id: 'epic-1', repo_id: 'repo-1', title: 'Epic One', position: 3, data_json: '{"id":"epic-1"}' });
   });
 
+  it('preserves catalog features that reference an Epic during the table rebuild', async () => {
+    const { db, backfillProjects, registerRepo } = await setup();
+    registerRepo('repo-1', '/tmp/repo-1');
+    db.prepare(
+      `INSERT INTO backlog_epics (epic_id, repo_id, title, position, data_json) VALUES ('epic-1', 'repo-1', 'Epic', 0, '{}')`,
+    ).run();
+    db.prepare(
+      `INSERT INTO backlog_features (feature_id, epic_id, repo_id, title, position, data_json) VALUES ('feat-1', 'epic-1', 'repo-1', 'Feature', 0, '{}')`,
+    ).run();
+
+    backfillProjects(db);
+
+    expect(db.prepare(`SELECT epic_id FROM backlog_features WHERE feature_id = 'feat-1'`).get()).toEqual({ epic_id: 'epic-1' });
+    expect(db.prepare('PRAGMA foreign_key_check').all()).toEqual([]);
+  });
+
   it('is idempotent: a second run creates no new projects, links or backfills', async () => {
     const { db, backfillProjects, registerRepo } = await setup();
     registerRepo('repo-1', '/tmp/repo-1');

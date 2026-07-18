@@ -72,7 +72,7 @@ describe('backlogCatalog upsert/diff/load', () => {
     home = '';
   });
 
-  async function setup() {
+  async function setup(options: { migrated?: boolean } = {}) {
     home = mkdtempSync(join(tmpdir(), 'msq-backlog-catalog-'));
     process.env.HOME = home;
     process.env['MSQ_DB_PATH'] = join(home, 'app.db');
@@ -82,6 +82,10 @@ describe('backlogCatalog upsert/diff/load', () => {
     const { registerRepo } = await import('../../src/db/repo.js');
     const db = getDb();
     registerRepo('repo-1', '/tmp/repo-1');
+    if (options.migrated) {
+      const { backfillProjects } = await import('../../src/db/backfill.js');
+      backfillProjects(db);
+    }
     return { db, ...repo };
   }
 
@@ -102,6 +106,17 @@ describe('backlogCatalog upsert/diff/load', () => {
     expect(reloaded.epics[0]?.features[0]?.tasks).toEqual([
       { id: 'task-1', title: 'Task One', status: 'todo', dependsOn: [], skills: [] },
     ]);
+  });
+
+  it('writes NULL to the legacy Epic repo_id after the project backfill', async () => {
+    const { db, upsertBacklogCatalog } = await setup({ migrated: true });
+
+    upsertBacklogCatalog(makeBacklog(), 'repo-1');
+
+    expect(db.prepare(`SELECT project_id, repo_id FROM backlog_epics WHERE epic_id = 'epic-1'`).get()).toMatchObject({
+      project_id: expect.any(String),
+      repo_id: null,
+    });
   });
 
   it('rekeys catalog rows and runtime references to the generated ID', async () => {

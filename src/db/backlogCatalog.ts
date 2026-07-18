@@ -394,6 +394,7 @@ export function upsertBacklogCatalog(
   const db = getDb('readwrite');
   const enforceGeneratedIds = registrations !== undefined;
   let diff: BacklogCatalogDiff | undefined;
+  const epicRepoIdNullable = isNullableColumn(db, 'backlog_epics', 'repo_id');
 
   const upsertMeta = db.prepare(
     `INSERT INTO backlog_catalog_meta (repo_id, repo, version, defaults_json, budget_json, updated_at)
@@ -406,7 +407,7 @@ export function upsertBacklogCatalog(
 
   const upsertEpic = db.prepare(
     `INSERT INTO backlog_epics (epic_id, project_id, repo_id, title, position, data_json, archived_at, updated_at)
-     VALUES (?, (SELECT project_id FROM project_repos WHERE repo_id = ?), ?, ?, ?, ?, NULL, datetime('now'))
+     VALUES (?, (SELECT project_id FROM project_repos WHERE repo_id = ?), ${epicRepoIdNullable ? 'NULL' : '?'}, ?, ?, ?, NULL, datetime('now'))
      ON CONFLICT(epic_id) DO UPDATE SET
        title = excluded.title,
        position = excluded.position,
@@ -478,7 +479,11 @@ export function upsertBacklogCatalog(
     );
 
     backlog.epics.forEach((epic, epicIndex) => {
-      upsertEpic.run(epic.id, repoId, repoId, epic.title, epicIndex, JSON.stringify(epic));
+      if (epicRepoIdNullable) {
+        upsertEpic.run(epic.id, repoId, epic.title, epicIndex, JSON.stringify(epic));
+      } else {
+        upsertEpic.run(epic.id, repoId, repoId, epic.title, epicIndex, JSON.stringify(epic));
+      }
 
       epic.features.forEach((feature, featureIndex) => {
         upsertFeature.run(
@@ -511,6 +516,11 @@ export function upsertBacklogCatalog(
   run();
   if (!diff) throw new Error('Catalog publication did not produce a diff.');
   return diff;
+}
+
+function isNullableColumn(db: Database.Database, table: string, column: string): boolean {
+  const columns = db.prepare(`PRAGMA table_info(${table})`).all() as { name: string; notnull: number }[];
+  return columns.some((candidate) => candidate.name === column && candidate.notnull === 0);
 }
 
 function mergeFeaturePatch(current: Feature, patch: FeaturePatch): unknown {
