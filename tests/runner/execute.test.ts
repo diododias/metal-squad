@@ -35,8 +35,10 @@ const mockCreateSkillRegistry = vi.fn();
 const mockGetCatalogFeature = vi.fn();
 const mockListCompletedFeatureIds = vi.fn();
 const mockListRunsForTui = vi.fn();
+const mockGetLatestPublishedRunForFeature = vi.fn();
 const mockSpawn = vi.fn();
 const mockVerifyPublishContract = vi.fn();
+const mockIsDescendantOfBase = vi.fn();
 let pipelineRow: any;
 
 vi.mock('../../src/core/repo.js', () => ({
@@ -76,7 +78,7 @@ vi.mock('../../src/db/repo.js', () => ({
   saveBudgetState: vi.fn(),
   listCompletedFeatureIds: mockListCompletedFeatureIds,
   listRunsForTui: mockListRunsForTui,
-  getLatestPublishedRunForFeature: vi.fn(() => null),
+  getLatestPublishedRunForFeature: mockGetLatestPublishedRunForFeature,
 }));
 
 vi.mock('node:child_process', async (importOriginal) => {
@@ -90,6 +92,7 @@ vi.mock('../../src/core/adapters/index.js', () => ({
 
 vi.mock('../../src/core/git/publish.js', () => ({
   verifyPublishContract: mockVerifyPublishContract,
+  isDescendantOfBase: mockIsDescendantOfBase,
 }));
 
 vi.mock('../../src/core/notify/telegram.js', () => ({
@@ -149,6 +152,8 @@ beforeEach(() => {
   mockNotify.mockReset();
   mockRunFeature.mockReset();
   mockVerifyPublishContract.mockReset();
+  mockIsDescendantOfBase.mockReset();
+  mockIsDescendantOfBase.mockReturnValue(true);
   mockEventEmit.mockReset();
   mockAttachDefaultEventLogger.mockReset();
   mockAttachEventNotifications.mockReset();
@@ -163,6 +168,8 @@ beforeEach(() => {
   mockListCompletedFeatureIds.mockImplementation(() => new Set(JSON.parse(pipelineRow.doneJson)));
   mockListRunsForTui.mockReset();
   mockListRunsForTui.mockReturnValue([]);
+  mockGetLatestPublishedRunForFeature.mockReset();
+  mockGetLatestPublishedRunForFeature.mockReturnValue(null);
   mockSpawn.mockReset();
   mockSpawn.mockReturnValue({ once: vi.fn(), unref: vi.fn() });
   mockResolveRepo.mockReturnValue({ repoId: 'repo-1', path: '/repo' });
@@ -359,6 +366,70 @@ describe('executeBacklog failure persistence', () => {
       'done',
       'implement publish verified on feat/test (https://example/pr/1).',
     );
+    expect(mockIsDescendantOfBase).toHaveBeenCalledWith('/repo', 'develop');
+  });
+
+  it('blocks a successful run when HEAD does not descend from the configured base', async () => {
+    mockRunFeature.mockResolvedValue({ ok: true, summary: 'completed on the wrong branch' });
+    mockIsDescendantOfBase.mockReturnValue(false);
+
+    const { executeBacklog } = await import('../../src/core/runner/execute.js');
+
+    await expect(
+      executeBacklog(createImplementStageBacklog(), { cwd: '/repo', concurrency: 1 }),
+    ).rejects.toThrow('MSQ_BLOCKED: validation_failed');
+
+    expect(mockFinishRun).toHaveBeenCalledWith(7, 'blocked', expect.stringContaining('HEAD does not descend from the declared base develop.'));
+    expect(mockEventEmit).toHaveBeenCalledWith('run:blocked', expect.objectContaining({
+      runId: 7,
+      featureId: 'feat-implement',
+      reason: 'gate',
+    }));
+  });
+
+  it('blocks a successful run when Git cannot verify the configured base', async () => {
+    mockRunFeature.mockResolvedValue({ ok: true, summary: 'completed' });
+    mockIsDescendantOfBase.mockReturnValue(null);
+
+    const { executeBacklog } = await import('../../src/core/runner/execute.js');
+
+    await expect(
+      executeBacklog(createImplementStageBacklog(), { cwd: '/repo', concurrency: 1 }),
+    ).rejects.toThrow('MSQ_BLOCKED: validation_failed');
+
+    expect(mockFinishRun).toHaveBeenCalledWith(7, 'blocked', expect.stringContaining('could not verify whether HEAD descends from the declared base develop.'));
+  });
+
+  it('reconciles against the recommended published dependency branch before the configured base', async () => {
+    const backlog = createImplementStageBacklog();
+    const feature = backlog.epics[0]?.features[0];
+    if (!feature) throw new Error('expected implement feature');
+    backlog.epics[0]?.features.push({
+      ...feature,
+      id: 'feat-dependency',
+      title: 'Dependency Feature',
+      dependsOn: [],
+    });
+    feature.dependsOn = ['feat-dependency'];
+    mockGetLatestPublishedRunForFeature.mockReturnValue({
+      featureId: 'feat-dependency',
+      prNumber: 169,
+      prUrl: 'https://example.test/pr/169',
+      branchName: 'feat/dependency-base',
+      remoteBranch: 'origin/feat/dependency-base',
+      baseBranch: 'develop',
+      startedAt: '2026-07-17T12:00:00.000Z',
+    });
+    mockListCompletedFeatureIds.mockReturnValue(new Set(['feat-dependency']));
+    mockRunFeature.mockResolvedValue({ ok: true, summary: 'completed on dependency base' });
+
+    const { executeBacklog } = await import('../../src/core/runner/execute.js');
+
+    await expect(executeBacklog(backlog, {
+      cwd: '/repo', concurrency: 1, featureId: 'feat-implement',
+    })).resolves.toBeUndefined();
+
+    expect(mockIsDescendantOfBase).toHaveBeenCalledWith('/repo', 'feat/dependency-base');
   });
 
   it('blocks implement completion when publish verification is inconclusive', async () => {

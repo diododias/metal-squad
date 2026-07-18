@@ -353,3 +353,38 @@ describe('verifyPublishContract', () => {
     });
   });
 });
+
+describe('isDescendantOfBase', () => {
+  it('returns true when git reports the base as an ancestor', async () => {
+    mockExecFileSync.mockReturnValue('');
+
+    const { isDescendantOfBase } = await import('../../src/core/git/publish.js');
+
+    expect(isDescendantOfBase('/repo', 'develop')).toBe(true);
+    expect(mockExecFileSync).toHaveBeenCalledWith('git', ['merge-base', '--is-ancestor', 'develop', 'HEAD'], {
+      cwd: '/repo',
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'ignore'],
+    });
+  });
+
+  it('returns false for git exit code 1', async () => {
+    mockExecFileSync.mockImplementation(() => {
+      throw Object.assign(new Error('not ancestor'), { status: 1 });
+    });
+
+    const { isDescendantOfBase } = await import('../../src/core/git/publish.js');
+
+    expect(isDescendantOfBase('/repo', 'develop')).toBe(false);
+  });
+
+  it('returns null for an operational git error', async () => {
+    mockExecFileSync.mockImplementation(() => {
+      throw Object.assign(new Error('repository unavailable'), { status: 128 });
+    });
+
+    const { isDescendantOfBase } = await import('../../src/core/git/publish.js');
+
+    expect(isDescendantOfBase('/repo', 'develop')).toBeNull();
+  });
+});
