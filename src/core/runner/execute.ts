@@ -77,6 +77,7 @@ import { verifyPublishContract } from '../git/publish.js';
 import { resolveDependencyPublications, type DependencyPublication } from '../git/dependencies.js';
 import { stackDependencies } from '../backlog/schema.js';
 import { updateRunPublishState } from '../../db/repo.js';
+import { stagePublishesResolved } from '../workflow/stagePublishes.js';
 
 export interface ResumeOverride {
   featureId: string;
@@ -317,9 +318,9 @@ export async function executeBacklog(
         resumeOverride: opts.resumeOverride?.featureId === feature.id ? opts.resumeOverride : undefined,
         stageSkills: effectiveStageSkills,
       });
-      const res = applyImplementPublishGate(
+      const res = applyPublishGate(
         initialRes,
-        stage,
+        stage !== undefined && stagePublishesResolved(stage, feature.workflow.mode, feature.workflow.stagePublishes),
         opts.cwd,
         dependencyPublicationsFor(feature.id).map((pub) => pub.branchName),
       );
@@ -550,7 +551,8 @@ export async function executeBacklog(
       dependencyPublications,
     });
     try {
-      const { res } = await executeStageRun(feature, prompt, undefined, controller.signal);
+        const singleStage = feature.workflow.stages[0];
+        const { res } = await executeStageRun(feature, prompt, singleStage, controller.signal);
       return res;
     } finally {
       activeControllers.delete(feature.id);
@@ -1173,18 +1175,19 @@ function buildStagePrompt(
   return `${basePrompt}\n\n---\n\n${appendedSections.join('\n\n')}`.trim();
 }
 
-function applyImplementPublishGate(
+export function applyPublishGate(
   result: RunResult,
-  stage: string | undefined,
+  shouldPublish: boolean,
   cwd: string,
   dependencyBranches: string[] = [],
+  verify: typeof verifyPublishContract = verifyPublishContract,
 ): RunResult {
-  if (stage !== 'implement' || !result.ok) return result;
+  if (!shouldPublish || !result.ok) return result;
 
   // A dependent feature may stack its PR on top of any dependency branch, so
   // accept those as valid PR bases alongside develop.
   const allowedBases = [...dependencyBranches, 'develop'];
-  const verification = verifyPublishContract(cwd, allowedBases);
+  const verification = verify(cwd, allowedBases);
   return {
     ...result,
     ok: verification.ok,
