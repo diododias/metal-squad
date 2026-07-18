@@ -100,17 +100,29 @@ describe('portability harness contract', () => {
       evidence: { branch: 'feat/portable-build', baseBranch: 'main', commitSha: 'abc1234', remoteBranch: 'origin/feat/portable-build', prNumber: null, prUrl: null },
     };
     const gated = applyPublishGate(
-      { ok: true, summary: 'build complete' },
-      true,
-      repoDirectory,
-      [],
+      {
+        ok: true,
+        summary: 'build complete',
+        control: {
+          type: 'done',
+          summary: 'build complete',
+          publication: {
+            prUrl: 'https://forge.example/pr/19', prNumber: 19, base: 'main', head: 'feat/portable-build',
+          },
+        },
+      },
+      { publishes: true, cwd: repoDirectory, dependencyBranches: [], baseBranch: 'main' },
       () => unavailable,
     );
 
     expect(gated).toMatchObject({
       ok: false,
       publishVerificationStatus: 'blocked',
-      publishEvidence: unavailable.evidence,
+      publishEvidence: {
+        ...unavailable.evidence,
+        prNumber: 19,
+        prUrl: 'https://forge.example/pr/19',
+      },
     });
     expect(gated.summary).toContain('GitHub CLI is unavailable');
   });

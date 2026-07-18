@@ -35,6 +35,29 @@ function countCommitsAheadOfBase(cwd: string, baseBranch: string): number | null
   return Number.isFinite(value) ? value : null;
 }
 
+/**
+ * Checks whether the current HEAD descends from the declared integration base.
+ * Git uses exit code 1 for a valid negative answer, while any other failure is
+ * operationally inconclusive and must remain distinguishable from `false`.
+ */
+export function isDescendantOfBase(cwd: string, baseBranch: string): boolean | null {
+  try {
+    execFileSync('git', ['merge-base', '--is-ancestor', baseBranch, 'HEAD'], {
+      cwd,
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+    return true;
+  } catch (error) {
+    const exitCode = typeof error === 'object' && error !== null && 'status' in error
+      ? error.status
+      : undefined;
+    if (exitCode === 1) return false;
+    logCaughtError(`git/publish.isDescendantOfBase(${baseBranch})`, error);
+    return null;
+  }
+}
+
 function resolveRemoteBranch(cwd: string): string | null {
   const upstream = tryRunGit(['rev-parse', '--abbrev-ref', '--symbolic-full-name', '@{u}'], cwd);
   if (upstream) return upstream;
@@ -50,13 +73,29 @@ function resolveRemoteBranch(cwd: string): string | null {
 
 export function verifyPublishContract(
   cwd: string,
-  allowedBaseBranches: string[] = ['develop'],
+  allowedBaseBranches: string[],
   forge: ForgeAdapter = new GithubForge(),
 ): PublishVerification {
-  // The set of acceptable PR base branches: always `develop`, plus any
-  // dependency branch a dependent feature may stack its PR on top of.
-  const allowedBases = allowedBaseBranches.length > 0 ? allowedBaseBranches : ['develop'];
-  const primaryBase = allowedBases[0] ?? 'develop';
+  if (allowedBaseBranches.length === 0) {
+    return {
+      ok: false,
+      status: 'failed',
+      summary: 'publish: no allowed base branches were configured; set integration.baseBranch or dependency branches.',
+      evidence: {
+        branch: null,
+        baseBranch: '',
+        commitSha: null,
+        remoteBranch: null,
+        prNumber: null,
+        prUrl: null,
+      },
+    };
+  }
+  const allowedBases = allowedBaseBranches;
+  const primaryBase = allowedBases[0];
+  if (primaryBase === undefined) {
+    throw new Error('Publish verification requires at least one allowed base branch.');
+  }
   const allowedLabel = allowedBases.join(' or ');
   const branch = tryRunGit(['rev-parse', '--abbrev-ref', 'HEAD'], cwd);
   const commitSha = tryRunGit(['rev-parse', 'HEAD'], cwd);
@@ -83,7 +122,7 @@ export function verifyPublishContract(
     return {
       ok: false,
       status: 'failed',
-      summary: 'implement: repository is not on a named working branch.',
+      summary: 'publish: repository is not on a named working branch.',
       evidence,
     };
   }
@@ -92,7 +131,7 @@ export function verifyPublishContract(
     return {
       ok: false,
       status: 'failed',
-      summary: `implement: branch must not be ${branch}.`,
+      summary: `publish: branch must not be ${branch}.`,
       evidence,
     };
   }
@@ -102,7 +141,7 @@ export function verifyPublishContract(
     return {
       ok: false,
       status: 'blocked',
-      summary: `implement: could not compare HEAD against ${effectiveBase}.`,
+      summary: `publish: could not compare HEAD against ${effectiveBase}.`,
       evidence,
     };
   }
@@ -111,7 +150,7 @@ export function verifyPublishContract(
     return {
       ok: false,
       status: 'failed',
-      summary: `implement: branch has no commits ahead of ${effectiveBase}.`,
+      summary: `publish: branch has no commits ahead of ${effectiveBase}.`,
       evidence,
     };
   }
@@ -120,7 +159,7 @@ export function verifyPublishContract(
     return {
       ok: false,
       status: 'blocked',
-      summary: 'implement: branch has no upstream remote configured; push evidence is missing.',
+      summary: 'publish: branch has no upstream remote configured; push evidence is missing.',
       evidence,
     };
   }
@@ -129,7 +168,7 @@ export function verifyPublishContract(
     return {
       ok: false,
       status: 'blocked',
-      summary: 'implement: GitHub CLI is unavailable, so PR verification could not be completed.',
+      summary: 'publish: GitHub CLI is unavailable, so PR verification could not be completed.',
       evidence,
     };
   }
@@ -138,7 +177,7 @@ export function verifyPublishContract(
     return {
       ok: false,
       status: 'blocked',
-      summary: `implement: GitHub CLI could not read the pull request: ${pullRequestResult.stderr}`,
+      summary: `publish: GitHub CLI could not read the pull request: ${pullRequestResult.stderr}`,
       evidence,
     };
   }
@@ -147,7 +186,7 @@ export function verifyPublishContract(
     return {
       ok: false,
       status: 'blocked',
-      summary: `implement: no pull request is open for the current branch against ${allowedLabel}.`,
+      summary: `publish: no pull request is open for the current branch against ${allowedLabel}.`,
       evidence,
     };
   }
@@ -156,7 +195,7 @@ export function verifyPublishContract(
     return {
       ok: false,
       status: 'failed',
-      summary: `implement: pull request base is ${pr.baseRefName ?? 'unknown'}, expected ${allowedLabel}.`,
+      summary: `publish: pull request base is ${pr.baseRefName ?? 'unknown'}, expected ${allowedLabel}.`,
       evidence,
     };
   }
@@ -165,7 +204,7 @@ export function verifyPublishContract(
     return {
       ok: false,
       status: 'failed',
-      summary: `implement: pull request is not open (state=${pr.state ?? 'unknown'}).`,
+      summary: `publish: pull request is not open (state=${pr.state ?? 'unknown'}).`,
       evidence,
     };
   }
@@ -173,7 +212,7 @@ export function verifyPublishContract(
   return {
     ok: true,
     status: 'done',
-    summary: `implement publish verified on ${branch} (${pr.url}).`,
+    summary: `publish verified on ${branch} (${pr.url}).`,
     evidence,
   };
 }

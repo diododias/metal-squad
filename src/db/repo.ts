@@ -673,6 +673,13 @@ export function listRuns(limit = 50): RunRow[] {
     .all(limit) as RunRow[];
 }
 
+export function getRun(runId: number): RunRow | null {
+  if (!hasDbFile()) return null;
+  return (getDb('readonly')
+    .prepare(`SELECT * FROM runs WHERE id = ?`)
+    .get(runId) as RunRow | undefined) ?? null;
+}
+
 // T002: RunSummary interface
 export interface RunSummary {
   runId: number;

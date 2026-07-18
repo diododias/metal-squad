@@ -99,13 +99,32 @@ export const RUN_BLOCKED_CODES = [
 
 export type RunBlockedCode = (typeof RUN_BLOCKED_CODES)[number];
 
+export interface DeclaredPublication {
+  prUrl: string;
+  prNumber: number | null;
+  base: string;
+  head: string;
+}
+
+export interface RunControlDone {
+  type: 'done';
+  summary: string;
+  publication?: DeclaredPublication;
+}
+
+export interface RunControlBlocked {
+  type: 'blocked';
+  code: RunBlockedCode;
+  reason: string;
+}
+
 export interface TimeoutResult {
   timeoutMs: number;
   runtimeMs: number;
   lastProgress?: string;
 }
 
-export type RunControl = RunControlNeedsInput;
+export type RunControl = RunControlNeedsInput | RunControlDone | RunControlBlocked;
 
 export interface SessionHandle {
   tool: Tool;
@@ -141,6 +160,8 @@ export interface RunFeatureOptions {
 export interface RunResult {
   ok: boolean;
   summary: string;
+  /** A pre-run condition failed and needs an operator action before retrying. */
+  blocked?: boolean;
   usage?: TokenUsage;
   control?: RunControl;
   aborted?: boolean;
@@ -148,6 +169,8 @@ export interface RunResult {
   publishEvidence?: PublishEvidence;
   publishVerified?: boolean;
   publishVerificationStatus?: 'blocked' | 'failed';
+  /** True when the agent-declared PR and the independently observed PR disagree. */
+  publishValidationFailed?: boolean;
   timeout?: TimeoutResult;
 }
 

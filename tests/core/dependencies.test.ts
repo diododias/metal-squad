@@ -1,13 +1,19 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 const mockGetLatestPublishedRunForFeature = vi.fn();
+const mockExecFileSync = vi.fn();
 
 vi.mock('../../src/db/repo.js', () => ({
   getLatestPublishedRunForFeature: mockGetLatestPublishedRunForFeature,
 }));
 
+vi.mock('node:child_process', () => ({
+  execFileSync: mockExecFileSync,
+}));
+
 beforeEach(() => {
   mockGetLatestPublishedRunForFeature.mockReset();
+  mockExecFileSync.mockReset();
 });
 
 function publishedRow(overrides: Record<string, unknown> = {}) {
@@ -56,5 +62,39 @@ describe('resolveDependencyPublications', () => {
     const { resolveDependencyPublications } = await import('../../src/core/git/dependencies.js');
     expect(resolveDependencyPublications('repo1', [])).toEqual([]);
     expect(mockGetLatestPublishedRunForFeature).not.toHaveBeenCalled();
+  });
+});
+
+describe('fetchDependencyBranches', () => {
+  it('fetches each published dependency from its remote ref in the agent cwd', async () => {
+    const { fetchDependencyBranches } = await import('../../src/core/git/dependencies.js');
+
+    expect(fetchDependencyBranches([
+      { featureId: 'feat-a', prNumber: 1, prUrl: 'u/a', branchName: 'feat/a', remoteBranch: 'upstream/stack/a' },
+      { featureId: 'feat-b', prNumber: 2, prUrl: 'u/b', branchName: 'feat/b', remoteBranch: null },
+    ], '/agent/repo')).toBeNull();
+
+    expect(mockExecFileSync).toHaveBeenNthCalledWith(1, 'git', ['fetch', 'upstream', 'stack/a'], expect.objectContaining({ cwd: '/agent/repo' }));
+    expect(mockExecFileSync).toHaveBeenNthCalledWith(2, 'git', ['fetch', 'origin', 'feat/b'], expect.objectContaining({ cwd: '/agent/repo' }));
+  });
+
+  it('returns the unavailable dependency and stops fetching after a failure', async () => {
+    mockExecFileSync.mockImplementationOnce(() => {
+      throw new Error('remote not found');
+    });
+    const { fetchDependencyBranches } = await import('../../src/core/git/dependencies.js');
+
+    expect(fetchDependencyBranches([
+      { featureId: 'feat-a', prNumber: 1, prUrl: 'u/a', branchName: 'feat/a', remoteBranch: 'origin/feat/a' },
+      { featureId: 'feat-b', prNumber: 2, prUrl: 'u/b', branchName: 'feat/b', remoteBranch: 'origin/feat/b' },
+    ], '/agent/repo')).toEqual({ featureId: 'feat-a', remote: 'origin', ref: 'feat/a' });
+    expect(mockExecFileSync).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not invoke git for logical dependencies without publications', async () => {
+    const { fetchDependencyBranches } = await import('../../src/core/git/dependencies.js');
+
+    expect(fetchDependencyBranches([], '/agent/repo')).toBeNull();
+    expect(mockExecFileSync).not.toHaveBeenCalled();
   });
 });
