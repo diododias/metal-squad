@@ -62,6 +62,62 @@ describe('parseControlSignal', () => {
     expect(result?.prompt).toBe('Line1\nLine2\nLine3');
   });
 
+  describe('typed done and blocked signals', () => {
+    it('parses MSQ_DONE with declared publication', () => {
+      const result = parseControlSignal([
+        'MSQ_DONE: Implemented typed control parsing.',
+        'pr_url=https://github.com/diododias/metal-squad/pull/1 pr_number=1 base=develop head=feat/x',
+      ].join('\n'));
+
+      expect(result).toEqual({
+        type: 'done',
+        summary: 'Implemented typed control parsing.',
+        publication: {
+          prUrl: 'https://github.com/diododias/metal-squad/pull/1',
+          prNumber: 1,
+          base: 'develop',
+          head: 'feat/x',
+        },
+      });
+    });
+
+    it('parses MSQ_DONE without publication', () => {
+      expect(parseControlSignal('MSQ_DONE: Implementation complete.')).toEqual({
+        type: 'done',
+        summary: 'Implementation complete.',
+      });
+    });
+
+    it('parses a valid MSQ_BLOCKED reason code', () => {
+      expect(parseControlSignal('MSQ_BLOCKED: dependency_unavailable | T05 is unavailable')).toEqual({
+        type: 'blocked',
+        code: 'dependency_unavailable',
+        reason: 'T05 is unavailable',
+      });
+    });
+
+    it('fails safe for an invalid MSQ_BLOCKED reason code', () => {
+      const result = parseControlSignal('MSQ_BLOCKED: bogus_code | dependency unavailable');
+      expect(result).toMatchObject({ type: 'blocked', code: 'precondition_failed' });
+      expect(result?.type === 'blocked' && result.reason).toContain('bogus_code | dependency unavailable');
+    });
+
+    it('uses the latest typed marker regardless of marker type', () => {
+      expect(parseControlSignal('MSQ_DONE: earlier success\nMSQ_BLOCKED: validation_failed | tests failed')).toEqual({
+        type: 'blocked',
+        code: 'validation_failed',
+        reason: 'tests failed',
+      });
+    });
+
+    it('does not let a typed marker be overridden by fallback prose', () => {
+      expect(parseControlSignal('The agent is blocked.\nMSQ_DONE: Completed successfully.')).toEqual({
+        type: 'done',
+        summary: 'Completed successfully.',
+      });
+    });
+  });
+
   describe('OPTIONS: block — valid extraction', () => {
     it('extracts options and strips the OPTIONS: block from prompt', () => {
       const text = [
@@ -154,6 +210,24 @@ describe('parseControlSignal', () => {
       const result = parseControlSignal(text);
       expect(result?.prompt).toBe('Pick a cache strategy');
     });
+  });
+
+  describe('unmarked blocked fallback', () => {
+    it('classifies unmarked blocked prose as blocked, never done', () => {
+      const result = parseControlSignal('I am blocked — dependency X was not found.');
+      expect(result).toEqual({
+        type: 'blocked',
+        code: 'precondition_failed',
+        reason: 'I am blocked — dependency X was not found.',
+      });
+    });
+
+    it.each(['Cannot proceed until credentials are available.', 'Dependency not found.', 'Unable to continue.'])(
+      'recognizes blocked phrase: %s',
+      (text) => {
+        expect(parseControlSignal(text)?.type).toBe('blocked');
+      },
+    );
   });
 
   describe('OPTIONS: block — invalid falls back to free text', () => {
