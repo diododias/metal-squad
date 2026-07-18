@@ -1,6 +1,9 @@
-import type { RunControl } from './types.js';
+import { RUN_BLOCKED_CODES, type RunBlockedCode, type RunControl } from './types.js';
 
 const INPUT_REQUIRED_PREFIX = 'MSQ_INPUT_REQUIRED:';
+const DONE_PREFIX = 'MSQ_DONE:';
+const BLOCKED_PREFIX = 'MSQ_BLOCKED:';
+const PR_LINE = /^pr_url=(\S+)\s+pr_number=(\d+)\s+base=(\S+)\s+head=(\S+)\s*$/m;
 const OPTIONS_MARKER = /^options:\s*$/i;
 const OPTION_LINE = /^-\s+(.+)$/;
 const MAX_OPTIONS = 8;
@@ -15,26 +18,75 @@ const MAX_LABEL_LENGTH = 60;
 const MAX_FALLBACK_QUESTION_LENGTH = 300;
 const CLARIFICATION_QUESTION_PATTERN =
   /\b(could you|can you|should i|should we|do you want|would you like|which (?:of|one|option)|what (?:should|would)|please (?:clarify|confirm)|i need (?:clarification|your input|to confirm)|need clarification)\b/i;
+const BLOCKED_FALLBACK_PATTERN =
+  /\b(cannot proceed|blocked|dependency not found|unable to continue)\b/i;
 
 export function parseControlSignal(text: string | null | undefined): RunControl | undefined {
   if (!text) return undefined;
   const normalized = text.trim();
   if (!normalized) return undefined;
 
-  const index = normalized.lastIndexOf(INPUT_REQUIRED_PREFIX);
-  if (index !== -1) {
-    const raw = normalized.slice(index + INPUT_REQUIRED_PREFIX.length).trim();
-    if (raw) {
-      const options = extractOptions(raw);
-      if (!options) return { type: 'needs_input', prompt: raw };
-      return { type: 'needs_input', prompt: options.prompt, options: options.labels };
-    }
+  const signal = findLastTypedSignal(normalized);
+  if (signal) {
+    return parseTypedSignal(signal.prefix, normalized.slice(signal.index + signal.prefix.length).trim());
   }
 
   const fallbackPrompt = detectUnmarkedClarificationQuestion(normalized);
   if (fallbackPrompt) return { type: 'needs_input', prompt: fallbackPrompt };
 
+  if (BLOCKED_FALLBACK_PATTERN.test(normalized)) {
+    return { type: 'blocked', code: 'precondition_failed', reason: normalized };
+  }
+
   return undefined;
+}
+
+function findLastTypedSignal(text: string): { prefix: string; index: number } | undefined {
+  return [INPUT_REQUIRED_PREFIX, DONE_PREFIX, BLOCKED_PREFIX]
+    .map((prefix) => ({ prefix, index: text.lastIndexOf(prefix) }))
+    .filter((signal) => signal.index !== -1)
+    .sort((a, b) => b.index - a.index)[0];
+}
+
+function parseTypedSignal(prefix: string, raw: string): RunControl | undefined {
+  if (prefix === INPUT_REQUIRED_PREFIX) {
+    if (!raw) return undefined;
+    const options = extractOptions(raw);
+    if (!options) return { type: 'needs_input', prompt: raw };
+    return { type: 'needs_input', prompt: options.prompt, options: options.labels };
+  }
+
+  if (prefix === DONE_PREFIX) {
+    const publicationMatch = PR_LINE.exec(raw);
+    const summary = publicationMatch ? raw.slice(0, publicationMatch.index).trim() : raw;
+    if (!publicationMatch) return { type: 'done', summary };
+    return {
+      type: 'done',
+      summary,
+      publication: {
+        prUrl: publicationMatch[1] ?? '',
+        prNumber: Number(publicationMatch[2]),
+        base: publicationMatch[3] ?? '',
+        head: publicationMatch[4] ?? '',
+      },
+    };
+  }
+
+  const [rawCode, ...reasonParts] = raw.split('|');
+  const code = rawCode?.trim();
+  const reason = reasonParts.join('|').trim();
+  if (isRunBlockedCode(code)) return { type: 'blocked', code, reason };
+
+  const detail = raw || 'No block reason was provided.';
+  return {
+    type: 'blocked',
+    code: 'precondition_failed',
+    reason: `${detail}\n[Invalid or missing MSQ_BLOCKED reason code; defaulted to precondition_failed.]`,
+  };
+}
+
+function isRunBlockedCode(code: string | undefined): code is RunBlockedCode {
+  return Boolean(code && RUN_BLOCKED_CODES.includes(code as RunBlockedCode));
 }
 
 function detectUnmarkedClarificationQuestion(text: string): string | undefined {
