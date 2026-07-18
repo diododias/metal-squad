@@ -74,7 +74,11 @@ import {
 import { loadBudgetState, saveBudgetState } from '../../db/repo.js';
 import { saveConfig } from '../../config/index.js';
 import { verifyPublishContract } from '../git/publish.js';
-import { resolveDependencyPublications, type DependencyPublication } from '../git/dependencies.js';
+import {
+  fetchDependencyBranches,
+  resolveDependencyPublications,
+  type DependencyPublication,
+} from '../git/dependencies.js';
 import { updateRunPublishState } from '../../db/repo.js';
 
 export interface ResumeOverride {
@@ -493,6 +497,28 @@ export async function executeBacklog(
     const controller = new AbortController();
     activeControllers.set(feature.id, controller);
     const dependencyPublications = dependencyPublicationsFor(feature.id);
+    const dependencyFetchFailure = fetchDependencyBranches(dependencyPublications, opts.cwd);
+    if (dependencyFetchFailure) {
+      const runId = createRun(repoId, feature.id, feature.tool, { pipelineId });
+      lastRunIdByFeature.set(feature.id, runId);
+      const summary = [
+        'MSQ_BLOCKED: dependency_unavailable',
+        `Could not fetch dependency ${dependencyFetchFailure.featureId} with git fetch ${dependencyFetchFailure.remote} ${dependencyFetchFailure.ref}.`,
+        'Verify the dependency branch is published and accessible, then resolve the gate to retry.',
+      ].join(' ');
+      finishRun(runId, 'blocked', summary);
+      createGate(runId, feature.id, repoId);
+      setPipelineStatus(pipelineId, 'blocked');
+      msqEventBus.emit('run:blocked', {
+        runId,
+        featureId: feature.id,
+        tool: feature.tool,
+        reason: 'precondition_failed',
+        summary,
+      });
+      activeControllers.delete(feature.id);
+      return { ok: false, blocked: true, summary };
+    }
     // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- workflow set by Zod default, but callers may pass raw objects
     if (feature.workflow?.mode === 'staged') {
       try {

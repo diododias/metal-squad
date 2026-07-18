@@ -52,7 +52,7 @@ export interface RunFailedEvent {
   featureName?: string;
 }
 
-export type RunBlockedReason = 'needs_input' | 'gate' | 'budget' | 'token';
+export type RunBlockedReason = 'needs_input' | 'gate' | 'budget' | 'token' | 'precondition_failed';
 
 export interface RunBlockedEvent {
   runId: number;
