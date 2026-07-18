@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { BacklogInputSchema, BacklogSchema, BacklogV1Schema, BacklogV2Schema, createRegisteredToolSchema, EpicSchema, FallbackAlternativeSchema, RetrySchema } from '../../src/core/backlog/schema.js';
+import { stagePublishesResolved } from '../../src/core/workflow/stagePublishes.js';
 
 const V1_YAML_OBJ = {
   version: 1,
@@ -235,6 +236,51 @@ describe('BacklogV2Schema', () => {
         alwaysIsolatedStages: [],
       });
       expect(result.data.epics[0]?.features[0]?.workflow.stepGuidance).toEqual({});
+      expect(result.data.epics[0]?.features[0]?.workflow.stagePublishes).toEqual({});
+    }
+  });
+
+  it('parses stagePublishes for declared stages', () => {
+    const result = BacklogV2Schema.safeParse({
+      ...V2_YAML_OBJ,
+      epics: [{
+        ...V2_YAML_OBJ.epics[0],
+        features: [{
+          ...V2_YAML_OBJ.epics[0].features[0],
+          workflow: {
+            ...V2_YAML_OBJ.epics[0].features[0].workflow,
+            stagePublishes: { specify: true, plan: false },
+          },
+        }],
+      }],
+    });
+
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.epics[0]?.features[0]?.workflow.stagePublishes).toEqual({ specify: true, plan: false });
+    }
+  });
+
+  it('rejects stagePublishes keys not present in workflow.stages', () => {
+    const result = BacklogV2Schema.safeParse({
+      ...V2_YAML_OBJ,
+      epics: [{
+        ...V2_YAML_OBJ.epics[0],
+        features: [{
+          ...V2_YAML_OBJ.epics[0].features[0],
+          workflow: {
+            ...V2_YAML_OBJ.epics[0].features[0].workflow,
+            stagePublishes: { validate: true },
+          },
+        }],
+      }],
+    });
+
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.error.issues).toContainEqual(expect.objectContaining({
+        message: 'Stage "validate" must exist in workflow.stages.',
+      }));
     }
   });
 
@@ -439,6 +485,21 @@ describe('FallbackAlternativeSchema / RetrySchema.fallback', () => {
     if (v2Result.success) {
       expect(v2Result.data.epics[0]?.features[0]?.retry?.fallback).toEqual(retryWithFallback.fallback);
     }
+  });
+});
+
+describe('stagePublishesResolved', () => {
+  it('uses staged defaults when no override is configured', () => {
+    expect(stagePublishesResolved('implement', 'staged', {})).toBe(true);
+    expect(stagePublishesResolved('specify', 'staged', {})).toBe(false);
+  });
+
+  it('uses an explicit override before defaults', () => {
+    expect(stagePublishesResolved('specify', 'staged', { specify: true })).toBe(true);
+  });
+
+  it('defaults unknown single-stage workflow stages to publish', () => {
+    expect(stagePublishesResolved('dev-flow', 'single', {})).toBe(true);
   });
 });
 

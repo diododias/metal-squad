@@ -54,6 +54,7 @@ import { dispatch } from '../notify/manager.js';
 import { startTelegramPoller, stopTelegramPoller } from '../notify/telegram-poller.js';
 import { resolveRuntimeConfig } from '../../config/index.js';
 import { buildPrompt } from '../backlog/prompt.js';
+import { COMMUNICATION_PROTOCOL } from './communicationProtocol.js';
 import { createSkillRegistry } from '../skills/index.js';
 import { syncFeatureTasksToBacklog } from '../backlog/sync.js';
 import type { Skill } from '../skills/types.js';
@@ -75,6 +76,7 @@ import { loadBudgetState, saveBudgetState } from '../../db/repo.js';
 import { saveConfig } from '../../config/index.js';
 import { verifyPublishContract } from '../git/publish.js';
 import { resolveDependencyPublications, type DependencyPublication } from '../git/dependencies.js';
+import { stagePublishesResolved } from '../workflow/stagePublishes.js';
 import { updateRunPublishState } from '../../db/repo.js';
 
 export interface ResumeOverride {
@@ -107,6 +109,7 @@ function captureWorkflowRevisions(features: Feature[]): PipelineWorkflowRevision
       ...guidance,
       ...(guidance.skills ? { skills: [...guidance.skills] } : {}),
     }])),
+    stagePublishes: { ...feature.workflow.stagePublishes },
   }]));
 }
 
@@ -315,11 +318,16 @@ export async function executeBacklog(
         resumeOverride: opts.resumeOverride?.featureId === feature.id ? opts.resumeOverride : undefined,
         stageSkills: effectiveStageSkills,
       });
-      const res = applyDeclaredPublishGate(
-        initialRes,
-        opts.cwd,
-        dependencyPublicationsFor(feature.id).map((pub) => pub.branchName),
-      );
+      const res = applyPublishGate(initialRes, {
+        publishes: stage !== undefined && stagePublishesResolved(
+          stage,
+          feature.workflow.mode,
+          feature.workflow.stagePublishes,
+        ),
+        cwd: opts.cwd,
+        dependencyBranches: dependencyPublicationsFor(feature.id).map((pub) => pub.branchName),
+        baseBranch: config.integration.baseBranch,
+      });
       if (res.usage) {
         recordUsage(runId, res.usage);
         applyBudgetUsage(feature, res.usage, runId);
@@ -1153,8 +1161,7 @@ function buildStagePrompt(
     `Current workflow stage: ${stage}.`,
     'Run only this stage in this session.',
     'Do not continue to later stages after finishing the current stage.',
-    'If you need admin input, end your final response with exactly: MSQ_INPUT_REQUIRED: <question>',
-    'If the question has 1-8 discrete answer options, add a line `OPTIONS:` right after it, followed by one `- <label>` line per option (each label 1-60 characters, no duplicates); otherwise omit it for free-text input.',
+    COMMUNICATION_PROTOCOL,
   ];
   const stageContext: string[] = [];
   if (stage === 'specify') {
@@ -1205,12 +1212,16 @@ function declaredPublicationEvidence(publication: DeclaredPublication): PublishE
   };
 }
 
-function applyDeclaredPublishGate(
+function applyPublishGate(
   result: RunResult,
-  cwd: string,
-  dependencyBranches: string[] = [],
+  opts: {
+    publishes: boolean;
+    cwd: string;
+    dependencyBranches: string[];
+    baseBranch: string;
+  },
 ): RunResult {
-  if (!result.ok || result.control?.type !== 'done') return result;
+  if (!opts.publishes || !result.ok || result.control?.type !== 'done') return result;
 
   if (!result.control.publication) {
     return {
@@ -1223,9 +1234,9 @@ function applyDeclaredPublishGate(
   }
 
   // A dependent feature may stack its PR on top of any dependency branch, so
-  // accept those as valid PR bases alongside develop.
-  const allowedBases = [...dependencyBranches, 'develop'];
-  const verification = verifyPublishContract(cwd, allowedBases);
+  // accept those as valid PR bases alongside the configured integration base.
+  const allowedBases = [...opts.dependencyBranches, opts.baseBranch];
+  const verification = verifyPublishContract(opts.cwd, allowedBases);
   const declared = declaredPublicationEvidence(result.control.publication);
   const observed = verification.evidence;
   const matchesDeclaration = observed.branch === declared.branch

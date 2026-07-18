@@ -58,7 +58,9 @@ export interface RunBlockedEvent {
   runId: number;
   featureId: string;
   tool: Tool;
+  /** `reason` routes recovery; `code` explains the specific blocking cause. */
   reason: RunBlockedReason;
+  code?: RunBlockedCode;
   summary: string;
   code?: RunBlockedCode;
 }
