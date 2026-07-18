@@ -27,6 +27,7 @@ export function createRegisteredToolSchema(registeredToolIds: readonly string[])
 }
 export const EffortSchema = z.enum(['low', 'medium', 'high']);
 export const ThinkingSchema = z.enum(['on', 'off']);
+export const DependencyTypeSchema = z.enum(['stack', 'logical']);
 export const WorkflowModeSchema = z.enum(['single', 'staged']);
 /** A configured notification channel type (for example `slack` or `desktop`).
  * Availability and credentials are validated against the runtime notification
@@ -141,7 +142,7 @@ export const DefaultsSchema = z.object({
   maxTokens: z.number().int().positive().optional(),
 });
 
-export const FeatureSchema = z.object({
+const FeatureSchemaShape = z.object({
   id: z.string(),
   title: z.string(),
   spec: z.string().optional(),
@@ -150,6 +151,7 @@ export const FeatureSchema = z.object({
   effort: EffortSchema.default('medium'),
   thinking: ThinkingSchema.default('off'),
   dependsOn: z.array(z.string()).default([]),
+  dependencyTypes: z.record(z.string(), DependencyTypeSchema).optional(),
   tasks: z.array(TaskSchema).default([]),
   skills: z.array(z.string()).optional(),
   specFile: z.string().optional(),
@@ -160,12 +162,29 @@ export const FeatureSchema = z.object({
   autoStart: z.boolean().default(false),
 });
 
+function validateDependencyTypes(
+  feature: { dependsOn?: string[]; dependencyTypes?: Record<string, DependencyType> },
+  ctx: z.RefinementCtx,
+): void {
+  for (const dependencyId of Object.keys(feature.dependencyTypes ?? {})) {
+    if (!feature.dependsOn?.includes(dependencyId)) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['dependencyTypes', dependencyId],
+        message: `dependencyTypes entry "${dependencyId}" must also appear in dependsOn.`,
+      });
+    }
+  }
+}
+
+export const FeatureSchema = FeatureSchemaShape.superRefine(validateDependencyTypes);
+
 /**
  * Authoring shape accepted from the YAML asset. Execution fields deliberately
  * remain optional here: project defaults are applied from the catalog, not
  * from values embedded in backlog.yaml.
  */
-export const FeatureInputSchema = z.object({
+const FeatureInputSchemaShape = z.object({
   id: z.string().optional(),
   title: z.string(),
   spec: z.string().optional(),
@@ -174,6 +193,7 @@ export const FeatureInputSchema = z.object({
   effort: EffortSchema.optional(),
   thinking: ThinkingSchema.optional(),
   dependsOn: z.array(z.string()).optional(),
+  dependencyTypes: z.record(z.string(), DependencyTypeSchema).optional(),
   tasks: z.array(TaskSchema).optional(),
   skills: z.array(z.string()).optional(),
   specFile: z.string().optional(),
@@ -183,6 +203,8 @@ export const FeatureInputSchema = z.object({
   maxTokens: z.number().int().positive().optional(),
   autoStart: z.boolean().optional(),
 });
+
+export const FeatureInputSchema = FeatureInputSchemaShape.superRefine(validateDependencyTypes);
 
 export const EpicSchema = z.object({
   id: z.string(),
@@ -233,6 +255,7 @@ export const BacklogInputSchema = z.union([BacklogV1InputSchema, BacklogV2InputS
 export type Tool = z.infer<typeof ToolSchema>;
 export type Effort = z.infer<typeof EffortSchema>;
 export type Thinking = z.infer<typeof ThinkingSchema>;
+export type DependencyType = z.infer<typeof DependencyTypeSchema>;
 export type OnFail = z.infer<typeof OnFailSchema>;
 export type SessionPolicyMode = z.infer<typeof SessionPolicyModeSchema>;
 export type Budget = z.infer<typeof BudgetSchema>;
@@ -253,3 +276,13 @@ export type BacklogV1Input = z.infer<typeof BacklogV1InputSchema>;
 export type BacklogV2 = z.infer<typeof BacklogV2Schema>;
 export type BacklogV2Input = z.infer<typeof BacklogV2InputSchema>;
 export type Backlog = z.infer<typeof BacklogSchema>;
+
+/** Returns the declared type for a dependency, defaulting to stack for legacy backlogs. */
+export function dependencyType(feature: Pick<Feature, 'dependencyTypes'>, dependencyId: string): DependencyType {
+  return feature.dependencyTypes?.[dependencyId] ?? 'stack';
+}
+
+/** Dependencies whose published branch/PR may be used as a stacked base. */
+export function stackDependencies(feature: Pick<Feature, 'dependsOn' | 'dependencyTypes'>): string[] {
+  return feature.dependsOn.filter((dependencyId) => dependencyType(feature, dependencyId) === 'stack');
+}
