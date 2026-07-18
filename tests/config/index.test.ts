@@ -5,7 +5,7 @@ import { join } from 'node:path';
 
 const DEFAULT_NOTIFICATIONS = {
   channels: [],
-  events: ['run:start', 'gate:created', 'run:failed', 'run:done', 'stage:approval', 'stage:input'],
+  events: ['run:start', 'gate:created', 'run:failed', 'run:blocked', 'run:done', 'stage:approval', 'stage:input'],
 };
 const DEFAULT_BUDGET = { alertAtPercent: 80 };
 const DEFAULT_WEB = { host: '127.0.0.1', port: 8_743, auth: 'token', statusSpinner: true };

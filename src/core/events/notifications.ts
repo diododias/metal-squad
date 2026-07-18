@@ -3,6 +3,7 @@ import { msqEventBus } from './bus.js';
 import type { TypedEventBus } from './bus.js';
 import type { MsqEvents } from './types.js';
 import { getPausedPipelineIdForBudget } from '../../db/repo.js';
+import { classifyBlockedOutcome } from '../orchestrator/autoPilot.js';
 
 export function attachEventNotifications(
   eventBus: TypedEventBus<MsqEvents> = msqEventBus,
@@ -129,6 +130,29 @@ export function attachEventNotifications(
           ]],
         },
       }).catch((error: unknown) => { console.error('[notify] timeout:approval-created dispatch failed:', error); });
+    }),
+    eventBus.subscribe('run:blocked', ({ runId, featureId, reason, code, summary }) => {
+      if (classifyBlockedOutcome(reason) !== 'blocked-human') return;
+
+      const blockingCause = code ?? reason;
+      const message = [
+        `metal-squad: ${featureId} needs human intervention`,
+        `Blocked: ${blockingCause}`,
+        summary,
+        `Or reply: blocked:approve:${String(runId)} | blocked:intervene:${String(runId)}`,
+      ].join('\n');
+      void dispatch('run:blocked', message, {
+        runId,
+        featureId,
+        reason,
+        ...(code ? { code } : {}),
+        reply_markup: {
+          inline_keyboard: [[
+            { text: '✅ Aprovar avanço', callback_data: `blocked:approve:${String(runId)}` },
+            { text: '🛠 Intervir', callback_data: `blocked:intervene:${String(runId)}` },
+          ]],
+        },
+      }).catch((error: unknown) => { console.error('[notify] run:blocked dispatch failed:', error); });
     }),
     eventBus.subscribe('run:failed', ({ featureId, featureName, error }) => {
       void dispatch('run:failed', `metal-squad: ${featureId} failed — ${error}`, {
