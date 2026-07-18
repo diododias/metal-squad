@@ -16,3 +16,12 @@ End your final response with exactly one of these control signals:
 - \`MSQ_BLOCKED: <reason_code> | <reason>\`
   Use exactly one reason_code: \`dependency_unavailable\`, \`precondition_failed\`,
   \`environment_error\`, \`spec_ambiguous\`, or \`validation_failed\`.`;
+
+/**
+ * Sent as a single follow-up turn, in the same resumed session, when a run
+ * finishes without any control signal above. Keep it short: the agent has
+ * already paid for full task context, this only needs to correct course.
+ */
+export const PROTOCOL_REINFORCEMENT_PROMPT = `Your previous response ended without declaring one of the control signals below. If you already finished the requested work in this session — including any push or pull request the task asked for — no further confirmation is needed: this session already authorizes it, so proceed and declare MSQ_DONE now. If you are genuinely stuck, use MSQ_INPUT_REQUIRED or MSQ_BLOCKED instead. Do not end this response with a plain-language question in place of a control signal.
+
+${COMMUNICATION_PROTOCOL}`;

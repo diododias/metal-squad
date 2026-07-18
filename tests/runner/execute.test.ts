@@ -569,6 +569,66 @@ describe('executeBacklog failure persistence', () => {
     }));
   });
 
+  it('recovers via one protocol-reinforcement turn when the agent has a resumable session and declares MSQ_DONE on retry', async () => {
+    let callCount = 0;
+    mockRunFeature.mockImplementation(async () => {
+      callCount += 1;
+      if (callCount === 1) {
+        return {
+          ok: true,
+          summary: 'finished quietly',
+          session: { tool: 'codex', sessionId: 'sess-1', capturedFromRunId: 7, capturedAt: '2026-07-18T00:00:00.000Z' },
+        };
+      }
+      return {
+        ok: true,
+        summary: 'completed after reinforcement',
+        control: {
+          type: 'done',
+          summary: 'completed after reinforcement',
+          publication: { prUrl: 'https://example/pr/1', prNumber: 1, base: 'develop', head: 'feat/test' },
+        },
+      };
+    });
+
+    const { executeBacklog } = await import('../../src/core/runner/execute.js');
+
+    await expect(
+      executeBacklog(createPublishStageBacklog(), { cwd: '/repo', concurrency: 1 }),
+    ).resolves.toBeUndefined();
+
+    expect(mockRunFeature).toHaveBeenCalledTimes(2);
+    const reinforcementCall = mockRunFeature.mock.calls[1];
+    expect(reinforcementCall?.[2]).toEqual(expect.objectContaining({
+      session: { mode: 'resume', handle: expect.objectContaining({ sessionId: 'sess-1' }) },
+    }));
+    expect(mockFinishRun).toHaveBeenCalledWith(
+      7,
+      'done',
+      'publish verified on feat/test (https://example/pr/1).',
+    );
+  });
+
+  it('gives up after one protocol-reinforcement attempt and marks the run blocked', async () => {
+    mockRunFeature.mockImplementation(async () => ({
+      ok: true,
+      summary: 'finished quietly',
+      session: { tool: 'codex', sessionId: 'sess-2', capturedFromRunId: 7, capturedAt: '2026-07-18T00:00:00.000Z' },
+    }));
+
+    const { executeBacklog } = await import('../../src/core/runner/execute.js');
+
+    await expect(executeBacklog(createPublishStageBacklog(), { cwd: '/repo', concurrency: 1 }))
+      .rejects.toThrow('agent finished without declaring MSQ_DONE (protocol reinforcement attempted)');
+
+    expect(mockRunFeature).toHaveBeenCalledTimes(2);
+    expect(mockFinishRun).toHaveBeenCalledWith(
+      7,
+      'blocked',
+      'agent finished without declaring MSQ_DONE (protocol reinforcement attempted)',
+    );
+  });
+
   it('blocks MSQ_DONE without required publication fields as validation_failed', async () => {
     mockRunFeature.mockImplementation(async () => ({
       ok: true,
