@@ -4,6 +4,7 @@ import type { RunningTaskSummary, RunOutputRow, RunSummary, TaskRun } from '../.
 import type { PendingApproval } from '../hooks/useGates.js';
 import type { NotificationEntry } from '../hooks/useNotifications.js';
 import type { BacklogSettings, FeatureCatalogEntry } from '../catalog.js';
+import { DefaultsSchema } from '../../core/backlog/schema.js';
 import type { LayoutMode, VerticalBudget } from '../format.js';
 import {
   STATUS_ICON,
@@ -26,6 +27,7 @@ import { NotificationsFeed } from './NotificationsFeed.js';
 import { WorkflowStepper } from './WorkflowStepper.js';
 import { formatDurationMs, type RunBreakdown } from '../../core/stats.js';
 import { summarizeTaskRuns, type WorkflowStageSummary } from '../workflow.js';
+import { STAGE_ORDER } from '../../core/workflow/stageOrder.js';
 import { useTheme } from '../theme/context.js';
 import {
   getOutputStyle,
@@ -46,7 +48,7 @@ const BACKLOG_TASK_ICON: Record<string, string> = {
   blocked: '!',
 };
 
-const DEFAULT_STEPPER_STAGES = ['specify', 'plan', 'tasks', 'implement', 'validate'];
+const DEFAULT_STEPPER_STAGES = [...STAGE_ORDER];
 
 const OVERVIEW_HINT_OVERHEAD = 2;
 const COLUMN_CHROME_HEIGHT = 2;
@@ -150,7 +152,7 @@ function MainPanelComponent({
   selectedRunIndex: _selectedRunIndex,
   selectedFeature,
   featureCatalog = {},
-  backlogSettings = { stageSkills: {} },
+  backlogSettings = { stageSkills: {}, projectDefaults: DefaultsSchema.parse({}) },
   activeView,
   output,
   outputPaused,

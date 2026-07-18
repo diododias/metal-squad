@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { listRunsForStats, type StatsRunRow } from '../../db/repo.js';
+import { logCaughtError } from '../../core/events/index.js';
 
 export function useStatsRows(
   enabled: boolean,
@@ -13,8 +14,9 @@ export function useStatsRows(
     const refresh = (): void => {
       try {
         setRows(listRunsForStats(sinceDays !== null ? { sinceDays } : {}));
-      } catch {
+      } catch (error) {
         // DB locked or unavailable — keep stale data
+        logCaughtError('useStatsRows.refresh', error);
       }
     };
     refresh();

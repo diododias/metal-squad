@@ -1,8 +1,60 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { Button } from './core/Button.js';
+import { EditableSelectField } from './core/EditableSelectField.js';
+import { EditableTextField } from './core/EditableTextField.js';
+import { EditableToggleField } from './core/EditableToggleField.js';
 import { Tag } from './core/Tag.js';
 import type { FeatureCatalogEntry, BacklogSettings } from '../../../ui/catalog.js';
-import type { FeatureConfigPatch, TaskConfigPatch } from '../../types.js';
+import type { FeatureConfigPatch, FeatureConfigSaveResult, TaskConfigPatch } from '../../types.js';
+
+const executionEfforts = ['low', 'medium', 'high'] as const;
+
+interface ExecutionDraft {
+  tool: string;
+  model: string;
+  effort: string;
+  thinking: string;
+  maxTokens: string;
+  autoStart: boolean;
+}
+
+interface WorkflowDraft {
+  mode: string;
+  syncTasksToBacklog: boolean;
+  approvalChannel: string;
+  autoAdvance: boolean;
+}
+
+function executionDraftFrom(feature: FeatureCatalogEntry): ExecutionDraft {
+  return {
+    tool: feature.tool,
+    model: feature.model ?? '',
+    effort: feature.effort,
+    thinking: feature.thinking ?? 'off',
+    maxTokens: feature.maxTokens?.toString() ?? '',
+    autoStart: feature.autoStart ?? false,
+  };
+}
+
+function workflowDraftFrom(feature: FeatureCatalogEntry): WorkflowDraft {
+  return {
+    mode: feature.workflow.mode,
+    syncTasksToBacklog: feature.workflow.syncTasksToBacklog,
+    approvalChannel: feature.workflow.approvals.channel,
+    autoAdvance: feature.workflow.autoAdvance,
+  };
+}
+
+function sameWorkflowDraft(left: WorkflowDraft, right: WorkflowDraft): boolean {
+  return left.mode === right.mode
+    && left.syncTasksToBacklog === right.syncTasksToBacklog
+    && left.approvalChannel === right.approvalChannel
+    && left.autoAdvance === right.autoAdvance;
+}
+
+function sameStageOrder(left: readonly string[], right: readonly string[]): boolean {
+  return left.length === right.length && left.every((stage, index) => stage === right[index]);
+}
 
 function ConfigCard({ title, children }: { title: string; children: React.ReactNode }): React.JSX.Element {
   return (
@@ -35,17 +87,50 @@ function SubHeading({ children }: { children: React.ReactNode }): React.JSX.Elem
 export interface FeatureConfigDetailProps {
   feature: FeatureCatalogEntry;
   backlogSettings: BacklogSettings;
+  approvalChannels?: string[];
   onSaveConfig: (patch: FeatureConfigPatch) => void;
   onSaveTaskConfig?: (taskId: string, patch: TaskConfigPatch) => void;
+  workflowSaveResult?: FeatureConfigSaveResult;
+  toolIds?: string[];
 }
 
-export function FeatureConfigDetail({ feature, backlogSettings, onSaveConfig }: FeatureConfigDetailProps): React.JSX.Element {
+export function FeatureConfigDetail({ feature, backlogSettings, approvalChannels = ['telegram'], onSaveConfig, workflowSaveResult, toolIds = ['claude', 'codex', 'opencode'] }: FeatureConfigDetailProps): React.JSX.Element {
   const stages = feature.workflow.stages;
   const [selectedStage, setSelectedStage] = useState(stages[0] ?? 'specify');
   const [draftPrompt, setDraftPrompt] = useState('');
   const [draftSkills, setDraftSkills] = useState<string[]>([]);
   const [newSkill, setNewSkill] = useState('');
+  const [newStage, setNewStage] = useState('');
+  const [newStageSkill, setNewStageSkill] = useState('');
+  const [newStageIssue, setNewStageIssue] = useState<string | null>(null);
+  const [draftStages, setDraftStages] = useState<string[]>(() => [...stages]);
+  const [stageOrderBaseline, setStageOrderBaseline] = useState<string[]>(() => [...stages]);
+  const [pendingAddedStage, setPendingAddedStage] = useState<string | null>(null);
+  const [pendingRemovedStage, setPendingRemovedStage] = useState<{ stage: string; nextStage: string } | null>(null);
+  const [awaitingRemovedStageRefresh, setAwaitingRemovedStageRefresh] = useState<{ stage: string; nextStage: string } | null>(null);
+  const [pendingStageOrder, setPendingStageOrder] = useState<string[] | null>(null);
+  const [awaitingStageOrderRefresh, setAwaitingStageOrderRefresh] = useState<string[] | null>(null);
   const [savedFlash, setSavedFlash] = useState(false);
+  const [draftExecution, setDraftExecution] = useState<ExecutionDraft>(() => executionDraftFrom(feature));
+  const [draftWorkflow, setDraftWorkflow] = useState<WorkflowDraft>(() => workflowDraftFrom(feature));
+  const [workflowIssues, setWorkflowIssues] = useState<{ path?: string; message: string }[]>([]);
+  const [workflowSavePending, setWorkflowSavePending] = useState(false);
+  const [awaitingWorkflowRefresh, setAwaitingWorkflowRefresh] = useState<WorkflowDraft | null>(null);
+  const workflowResultAtSaveStart = useRef<FeatureConfigSaveResult | undefined>(undefined);
+  const stageOrderFeatureId = useRef(feature.id);
+
+  useEffect(() => {
+    if (stageOrderFeatureId.current === feature.id) return;
+    stageOrderFeatureId.current = feature.id;
+    setDraftStages([...stages]);
+    setStageOrderBaseline([...stages]);
+  }, [feature.id, stages]);
+
+  useEffect(() => {
+    if (!sameStageOrder(draftStages, stageOrderBaseline) || sameStageOrder(stageOrderBaseline, stages)) return;
+    setDraftStages([...stages]);
+    setStageOrderBaseline([...stages]);
+  }, [draftStages, stageOrderBaseline, stages]);
 
   useEffect(() => {
     const guidance = feature.workflow.stepGuidance[selectedStage];
@@ -53,6 +138,70 @@ export function FeatureConfigDetail({ feature, backlogSettings, onSaveConfig }: 
     setDraftSkills(guidance?.skills ?? []);
     setNewSkill('');
   }, [feature.id, selectedStage, feature.workflow.stepGuidance]);
+
+  useEffect(() => {
+    if (!pendingAddedStage || !stages.includes(pendingAddedStage)) return;
+    setSelectedStage(pendingAddedStage);
+    setPendingAddedStage(null);
+  }, [pendingAddedStage, stages]);
+
+  useEffect(() => {
+    setDraftExecution({
+      tool: feature.tool,
+      model: feature.model ?? '',
+      effort: feature.effort,
+      thinking: feature.thinking ?? 'off',
+      maxTokens: feature.maxTokens?.toString() ?? '',
+      autoStart: feature.autoStart ?? false,
+    });
+  }, [feature.id, feature.tool, feature.model, feature.effort, feature.thinking, feature.maxTokens, feature.autoStart]);
+
+  useEffect(() => {
+    if (
+      !workflowSavePending
+      || workflowSaveResult?.payload.featureId !== feature.id
+      || workflowSaveResult === workflowResultAtSaveStart.current
+    ) return;
+    if (workflowSaveResult.payload.ok) {
+      if (pendingRemovedStage) {
+        setAwaitingRemovedStageRefresh(pendingRemovedStage);
+        setPendingRemovedStage(null);
+      } else if (pendingStageOrder) {
+        setAwaitingStageOrderRefresh(pendingStageOrder);
+        setPendingStageOrder(null);
+      } else {
+        setAwaitingWorkflowRefresh(draftWorkflow);
+      }
+    } else {
+      setWorkflowIssues(workflowSaveResult.payload.issues ?? [{ message: 'The workflow was not saved. Correct the issue and retry.' }]);
+      setPendingRemovedStage(null);
+      setPendingStageOrder(null);
+    }
+    setWorkflowSavePending(false);
+  }, [draftWorkflow, feature.id, pendingRemovedStage, pendingStageOrder, workflowSavePending, workflowSaveResult]);
+
+  useEffect(() => {
+    if (!awaitingWorkflowRefresh || !sameWorkflowDraft(workflowDraftFrom(feature), awaitingWorkflowRefresh)) return;
+    setDraftWorkflow(workflowDraftFrom(feature));
+    setWorkflowIssues([]);
+    setAwaitingWorkflowRefresh(null);
+  }, [awaitingWorkflowRefresh, feature]);
+
+  useEffect(() => {
+    if (!awaitingRemovedStageRefresh || stages.includes(awaitingRemovedStageRefresh.stage)) return;
+    setSelectedStage(stages.includes(awaitingRemovedStageRefresh.nextStage)
+      ? awaitingRemovedStageRefresh.nextStage
+      : (stages[0] ?? 'specify'));
+    setAwaitingRemovedStageRefresh(null);
+  }, [awaitingRemovedStageRefresh, stages]);
+
+  useEffect(() => {
+    if (!awaitingStageOrderRefresh || !sameStageOrder(stages, awaitingStageOrderRefresh)) return;
+    setDraftStages([...stages]);
+    setStageOrderBaseline([...stages]);
+    setWorkflowIssues([]);
+    setAwaitingStageOrderRefresh(null);
+  }, [awaitingStageOrderRefresh, stages]);
 
   function saveGuidance(): void {
     onSaveConfig({
@@ -73,16 +222,214 @@ export function FeatureConfigDetail({ feature, backlogSettings, onSaveConfig }: 
     setDraftSkills(guidance?.skills ?? []);
   }
 
+  function addStage(): void {
+    const stage = newStage.trim();
+    if (!stage) {
+      setNewStageIssue('Enter a step name.');
+      return;
+    }
+    if (stages.includes(stage)) {
+      setNewStageIssue(`Step "${stage}" already exists.`);
+      return;
+    }
+
+    const skill = newStageSkill.trim();
+    onSaveConfig({
+      workflow: {
+        stages: [...stages, stage],
+        stepGuidance: skill
+          ? { ...feature.workflow.stepGuidance, [stage]: { skills: [skill] } }
+          : feature.workflow.stepGuidance,
+      },
+    });
+    setNewStage('');
+    setNewStageSkill('');
+    setNewStageIssue(null);
+    setPendingAddedStage(stage);
+  }
+
+  function removeStage(stage: string): void {
+    if (stages.length <= 1 || workflowSavePending || awaitingRemovedStageRefresh) return;
+    const removedIndex = stages.indexOf(stage);
+    if (removedIndex < 0) return;
+    const nextStages = stages.filter((candidate) => candidate !== stage);
+    const nextStage = nextStages[removedIndex] ?? nextStages[removedIndex - 1] ?? nextStages[0];
+    if (!nextStage) return;
+    const nextGuidance = Object.fromEntries(
+      Object.entries(feature.workflow.stepGuidance).filter(([candidate]) => candidate !== stage),
+    );
+
+    setWorkflowIssues([]);
+    workflowResultAtSaveStart.current = workflowSaveResult;
+    setPendingRemovedStage({ stage, nextStage });
+    setWorkflowSavePending(true);
+    onSaveConfig({
+      workflow: {
+        stages: nextStages,
+        stepGuidance: nextGuidance,
+        sessionPolicy: {
+          alwaysIsolatedStages: feature.workflow.sessionPolicy.alwaysIsolatedStages.filter((candidate) => candidate !== stage),
+        },
+      },
+    });
+  }
+
+  const hasStageOrderChanges = !sameStageOrder(draftStages, stageOrderBaseline);
+  const isStageOrderBusy = workflowSavePending || awaitingStageOrderRefresh !== null;
+
+  function moveStage(stage: string, direction: 'up' | 'down'): void {
+    if (isStageOrderBusy) return;
+    setDraftStages((current) => {
+      const index = current.indexOf(stage);
+      const targetIndex = direction === 'up' ? index - 1 : index + 1;
+      if (index < 0 || targetIndex < 0 || targetIndex >= current.length) return current;
+      const next = [...current];
+      const currentStage = next[index];
+      const targetStage = next[targetIndex];
+      if (currentStage === undefined || targetStage === undefined) return current;
+      [next[index], next[targetIndex]] = [targetStage, currentStage];
+      return next;
+    });
+  }
+
+  function saveStageOrder(): void {
+    if (!hasStageOrderChanges || isStageOrderBusy) return;
+    setWorkflowIssues([]);
+    workflowResultAtSaveStart.current = workflowSaveResult;
+    setPendingStageOrder(draftStages);
+    setWorkflowSavePending(true);
+    onSaveConfig({ workflow: { stages: draftStages } });
+  }
+
+  const executionBaseline = executionDraftFrom(feature);
+  const executionPatch: FeatureConfigPatch = {};
+  const hasChangedMaxTokens = draftExecution.maxTokens !== executionBaseline.maxTokens;
+  let maxTokensError: string | undefined;
+
+  if (draftExecution.tool !== executionBaseline.tool) executionPatch.tool = draftExecution.tool;
+  const configuredCapabilities = backlogSettings.toolCapabilities?.[draftExecution.tool];
+  // Preserve correction of legacy/unavailable saved tools: capabilities only
+  // constrain tools known by the registry, while the existing unavailable-tool
+  // guard still blocks the save until the user selects a valid tool.
+  const executionCapabilities = configuredCapabilities ?? { model: true, effort: true, thinking: true };
+  if (executionCapabilities.model && draftExecution.model !== executionBaseline.model) executionPatch.model = draftExecution.model;
+  if (executionCapabilities.effort && draftExecution.effort !== executionBaseline.effort) executionPatch.effort = draftExecution.effort;
+  if (executionCapabilities.thinking && draftExecution.thinking !== executionBaseline.thinking) executionPatch.thinking = draftExecution.thinking;
+  if (draftExecution.autoStart !== executionBaseline.autoStart) executionPatch.autoStart = draftExecution.autoStart;
+
+  if (hasChangedMaxTokens) {
+    const parsed = Number(draftExecution.maxTokens);
+    if (!Number.isInteger(parsed) || parsed <= 0) {
+      maxTokensError = 'Enter a positive whole number for maxTokens.';
+    } else {
+      executionPatch.maxTokens = parsed;
+    }
+  }
+
+  const hasUnavailableTool = !toolIds.includes(draftExecution.tool);
+  const hasExecutionChanges = Object.keys(executionPatch).length > 0 || hasChangedMaxTokens;
+  const unsupportedExecutionWarnings = configuredCapabilities ? [
+    !executionCapabilities.model ? `${draftExecution.tool} does not support model; it will be ignored.` : undefined,
+    !executionCapabilities.effort ? `${draftExecution.tool} does not support effort; it will be ignored.` : undefined,
+    !executionCapabilities.thinking ? `${draftExecution.tool} does not support thinking; it will be ignored.` : undefined,
+  ].filter((warning): warning is string => warning !== undefined) : [];
+  const executionGuidance = maxTokensError
+    ?? (hasUnavailableTool && hasExecutionChanges ? 'Select an available tool before saving execution settings.' : undefined);
+  const canSaveExecution = hasExecutionChanges && !executionGuidance;
+
+  function saveExecution(): void {
+    if (!canSaveExecution || Object.keys(executionPatch).length === 0) return;
+    onSaveConfig(executionPatch);
+  }
+
+  const workflowBaseline = workflowDraftFrom(feature);
+  const workflowPatch: NonNullable<FeatureConfigPatch['workflow']> = {};
+  if (draftWorkflow.mode !== workflowBaseline.mode) workflowPatch.mode = draftWorkflow.mode;
+  if (draftWorkflow.syncTasksToBacklog !== workflowBaseline.syncTasksToBacklog) workflowPatch.syncTasksToBacklog = draftWorkflow.syncTasksToBacklog;
+  const approvalPatch: { channel?: string } = {};
+  if (draftWorkflow.approvalChannel !== workflowBaseline.approvalChannel) approvalPatch.channel = draftWorkflow.approvalChannel;
+  if (Object.keys(approvalPatch).length > 0) workflowPatch.approvals = approvalPatch;
+  if (draftWorkflow.autoAdvance !== workflowBaseline.autoAdvance) workflowPatch.autoAdvance = draftWorkflow.autoAdvance;
+  const hasWorkflowChanges = Object.keys(workflowPatch).length > 0;
+  const hasUnavailableApprovalChannel = !approvalChannels.includes(draftWorkflow.approvalChannel);
+  const workflowGuidance = hasUnavailableApprovalChannel && hasWorkflowChanges
+    ? 'Choose an available approval destination before saving.'
+    : undefined;
+  const canSaveWorkflow = hasWorkflowChanges && !workflowGuidance && !workflowSavePending && !awaitingWorkflowRefresh;
+
+  function saveWorkflow(): void {
+    if (!canSaveWorkflow) return;
+    setWorkflowIssues([]);
+    workflowResultAtSaveStart.current = workflowSaveResult;
+    setWorkflowSavePending(true);
+    onSaveConfig({ workflow: workflowPatch });
+  }
+
   const resolvedStageSkills = backlogSettings.stageSkills[selectedStage] ?? [];
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
       <ConfigCard title="Execução">
-        <ConfigField label="tool" value={feature.tool} />
-        <ConfigField label="model" value={feature.model ?? '—'} />
-        <ConfigField label="effort" value={feature.effort} />
-        <ConfigField label="maxTokens (override)" value={feature.maxTokens?.toLocaleString() ?? 'none (uses perFeatureMaxTokens)'} />
-        <ConfigField label="autoStart" value={feature.autoStart ? 'on' : 'off'} />
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 12, marginBottom: 12 }}>
+          <EditableSelectField
+            id="execution-tool"
+            label="tool"
+            value={draftExecution.tool}
+            initialValue={executionBaseline.tool}
+            options={toolIds.map((tool) => ({ value: tool, label: tool }))}
+            onChange={(tool) => { setDraftExecution((draft) => ({ ...draft, tool: tool ?? '' })); }}
+          />
+          <EditableTextField
+            id="execution-model"
+            label="model"
+            value={draftExecution.model}
+            initialValue={executionBaseline.model}
+            placeholder="default model"
+            disabled={!executionCapabilities.model}
+            onChange={(model) => { setDraftExecution((draft) => ({ ...draft, model })); }}
+          />
+          <EditableSelectField
+            id="execution-effort"
+            label="effort"
+            value={draftExecution.effort}
+            initialValue={executionBaseline.effort}
+            options={executionEfforts.map((effort) => ({ value: effort, label: effort }))}
+            disabled={!executionCapabilities.effort}
+            onChange={(effort) => { setDraftExecution((draft) => ({ ...draft, effort: effort ?? '' })); }}
+          />
+          <EditableToggleField
+            id="execution-thinking"
+            label="thinking"
+            value={draftExecution.thinking === 'on'}
+            initialValue={executionBaseline.thinking === 'on'}
+            disabled={!executionCapabilities.thinking}
+            onChange={(thinking) => { setDraftExecution((draft) => ({ ...draft, thinking: thinking ? 'on' : 'off' })); }}
+          />
+          <EditableTextField
+            id="execution-max-tokens"
+            label="maxTokens (override)"
+            value={draftExecution.maxTokens}
+            initialValue={executionBaseline.maxTokens}
+            placeholder="uses perFeatureMaxTokens when unset"
+            onChange={(maxTokens) => { setDraftExecution((draft) => ({ ...draft, maxTokens })); }}
+          />
+          <EditableToggleField
+            id="execution-auto-start"
+            label="autoStart"
+            value={draftExecution.autoStart}
+            initialValue={executionBaseline.autoStart}
+            onChange={(autoStart) => { setDraftExecution((draft) => ({ ...draft, autoStart })); }}
+          />
+          {executionGuidance && <span style={{ color: 'var(--accent-warn)', fontSize: 'var(--text-xs)', lineHeight: 1.4 }}>{executionGuidance}</span>}
+          {unsupportedExecutionWarnings.map((warning) => (
+            <span key={warning} style={{ color: 'var(--accent-warn)', fontSize: 'var(--text-xs)', lineHeight: 1.4 }}>{warning}</span>
+          ))}
+          {canSaveExecution && (
+            <div>
+              <Button variant="primary" size="sm" onClick={saveExecution}>save execution</Button>
+            </div>
+          )}
+        </div>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '6px 0' }}>
           <span style={{ color: 'var(--text-dim)' }}>dependsOn</span>
           <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
@@ -112,10 +459,45 @@ export function FeatureConfigDetail({ feature, backlogSettings, onSaveConfig }: 
       </ConfigCard>
 
       <ConfigCard title="Workflow">
-        <ConfigField label="mode" value={feature.workflow.mode} />
-        <ConfigField label="syncTasksToBacklog" value={feature.workflow.syncTasksToBacklog ? 'on' : 'off'} />
-        <ConfigField label="approvals.channel" value={feature.workflow.approvals.channel} />
-        <ConfigField label="approvals.autoAdvance" value={feature.workflow.approvals.autoAdvance ? 'on' : 'off'} />
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 12, marginBottom: 12 }}>
+          <EditableSelectField
+            id="workflow-mode"
+            label="mode"
+            value={draftWorkflow.mode}
+            initialValue={workflowBaseline.mode}
+            options={[{ value: 'single', label: 'single' }, { value: 'staged', label: 'staged' }]}
+            onChange={(mode) => { setDraftWorkflow((draft) => ({ ...draft, mode: mode ?? '' })); }}
+          />
+          <EditableToggleField
+            id="workflow-sync-tasks"
+            label="syncTasksToBacklog"
+            value={draftWorkflow.syncTasksToBacklog}
+            initialValue={workflowBaseline.syncTasksToBacklog}
+            onChange={(syncTasksToBacklog) => { setDraftWorkflow((draft) => ({ ...draft, syncTasksToBacklog })); }}
+          />
+          <EditableSelectField
+            id="workflow-approval-channel"
+            label="approvals.channel"
+            value={draftWorkflow.approvalChannel}
+            initialValue={workflowBaseline.approvalChannel}
+            options={Array.from(new Set(approvalChannels)).map((channel) => ({ value: channel, label: channel }))}
+            onChange={(approvalChannel) => { setDraftWorkflow((draft) => ({ ...draft, approvalChannel: approvalChannel ?? '' })); }}
+          />
+          <EditableToggleField
+            id="workflow-auto-advance"
+            label="workflow.autoAdvance"
+            value={draftWorkflow.autoAdvance}
+            initialValue={workflowBaseline.autoAdvance}
+            onChange={(autoAdvance) => { setDraftWorkflow((draft) => ({ ...draft, autoAdvance })); }}
+          />
+          {workflowGuidance && <span style={{ color: 'var(--accent-warn)', fontSize: 'var(--text-xs)', lineHeight: 1.4 }}>{workflowGuidance}</span>}
+          {workflowIssues.map((issue, index) => (
+            <span key={`${issue.path ?? 'workflow'}-${String(index)}`} style={{ color: 'var(--accent-warn)', fontSize: 'var(--text-xs)', lineHeight: 1.4 }}>
+              {issue.path ? `${issue.path}: ${issue.message}` : issue.message}
+            </span>
+          ))}
+          {canSaveWorkflow && <div><Button variant="primary" size="sm" onClick={saveWorkflow}>save workflow</Button></div>}
+        </div>
         <ConfigField label="sessionPolicy.mode" value={feature.workflow.sessionPolicy.mode} />
       </ConfigCard>
 
@@ -132,27 +514,71 @@ export function FeatureConfigDetail({ feature, backlogSettings, onSaveConfig }: 
       )}
 
       <ConfigCard title="Steps — prompt and skills per stage">
+        <SubHeading>Add step</SubHeading>
+        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 8 }}>
+          <input
+            id="new-step-name"
+            value={newStage}
+            onChange={(e) => { setNewStage(e.target.value); setNewStageIssue(null); }}
+            placeholder="step name…"
+            style={{ flex: 1, minWidth: 140, background: 'var(--bg-sunken)', border: '1px solid var(--border-dim)', borderRadius: 'var(--radius-sm)', color: 'var(--text-primary)', fontFamily: 'var(--font-mono)', fontSize: 'var(--text-xs)', padding: '6px 9px' }}
+          />
+          <input
+            id="new-step-guidance-skill"
+            value={newStageSkill}
+            onChange={(e) => { setNewStageSkill(e.target.value); }}
+            placeholder="guidance skill (optional)…"
+            style={{ flex: 1, minWidth: 180, background: 'var(--bg-sunken)', border: '1px solid var(--border-dim)', borderRadius: 'var(--radius-sm)', color: 'var(--text-primary)', fontFamily: 'var(--font-mono)', fontSize: 'var(--text-xs)', padding: '6px 9px' }}
+          />
+          <Button variant="neutral" size="sm" onClick={addStage}>add step</Button>
+        </div>
+        {newStageIssue && <div role="alert" style={{ color: 'var(--accent-warn)', fontSize: 'var(--text-xs)', marginBottom: 8 }}>{newStageIssue}</div>}
         <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 4 }}>
-          {stages.map((s) => (
-            <button
-              key={s}
-              onClick={() => { setSelectedStage(s); }}
-              style={{
-                fontFamily: 'var(--font-mono)',
-                fontSize: 'var(--text-xs)',
-                padding: '6px 12px',
-                borderRadius: 'var(--radius-pill)',
-                cursor: 'pointer',
-                border: `1px solid ${selectedStage === s ? 'var(--accent-info)' : 'var(--border-strong)'}`,
-                background: selectedStage === s ? 'var(--accent-info-10)' : 'transparent',
-                color: selectedStage === s ? 'var(--accent-info)' : 'var(--text-dim)',
-                fontWeight: selectedStage === s ? 600 : 400,
-              }}
-            >
-              {s}
-            </button>
+          {draftStages.map((s, index) => (
+            <div key={s} style={{ display: 'flex', alignItems: 'center', border: `1px solid ${selectedStage === s ? 'var(--accent-info)' : 'var(--border-strong)'}`, borderRadius: 'var(--radius-pill)', background: selectedStage === s ? 'var(--accent-info-10)' : 'transparent' }}>
+              <button
+                onClick={() => { setSelectedStage(s); }}
+                style={{ fontFamily: 'var(--font-mono)', fontSize: 'var(--text-xs)', padding: '6px 8px 6px 12px', border: 0, borderRadius: 'var(--radius-pill)', cursor: 'pointer', background: 'transparent', color: selectedStage === s ? 'var(--accent-info)' : 'var(--text-dim)', fontWeight: selectedStage === s ? 600 : 400 }}
+              >
+                {s}
+              </button>
+              <button
+                type="button"
+                aria-label={`Move ${s} up`}
+                disabled={index === 0 || isStageOrderBusy}
+                onClick={() => { moveStage(s, 'up'); }}
+                style={{ border: 0, borderLeft: '1px solid var(--border-dim)', padding: '4px 6px', background: 'transparent', color: 'var(--text-dim)', cursor: index === 0 || isStageOrderBusy ? 'not-allowed' : 'pointer' }}
+              >
+                ↑
+              </button>
+              <button
+                type="button"
+                aria-label={`Move ${s} down`}
+                disabled={index === draftStages.length - 1 || isStageOrderBusy}
+                onClick={() => { moveStage(s, 'down'); }}
+                style={{ border: 0, borderLeft: '1px solid var(--border-dim)', padding: '4px 6px', background: 'transparent', color: 'var(--text-dim)', cursor: index === draftStages.length - 1 || isStageOrderBusy ? 'not-allowed' : 'pointer' }}
+              >
+                ↓
+              </button>
+              <button
+                type="button"
+                aria-label={`Remove ${s}`}
+                disabled={stages.length <= 1 || workflowSavePending || awaitingRemovedStageRefresh !== null || hasStageOrderChanges}
+                onClick={() => { removeStage(s); }}
+                style={{ border: 0, borderLeft: '1px solid var(--border-dim)', padding: '4px 8px', background: 'transparent', color: 'var(--text-dim)', cursor: stages.length <= 1 || hasStageOrderChanges ? 'not-allowed' : 'pointer' }}
+              >
+                ×
+              </button>
+            </div>
           ))}
         </div>
+        {hasStageOrderChanges && (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', marginBottom: 8 }}>
+            <span aria-live="polite" style={{ color: 'var(--text-dim)', fontSize: 'var(--text-xs)' }}>Proposed order: {draftStages.join(' → ')}</span>
+            <Button variant="primary" size="sm" onClick={saveStageOrder} disabled={isStageOrderBusy}>save step order</Button>
+          </div>
+        )}
+        {stages.length <= 1 && <div style={{ color: 'var(--text-faint)', fontSize: 'var(--text-xs)', marginBottom: 8 }}>A workflow must keep at least one step.</div>}
 
         <SubHeading>Resolved skills ({selectedStage}) — global, via stageSkills</SubHeading>
         <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 10 }}>

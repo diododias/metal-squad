@@ -1,5 +1,5 @@
 import { randomInt } from 'node:crypto';
-import type { BacklogV2, BacklogV2Input, Feature, FeatureInput } from './schema.js';
+import { BacklogV2Schema, DefaultsSchema, FeatureSchema, type BacklogV2, type BacklogV2Input, type Feature, type FeatureInput } from './schema.js';
 
 export const FEATURE_ID_ALPHABET = '23456789ABCDEFGHJKMNPQRSTVWXYZ';
 export const CANONICAL_FEATURE_ID_RE = /^F-[23456789ABCDEFGHJKMNPQRSTVWXYZ]{8}$/;
@@ -99,16 +99,21 @@ export function registerBacklogFeatures(
     features: epic.features.map((input, featureIndex) => {
       const id = allocated[epicIndex]?.[featureIndex]?.id;
       if (!id) throw new Error(`Unable to allocate a feature ID at ${featureLocation(epicIndex, featureIndex, input)}.`);
-      const feature: Feature = {
+      const feature: Feature = FeatureSchema.parse({
         ...input,
         id,
-        dependsOn: input.dependsOn.map((dependency) => aliases.get(dependency) ?? dependency),
-      };
+        dependsOn: (input.dependsOn ?? []).map((dependency) => aliases.get(dependency) ?? dependency),
+        ...(input.dependencyTypes === undefined ? {} : {
+          dependencyTypes: Object.fromEntries(
+            Object.entries(input.dependencyTypes).map(([dependencyId, type]) => [aliases.get(dependencyId) ?? dependencyId, type]),
+          ),
+        }),
+      });
       registrations.push({
         feature,
         assigned: true,
         idKind: 'generated',
-        ...(input.id !== undefined ? { previousId: input.id } : {}),
+        ...(input.id === undefined ? {} : { previousId: input.id }),
         source,
       });
       return feature;
@@ -116,7 +121,7 @@ export function registerBacklogFeatures(
   }));
 
   return {
-    backlog: { ...backlog, epics },
+    backlog: BacklogV2Schema.parse({ ...backlog, defaults: DefaultsSchema.parse(backlog.defaults ?? {}), epics }),
     registrations,
   };
 }

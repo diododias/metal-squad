@@ -1,10 +1,11 @@
-import { sanitizeToolCallRecord, type SessionHandle, type ToolAdapter, type RunResult, type RunFeatureOptions, type TokenUsage, type ToolCallRecord } from './types.js';
-import type { Effort, Feature } from '../backlog/schema.js';
 import { execFileSync } from 'node:child_process';
+import { detectStderrLevel, sanitizeToolCallRecord, type SessionHandle, type ToolAdapter, type RunResult, type RunFeatureOptions, type TokenUsage, type ToolCallRecord } from './types.js';
+import type { Effort, Feature } from '../backlog/schema.js';
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
+import { logCaughtError } from '../events/logging.js';
 import { resolveRuntimeConfig } from '../../config/index.js';
-import { CliAbortError, CliTimeoutError, runCli } from './spawn.js';
+import { CliAbortError, CliTimeoutError, resolveToolInvocation, runCli } from './spawn.js';
 import { msqEventBus } from '../events/index.js';
 import { parseControlSignal } from './control.js';
 
@@ -52,7 +53,8 @@ export const codexAdapter: ToolAdapter = {
 
   isAvailable(): boolean {
     try {
-      execFileSync('codex', ['--version'], { stdio: 'ignore' });
+      const invocation = resolveToolInvocation('codex');
+      execFileSync(invocation.command, invocation.versionCheck, { stdio: 'ignore' });
       return true;
     } catch {
       return false;
@@ -60,33 +62,45 @@ export const codexAdapter: ToolAdapter = {
   },
 
   async runFeature(feature: Feature, prompt: string, opts: RunFeatureOptions): Promise<RunResult> {
-    const gitWritableArgs = resolveGitWritableArgs(opts.cwd);
+    const invocation = resolveToolInvocation(feature.tool, opts.cwd);
+    if (feature.thinking === 'on' && !invocation.capabilities.thinking) {
+      emitRunOutput(
+        opts.runId,
+        feature,
+        'aviso: codex não suporta thinking; opção ignorada.',
+        'stderr',
+        'heartbeat',
+      );
+    }
+
     const args = opts.session?.mode === 'resume' && opts.session.handle
       ? [
+          ...invocation.baseArgs,
           'exec',
           'resume',
           '--json',
           '--skip-git-repo-check',
-          '--sandbox', 'workspace-write',
-          ...gitWritableArgs,
           ...(feature.model ? ['-m', feature.model] : []),
           ...this.effortFlag(feature.effort),
           opts.session.handle.sessionId,
+          '--',
           prompt,
         ]
       : [
+          ...invocation.baseArgs,
           'exec',
           '--json',
           '--skip-git-repo-check',
           '--sandbox', 'workspace-write',
-          ...gitWritableArgs,
+          ...resolveGitWritableArgs(opts.cwd),
           ...(feature.model ? ['-m', feature.model] : []),
           ...this.effortFlag(feature.effort),
           '--',
           prompt,
         ];
 
-    const timeoutMs = Math.max(resolveRuntimeConfig(process.cwd()).toolTimeoutMs, 1_800_000);
+    const runtime = resolveRuntimeConfig(opts.cwd);
+    const timeoutMs = Math.max(runtime.toolTimeoutMs, invocation.minTimeoutMs);
     let code: number;
     let stdout: string;
     let stderr: string;
@@ -94,11 +108,13 @@ export const codexAdapter: ToolAdapter = {
     const seenToolCalls = new Set<string>();
 
     try {
-      ({ code, stdout, stderr } = await runCli('codex', args, {
+      ({ code, stdout, stderr } = await runCli(invocation.command, args, {
         cwd: opts.cwd,
+        env: invocation.env,
         timeoutMs,
         signal: opts.signal,
-        idleThresholdMs: resolveRuntimeConfig(opts.cwd).idleThresholdMs,
+        idleThresholdMs: runtime.idleThresholdMs,
+        heartbeatMs: runtime.heartbeatMs,
         runId: opts.runId,
         featureId: feature.id,
         tool: feature.tool,
@@ -108,13 +124,13 @@ export const codexAdapter: ToolAdapter = {
         onStatus: opts.onStatus ?? ((snapshot): void => { msqEventBus.emit('run:status', snapshot); }),
         onStdoutLine: (line) => {
           const update = progress.onStdoutLine(line);
-          if (update.output) emitRunOutput(opts.runId, feature, update.output.line, 'stdout', update.output.source);
+          if (update.output) emitRunOutput(opts.runId, feature, update.output.line, 'stdout', update.output.source, update.output);
           if (update.usage) emitUsage(opts.runId, feature, update.usage);
           if (update.toolCall) emitToolCall(opts, feature, update.toolCall, seenToolCalls);
         },
         onStderrLine: (line) => {
           const update = progress.onStderrLine(line);
-          if (update.output) emitRunOutput(opts.runId, feature, update.output.line, 'stderr', update.output.source);
+          if (update.output) emitRunOutput(opts.runId, feature, update.output.line, 'stderr', update.output.source, update.output);
           if (update.toolCall) emitToolCall(opts, feature, update.toolCall, seenToolCalls);
         },
       }));
@@ -272,7 +288,8 @@ function summarizePartialOutput(stdout: string, stderr: string, touchedFiles: st
 function safeJson<T>(s: string): T | null { // eslint-disable-line @typescript-eslint/no-unnecessary-type-parameters
   try {
     return JSON.parse(s) as T;
-  } catch {
+  } catch (error) {
+    logCaughtError('adapters/codex.safeJson', error);
     return null;
   }
 }
@@ -288,7 +305,8 @@ function detectTouchedFiles(cwd: string): string[] {
       .split('\n')
       .map((line) => parseGitStatusPath(line))
       .filter((path): path is string => Boolean(path));
-  } catch {
+  } catch (error) {
+    logCaughtError('adapters/codex.detectTouchedFiles', error);
     return [];
   }
 }
@@ -315,6 +333,8 @@ interface ProgressUpdate {
   output?: {
     line: string;
     source: 'agent' | 'tool' | 'stderr';
+    toolName?: string;
+    level?: 'error' | 'warn';
   };
   usage?: TokenUsage;
   toolCall?: Omit<ToolCallRecord, 'runId' | 'featureId' | 'tool'>;
@@ -365,6 +385,7 @@ function createCodexProgress(): {
           output: {
             line: errorLine,
             source: 'tool',
+            level: 'error',
           },
         };
       }
@@ -376,6 +397,7 @@ function createCodexProgress(): {
           output: {
             line: toolLine,
             source: 'tool',
+            toolName: deriveCodexToolName(evt) ?? undefined,
           },
           toolCall: normalizeCodexToolCall(evt, eventCount),
         };
@@ -391,6 +413,7 @@ function createCodexProgress(): {
         output: {
           line: text,
           source: 'stderr',
+          level: detectStderrLevel(line),
         },
       };
     },
@@ -426,7 +449,16 @@ function emitToolCall(opts: RunFeatureOptions, feature: Feature, partial: Omit<T
 }
 
 function normalizeSnippet(text: unknown): string {
-  return String(text ?? '').replace(/\s+/g, ' ').trim().slice(0, 140); // eslint-disable-line @typescript-eslint/no-base-to-string
+  return String(text ?? '').replace(/\s+/g, ' ').trim(); // eslint-disable-line @typescript-eslint/no-base-to-string
+}
+
+function deriveCodexToolName(evt: CodexEvent): string | null {
+  if (evt.type !== 'item.completed') return null;
+  const item = evt.item;
+  if (!item || item.type === 'agent_message') return null;
+  if (item.type === 'command_execution') return 'shell';
+  const label = normalizeSnippet(item.name ?? item.tool_name ?? item.type ?? '');
+  return label || null;
 }
 
 function summarizeCodexToolEvent(evt: CodexEvent): string | null {
@@ -463,7 +495,8 @@ function serializeToolPayload(payload: unknown): string {
   if (!payload) return '';
   try {
     return normalizeSnippet(JSON.stringify(payload));
-  } catch {
+  } catch (error) {
+    logCaughtError('adapters/codex.serializeToolPayload', error);
     return normalizeSnippet(String(payload)); // eslint-disable-line @typescript-eslint/no-base-to-string
   }
 }
@@ -490,6 +523,7 @@ function emitRunOutput(
   line: string,
   stream: 'stdout' | 'stderr',
   source: 'agent' | 'tool' | 'stderr' | 'heartbeat',
+  extra?: { toolName?: string; level?: 'error' | 'warn' },
 ): void {
   msqEventBus.emit('run:output', {
     runId,
@@ -498,6 +532,9 @@ function emitRunOutput(
     line,
     stream,
     source,
+    createdAt: new Date().toISOString(),
+    ...(extra?.toolName !== undefined ? { toolName: extra.toolName } : {}),
+    ...(extra?.level !== undefined ? { level: extra.level } : {}),
   });
 }
 

@@ -1,5 +1,6 @@
 import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
 import { networkInterfaces } from 'node:os';
+import { logCaughtError } from '../core/events/logging.js';
 
 export const SESSION_COOKIE_NAME = 'msq_session';
 export const SESSION_COOKIE_MAX_AGE_SECONDS = 7 * 24 * 60 * 60;
@@ -81,7 +82,8 @@ export function isAllowedHostHeader(hostHeader: string | undefined, boundHost: s
   let hostname: string;
   try {
     hostname = new URL(`http://${hostHeader}`).hostname;
-  } catch {
+  } catch (error) {
+    logCaughtError('web/auth.isAllowedHostHeader', error);
     return false;
   }
   return isAllowedHostname(hostname, boundHost);
@@ -94,7 +96,8 @@ export function isAllowedOrigin(originHeader: string | undefined, boundHost: str
   let url: URL;
   try {
     url = new URL(originHeader);
-  } catch {
+  } catch (error) {
+    logCaughtError('web/auth.isAllowedOrigin', error);
     return false;
   }
   if (url.protocol !== 'http:' && url.protocol !== 'https:') return false;
@@ -106,8 +109,12 @@ export interface WebAuth {
   createSession: () => string;
   /** True when the Cookie header carries a live session id. */
   hasValidSession: (cookieHeader: string | undefined) => boolean;
+  /** Removes the session carried by the Cookie header, if any. */
+  invalidateSession: (cookieHeader: string | undefined) => void;
   /** Serialized Set-Cookie value for a session id. */
   sessionCookie: (sessionId: string) => string;
+  /** Serialized Set-Cookie value that clears the session cookie in the browser. */
+  expiredSessionCookie: () => string;
 }
 
 export function createWebAuth(now: () => number = Date.now): WebAuth {
@@ -131,8 +138,18 @@ export function createWebAuth(now: () => number = Date.now): WebAuth {
       }
       return false;
     },
+    invalidateSession(cookieHeader: string | undefined): void {
+      const sessionId = parseCookies(cookieHeader)[SESSION_COOKIE_NAME];
+      if (!sessionId) return;
+      for (const stored of sessions.keys()) {
+        if (timingSafeEqualStrings(stored, sessionId)) sessions.delete(stored);
+      }
+    },
     sessionCookie(sessionId: string): string {
       return `${SESSION_COOKIE_NAME}=${sessionId}; HttpOnly; SameSite=Strict; Path=/; Max-Age=${String(SESSION_COOKIE_MAX_AGE_SECONDS)}`;
+    },
+    expiredSessionCookie(): string {
+      return `${SESSION_COOKIE_NAME}=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0`;
     },
   };
 }

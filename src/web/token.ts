@@ -4,6 +4,7 @@ import { dirname, join } from 'node:path';
 import { homedir } from 'node:os';
 import { loadConfig, saveConfig, type Config } from '../config/index.js';
 import { getSecret, setSecret } from '../security/secrets.js';
+import { logCaughtError } from '../core/events/logging.js';
 
 const TOKEN_ACCOUNT = 'msq-web-token';
 const TOKEN_CONFIG_KEY = 'webToken' as const;
@@ -23,7 +24,8 @@ function readFallbackToken(): string | null {
     const raw = JSON.parse(readFileSync(path, 'utf8')) as Partial<Config> & { [TOKEN_CONFIG_KEY]?: string };
     const token = raw[TOKEN_CONFIG_KEY];
     return typeof token === 'string' && token.length > 0 ? token : null;
-  } catch {
+  } catch (error) {
+    logCaughtError('web/token.readFallbackToken', error);
     return null;
   }
 }
@@ -35,7 +37,8 @@ function writeFallbackToken(token: string): void {
   if (existsSync(path)) {
     try {
       raw = JSON.parse(readFileSync(path, 'utf8')) as Record<string, unknown>;
-    } catch {
+    } catch (error) {
+      logCaughtError('web/token.writeFallbackToken', error);
       raw = {};
     }
   }
@@ -62,8 +65,9 @@ export async function getOrCreateWebToken(): Promise<string> {
   try {
     await setSecret(TOKEN_ACCOUNT, token);
     return token;
-  } catch {
+  } catch (error) {
     // Keychain unavailable in headless/container environments — fall back to config file
+    logCaughtError('web/token.getOrCreateWebToken', error);
     writeFallbackToken(token);
     return token;
   }
@@ -78,7 +82,8 @@ export async function rotateWebToken(): Promise<string> {
   const token = generateToken();
   try {
     await setSecret(TOKEN_ACCOUNT, token);
-  } catch {
+  } catch (error) {
+    logCaughtError('web/token.rotateWebToken', error);
     writeFallbackToken(token);
     return token;
   }

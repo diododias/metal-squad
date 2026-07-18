@@ -1,10 +1,11 @@
 import type { Tool } from '../backlog/schema.js';
-import type { RunResult, SessionStatusSnapshot, ToolCallRecord } from '../adapters/types.js';
+import type { RunBlockedCode, RunResult, SessionStatusSnapshot, ToolCallRecord } from '../adapters/types.js';
 import type { StageTransitionDecision } from '../workflow/sessionPolicy.js';
 
 export type GateDecision = 'approved' | 'skipped' | 'retried';
 export type OutputStream = 'stdout' | 'stderr';
 export type OutputSource = 'stdout' | 'stderr' | 'agent' | 'tool' | 'heartbeat';
+export type OutputLevel = 'error' | 'warn';
 export type StageRequestKind = 'approval' | 'input';
 export type ContextQueryTool = 'dora' | 'serena' | 'shell';
 export type ContextQueryKind = 'structured' | 'shell_read';
@@ -27,6 +28,9 @@ export interface RunOutputEvent {
   featureId?: string;
   tool?: Tool;
   source?: OutputSource;
+  createdAt?: string;
+  toolName?: string;
+  level?: OutputLevel;
 }
 
 export interface RunDoneEvent {
@@ -48,13 +52,15 @@ export interface RunFailedEvent {
   featureName?: string;
 }
 
-export type RunBlockedReason = 'needs_input' | 'gate' | 'budget' | 'token';
+export type RunBlockedReason = 'needs_input' | 'gate' | 'budget' | 'token' | 'precondition_failed';
 
 export interface RunBlockedEvent {
   runId: number;
   featureId: string;
   tool: Tool;
+  /** `reason` routes recovery; `code` explains the specific blocking cause. */
   reason: RunBlockedReason;
+  code?: RunBlockedCode;
   summary: string;
 }
 
@@ -79,6 +85,7 @@ export interface StageRequestCreatedEvent {
   kind: StageRequestKind;
   prompt: string;
   source?: 'manual' | 'auto';
+  approvalChannel?: string;
   options?: string[];
   featureName?: string;
 }

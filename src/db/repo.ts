@@ -2,7 +2,7 @@ import { existsSync } from 'node:fs';
 import { getDb, withTransaction } from './index.js';
 import { sanitizeToolCallRecord, type PublishEvidence, type SessionStatusSnapshot, type TokenUsage, type ToolCallRecord } from '../core/adapters/types.js';
 import { resolveDbPath } from '../config/index.js';
-import { msqEventBus } from '../core/events/index.js';
+import { msqEventBus, logCaughtError } from '../core/events/index.js';
 import type {
   ContextQueryEvent,
   ContextQueryKind,
@@ -13,7 +13,7 @@ import type {
   TokensUpdateEvent,
 } from '../core/events/types.js';
 import { resolveContextWindow } from '../core/tasks/blocks.js';
-import type { Tool } from '../core/backlog/schema.js';
+import type { Tool, Workflow } from '../core/backlog/schema.js';
 import type {
   SessionContextTelemetrySnapshot,
   StageTransitionDecision,
@@ -179,7 +179,11 @@ export interface PipelineSnapshot {
   pending: string[];
   active: string[];
   aborted: string[];
+  workflowRevisions?: PipelineWorkflowRevisions;
 }
+
+export type PipelineWorkflowRevision = Pick<Workflow, 'mode' | 'stages' | 'syncTasksToBacklog' | 'sessionPolicy' | 'stepGuidance' | 'stagePublishes'>;
+export type PipelineWorkflowRevisions = Record<string, PipelineWorkflowRevision>;
 
 export function createRun(
   repoId: string,
@@ -234,6 +238,50 @@ export function updateRunPublishState(runId: number, publish: RunPublishState): 
       publish.evidence.prUrl,
       runId,
     );
+}
+
+export interface PublishedRunRow {
+  featureId: string;
+  prNumber: number | null;
+  prUrl: string | null;
+  branchName: string | null;
+  remoteBranch: string | null;
+  baseBranch: string | null;
+  startedAt: string;
+}
+
+// Most recent run of a feature that produced a pull request (pr_url set). Used
+// to recover a dependency's published PR/branch so a dependent feature can
+// stack its own branch/PR on top of it.
+export function getLatestPublishedRunForFeature(
+  repoId: string,
+  featureId: string,
+): PublishedRunRow | null {
+  if (!hasDbFile()) return null;
+  const db = getDb('readonly');
+  const runColumns = new Set(
+    (db.prepare(`PRAGMA table_info(runs)`).all() as { name?: string }[])
+      .map((column) => column.name)
+      .filter((name): name is string => typeof name === 'string'),
+  );
+  if (!runColumns.has('pr_url')) return null;
+  const row = db
+    .prepare(
+      `SELECT
+         r.feature_id AS featureId,
+         ${getRunColumnProjection(runColumns, 'pr_number', 'prNumber')},
+         ${getRunColumnProjection(runColumns, 'pr_url', 'prUrl')},
+         ${getRunColumnProjection(runColumns, 'branch_name', 'branchName')},
+         ${getRunColumnProjection(runColumns, 'remote_branch', 'remoteBranch')},
+         ${getRunColumnProjection(runColumns, 'base_branch', 'baseBranch')},
+         r.started_at AS startedAt
+       FROM runs r
+       WHERE r.repo_id = ? AND r.feature_id = ? AND r.pr_url IS NOT NULL
+       ORDER BY r.started_at DESC
+       LIMIT 1`,
+    )
+    .get(repoId, featureId) as PublishedRunRow | undefined;
+  return row ?? null;
 }
 
 export function upsertRunSessionStatus(snapshot: SessionStatusSnapshot): void {
@@ -319,7 +367,14 @@ export function listRunToolCalls(runId: number, limit = 200): RunToolCallRow[] {
     `SELECT run_id AS runId, id, feature_id AS featureId, tool, sequence, phase, name,
             arguments_json AS argumentsJson, output, step, started_at AS startedAt,
             completed_at AS completedAt, error
-       FROM run_tool_calls WHERE run_id = ? ORDER BY sequence ASC, started_at ASC LIMIT ?`,
+       FROM (
+         SELECT *
+         FROM run_tool_calls
+         WHERE run_id = ?
+         ORDER BY sequence DESC, started_at DESC
+         LIMIT ?
+       ) recent
+       ORDER BY sequence ASC, started_at ASC`,
   ).all(runId, limit) as RawToolCallRow[];
   return rows.map(({ argumentsJson, ...row }) => ({
     ...row,
@@ -330,7 +385,7 @@ export function listRunToolCalls(runId: number, limit = 200): RunToolCallRow[] {
 export function getRunSessionStatus(runId: number): SessionStatusSnapshot | null {
   if (!hasDbFile()) return null;
   const row = getDb('readonly').prepare(
-    `SELECT run_id AS runId, feature_id AS featureId, tool, session_status AS status,
+    `SELECT id AS runId, feature_id AS featureId, tool, session_status AS status,
             session_started_at AS startedAt, session_updated_at AS updatedAt,
             session_elapsed_ms AS elapsedMs, session_last_output_at AS lastOutputAt,
             session_idle_ms AS idleMs, session_reason AS reason, session_terminal AS terminal
@@ -340,7 +395,12 @@ export function getRunSessionStatus(runId: number): SessionStatusSnapshot | null
 }
 
 function parseJsonValue(value: string): unknown {
-  try { return JSON.parse(value) as unknown; } catch { return null; }
+  try {
+    return JSON.parse(value) as unknown;
+  } catch (error) {
+    logCaughtError('db/repo.parseJsonValue', error);
+    return null;
+  }
 }
 
 export function cleanupStaleRuns(olderThanMinutes: number): number {
@@ -414,13 +474,16 @@ export interface RunOutputRow {
   source: OutputSource;
   line: string;
   createdAt: string;
+  toolName: string | null;
+  level: string | null;
 }
 
 export function appendRunOutput(event: RunOutputEvent): void {
+  const createdAt = event.createdAt ?? new Date().toISOString();
   getDb('readwrite')
     .prepare(
-      `INSERT INTO run_output (run_id, feature_id, tool, stream, source, line)
-       VALUES (?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO run_output (run_id, feature_id, tool, stream, source, line, created_at, tool_name, level)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     )
     .run(
       event.runId,
@@ -429,6 +492,9 @@ export function appendRunOutput(event: RunOutputEvent): void {
       event.stream,
       event.source ?? event.stream,
       event.line,
+      createdAt,
+      event.toolName ?? null,
+      event.level ?? null,
     );
 }
 
@@ -545,7 +611,7 @@ export function listRunOutput(runId: number, limit = 120): RunOutputRow[] {
   if (!hasDbFile()) return [];
   return getDb('readonly')
     .prepare(
-      `SELECT id, run_id AS runId, feature_id AS featureId, tool, stream, source, line, created_at AS createdAt
+      `SELECT id, run_id AS runId, feature_id AS featureId, tool, stream, source, line, created_at AS createdAt, tool_name AS toolName, level
        FROM (
          SELECT *
          FROM run_output
@@ -562,7 +628,7 @@ export function listRunOutputAfterId(runId: number, afterId: number, limit = 200
   if (!hasDbFile()) return [];
   return getDb('readonly')
     .prepare(
-      `SELECT id, run_id AS runId, feature_id AS featureId, tool, stream, source, line, created_at AS createdAt
+      `SELECT id, run_id AS runId, feature_id AS featureId, tool, stream, source, line, created_at AS createdAt, tool_name AS toolName, level
        FROM run_output
        WHERE run_id = ? AND id > ?
        ORDER BY id ASC
@@ -607,6 +673,13 @@ export function listRuns(limit = 50): RunRow[] {
     .all(limit) as RunRow[];
 }
 
+export function getRun(runId: number): RunRow | null {
+  if (!hasDbFile()) return null;
+  return (getDb('readonly')
+    .prepare(`SELECT * FROM runs WHERE id = ?`)
+    .get(runId) as RunRow | undefined) ?? null;
+}
+
 // T002: RunSummary interface
 export interface RunSummary {
   runId: number;
@@ -637,6 +710,7 @@ export interface RunSummary {
   pendingStageRequestId: number | null;
   pendingStageRequestKind: StageRequestKind | null;
   pendingStageRequestPrompt: string | null;
+  pendingStageRequestOptions?: string[] | null;
   pendingStageRequestCreatedAt: string | null;
   sessionStatus?: SessionStatusSnapshot['status'] | null;
   sessionStartedAt?: string | null;
@@ -684,7 +758,7 @@ export function listRunsForTui(limit = 50, repoId?: string): RunSummary[] {
       .filter((name): name is string => typeof name === 'string'),
   );
 
-  return db
+  const rows = db
     .prepare(
       `WITH latest AS (
          SELECT MAX(id) AS id
@@ -704,6 +778,7 @@ export function listRunsForTui(limit = 50, repoId?: string): RunSummary[] {
        pipeline_totals AS (
          SELECT
            r.pipeline_id AS pipelineId,
+           r.feature_id AS featureId,
            SUM(COALESCE(r.input_tokens, lu.input, 0)) AS pipelineInputTokens,
            SUM(COALESCE(r.cached_input_tokens, lu.cachedInput, 0)) AS pipelineCachedInputTokens,
            SUM(COALESCE(r.output_tokens, lu.output, 0)) AS pipelineOutputTokens,
@@ -711,7 +786,7 @@ export function listRunsForTui(limit = 50, repoId?: string): RunSummary[] {
          FROM runs r
          LEFT JOIN latest_usage lu ON lu.runId = r.id
          WHERE r.pipeline_id IS NOT NULL
-         GROUP BY r.pipeline_id
+         GROUP BY r.pipeline_id, r.feature_id
        ),
        pending_stage_requests AS (
          SELECT sr.*
@@ -768,6 +843,7 @@ export function listRunsForTui(limit = 50, repoId?: string): RunSummary[] {
          psr.id AS pendingStageRequestId,
          psr.kind AS pendingStageRequestKind,
          psr.prompt AS pendingStageRequestPrompt,
+         psr.options AS pendingStageRequestOptions,
          psr.created_at AS pendingStageRequestCreatedAt,
          r.session_status AS sessionStatus,
          r.session_started_at AS sessionStartedAt,
@@ -796,7 +872,9 @@ export function listRunsForTui(limit = 50, repoId?: string): RunSummary[] {
        LEFT JOIN latest_usage lu ON lu.runId = r.id
        LEFT JOIN gates g ON g.run_id = r.id AND g.resolved_at IS NULL
        LEFT JOIN pipelines p ON p.id = r.pipeline_id
-       LEFT JOIN pipeline_totals pt ON pt.pipelineId = r.pipeline_id
+       LEFT JOIN pipeline_totals pt
+         ON pt.pipelineId = r.pipeline_id
+        AND pt.featureId = r.feature_id
        LEFT JOIN pending_stage_requests psr
          ON psr.pipeline_id = r.pipeline_id
         AND psr.feature_id = r.feature_id
@@ -807,6 +885,8 @@ export function listRunsForTui(limit = 50, repoId?: string): RunSummary[] {
        LIMIT ?`,
     )
     .all(...params) as RunSummary[];
+  for (const row of rows) row.pendingStageRequestOptions = decodeStageRequestOptions(row.pendingStageRequestOptions) ?? null;
+  return rows;
 }
 
 // F34 item 1: full run history for a feature (not deduplicated to the latest
@@ -1173,7 +1253,8 @@ function safeJsonParse(value: string): Record<string, unknown> | null {
   try {
     const parsed = JSON.parse(value) as unknown;
     return parsed && typeof parsed === 'object' ? parsed as Record<string, unknown> : null;
-  } catch {
+  } catch (error) {
+    logCaughtError('db/repo.safeJsonParse', error);
     return null;
   }
 }
@@ -1482,6 +1563,7 @@ export interface PipelineRow {
   pendingJson: string;
   activeJson: string;
   abortedJson: string;
+  workflowSnapshotJson?: string;
   requestedAbortFeatureId: string | null;
   resumeCount: number;
   resumeSummary: string | null;
@@ -1637,8 +1719,8 @@ export function createPipeline(
   const info = getDb('readwrite')
     .prepare(
       `INSERT INTO pipelines
-         (repo_id, feature_id, auto_advance, cwd, plan_json, done_json, pending_json, active_json, aborted_json, resume_summary)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         (repo_id, feature_id, auto_advance, cwd, plan_json, done_json, pending_json, active_json, aborted_json, workflow_snapshot_json, resume_summary)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     )
     .run(
       repoId,
@@ -1650,6 +1732,7 @@ export function createPipeline(
       encodeJson(snapshot.pending),
       encodeJson(snapshot.active),
       encodeJson(snapshot.aborted),
+      JSON.stringify(snapshot.workflowRevisions ?? {}),
       opts.resumeSummary ?? summarizeSnapshot(snapshot),
     );
   return Number(info.lastInsertRowid);
@@ -1766,6 +1849,7 @@ export function updatePipelineSnapshot(
            pending_json = ?,
            active_json = ?,
            aborted_json = ?,
+           workflow_snapshot_json = ?,
            resume_summary = ?,
            requested_abort_feature_id = ?,
            resume_count = ?,
@@ -1780,6 +1864,7 @@ export function updatePipelineSnapshot(
       encodeJson(snapshot.pending),
       encodeJson(snapshot.active),
       encodeJson(snapshot.aborted),
+      JSON.stringify(snapshot.workflowRevisions ?? {}),
       opts.resumeSummary ?? summarizeSnapshot(snapshot),
       opts.clearAbortRequest ? null : (opts.requestedAbortFeatureId ?? row.requestedAbortFeatureId),
       opts.resumeCount ?? row.resumeCount,
@@ -1804,6 +1889,7 @@ export function getPipeline(id: number): PipelineRow | null {
          pending_json AS pendingJson,
          active_json AS activeJson,
          aborted_json AS abortedJson,
+         workflow_snapshot_json AS workflowSnapshotJson,
          requested_abort_feature_id AS requestedAbortFeatureId,
          resume_count AS resumeCount,
          resume_summary AS resumeSummary,
@@ -1833,6 +1919,7 @@ export function listResumablePipelines(): PipelineRow[] {
          pending_json AS pendingJson,
          active_json AS activeJson,
          aborted_json AS abortedJson,
+         workflow_snapshot_json AS workflowSnapshotJson,
          requested_abort_feature_id AS requestedAbortFeatureId,
          resume_count AS resumeCount,
          resume_summary AS resumeSummary,
@@ -1869,7 +1956,27 @@ export function getPipelineSnapshot(row: PipelineRow): PipelineSnapshot {
     pending: decodeJsonArray(row.pendingJson),
     active: decodeJsonArray(row.activeJson),
     aborted: decodeJsonArray(row.abortedJson),
+    workflowRevisions: decodeWorkflowRevisions(row.workflowSnapshotJson),
   };
+}
+
+function decodeWorkflowRevisions(json: string | undefined): PipelineWorkflowRevisions {
+  if (!json) return {};
+  try {
+    const parsed = JSON.parse(json) as unknown;
+    if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) return {};
+    return Object.fromEntries(
+      Object.entries(parsed).filter(([, revision]) => (
+        typeof revision === 'object'
+        && revision !== null
+        && !Array.isArray(revision)
+        && Array.isArray(Reflect.get(revision, 'stages'))
+      )),
+    );
+  } catch (error) {
+    logCaughtError('db/repo.parseStageRevisions', error);
+    return {};
+  }
 }
 
 export function createStageRequest(
@@ -1882,6 +1989,7 @@ export function createStageRequest(
     runId?: number;
     response?: string;
     source?: 'manual' | 'auto';
+    approvalChannel?: string;
     options?: string[];
   } = {},
 ): number {
@@ -1915,6 +2023,7 @@ export function createStageRequest(
     kind,
     prompt,
     source: opts.source ?? 'manual',
+    approvalChannel: opts.approvalChannel,
     options: opts.options,
   });
   return requestId;
@@ -1947,7 +2056,8 @@ function decodeStageRequestOptions(value: unknown): string[] | undefined {
     if (!Array.isArray(parsed)) return undefined;
     const options = parsed.filter((entry): entry is string => typeof entry === 'string');
     return options.length > 0 ? options : undefined;
-  } catch {
+  } catch (error) {
+    logCaughtError('db/repo.decodeStageRequestOptions', error);
     return undefined;
   }
 }
@@ -2278,7 +2388,8 @@ function decodeJsonArray(value: string | null | undefined): string[] {
   try {
     const parsed = JSON.parse(value) as unknown;
     return Array.isArray(parsed) ? parsed.filter((entry): entry is string => typeof entry === 'string') : [];
-  } catch {
+  } catch (error) {
+    logCaughtError('db/repo.decodeJsonArray', error);
     return [];
   }
 }

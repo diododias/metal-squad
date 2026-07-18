@@ -8,6 +8,7 @@ let pragmaTaskRunColumns: Array<{ name: string }> = [];
 let pragmaPipelinesColumns: Array<{ name: string }> = [];
 let pragmaRetryHistoryColumns: Array<{ name: string }> = [];
 let pragmaStageRequestColumns: Array<{ name: string }> = [];
+let pragmaRunOutputColumns: Array<{ name: string }> = [];
 const mockExecCalls: string[] = [];
 
 const mockExec = vi.fn((sql: string) => { mockExecCalls.push(sql); });
@@ -36,6 +37,9 @@ const mockPrepare = vi.fn((sql: string) => {
   }
   if (sql.includes('PRAGMA table_info(stage_requests)')) {
     return { all: makeMockAll(pragmaStageRequestColumns), run: vi.fn(), get: vi.fn() };
+  }
+  if (sql.includes('PRAGMA table_info(run_output)')) {
+    return { all: makeMockAll(pragmaRunOutputColumns), run: vi.fn(), get: vi.fn() };
   }
   return { all: vi.fn(() => []), run: vi.fn(), get: vi.fn() };
 });
@@ -73,6 +77,7 @@ function resetAll() {
   pragmaPipelinesColumns = [];
   pragmaRetryHistoryColumns = [{ name: 'tool' }, { name: 'model' }];
   pragmaStageRequestColumns = [{ name: 'options' }];
+  pragmaRunOutputColumns = [];
   mockExecCalls.length = 0;
   mockDatabase.mockReset();
   mockDatabase.mockReturnValue(mockDb);
@@ -111,8 +116,10 @@ describe('getDb migration — column checks', () => {
     pragmaPipelinesColumns = [
       { name: 'cwd' }, { name: 'plan_json' }, { name: 'done_json' },
       { name: 'pending_json' }, { name: 'active_json' }, { name: 'aborted_json' },
+      { name: 'workflow_snapshot_json' },
       { name: 'requested_abort_feature_id' }, { name: 'resume_count' }, { name: 'resume_summary' },
     ];
+    pragmaRunOutputColumns = [{ name: 'tool_name' }, { name: 'level' }];
 
     const { getDb } = await import('../../src/db/index.js');
     getDb('readwrite');

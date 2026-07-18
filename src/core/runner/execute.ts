@@ -2,7 +2,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import { resolve, dirname, join } from 'node:path';
 import { spawn } from 'node:child_process';
 import type { Backlog, Effort, Feature, OnFail, Tool } from '../backlog/schema.js';
-import type { RunFeatureOptions, RunResult } from '../adapters/types.js';
+import type { DeclaredPublication, PublishEvidence, RunFeatureOptions, RunResult } from '../adapters/types.js';
 import { topoOrder, selectStartableFeaturePlan } from '../orchestrator/graph.js';
 import { schedule } from '../orchestrator/scheduler.js';
 import {
@@ -14,6 +14,7 @@ import {
   shouldEvaluateNextCandidate,
 } from '../orchestrator/autoPilot.js';
 import type { AutoPilotOutcomeKind } from '../events/types.js';
+import { logCaughtError } from '../events/logging.js';
 import { getAdapter } from '../adapters/index.js';
 import { resolveRepo } from '../repo.js';
 import {
@@ -45,6 +46,7 @@ import {
   updateRunTool,
   updateStageTransitionDecisionNextSessionId,
   type PipelineStatus,
+  type PipelineWorkflowRevisions,
   type StageRequestRow,
 } from '../../db/repo.js';
 import { getCatalogFeature } from '../../db/backlogCatalog.js';
@@ -52,10 +54,11 @@ import { dispatch } from '../notify/manager.js';
 import { startTelegramPoller, stopTelegramPoller } from '../notify/telegram-poller.js';
 import { resolveRuntimeConfig } from '../../config/index.js';
 import { buildPrompt } from '../backlog/prompt.js';
+import { COMMUNICATION_PROTOCOL, PROTOCOL_REINFORCEMENT_PROMPT } from './communicationProtocol.js';
 import { createSkillRegistry } from '../skills/index.js';
 import { syncFeatureTasksToBacklog } from '../backlog/sync.js';
 import type { Skill } from '../skills/types.js';
-import { collectEffectiveStageSkills } from '../workflow/stageSkills.js';
+import { collectEffectiveStageSkills, resolveDefaultStageSkillNames } from '../workflow/stageSkills.js';
 import { decideStageTransition } from '../workflow/sessionPolicy.js';
 import {
   createBudgetTracker,
@@ -71,7 +74,14 @@ import {
 } from '../events/index.js';
 import { loadBudgetState, saveBudgetState } from '../../db/repo.js';
 import { saveConfig } from '../../config/index.js';
-import { verifyPublishContract } from '../git/publish.js';
+import { isDescendantOfBase, verifyPublishContract } from '../git/publish.js';
+import {
+  fetchDependencyBranches,
+  resolveDependencyPublications,
+  type DependencyPublication,
+} from '../git/dependencies.js';
+import { stagePublishesResolved } from '../workflow/stagePublishes.js';
+import { stackDependencies } from '../backlog/schema.js';
 import { updateRunPublishState } from '../../db/repo.js';
 
 export interface ResumeOverride {
@@ -85,9 +95,59 @@ export interface ExecuteOptions {
   cwd: string;
   concurrency: number;
   featureId?: string;
-  autoAdvanceStages?: boolean;
   resumePipelineId?: number;
   resumeOverride?: ResumeOverride;
+}
+
+function captureWorkflowRevisions(features: Feature[]): PipelineWorkflowRevisions {
+  return Object.fromEntries(features.map((feature) => [feature.id, {
+    mode: feature.workflow.mode,
+    stages: [...feature.workflow.stages],
+    syncTasksToBacklog: feature.workflow.syncTasksToBacklog,
+    sessionPolicy: {
+      ...feature.workflow.sessionPolicy,
+      alwaysIsolatedStages: [...feature.workflow.sessionPolicy.alwaysIsolatedStages],
+    },
+    stepGuidance: Object.fromEntries(Object.entries(
+      Object.hasOwn(feature.workflow, 'stepGuidance') ? feature.workflow.stepGuidance : {},
+    ).map(([stage, guidance]) => [stage, {
+      ...guidance,
+      ...(guidance.skills ? { skills: [...guidance.skills] } : {}),
+    }])),
+    stagePublishes: { ...feature.workflow.stagePublishes },
+  }]));
+}
+
+function applyWorkflowRevisions(features: Feature[], revisions: PipelineWorkflowRevisions | undefined): Feature[] {
+  if (!revisions || Object.keys(revisions).length === 0) return features;
+  return features.map((feature) => {
+    const revision = revisions[feature.id];
+    if (!revision) return feature;
+    return {
+      ...feature,
+      workflow: {
+        ...revision,
+        autoAdvance: feature.workflow.autoAdvance,
+        // Approval transitions are intentionally resolved from the current
+        // catalog, even when the structural workflow is frozen for resume.
+        approvals: feature.workflow.approvals,
+      },
+    };
+  });
+}
+
+export function rehydrateBacklogWorkflowRevisions<T extends Backlog>(
+  backlog: T,
+  revisions: PipelineWorkflowRevisions | undefined,
+): T {
+  if (!revisions || Object.keys(revisions).length === 0) return backlog;
+  return {
+    ...backlog,
+    epics: backlog.epics.map((epic) => ({
+      ...epic,
+      features: applyWorkflowRevisions(epic.features, revisions),
+    })),
+  };
 }
 
 export async function executeBacklog(
@@ -102,11 +162,17 @@ export async function executeBacklog(
   const activeControllers = new Map<string, AbortController>();
   const lastRunIdByFeature = new Map<string, number>();
   const featureMaxTokens = new Map<string, number>();
+  // The `--feature` path clears `dependsOn` on the resolved plan (see below), so
+  // capture the original dependency edges here to recover dependency PRs later.
+  const stackDependenciesByFeature = new Map<string, string[]>();
   for (const epic of backlog.epics) {
     for (const feature of epic.features) {
       if (feature.maxTokens !== undefined) featureMaxTokens.set(feature.id, feature.maxTokens);
+      stackDependenciesByFeature.set(feature.id, stackDependencies(feature));
     }
   }
+  const dependencyPublicationsFor = (featureId: string): DependencyPublication[] =>
+    resolveDependencyPublications(repoId, stackDependenciesByFeature.get(featureId) ?? []);
   const budget = createBudgetTracker(resolveBudgetLimits(
     backlog.version === 2 ? backlog.budget : undefined,
     config.budget,
@@ -120,7 +186,7 @@ export async function executeBacklog(
   let autoPilotProtectiveStop = false;
 
   const repoStageSkills = backlog.version === 2 ? backlog.defaults.stageSkills : {};
-  const effectiveStageSkills = collectEffectiveStageSkills(repoStageSkills, config.stageSkills);
+  const effectiveStageSkills = collectEffectiveStageSkills(repoStageSkills);
   const completedFeatureIds = listCompletedFeatureIds(repoId);
 
   const resolvedPlan = opts.featureId
@@ -140,6 +206,7 @@ export async function executeBacklog(
     pending: resolvedPlan.map((feature) => feature.id),
     active: [] as string[],
     aborted: [] as string[],
+    workflowRevisions: captureWorkflowRevisions(resolvedPlan),
   };
 
   const pipelineId = opts.resumePipelineId
@@ -152,7 +219,7 @@ export async function executeBacklog(
     : createPipeline(
         repoId,
         opts.featureId ?? resolvedPlan[resolvedPlan.length - 1]?.id ?? 'backlog',
-        Boolean(opts.autoAdvanceStages),
+        Boolean(resolvedPlan[resolvedPlan.length - 1]?.workflow.autoAdvance),
         { cwd: opts.cwd, snapshot: initialSnapshot },
       );
   const persistedPipeline = getPipeline(pipelineId);
@@ -166,7 +233,10 @@ export async function executeBacklog(
     ...persistedSnapshot.active,
     ...persistedSnapshot.aborted,
   ]);
-  const ordered = resolvedPlan.filter((feature) => remainingIds.has(feature.id));
+  const ordered = applyWorkflowRevisions(
+    resolvedPlan.filter((feature) => remainingIds.has(feature.id)),
+    persistedSnapshot.workflowRevisions,
+  );
 
   const registry = createSkillRegistry();
   const detachPersistence = attachRunPersistence();
@@ -251,105 +321,214 @@ export async function executeBacklog(
         signal: abortSignal,
         session,
         resumeOverride: opts.resumeOverride?.featureId === feature.id ? opts.resumeOverride : undefined,
+        stageSkills: effectiveStageSkills,
       });
-      const res = applyImplementPublishGate(initialRes, stage, opts.cwd);
-      if (res.usage) {
-        recordUsage(runId, res.usage);
-        applyBudgetUsage(feature, res.usage, runId);
-      }
-      if (res.publishEvidence) {
-        updateRunPublishState(runId, {
-          verified: res.publishVerified ?? false,
-          error: res.publishVerified ? null : res.summary,
-          evidence: res.publishEvidence,
-        });
-      }
+      const dependencyPublications = dependencyPublicationsFor(feature.id);
+      const publishes = stage !== undefined && stagePublishesResolved(
+        stage,
+        feature.workflow.mode,
+        feature.workflow.stagePublishes,
+      );
+      const publishGatedRes = applyPublishGate(initialRes, {
+        publishes,
+        cwd: opts.cwd,
+        dependencyBranches: dependencyPublications.map((pub) => pub.branchName),
+        baseBranch: config.integration.baseBranch,
+      });
+      let res = applyBaseReconciliation(
+        publishGatedRes,
+        opts.cwd,
+        dependencyPublications[0]?.branchName ?? config.integration.baseBranch,
+      );
 
-      if (res.timeout) {
-        const occurrence = createTimeoutOccurrence({
-          runId,
-          pipelineId,
-          featureId: feature.id,
-          stage,
-          timeoutMs: res.timeout.timeoutMs,
-          runtimeMs: res.timeout.runtimeMs,
-          lastProgress: res.timeout.lastProgress,
-        });
-        const request = occurrence ? createTimeoutApprovalRequest(occurrence.id) : null;
-        finishRun(runId, 'blocked', res.summary);
-        setPipelineStatus(pipelineId, 'blocked');
-        if (stage) {
-          msqEventBus.emit('task:updated', {
-            runId, featureId: feature.id, taskId: stage, status: 'blocked', stage,
-            endedAt: new Date().toISOString(),
+      // A run that exits cleanly but never declares MSQ_DONE gets exactly one
+      // reinforcement turn in the same adapter session before it is finalized
+      // as blocked. Claude in particular tends to pause and ask for
+      // confirmation before push/PR even when the stage prompt already
+      // authorizes it, which otherwise strands genuinely-completed work as
+      // `blocked` (observed on F-4YW66H3T / run 302).
+      let reinforcementUsed = false;
+      let declaredDone = false;
+      for (;;) {
+        if (res.usage) {
+          recordUsage(runId, res.usage);
+          applyBudgetUsage(feature, res.usage, runId);
+        }
+        if (res.control?.type === 'done' && res.control.publication) {
+          updateRunPublishState(runId, {
+            // The agent declaration is the source of truth for PR identity.
+            // Verification only contributes the independently observed commit
+            // and remote details; it must never replace declared PR fields.
+            verified: false,
+            error: null,
+            evidence: declaredPublicationEvidence(res.control.publication),
           });
         }
-        if (occurrence && request) {
-          msqEventBus.emit('timeout:approval-created', {
-            requestId: request.id,
-            occurrenceId: occurrence.id,
+        if (res.publishEvidence) {
+          updateRunPublishState(runId, {
+            verified: res.publishVerified ?? false,
+            error: res.publishVerified ? null : res.summary,
+            evidence: res.publishEvidence,
+          });
+        }
+
+        if (res.timeout) {
+          const occurrence = createTimeoutOccurrence({
             runId,
             pipelineId,
             featureId: feature.id,
-            ...(stage ? { stage } : {}),
-            timeoutMs: occurrence.timeoutMs,
-            runtimeMs: occurrence.runtimeMs,
-            ...(occurrence.lastProgress ? { lastProgress: occurrence.lastProgress } : {}),
+            stage,
+            timeoutMs: res.timeout.timeoutMs,
+            runtimeMs: res.timeout.runtimeMs,
+            lastProgress: res.timeout.lastProgress,
           });
+          const request = occurrence ? createTimeoutApprovalRequest(occurrence.id) : null;
+          finishRun(runId, 'blocked', res.summary);
+          setPipelineStatus(pipelineId, 'blocked');
+          if (stage) {
+            msqEventBus.emit('task:updated', {
+              runId, featureId: feature.id, taskId: stage, status: 'blocked', stage,
+              endedAt: new Date().toISOString(),
+            });
+          }
+          if (occurrence && request) {
+            msqEventBus.emit('timeout:approval-created', {
+              requestId: request.id,
+              occurrenceId: occurrence.id,
+              runId,
+              pipelineId,
+              featureId: feature.id,
+              ...(stage ? { stage } : {}),
+              timeoutMs: occurrence.timeoutMs,
+              runtimeMs: occurrence.runtimeMs,
+              ...(occurrence.lastProgress ? { lastProgress: occurrence.lastProgress } : {}),
+            });
+          }
+          activeRunIds.delete(runId);
+          return { runId, res };
         }
-        activeRunIds.delete(runId);
-        return { runId, res };
-      }
 
-      if (res.control?.type === 'needs_input') {
-        finishRun(runId, 'blocked', res.summary);
-        if (stage) {
-          msqEventBus.emit('task:updated', {
+        if (res.control?.type === 'needs_input') {
+          finishRun(runId, 'blocked', res.summary);
+          if (stage) {
+            msqEventBus.emit('task:updated', {
+              runId,
+              featureId: feature.id,
+              taskId: stage,
+              status: 'blocked',
+              stage,
+              endedAt: new Date().toISOString(),
+            });
+          }
+          msqEventBus.emit('run:blocked', {
             runId,
             featureId: feature.id,
-            taskId: stage,
-            status: 'blocked',
-            stage,
-            endedAt: new Date().toISOString(),
+            tool: feature.tool,
+            reason: 'needs_input',
+            summary: res.summary,
           });
+          activeRunIds.delete(runId);
+          return { runId, res: { ...res, ok: false } };
         }
-        msqEventBus.emit('run:blocked', {
-          runId,
-          featureId: feature.id,
-          tool: feature.tool,
-          reason: 'needs_input',
-          summary: res.summary,
-        });
-        activeRunIds.delete(runId);
-        return { runId, res };
-      }
 
-      if (res.aborted) {
-        finishRun(runId, 'aborted', res.summary);
-        if (stage) {
-          msqEventBus.emit('task:updated', {
+        if (res.control?.type === 'blocked') {
+          finishRun(runId, 'blocked', res.summary);
+          if (stage) {
+            msqEventBus.emit('task:updated', {
+              runId,
+              featureId: feature.id,
+              taskId: stage,
+              status: 'blocked',
+              stage,
+              endedAt: new Date().toISOString(),
+            });
+          }
+          msqEventBus.emit('run:blocked', {
             runId,
             featureId: feature.id,
-            taskId: stage,
-            status: 'failed',
-            stage,
-            endedAt: new Date().toISOString(),
+            tool: feature.tool,
+            reason: 'gate',
+            code: res.control.code,
+            summary: res.summary,
           });
+          activeRunIds.delete(runId);
+          return { runId, res: { ...res, ok: false } };
         }
-        msqEventBus.emit('run:failed', {
-          runId,
-          featureId: feature.id,
-          tool: feature.tool,
-          error: res.summary,
-          kind: 'aborted',
-        });
-        activeRunIds.delete(runId);
-        return { runId, res };
+
+        if (res.aborted) {
+          finishRun(runId, 'aborted', res.summary);
+          if (stage) {
+            msqEventBus.emit('task:updated', {
+              runId,
+              featureId: feature.id,
+              taskId: stage,
+              status: 'failed',
+              stage,
+              endedAt: new Date().toISOString(),
+            });
+          }
+          msqEventBus.emit('run:failed', {
+            runId,
+            featureId: feature.id,
+            tool: feature.tool,
+            error: res.summary,
+            kind: 'aborted',
+          });
+          activeRunIds.delete(runId);
+          return { runId, res };
+        }
+
+        declaredDone = res.control?.type === 'done';
+        if (res.ok && !declaredDone) {
+          if (!reinforcementUsed && res.session) {
+            reinforcementUsed = true;
+            const reinforced = await attemptProtocolReinforcement(feature, res, {
+              cwd: opts.cwd,
+              runId,
+              signal: abortSignal,
+            });
+            if (reinforced) {
+              const reinforcedGated = applyPublishGate(reinforced, {
+                publishes,
+                cwd: opts.cwd,
+                dependencyBranches: dependencyPublications.map((pub) => pub.branchName),
+                baseBranch: config.integration.baseBranch,
+              });
+              res = applyBaseReconciliation(
+                reinforcedGated,
+                opts.cwd,
+                dependencyPublications[0]?.branchName ?? config.integration.baseBranch,
+              );
+              continue;
+            }
+          }
+          const summary = reinforcementUsed
+            ? 'agent finished without declaring MSQ_DONE (protocol reinforcement attempted)'
+            : 'agent finished without declaring MSQ_DONE';
+          finishRun(runId, 'blocked', summary);
+          if (stage) {
+            msqEventBus.emit('task:updated', {
+              runId, featureId: feature.id, taskId: stage, status: 'blocked', stage,
+              endedAt: new Date().toISOString(),
+            });
+          }
+          msqEventBus.emit('run:blocked', {
+            runId,
+            featureId: feature.id,
+            tool: feature.tool,
+            reason: 'gate',
+            summary,
+          });
+          activeRunIds.delete(runId);
+          return { runId, res: { ...res, ok: false, summary } };
+        }
+
+        break;
       }
 
       const failurePolicy = getOnFailPolicy(feature);
       const failureStatus = res.publishVerificationStatus ?? (failurePolicy === 'gate' ? 'blocked' : 'failed');
-      const status = res.ok ? 'done' : failureStatus;
+      const status = res.ok && declaredDone ? 'done' : failureStatus;
       finishRun(runId, status, res.summary);
       if (stage) {
         msqEventBus.emit('task:updated', {
@@ -361,7 +540,7 @@ export async function executeBacklog(
           endedAt: new Date().toISOString(),
         });
       }
-      if (res.ok) {
+      if (res.ok && declaredDone) {
         msqEventBus.emit('run:done', {
           runId,
           featureId: feature.id,
@@ -374,6 +553,7 @@ export async function executeBacklog(
           featureId: feature.id,
           tool: feature.tool,
           reason: 'gate',
+          ...(res.publishValidationFailed ? { code: 'validation_failed' as const } : {}),
           summary: res.summary,
         });
       } else {
@@ -422,8 +602,60 @@ export async function executeBacklog(
         summary: formatBudgetViolation(violation),
       };
     }
+    const dependencyPublications = dependencyPublicationsFor(feature.id);
+    const publishedDependencyIds = new Set(dependencyPublications.map((publication) => publication.featureId));
+    const missingDependencies = (stackDependenciesByFeature.get(feature.id) ?? [])
+      .filter((dependencyId) => !publishedDependencyIds.has(dependencyId));
+    if (missingDependencies.length > 0) {
+      const stage = feature.workflow.mode === 'staged' ? feature.workflow.stages[0] : undefined;
+      const runId = createRun(repoId, feature.id, feature.tool, { pipelineId, stage });
+      const summary = `dependency_unavailable: ${missingDependencies.join(', ')}`;
+      lastRunIdByFeature.set(feature.id, runId);
+      finishRun(runId, 'blocked', summary);
+      if (stage) {
+        msqEventBus.emit('task:updated', {
+          runId,
+          featureId: feature.id,
+          taskId: stage,
+          status: 'blocked',
+          stage,
+          endedAt: new Date().toISOString(),
+        });
+      }
+      msqEventBus.emit('run:blocked', {
+        runId,
+        featureId: feature.id,
+        tool: feature.tool,
+        reason: 'gate',
+        code: 'dependency_unavailable',
+        summary,
+      });
+      return { ok: false, summary };
+    }
     const controller = new AbortController();
     activeControllers.set(feature.id, controller);
+    const dependencyFetchFailure = fetchDependencyBranches(dependencyPublications, opts.cwd);
+    if (dependencyFetchFailure) {
+      const runId = createRun(repoId, feature.id, feature.tool, { pipelineId });
+      lastRunIdByFeature.set(feature.id, runId);
+      const summary = [
+        'MSQ_BLOCKED: dependency_unavailable',
+        `Could not fetch dependency ${dependencyFetchFailure.featureId} with git fetch ${dependencyFetchFailure.remote} ${dependencyFetchFailure.ref}.`,
+        'Verify the dependency branch is published and accessible, then resolve the gate to retry.',
+      ].join(' ');
+      finishRun(runId, 'blocked', summary);
+      createGate(runId, feature.id, repoId);
+      setPipelineStatus(pipelineId, 'blocked');
+      msqEventBus.emit('run:blocked', {
+        runId,
+        featureId: feature.id,
+        tool: feature.tool,
+        reason: 'precondition_failed',
+        summary,
+      });
+      activeControllers.delete(feature.id);
+      return { ok: false, blocked: true, summary };
+    }
     // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- workflow set by Zod default, but callers may pass raw objects
     if (feature.workflow?.mode === 'staged') {
       try {
@@ -435,7 +667,9 @@ export async function executeBacklog(
           opts,
           executeStageRun,
           effectiveStageSkills,
+          repoStageSkills,
           controller.signal,
+          dependencyPublications,
         );
       } finally {
         activeControllers.delete(feature.id);
@@ -445,9 +679,12 @@ export async function executeBacklog(
     const skills = registry.resolve(feature.skills ?? [], opts.cwd);
     const prompt = buildPrompt(feature, skills, opts.cwd, {
       maxContextChars: config.promptContextCharLimit,
+      dependencyPublications,
+      baseBranch: config.integration.baseBranch,
     });
     try {
-      const { res } = await executeStageRun(feature, prompt, undefined, controller.signal);
+        const singleStage = feature.workflow.stages[0];
+        const { res } = await executeStageRun(feature, prompt, singleStage, controller.signal);
       return res;
     } finally {
       activeControllers.delete(feature.id);
@@ -509,6 +746,8 @@ export async function executeBacklog(
       outcomeKind = classifySuccessOutcome();
     } else if (result.control?.type === 'needs_input') {
       outcomeKind = classifyBlockedOutcome('needs_input');
+    } else if (result.control?.type === 'blocked') {
+      outcomeKind = classifyBlockedOutcome('gate');
     } else if (getOnFailPolicy(feature) === 'gate') {
       outcomeKind = classifyBlockedOutcome('gate');
     } else {
@@ -686,6 +925,7 @@ interface RetryRunOptions {
   signal?: AbortSignal;
   session?: RunFeatureOptions['session'];
   resumeOverride?: ResumeOverride;
+  stageSkills?: Record<string, string[]>;
 }
 
 interface RetryCandidate {
@@ -745,9 +985,10 @@ async function runWithRetry(
         runId: opts.runId,
         signal: opts.signal,
         session,
+        ...(opts.stageSkills && Object.keys(opts.stageSkills).length > 0 ? { stageSkills: opts.stageSkills } : {}),
       });
 
-      if (res.ok || res.control?.type === 'needs_input') {
+      if (res.ok || res.control?.type === 'needs_input' || res.control?.type === 'blocked') {
         if (candidate.tool !== feature.tool) updateRunTool(opts.runId, candidate.tool);
         return res;
       }
@@ -782,6 +1023,32 @@ async function runWithRetry(
   return lastResult;
 }
 
+// Sends exactly one follow-up turn in the same resumed adapter session,
+// reasserting the communication protocol, when a run exited ok but never
+// declared a control signal. Returns null (never throws) when there is no
+// resumable session or the adapter call itself fails, so the caller falls
+// back to the existing "blocked" classification unchanged.
+async function attemptProtocolReinforcement(
+  feature: Feature,
+  res: RunResult,
+  opts: { cwd: string; runId: number; signal?: AbortSignal },
+): Promise<RunResult | null> {
+  if (!res.session) return null;
+  const adapter = getAdapter(res.session.tool);
+  const reinforcedFeature: Feature = { ...feature, tool: res.session.tool };
+  try {
+    return await adapter.runFeature(reinforcedFeature, PROTOCOL_REINFORCEMENT_PROMPT, {
+      cwd: opts.cwd,
+      runId: opts.runId,
+      signal: opts.signal,
+      session: { mode: 'resume', handle: res.session },
+    });
+  } catch (error) {
+    logCaughtError('execute.attemptProtocolReinforcement', error);
+    return null;
+  }
+}
+
 async function executeStagedFeature(
   feature: Feature,
   pipelineId: number,
@@ -790,27 +1057,29 @@ async function executeStagedFeature(
   opts: ExecuteOptions,
   executeStageRun: StageExecutor,
   stageSkills: Record<string, string[]>,
+  repoStageSkills: Record<string, string[]>,
   abortSignal?: AbortSignal,
+  dependencyPublications: DependencyPublication[] = [],
 ): Promise<RunResult> {
   const workflow = feature.workflow;
   const sessionPolicy = workflow.sessionPolicy;
-  // Re-read `approvals.autoAdvance` from the catalog at each transition
+  // Re-read `workflow.autoAdvance` from the catalog at each transition
   // rather than caching it once — the web UI lets the user flip this
   // checkbox while a run is already in flight, and that edit must take
   // effect on the very next stage transition instead of only on future runs.
   const resolveAutoAdvance = (): boolean => {
-    if (opts.autoAdvanceStages !== undefined) return opts.autoAdvanceStages;
-    let featureAutoAdvance = workflow.approvals.autoAdvance;
+    let autoAdvance = workflow.autoAdvance;
     try {
       const { repoId } = resolveRepo(opts.cwd);
       const liveFeature = getCatalogFeature(repoId, feature.id);
-      if (liveFeature) featureAutoAdvance = liveFeature.workflow.approvals.autoAdvance;
-    } catch {
+      if (liveFeature) autoAdvance = liveFeature.workflow.autoAdvance;
+    } catch (error) {
       // catalog read failed (e.g. sandboxed harness DB) — fall back to the
       // value captured when this run started rather than aborting a stage
       // transition over a config re-check.
+      logCaughtError('execute.resolveAutoAdvance', error);
     }
-    return featureAutoAdvance || config.workflow.autoAdvanceStages;
+    return autoAdvance;
   };
   const stages = workflow.stages;
   const persistedRequests = listStageRequestsForFeature(pipelineId, feature.id);
@@ -832,7 +1101,7 @@ async function executeStagedFeature(
   for (let index = startIndex; index < stages.length; index += 1) {
     const stage = stages[index] ?? 'implement';
     updatePipelineStage(pipelineId, stage);
-    const stageSkillList = resolveStageSkill(feature, stage, registry, opts.cwd, stageSkills);
+    const stageSkillList = resolveStageSkill(feature, stage, registry, opts.cwd, stageSkills, repoStageSkills);
     const stepGuidanceSkills = resolveStepGuidanceSkills(feature, stage, registry, opts.cwd);
     const prompt = buildStagePrompt(
       feature,
@@ -842,6 +1111,8 @@ async function executeStagedFeature(
       opts.cwd,
       config.promptContextCharLimit,
       stageInputs.get(stage) ?? [],
+      dependencyPublications,
+      config.integration.baseBranch,
     );
     const { runId, res } = await executeStageRun(feature, prompt, stage, abortSignal, nextStageSession);
     if (pendingTransitionDecisionId !== null) {
@@ -862,8 +1133,24 @@ async function executeStagedFeature(
         res.control.prompt,
         { runId, options: res.control.options },
       );
-      const response = await waitForStageRequestResponse(requestId, config.workflow.pollIntervalMs);
+      const response = await waitForStageRequestResponse(requestId, 2_000);
       stageInputs.set(stage, [...(stageInputs.get(stage) ?? []), response]);
+      // Reuse the same resume-vs-new-session policy as a normal stage
+      // transition instead of always forcing a fresh session — a needs_input
+      // retry is answering the same stage, not moving to a new one, so
+      // discarding `res.session` here would burn tokens re-deriving context
+      // the adapter already paid for just to receive the human's answer.
+      const retryPlan = decideStageTransition({
+        policy: sessionPolicy,
+        telemetry: getRunContextTelemetry(runId),
+        nextStage: stage,
+        expectedTool: resolvePrimaryTool(
+          feature,
+          opts.resumeOverride?.featureId === feature.id ? opts.resumeOverride : undefined,
+        ),
+        previousSession: res.session,
+      });
+      nextStageSession = retryPlan.session.mode === 'resume' ? retryPlan.session : undefined;
       index -= 1;
       continue;
     }
@@ -880,8 +1167,9 @@ async function executeStagedFeature(
       try {
         const tasksFile = resolveGeneratedTasksFile(feature, opts.cwd);
         syncFeatureTasksToBacklog(feature.id, tasksFile, opts.cwd);
-      } catch {
+      } catch (error) {
         // tasks file not yet generated — skip silently
+        logCaughtError('execute.syncFeatureTasksToBacklog', error);
       }
     }
 
@@ -927,6 +1215,7 @@ async function executeStagedFeature(
           runId,
           response: 'advance',
           source: 'auto',
+          approvalChannel: workflow.approvals.channel,
         },
       );
       continue;
@@ -938,7 +1227,7 @@ async function executeStagedFeature(
       stage,
       'approval',
       `Advance to stage ${nextStage}?`,
-      { runId },
+      { runId, approvalChannel: workflow.approvals.channel },
     );
     const decision = await waitForStageApproval(
       requestId,
@@ -946,8 +1235,9 @@ async function executeStagedFeature(
       feature.id,
       stage,
       nextStage,
-      config.workflow.pollIntervalMs,
+      2_000,
       runId,
+      workflow.approvals.channel,
     );
     if (decision === 'retry') {
       pendingTransitionDecisionId = null;
@@ -969,8 +1259,11 @@ function resolveStageSkill(
   registry: ReturnType<typeof createSkillRegistry>,
   cwd: string,
   stageSkills: Record<string, string[]>,
+  repoStageSkills: Record<string, string[]> = {},
 ): Skill[] {
-  const mappedNames = stageSkills[stage];
+  const mappedNames = Object.hasOwn(repoStageSkills, stage)
+    ? stageSkills[stage]
+    : resolveDefaultStageSkillNames(stage, registry, cwd);
   if (mappedNames && mappedNames.length > 0) {
     const resolved = registry.resolve(mappedNames, cwd);
     if (resolved.length > 0) return resolved;
@@ -990,18 +1283,21 @@ function buildStagePrompt(
   cwd: string,
   maxContextChars: number,
   adminInputs: string[],
+  dependencyPublications: DependencyPublication[] = [],
+  baseBranch = 'develop',
 ): string {
   const basePrompt = buildPrompt(feature, skills, cwd, {
     maxContextChars,
     activeStage: stage,
     stepGuidanceSkills,
+    dependencyPublications,
+    baseBranch,
   });
   const stageNotes = [
     `Current workflow stage: ${stage}.`,
     'Run only this stage in this session.',
     'Do not continue to later stages after finishing the current stage.',
-    'If you need admin input, end your final response with exactly: MSQ_INPUT_REQUIRED: <question>',
-    'If the question has 1-8 discrete answer options, add a line `OPTIONS:` right after it, followed by one `- <label>` line per option (each label 1-60 characters, no duplicates); otherwise omit it for free-text input.',
+    COMMUNICATION_PROTOCOL,
   ];
   const stageContext: string[] = [];
   if (stage === 'specify') {
@@ -1013,41 +1309,123 @@ function buildStagePrompt(
       ].join('\n'));
     }
   }
-  if (adminInputs.length > 0) {
-    stageNotes.push(`Admin inputs already collected for this stage:\n- ${adminInputs.join('\n- ')}`);
-  }
   if (stage === 'implement') {
     stageNotes.push([
       'Implementation exit contract:',
-      `- work on a named branch that is not develop`,
+      '- work on a named branch',
       '- complete the implementation in this session',
       '- run the relevant validation commands before finishing',
       '- create a commit for the implementation',
       '- push the branch to its remote upstream',
-      '- open a pull request targeting develop',
+      `- open a pull request targeting ${baseBranch}, unless # dependency base specifies pr_base for a stacked PR`,
+      '- pushing this branch and opening this pull request are pre-authorized for this session; do not pause to ask for confirmation before doing them',
       '- do not claim the stage is complete unless all items above were actually completed',
+      '- ending your final response with a plain-language question instead of MSQ_DONE, MSQ_INPUT_REQUIRED, or MSQ_BLOCKED is a protocol violation, even if the question itself is reasonable',
     ].join('\n'));
   }
 
-  const appendedSections = [stageNotes.join('\n'), ...stageContext].filter((section) => section.trim().length > 0);
+  const adminInputSection = adminInputs.length > 0
+    ? `Admin inputs already collected for this stage:\n- ${adminInputs.join('\n- ')}`
+    : null;
+  const appendedSections = [stageNotes.join('\n'), ...stageContext, adminInputSection]
+    .filter((section): section is string => Boolean(section?.trim()));
   return `${basePrompt}\n\n---\n\n${appendedSections.join('\n\n')}`.trim();
 }
 
-function applyImplementPublishGate(
-  result: RunResult,
-  stage: string | undefined,
-  cwd: string,
-): RunResult {
-  if (stage !== 'implement' || !result.ok) return result;
+function declaredPublicationEvidence(publication: DeclaredPublication): PublishEvidence {
+  return {
+    branch: publication.head,
+    baseBranch: publication.base,
+    commitSha: null,
+    remoteBranch: null,
+    prNumber: publication.prNumber,
+    prUrl: publication.prUrl,
+  };
+}
 
-  const verification = verifyPublishContract(cwd);
+export function applyPublishGate(
+  result: RunResult,
+  opts: {
+    publishes: boolean;
+    cwd: string;
+    dependencyBranches: string[];
+    baseBranch: string;
+  },
+  verify: typeof verifyPublishContract = verifyPublishContract,
+): RunResult {
+  if (!opts.publishes || !result.ok || result.control?.type !== 'done') return result;
+
+  if (!result.control.publication) {
+    return {
+      ...result,
+      ok: false,
+      summary: `${result.summary}\nMSQ_DONE is missing required pr_url, pr_number, base, and head publication fields.`.trim(),
+      publishVerificationStatus: 'blocked',
+      publishValidationFailed: true,
+    };
+  }
+
+  // A dependent feature may stack its PR on top of any dependency branch, so
+  // accept those as valid PR bases alongside the configured integration base.
+  const allowedBases = [...opts.dependencyBranches, opts.baseBranch];
+  const verification = verify(opts.cwd, allowedBases);
+  const declared = declaredPublicationEvidence(result.control.publication);
+  const observed = verification.evidence;
+  const matchesDeclaration = observed.branch === declared.branch
+    && observed.baseBranch === declared.baseBranch
+    && observed.prNumber === declared.prNumber
+    && observed.prUrl === declared.prUrl;
+  const evidence = {
+    ...declared,
+    commitSha: observed.commitSha,
+    remoteBranch: observed.remoteBranch,
+  };
+  const diverged = !matchesDeclaration && (
+    (observed.branch !== null && observed.branch !== declared.branch)
+    || observed.baseBranch !== declared.baseBranch
+    || (observed.prNumber !== null && observed.prNumber !== declared.prNumber)
+    || (observed.prUrl !== null && observed.prUrl !== declared.prUrl)
+  );
+  const summary = diverged
+    ? `${result.summary}\nimplement: declared publication does not match verified publication.`.trim()
+    : verification.ok ? verification.summary : `${result.summary}\n${verification.summary}`.trim();
   return {
     ...result,
-    ok: verification.ok,
-    summary: verification.ok ? verification.summary : `${result.summary}\n${verification.summary}`.trim(),
-    publishEvidence: verification.evidence,
-    publishVerified: verification.ok,
-    publishVerificationStatus: verification.status === 'done' ? undefined : verification.status,
+    ok: verification.ok && matchesDeclaration,
+    summary,
+    publishEvidence: evidence,
+    publishVerified: verification.ok && matchesDeclaration,
+    publishVerificationStatus: verification.ok && matchesDeclaration
+      ? undefined
+      : (diverged ? 'blocked' : verification.status === 'done' ? 'failed' : verification.status),
+    publishValidationFailed: diverged,
+  };
+}
+
+function applyBaseReconciliation(
+  result: RunResult,
+  cwd: string,
+  baseBranch: string | undefined,
+): RunResult {
+  if (!result.ok || !baseBranch) return result;
+
+  const descendant = isDescendantOfBase(cwd, baseBranch);
+  if (descendant === true) return result;
+
+  const detail = descendant === false
+    ? `HEAD does not descend from the declared base ${baseBranch}.`
+    : `could not verify whether HEAD descends from the declared base ${baseBranch}.`;
+  const summary = [
+    'MSQ_BLOCKED: validation_failed',
+    `post-run: ${detail}`,
+    'Resolve the branch base or Git error, then retry the run.',
+    result.summary,
+  ].join('\n');
+  return {
+    ...result,
+    ok: false,
+    summary,
+    publishVerificationStatus: 'blocked',
   };
 }
 
@@ -1066,7 +1444,7 @@ function resolveStepGuidanceSkills(
 function buildSpecifyStageDescription(
   feature: Feature,
   cwd: string,
-  maxContextChars: number,
+  _maxContextChars: number,
 ): string | null {
   const parts = [`Feature: ${feature.title}`];
 
@@ -1075,22 +1453,13 @@ function buildSpecifyStageDescription(
   }
 
   if (feature.specFile && existsSync(resolve(cwd, feature.specFile))) {
-    const specFileContent = truncateForStageContext(readFileSync(resolve(cwd, feature.specFile), 'utf8'), maxContextChars);
+    const specFileContent = readFileSync(resolve(cwd, feature.specFile), 'utf8');
     if (specFileContent) {
       parts.push(`Existing feature brief from ${feature.specFile}:\n${specFileContent}`);
     }
   }
 
   return parts.join('\n\n').trim() || null;
-}
-
-function truncateForStageContext(content: string, maxChars: number): string | null {
-  if (!content) return null;
-  if (content.length <= maxChars) return content;
-
-  const notice = '\n\n[truncated to respect promptContextCharLimit]';
-  const sliceLength = Math.max(0, maxChars - notice.length);
-  return `${content.slice(0, sliceLength)}${notice}`.trim();
 }
 
 function resolveGeneratedTasksFile(feature: Feature, cwd: string): string {
@@ -1134,6 +1503,7 @@ async function waitForStageApproval(
   nextStage: string,
   pollIntervalMs: number,
   runId: number,
+  approvalChannel: string,
 ): Promise<'advance' | 'retry'> {
   let pendingRequestId = requestId;
 
@@ -1146,7 +1516,7 @@ async function waitForStageApproval(
       stage,
       'approval',
       `Stage ${stage} still pending. Advance to ${nextStage}?`,
-      { runId },
+      { runId, approvalChannel },
     );
   }
 }

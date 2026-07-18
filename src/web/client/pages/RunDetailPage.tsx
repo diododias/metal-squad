@@ -1,21 +1,23 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Button } from '../components/core/Button.js';
-import { MetricCard } from '../components/data/MetricCard.js';
 import { WorkflowStepper } from '../components/navigation/WorkflowStepper.js';
 import { Tabs } from '../components/navigation/Tabs.js';
 import { ApprovalBanner } from '../components/feedback/ApprovalBanner.js';
+import { QuestionBanner } from '../components/feedback/QuestionBanner.js';
 import { AgentTranscript, type TranscriptEntry } from '../components/transcript/AgentTranscript.js';
-import { ToolCallGroup } from '../components/transcript/ToolCallGroup.js';
-import { RunStatusIndicator } from '../components/status/RunStatusIndicator.js';
+import { RunStatusStrip } from '../components/status/RunStatusStrip.js';
 import { FeatureConfigDetail } from '../components/FeatureConfigDetail.js';
 import { PageHeader } from '../PageHeader.js';
-import { formatElapsed, formatPercent, formatPublishTarget, formatTokens, getPublishStatusLabel, getRunStatusLabel } from '../lib/format.js';
+import { useIsMobile } from '../Responsive.js';
+import { formatClockTime, formatElapsed, formatPercent, formatPublishTarget, formatTokens, getPublishStatusLabel, getRunStatusLabel, parseTimestampMs } from '../lib/format.js';
 import { summarizeTaskRuns } from '../lib/workflow.js';
+import { STAGE_ORDER } from '../../../core/workflow/stageOrder.js';
 import type { MsqWebState, FeatureConfigPatch, WebSocketClientMessage } from '../../types.js';
 import type { TaskRun } from '../../../db/repo.js';
 import type { RunBreakdown } from '../../../core/stats.js';
 import type { OutputLine } from '../hooks/useLocalOutput.js';
 import type { SessionStatusSnapshot, ToolCallRecord } from '../../../core/adapters/types.js';
+import { detectStderrLevel } from '../../../core/adapters/types.js';
 
 export interface RunDetailPageProps {
   state: MsqWebState;
@@ -35,35 +37,55 @@ const TABS = [
   { id: 'output', label: 'Live Output' },
 ];
 
-function outputToTranscript(lines: OutputLine[]): TranscriptEntry[] {
+const resumeEfforts = ['low', 'medium', 'high'] as const;
+
+const inputStyle: React.CSSProperties = {
+  background: 'var(--bg-sunken)',
+  border: '1px solid var(--border-dim)',
+  borderRadius: 'var(--radius-sm)',
+  color: 'var(--text-primary)',
+  fontFamily: 'var(--font-mono)',
+  fontSize: 'var(--text-xs)',
+  padding: '6px 9px',
+};
+
+type TimedEntry = TranscriptEntry & { sortKey: number };
+
+function outputToTranscript(lines: OutputLine[]): TimedEntry[] {
   return lines.map((line, i) => {
     const source = line.source ?? 'stdout';
-    const type: TranscriptEntry['type'] = source === 'tool' ? 'tool' : source === 'agent' ? 'agent' : 'system';
+    // Historical rows (and any adapter path that doesn't tag `level` itself) still
+    // carry the raw stderr log line, so re-detect error/warn from the text as a
+    // fallback rather than trusting only the persisted `level` column.
+    const level = line.level ?? detectStderrLevel(line.line);
+    const isError = level === 'error';
+    const type: TranscriptEntry['type'] = source === 'tool' || isError ? 'tool' : source === 'agent' ? 'agent' : 'system';
+    const text = level === 'warn' ? `[warn] ${line.line}` : line.line;
     return {
       id: line.id ?? i,
       type,
-      tool: line.tool,
-      text: line.line,
-      command: type === 'tool' ? line.line : undefined,
+      status: isError ? 'error' : undefined,
+      tool: line.toolName ?? line.tool,
+      text,
+      command: type === 'tool' && !isError && source === 'tool' ? text : undefined,
+      output: type === 'tool' && isError ? text : undefined,
+      time: formatClockTime(line.createdAt),
+      sortKey: parseTimestampMs(line.createdAt) ?? i,
     };
   });
 }
 
-function snapshotFromRun(run: NonNullable<MsqWebState['runs'][number]>): SessionStatusSnapshot | null {
-  if (!run.sessionStatus || !run.sessionStartedAt || !run.sessionUpdatedAt) return null;
-  return {
-    runId: run.runId,
-    featureId: run.featureId,
-    tool: run.tool,
-    status: run.sessionStatus,
-    startedAt: run.sessionStartedAt,
-    updatedAt: run.sessionUpdatedAt,
-    elapsedMs: run.sessionElapsedMs ?? 0,
-    lastOutputAt: run.sessionLastOutputAt ?? null,
-    idleMs: run.sessionIdleMs ?? null,
-    reason: run.sessionReason ?? null,
-    terminal: run.sessionTerminal ?? false,
-  };
+function toolCallsToTranscript(calls: ToolCallRecord[]): TimedEntry[] {
+  return calls.map((call) => ({
+    id: `tool-${call.id}`,
+    type: 'tool',
+    status: call.phase === 'started' ? 'running' : call.phase === 'failed' ? 'error' : 'done',
+    tool: call.name,
+    command: call.arguments == null ? undefined : JSON.stringify(call.arguments),
+    output: call.error ?? call.output ?? undefined,
+    time: formatClockTime(call.startedAt),
+    sortKey: parseTimestampMs(call.startedAt) ?? call.sequence,
+  }));
 }
 
 export function RunDetailPage({
@@ -76,9 +98,15 @@ export function RunDetailPage({
   send,
 }: RunDetailPageProps): React.JSX.Element {
   const [activeTab, setActiveTab] = useState('summary');
+  const isMobile = useIsMobile();
+  const [overrideTool, setOverrideTool] = useState('');
+  const [overrideModel, setOverrideModel] = useState('');
+  const [overrideEffort, setOverrideEffort] = useState('');
   const run = state.runs.find((r) => r.featureId === featureId);
   const feature = state.featureCatalog[featureId];
   const runId = run?.runId;
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const stickToBottomRef = useRef(true);
 
   useEffect(() => {
     if (runId == null) return undefined;
@@ -87,9 +115,25 @@ export function RunDetailPage({
 
   const detail = run ? runDetails[run.runId] : undefined;
   const stageGroups = useMemo(() => summarizeTaskRuns(detail?.taskRuns ?? [], feature?.workflow.stages), [detail, feature]);
-  const transcript = useMemo(() => outputToTranscript(run ? (linesByRun[run.runId] ?? []) : []), [run, linesByRun]);
-  const sessionStatus = detail?.sessionStatus ?? (run ? snapshotFromRun(run) : null);
-  const toolCalls = detail?.toolCalls ?? [];
+  const toolCalls = useMemo(() => detail?.toolCalls ?? [], [detail]);
+  const combinedOutput = useMemo(() => {
+    const lineEntries = outputToTranscript(run ? (linesByRun[run.runId] ?? []) : []).filter(
+      // Duplicate tool-echo lines are dropped once structured tool calls cover them, but
+      // error lines (e.g. raw stderr router failures) have no structured counterpart and
+      // must always surface, even when the run has other successful tool calls.
+      (entry) => entry.type !== 'tool' || entry.status === 'error' || toolCalls.length === 0,
+    );
+    const toolEntries = toolCallsToTranscript(toolCalls);
+    return [...lineEntries, ...toolEntries].sort((a, b) => a.sortKey - b.sortKey);
+  }, [run, linesByRun, toolCalls]);
+  const toolIds = state.runtimeConfig.tools.map((tool) => tool.id);
+
+  useEffect(() => {
+    if (activeTab !== 'output') return;
+    const el = scrollRef.current;
+    if (!el || !stickToBottomRef.current) return;
+    el.scrollTop = el.scrollHeight;
+  }, [activeTab, combinedOutput]);
 
   if (!run) {
     return (
@@ -109,10 +153,24 @@ export function RunDetailPage({
     );
   }
 
-  const stages = feature?.workflow.stages ?? ['specify', 'plan', 'tasks', 'implement', 'validate'];
+  const stages = feature?.workflow.stages ?? [...STAGE_ORDER];
   const canPause = run.pipelineStatus === 'running';
   const canAbort = run.pipelineStatus === 'running' || run.pipelineStatus === 'blocked';
+  const canResumeWithOverride = run.pipelineId != null
+    && (run.pipelineStatus === 'paused' || run.pipelineStatus === 'aborted');
   const pendingPrompt = run.pendingStageRequestPrompt;
+
+  function resumeWithOverride(tool?: string): void {
+    if (run?.pipelineId == null) return;
+    send({
+      type: 'action:resumeWithOverride',
+      pipelineId: run.pipelineId,
+      featureId,
+      tool: tool ?? overrideTool,
+      model: overrideModel || undefined,
+      effort: overrideEffort || undefined,
+    });
+  }
 
   function resolveApproval(response: 'advance' | 'hold' | 'retry'): void {
     if (run == null) return;
@@ -124,6 +182,11 @@ export function RunDetailPage({
     }
   }
 
+  function resolveQuestion(response: string): void {
+    if (run?.pendingStageRequestId == null) return;
+    send({ type: 'action:resolveStageRequest', requestId: run.pendingStageRequestId, response });
+  }
+
   function saveConfig(patch: FeatureConfigPatch): void {
     send({ type: 'action:updateFeatureConfig', featureId, patch });
   }
@@ -131,10 +194,7 @@ export function RunDetailPage({
   const tabContent: Record<string, React.ReactNode> = {
     summary: (
       <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-        <div>
-          <RunStatusIndicator status={sessionStatus} fallbackStatus={run.status} spinnerEnabled={state.runtimeConfig.web.statusSpinner} />
-        </div>
-        <WorkflowStepper stages={stages} currentStage={run.pipelineCurrentStage ?? run.stage} />
+        <WorkflowStepper stages={stages} currentStage={run.pipelineCurrentStage ?? run.stage} completed={run.status === 'done'} />
         <div style={{ marginTop: 14, display: 'flex', flexDirection: 'column', gap: 6 }}>
           {stageGroups.map((g) => (
             <div key={g.stage} style={{ display: 'flex', justifyContent: 'space-between', fontSize: 'var(--text-sm)', color: 'var(--text-dim)' }}>
@@ -210,20 +270,30 @@ export function RunDetailPage({
       </div>
     ),
     config: feature ? (
-      <FeatureConfigDetail feature={feature} backlogSettings={state.backlogSettings} onSaveConfig={saveConfig} />
+      <FeatureConfigDetail
+        feature={feature}
+        backlogSettings={state.backlogSettings}
+        approvalChannels={state.runtimeConfig.notifications.channels.map((channel) => channel.type)}
+        toolIds={toolIds}
+        onSaveConfig={saveConfig}
+      />
     ) : (
       <div style={{ color: 'var(--text-faint)', fontSize: 'var(--text-sm)' }}>Feature config not found in catalog.</div>
     ),
     output: (
       <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-        {toolCalls.length > 0 && <ToolCallGroup groupKey={`${String(runId ?? 0)}:${run.stage ?? 'run'}:0`} calls={toolCalls} />}
-        {transcript.length > 0 ? <AgentTranscript entries={transcript.filter((entry) => entry.type !== 'tool' || toolCalls.length === 0)} /> : toolCalls.length === 0 && <div style={{ color: 'var(--text-faint)', fontSize: 'var(--text-sm)' }}>No output captured for this run yet.</div>}
+        {combinedOutput.length > 0 ? (
+          <AgentTranscript entries={combinedOutput} />
+        ) : (
+          <div style={{ color: 'var(--text-faint)', fontSize: 'var(--text-sm)' }}>No output captured for this run yet.</div>
+        )}
       </div>
     ),
   };
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+      <div style={{ position: 'relative', flexShrink: 0 }}>
       <PageHeader
         title={feature?.title ?? featureId}
         breadcrumb={
@@ -269,31 +339,139 @@ export function RunDetailPage({
                 abort
               </Button>
             )}
-            <Button variant="neutral" size="sm" onClick={onBack}>
-              close
-            </Button>
+            {!isMobile && (
+              <Button variant="neutral" size="sm" onClick={onBack}>
+                close
+              </Button>
+            )}
           </>
         }
       />
-      <div style={{ flex: 1, overflow: 'auto', padding: 20 }}>
+      {isMobile && (
+        <button
+          aria-label="Close run detail"
+          title="Close"
+          onClick={onBack}
+          style={{
+            position: 'absolute',
+            top: 'calc(12px + env(safe-area-inset-top, 0px))',
+            right: 12,
+            width: 28,
+            height: 28,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            border: '1px solid var(--border-strong)',
+            borderRadius: 'var(--radius-sm)',
+            color: 'var(--text-dim)',
+            background: 'var(--bg-panel)',
+            cursor: 'pointer',
+            fontFamily: 'var(--font-mono)',
+            fontSize: 'var(--text-sm)',
+            lineHeight: 1,
+          }}
+        >
+          ✕
+        </button>
+      )}
+      </div>
+      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0, padding: isMobile ? 12 : 20 }}>
         {pendingPrompt && (
           <div style={{ marginBottom: 16 }}>
-            <ApprovalBanner prompt={pendingPrompt} onAdvance={() => { resolveApproval('advance'); }} onHold={() => { resolveApproval('hold'); }} onRetry={() => { resolveApproval('retry'); }} />
+            {run.pendingStageRequestKind === 'input' ? (
+              <QuestionBanner prompt={pendingPrompt} options={run.pendingStageRequestOptions ?? undefined} onAnswer={resolveQuestion} />
+            ) : (
+              <ApprovalBanner
+                prompt={pendingPrompt}
+                onAdvance={() => { resolveApproval('advance'); }}
+                onAdvanceWithTool={(tool) => { resumeWithOverride(tool); }}
+                onHold={() => { resolveApproval('hold'); }}
+                onRetry={() => { resolveApproval('retry'); }}
+              />
+            )}
           </div>
         )}
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(120px, 1fr))', gap: 8, marginBottom: 16 }}>
-          <MetricCard label="Status" value={sessionStatus?.status ?? getRunStatusLabel(run)} status={run.status} />
-          <MetricCard label="Tool" value={run.tool} />
-          <MetricCard label="Model" value={feature?.model ?? '—'} />
-          <MetricCard label="Publish" value={getPublishStatusLabel(run)} />
-          <MetricCard label="Tokens" value={formatTokens(run.totalTokens)} />
-          <MetricCard label="Context" value={formatPercent(run.contextWindowPercent)} />
-          <MetricCard label="Elapsed" value={formatElapsed(run.startedAt, run.endedAt)} />
+        {canResumeWithOverride && (
+          <div
+            style={{
+              display: 'flex',
+              flexWrap: 'wrap',
+              alignItems: 'center',
+              gap: 8,
+              padding: 12,
+              marginBottom: 16,
+              border: '1px solid var(--border-dim)',
+              borderRadius: 'var(--radius-md)',
+              background: 'var(--bg-panel)',
+            }}
+          >
+            <span style={{ color: 'var(--text-dim)', fontSize: 'var(--text-sm)' }}>Resume with another tool:</span>
+            <select
+              aria-label="Resume tool override"
+              value={overrideTool}
+              onChange={(e) => { setOverrideTool(e.target.value); }}
+              style={inputStyle}
+            >
+              <option value="">tool (default)</option>
+              {toolIds.map((tool) => (
+                <option key={tool} value={tool}>{tool}</option>
+              ))}
+            </select>
+            <input
+              aria-label="Resume model override"
+              value={overrideModel}
+              onChange={(e) => { setOverrideModel(e.target.value); }}
+              placeholder="model (optional)"
+              style={{ ...inputStyle, minWidth: 140 }}
+            />
+            <select
+              aria-label="Resume effort override"
+              value={overrideEffort}
+              onChange={(e) => { setOverrideEffort(e.target.value); }}
+              style={inputStyle}
+            >
+              <option value="">effort (optional)</option>
+              {resumeEfforts.map((effort) => (
+                <option key={effort} value={effort}>{effort}</option>
+              ))}
+            </select>
+            <Button variant="ok" size="sm" onClick={() => { resumeWithOverride(); }}>
+              resume with override
+            </Button>
+          </div>
+        )}
+        <div style={{ marginBottom: 16 }}>
+          <RunStatusStrip
+            status={run.status}
+            statusLabel={getRunStatusLabel(run)}
+            spinnerEnabled={state.runtimeConfig.web.statusSpinner}
+            tool={run.tool}
+            model={feature?.model}
+            tokens={formatTokens(run.pipelineTotalTokens ?? run.totalTokens)}
+            contextPercent={formatPercent(run.contextWindowPercent)}
+            elapsed={formatElapsed(run.startedAt, run.endedAt)}
+          />
         </div>
         <div style={{ marginBottom: 16 }}>
-          <Tabs tabs={TABS} activeId={activeTab} onSelect={setActiveTab} />
+          <Tabs
+            tabs={TABS}
+            activeId={activeTab}
+            onSelect={(id) => {
+              stickToBottomRef.current = true;
+              setActiveTab(id);
+            }}
+          />
         </div>
-        {tabContent[activeTab]}
+        <div
+          ref={scrollRef}
+          onScroll={(e) => {
+            const el = e.currentTarget;
+            stickToBottomRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 48;
+          }}
+          style={{ flex: 1, minHeight: 0, overflow: 'auto' }}
+        >
+          {tabContent[activeTab]}
+        </div>
       </div>
     </div>
   );

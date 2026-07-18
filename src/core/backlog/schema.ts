@@ -1,9 +1,38 @@
 import { z } from 'zod';
+import { DEFAULT_PROJECT_TEMPLATE } from '../workflow/stageSkills.js';
+export { DEFAULT_PROJECT_TEMPLATE } from '../workflow/stageSkills.js';
 
-export const ToolSchema = z.enum(['claude', 'codex', 'opencode']);
+export const AdapterSchema = z.enum(['claude', 'codex', 'opencode']);
+export const ToolSchema = z.string().trim().min(1).regex(
+  /^[a-z][a-z0-9-]*$/,
+  'Tool id must use lowercase letters, numbers, and hyphens.',
+);
+
+/**
+ * Builds the runtime validation for a backlog `tool` reference. The registry
+ * itself lives in runtime config, so this cannot be a fixed enum.
+ */
+export function createRegisteredToolSchema(registeredToolIds: readonly string[]): z.ZodType<string> {
+  const registered = new Set(registeredToolIds);
+  const available = [...registered].sort();
+
+  return ToolSchema.superRefine((tool, ctx) => {
+    if (!registered.has(tool)) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: `Tool "${tool}" is not registered. Register it in config.tools or use one of: ${available.join(', ')}.`,
+      });
+    }
+  });
+}
 export const EffortSchema = z.enum(['low', 'medium', 'high']);
+export const ThinkingSchema = z.enum(['on', 'off']);
+export const DependencyTypeSchema = z.enum(['stack', 'logical']);
 export const WorkflowModeSchema = z.enum(['single', 'staged']);
-export const WorkflowApprovalChannelSchema = z.enum(['telegram']);
+/** A configured notification channel type (for example `slack` or `desktop`).
+ * Availability and credentials are validated against the runtime notification
+ * config when the workflow is saved or an approval is dispatched. */
+export const WorkflowApprovalChannelSchema = z.string().trim().min(1);
 export const OnFailSchema = z.enum(['stop', 'continue', 'gate']);
 export const SessionPolicyModeSchema = z.enum(['isolated', 'adaptive']);
 export const FallbackAlternativeSchema = z.object({
@@ -23,15 +52,6 @@ export const BudgetSchema = z.object({
   maxTokens: z.number().int().positive().optional(),
   perFeatureMaxTokens: z.number().int().positive().optional(),
 });
-
-export const DefaultsSchema = z.object({
-  tool: ToolSchema.default('claude'),
-  model: z.string().trim().min(1).optional(),
-  effort: EffortSchema.default('medium'),
-  skills: z.array(z.string()).default([]),
-  stageSkills: z.record(z.string(), z.array(z.string())).default({}),
-});
-
 export const TaskSchema = z.object({
   id: z.string(),
   title: z.string(),
@@ -43,7 +63,6 @@ export const TaskSchema = z.object({
 
 export const WorkflowApprovalsSchema = z.object({
   channel: WorkflowApprovalChannelSchema.default('telegram'),
-  autoAdvance: z.boolean().default(false),
 });
 
 export const WorkflowSessionPolicySchema = z.object({
@@ -56,14 +75,30 @@ export const StepGuidanceSchema = z.object({
   prompt: z.string().optional(),
 });
 
-export const WorkflowSchema = z.object({
+const WorkflowSchemaShape = z.object({
   mode: WorkflowModeSchema.default('staged'),
-  stages: z.array(z.string()).min(1).default(['specify', 'plan', 'tasks', 'implement', 'validate']),
+  stages: z.array(z.string()).min(1).default([...DEFAULT_PROJECT_TEMPLATE.stages]),
   approvals: WorkflowApprovalsSchema.default({}),
+  autoAdvance: z.boolean().default(false),
   syncTasksToBacklog: z.boolean().default(true),
   sessionPolicy: WorkflowSessionPolicySchema.default({}),
   stepGuidance: z.record(z.string(), StepGuidanceSchema).default({}),
-}).superRefine((workflow, ctx) => {
+  stagePublishes: z.record(z.string(), z.boolean()).default({}),
+});
+
+/** Normalizes the former approvals.autoAdvance input into workflow.autoAdvance. */
+export const WorkflowSchema = z.preprocess((value) => {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return value;
+  const workflow = value as Record<string, unknown>;
+  const approvals = workflow.approvals;
+  if (typeof approvals !== 'object' || approvals === null || Array.isArray(approvals)) return workflow;
+  const { autoAdvance: legacyAutoAdvance, ...normalizedApprovals } = approvals as Record<string, unknown>;
+  return {
+    ...workflow,
+    ...(workflow.autoAdvance === undefined && typeof legacyAutoAdvance === 'boolean' ? { autoAdvance: legacyAutoAdvance } : {}),
+    approvals: normalizedApprovals,
+  };
+}, WorkflowSchemaShape).superRefine((workflow, ctx) => {
   const seen = new Set<string>();
   for (const [index, stage] of workflow.sessionPolicy.alwaysIsolatedStages.entries()) {
     if (!workflow.stages.includes(stage)) {
@@ -95,16 +130,39 @@ export const WorkflowSchema = z.object({
       continue;
     }
   }
+
+  for (const stage of Object.keys(workflow.stagePublishes)) {
+    if (!workflow.stages.includes(stage)) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['stagePublishes', stage],
+        message: `Stage "${stage}" must exist in workflow.stages.`,
+      });
+    }
+  }
 });
 
-export const FeatureSchema = z.object({
+export const DefaultsSchema = z.object({
+  tool: ToolSchema.default('claude'),
+  model: z.string().trim().min(1).optional(),
+  effort: EffortSchema.default('medium'),
+  thinking: ThinkingSchema.default('off'),
+  skills: z.array(z.string()).default([]),
+  stageSkills: z.record(z.string(), z.array(z.string())).default({}),
+  workflow: WorkflowSchema.default({}),
+  maxTokens: z.number().int().positive().optional(),
+});
+
+const FeatureSchemaShape = z.object({
   id: z.string(),
   title: z.string(),
   spec: z.string().optional(),
   tool: ToolSchema.default('claude'),
   model: z.string().optional(),
   effort: EffortSchema.default('medium'),
+  thinking: ThinkingSchema.default('off'),
   dependsOn: z.array(z.string()).default([]),
+  dependencyTypes: z.record(z.string(), DependencyTypeSchema).optional(),
   tasks: z.array(TaskSchema).default([]),
   skills: z.array(z.string()).optional(),
   specFile: z.string().optional(),
@@ -115,10 +173,49 @@ export const FeatureSchema = z.object({
   autoStart: z.boolean().default(false),
 });
 
-/** Authoring shape accepted by backlog.yaml before registration assigns an id. */
-export const FeatureInputSchema = FeatureSchema.extend({
+function validateDependencyTypes(
+  feature: { dependsOn?: string[]; dependencyTypes?: Record<string, DependencyType> },
+  ctx: z.RefinementCtx,
+): void {
+  for (const dependencyId of Object.keys(feature.dependencyTypes ?? {})) {
+    if (!feature.dependsOn?.includes(dependencyId)) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['dependencyTypes', dependencyId],
+        message: `dependencyTypes entry "${dependencyId}" must also appear in dependsOn.`,
+      });
+    }
+  }
+}
+
+export const FeatureSchema = FeatureSchemaShape.superRefine(validateDependencyTypes);
+
+/**
+ * Authoring shape accepted from the YAML asset. Execution fields deliberately
+ * remain optional here: project defaults are applied from the catalog, not
+ * from values embedded in backlog.yaml.
+ */
+const FeatureInputSchemaShape = z.object({
   id: z.string().optional(),
+  title: z.string(),
+  spec: z.string().optional(),
+  tool: ToolSchema.optional(),
+  model: z.string().optional(),
+  effort: EffortSchema.optional(),
+  thinking: ThinkingSchema.optional(),
+  dependsOn: z.array(z.string()).optional(),
+  dependencyTypes: z.record(z.string(), DependencyTypeSchema).optional(),
+  tasks: z.array(TaskSchema).optional(),
+  skills: z.array(z.string()).optional(),
+  specFile: z.string().optional(),
+  context: z.array(z.string()).optional(),
+  workflow: WorkflowSchema.optional(),
+  retry: RetrySchema.optional(),
+  maxTokens: z.number().int().positive().optional(),
+  autoStart: z.boolean().optional(),
 });
+
+export const FeatureInputSchema = FeatureInputSchemaShape.superRefine(validateDependencyTypes);
 
 export const EpicSchema = z.object({
   id: z.string(),
@@ -157,7 +254,8 @@ export const BacklogV2Schema = z.object({
 export const BacklogV2InputSchema = z.object({
   version: z.literal(2),
   repo: z.string(),
-  defaults: DefaultsSchema.default({}),
+  /** Legacy input is accepted and discarded by the loader with a warning. */
+  defaults: DefaultsSchema.optional(),
   budget: BudgetSchema.optional(),
   epics: z.array(EpicInputSchema).default([]),
 });
@@ -167,6 +265,9 @@ export const BacklogInputSchema = z.union([BacklogV1InputSchema, BacklogV2InputS
 
 export type Tool = z.infer<typeof ToolSchema>;
 export type Effort = z.infer<typeof EffortSchema>;
+export type Thinking = z.infer<typeof ThinkingSchema>;
+export type DependencyType = z.infer<typeof DependencyTypeSchema>;
+export type WorkflowMode = z.infer<typeof WorkflowModeSchema>;
 export type OnFail = z.infer<typeof OnFailSchema>;
 export type SessionPolicyMode = z.infer<typeof SessionPolicyModeSchema>;
 export type Budget = z.infer<typeof BudgetSchema>;
@@ -187,3 +288,13 @@ export type BacklogV1Input = z.infer<typeof BacklogV1InputSchema>;
 export type BacklogV2 = z.infer<typeof BacklogV2Schema>;
 export type BacklogV2Input = z.infer<typeof BacklogV2InputSchema>;
 export type Backlog = z.infer<typeof BacklogSchema>;
+
+/** Returns the declared type for a dependency, defaulting to stack for legacy backlogs. */
+export function dependencyType(feature: Pick<Feature, 'dependencyTypes'>, dependencyId: string): DependencyType {
+  return feature.dependencyTypes?.[dependencyId] ?? 'stack';
+}
+
+/** Dependencies whose published branch/PR may be used as a stacked base. */
+export function stackDependencies(feature: Pick<Feature, 'dependsOn' | 'dependencyTypes'>): string[] {
+  return feature.dependsOn.filter((dependencyId) => dependencyType(feature, dependencyId) === 'stack');
+}

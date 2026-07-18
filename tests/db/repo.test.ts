@@ -87,6 +87,54 @@ describe('listRunsForTui', () => {
     expect(result[0]!.status).toBe('done');
   });
 
+  it('decodes pendingStageRequestOptions JSON into a string array', async () => {
+    const row = {
+      runId: 3,
+      repoId: 'repo1',
+      featureId: 'feat-3',
+      tool: 'codex',
+      status: 'blocked',
+      startedAt: '2026-07-06T10:00:00',
+      endedAt: null,
+      totalTokens: null,
+      inputTokens: null,
+      outputTokens: null,
+      gateId: null,
+      gateDecision: null,
+      pendingStageRequestId: 5,
+      pendingStageRequestKind: 'input',
+      pendingStageRequestPrompt: 'Qual estrategia de cache?',
+      pendingStageRequestOptions: '["Cache em memoria","Cache em SQLite"]',
+      pendingStageRequestCreatedAt: '2026-07-06T10:00:00',
+    };
+    mockAll.mockReturnValue([row]);
+    const { listRunsForTui } = await import('../../src/db/repo.js');
+    const result = listRunsForTui();
+    expect(result[0]!.pendingStageRequestOptions).toEqual(['Cache em memoria', 'Cache em SQLite']);
+  });
+
+  it('returns null pendingStageRequestOptions when there is no pending question or no options', async () => {
+    const row = {
+      runId: 4,
+      repoId: 'repo1',
+      featureId: 'feat-4',
+      tool: 'codex',
+      status: 'running',
+      startedAt: '2026-07-06T10:00:00',
+      endedAt: null,
+      totalTokens: null,
+      inputTokens: null,
+      outputTokens: null,
+      gateId: null,
+      gateDecision: null,
+      pendingStageRequestOptions: null,
+    };
+    mockAll.mockReturnValue([row]);
+    const { listRunsForTui } = await import('../../src/db/repo.js');
+    const result = listRunsForTui();
+    expect(result[0]!.pendingStageRequestOptions).toBeNull();
+  });
+
   it('falls back to NULL publish metadata when the runs schema is older than the query', async () => {
     const row = {
       runId: 15,
@@ -164,6 +212,16 @@ describe('listRunsForTui deduplication', () => {
     listRunsForTui(25);
     expect(mockAll).toHaveBeenCalledWith(25);
   });
+
+  it('aggregates pipeline token totals for the same feature only', async () => {
+    mockAll.mockReturnValue([]);
+    const { listRunsForTui } = await import('../../src/db/repo.js');
+
+    listRunsForTui();
+
+    expect(mockPrepare).toHaveBeenCalledWith(expect.stringContaining('GROUP BY r.pipeline_id, r.feature_id'));
+    expect(mockPrepare).toHaveBeenCalledWith(expect.stringContaining('AND pt.featureId = r.feature_id'));
+  });
 });
 
 describe('live run persistence helpers', () => {
@@ -190,6 +248,9 @@ describe('live run persistence helpers', () => {
       'stdout',
       'tool',
       'tool write_file {"path":"src/ui/App.tsx"}',
+      expect.any(String),
+      null,
+      null,
     );
   });
 
@@ -198,6 +259,15 @@ describe('live run persistence helpers', () => {
     const { listRunOutput } = await import('../../src/db/repo.js');
     expect(listRunOutput(7, 20)).toEqual([{ id: 1, line: 'done' }]);
     expect(mockAll).toHaveBeenCalledWith(7, 20);
+  });
+
+  it('lists the most recent tool calls, not the oldest, so they interleave with the recent output window', async () => {
+    mockAll.mockReturnValue([{ id: 1, sequence: 1, startedAt: '2026-07-15T12:00:01.000Z' }]);
+    const { listRunToolCalls } = await import('../../src/db/repo.js');
+    listRunToolCalls(7, 200);
+    expect(mockPrepare).toHaveBeenCalledWith(expect.stringContaining('ORDER BY sequence DESC, started_at DESC'));
+    expect(mockPrepare).toHaveBeenCalledWith(expect.stringMatching(/ORDER BY sequence ASC, started_at ASC\s*$/));
+    expect(mockAll).toHaveBeenCalledWith(7, 200);
   });
 
   it('stores context query rows', async () => {
@@ -418,5 +488,52 @@ describe('getRunAccumulatedTokens', () => {
     mockGet.mockReturnValue({ total: 0 });
     const { getRunAccumulatedTokens } = await import('../../src/db/repo.js');
     expect(getRunAccumulatedTokens(99)).toBe(0);
+  });
+});
+
+describe('getLatestPublishedRunForFeature', () => {
+  const publishColumns = [
+    { name: 'pr_url' },
+    { name: 'pr_number' },
+    { name: 'branch_name' },
+    { name: 'remote_branch' },
+    { name: 'base_branch' },
+  ];
+
+  it('returns the most recent published run for the feature', async () => {
+    mockAll.mockReturnValue(publishColumns);
+    const row = {
+      featureId: 'feat-a',
+      prNumber: 42,
+      prUrl: 'https://example.test/pr/42',
+      branchName: 'feat/a',
+      remoteBranch: 'origin/feat/a',
+      baseBranch: 'develop',
+      startedAt: '2026-07-06T10:00:00',
+    };
+    mockGet.mockReturnValue(row);
+    const { getLatestPublishedRunForFeature } = await import('../../src/db/repo.js');
+    expect(getLatestPublishedRunForFeature('repo1', 'feat-a')).toEqual(row);
+  });
+
+  it('returns null when no published run exists', async () => {
+    mockAll.mockReturnValue(publishColumns);
+    mockGet.mockReturnValue(undefined);
+    const { getLatestPublishedRunForFeature } = await import('../../src/db/repo.js');
+    expect(getLatestPublishedRunForFeature('repo1', 'feat-a')).toBeNull();
+  });
+
+  it('returns null for a done run without a pull request URL', async () => {
+    mockAll.mockReturnValue(publishColumns);
+    mockGet.mockReturnValue(undefined);
+    const { getLatestPublishedRunForFeature } = await import('../../src/db/repo.js');
+    expect(getLatestPublishedRunForFeature('repo1', 'feat-a')).toBeNull();
+  });
+
+  it('returns null when the runs table has no pr_url column', async () => {
+    mockAll.mockReturnValue([{ name: 'feature_id' }]);
+    const { getLatestPublishedRunForFeature } = await import('../../src/db/repo.js');
+    expect(getLatestPublishedRunForFeature('repo1', 'feat-a')).toBeNull();
+    expect(mockGet).not.toHaveBeenCalled();
   });
 });

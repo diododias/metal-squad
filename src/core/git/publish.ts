@@ -1,5 +1,8 @@
 import { execFileSync } from 'node:child_process';
 import type { PublishEvidence } from '../adapters/types.js';
+import { logCaughtError } from '../events/logging.js';
+import { GithubForge } from './forge/github.js';
+import type { ForgeAdapter, ForgePullRequestView } from './forge/types.js';
 
 export interface PublishVerification {
   ok: boolean;
@@ -8,52 +11,17 @@ export interface PublishVerification {
   evidence: PublishEvidence;
 }
 
-interface GhPullRequestView {
-  number?: number;
-  url?: string;
-  state?: string;
-  baseRefName?: string;
-  headRefName?: string;
-}
-
-function runCommand(command: string, args: string[], cwd: string): string {
-  return execFileSync(command, args, {
-    cwd,
-    encoding: 'utf8',
-    stdio: ['ignore', 'pipe', 'ignore'],
-  }).trim();
-}
-
 function tryRunGit(args: string[], cwd: string): string | null {
   try {
-    return runCommand('git', args, cwd);
-  } catch {
-    return null;
-  }
-}
-
-function tryRunCommand(command: string, args: string[], cwd: string): string | null {
-  try {
-    return runCommand(command, args, cwd);
-  } catch {
-    return null;
-  }
-}
-
-function ghAvailable(): boolean {
-  try {
-    execFileSync('gh', ['--version'], { stdio: 'ignore' });
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-function parsePrView(raw: string | null): GhPullRequestView | null {
-  if (!raw) return null;
-  try {
-    return JSON.parse(raw) as GhPullRequestView;
-  } catch {
+    // Git failures remain non-fatal evidence checks; GH failures are handled
+    // through ForgeAdapter below so their diagnostics are preserved.
+    return execFileSync('git', args, {
+      cwd,
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'pipe'],
+    }).trim();
+  } catch (error) {
+    logCaughtError(`git/publish.tryRunGit(${args.join(' ')})`, error);
     return null;
   }
 }
@@ -65,6 +33,29 @@ function countCommitsAheadOfBase(cwd: string, baseBranch: string): number | null
   if (!raw) return null;
   const value = Number(raw);
   return Number.isFinite(value) ? value : null;
+}
+
+/**
+ * Checks whether the current HEAD descends from the declared integration base.
+ * Git uses exit code 1 for a valid negative answer, while any other failure is
+ * operationally inconclusive and must remain distinguishable from `false`.
+ */
+export function isDescendantOfBase(cwd: string, baseBranch: string): boolean | null {
+  try {
+    execFileSync('git', ['merge-base', '--is-ancestor', baseBranch, 'HEAD'], {
+      cwd,
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+    return true;
+  } catch (error) {
+    const exitCode = typeof error === 'object' && error !== null && 'status' in error
+      ? error.status
+      : undefined;
+    if (exitCode === 1) return false;
+    logCaughtError(`git/publish.isDescendantOfBase(${baseBranch})`, error);
+    return null;
+  }
 }
 
 function resolveRemoteBranch(cwd: string): string | null {
@@ -80,24 +71,47 @@ function resolveRemoteBranch(cwd: string): string | null {
   return `${remote}/${remoteRef}`;
 }
 
-function resolvePullRequest(cwd: string): GhPullRequestView | null {
-  if (!ghAvailable()) return null;
-  const raw = tryRunCommand(
-    'gh',
-    ['pr', 'view', '--json', 'number,url,state,baseRefName,headRefName'],
-    cwd,
-  );
-  return parsePrView(raw);
-}
-
-export function verifyPublishContract(cwd: string, baseBranch = 'develop'): PublishVerification {
+export function verifyPublishContract(
+  cwd: string,
+  allowedBaseBranches: string[],
+  forge: ForgeAdapter = new GithubForge(),
+): PublishVerification {
+  if (allowedBaseBranches.length === 0) {
+    return {
+      ok: false,
+      status: 'failed',
+      summary: 'publish: no allowed base branches were configured; set integration.baseBranch or dependency branches.',
+      evidence: {
+        branch: null,
+        baseBranch: '',
+        commitSha: null,
+        remoteBranch: null,
+        prNumber: null,
+        prUrl: null,
+      },
+    };
+  }
+  const allowedBases = allowedBaseBranches;
+  const primaryBase = allowedBases[0];
+  if (primaryBase === undefined) {
+    throw new Error('Publish verification requires at least one allowed base branch.');
+  }
+  const allowedLabel = allowedBases.join(' or ');
   const branch = tryRunGit(['rev-parse', '--abbrev-ref', 'HEAD'], cwd);
   const commitSha = tryRunGit(['rev-parse', 'HEAD'], cwd);
   const remoteBranch = resolveRemoteBranch(cwd);
-  const pr = resolvePullRequest(cwd);
+  const forgeAvailable = forge.available();
+  const pullRequestResult = forgeAvailable ? forge.viewPullRequest(cwd) : null;
+  const pr: ForgePullRequestView | null = pullRequestResult?.ok ? pullRequestResult.value : null;
+  // The effective base is the PR's actual base when it is one of the allowed
+  // branches (agent may have chosen any dependency branch); otherwise fall back
+  // to the primary base for reporting/comparison.
+  const effectiveBase = typeof pr?.baseRefName === 'string' && allowedBases.includes(pr.baseRefName)
+    ? pr.baseRefName
+    : primaryBase;
   const evidence: PublishEvidence = {
     branch,
-    baseBranch,
+    baseBranch: effectiveBase,
     commitSha,
     remoteBranch,
     prNumber: typeof pr?.number === 'number' ? pr.number : null,
@@ -108,26 +122,26 @@ export function verifyPublishContract(cwd: string, baseBranch = 'develop'): Publ
     return {
       ok: false,
       status: 'failed',
-      summary: 'implement: repository is not on a named working branch.',
+      summary: 'publish: repository is not on a named working branch.',
       evidence,
     };
   }
 
-  if (branch === baseBranch) {
+  if (allowedBases.includes(branch)) {
     return {
       ok: false,
       status: 'failed',
-      summary: `implement: branch must not be ${baseBranch}.`,
+      summary: `publish: branch must not be ${branch}.`,
       evidence,
     };
   }
 
-  const commitsAhead = countCommitsAheadOfBase(cwd, baseBranch);
+  const commitsAhead = countCommitsAheadOfBase(cwd, effectiveBase);
   if (commitsAhead === null) {
     return {
       ok: false,
       status: 'blocked',
-      summary: `implement: could not compare HEAD against ${baseBranch}.`,
+      summary: `publish: could not compare HEAD against ${effectiveBase}.`,
       evidence,
     };
   }
@@ -136,7 +150,7 @@ export function verifyPublishContract(cwd: string, baseBranch = 'develop'): Publ
     return {
       ok: false,
       status: 'failed',
-      summary: `implement: branch has no commits ahead of ${baseBranch}.`,
+      summary: `publish: branch has no commits ahead of ${effectiveBase}.`,
       evidence,
     };
   }
@@ -145,16 +159,25 @@ export function verifyPublishContract(cwd: string, baseBranch = 'develop'): Publ
     return {
       ok: false,
       status: 'blocked',
-      summary: 'implement: branch has no upstream remote configured; push evidence is missing.',
+      summary: 'publish: branch has no upstream remote configured; push evidence is missing.',
       evidence,
     };
   }
 
-  if (!ghAvailable()) {
+  if (!forgeAvailable) {
     return {
       ok: false,
       status: 'blocked',
-      summary: 'implement: GitHub CLI is unavailable, so PR verification could not be completed.',
+      summary: 'publish: GitHub CLI is unavailable, so PR verification could not be completed.',
+      evidence,
+    };
+  }
+
+  if (pullRequestResult && !pullRequestResult.ok) {
+    return {
+      ok: false,
+      status: 'blocked',
+      summary: `publish: GitHub CLI could not read the pull request: ${pullRequestResult.stderr}`,
       evidence,
     };
   }
@@ -163,16 +186,16 @@ export function verifyPublishContract(cwd: string, baseBranch = 'develop'): Publ
     return {
       ok: false,
       status: 'blocked',
-      summary: `implement: no pull request is open for the current branch against ${baseBranch}.`,
+      summary: `publish: no pull request is open for the current branch against ${allowedLabel}.`,
       evidence,
     };
   }
 
-  if (pr.baseRefName !== baseBranch) {
+  if (!pr.baseRefName || !allowedBases.includes(pr.baseRefName)) {
     return {
       ok: false,
       status: 'failed',
-      summary: `implement: pull request base is ${pr.baseRefName ?? 'unknown'}, expected ${baseBranch}.`,
+      summary: `publish: pull request base is ${pr.baseRefName ?? 'unknown'}, expected ${allowedLabel}.`,
       evidence,
     };
   }
@@ -181,7 +204,7 @@ export function verifyPublishContract(cwd: string, baseBranch = 'develop'): Publ
     return {
       ok: false,
       status: 'failed',
-      summary: `implement: pull request is not open (state=${pr.state ?? 'unknown'}).`,
+      summary: `publish: pull request is not open (state=${pr.state ?? 'unknown'}).`,
       evidence,
     };
   }
@@ -189,7 +212,7 @@ export function verifyPublishContract(cwd: string, baseBranch = 'develop'): Publ
   return {
     ok: true,
     status: 'done',
-    summary: `implement publish verified on ${branch} (${pr.url}).`,
+    summary: `publish verified on ${branch} (${pr.url}).`,
     evidence,
   };
 }

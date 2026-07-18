@@ -21,6 +21,8 @@ import { resolveThemePreference } from '../ui/theme/resolve.js';
 import type { ThemeRoleName } from '../ui/theme/types.js';
 import { createSkillRegistry } from '../core/skills/registry.js';
 import type { Skill } from '../core/skills/types.js';
+import { collectEnvironmentInfo } from './environment.js';
+import { logCaughtError } from '../core/events/index.js';
 import type { MsqWebState, ThemeSnapshot, TimeoutApprovalState, TokenStats, UiNotification, WebRuntimeConfig } from './types.js';
 
 const DASHBOARD_PERIODS: { label: string; days: number | null }[] = [
@@ -41,7 +43,7 @@ function gateToPendingApproval(gate: GateRow): { kind: 'gate'; id: number; featu
   };
 }
 
-function stageRequestToPendingApproval(sr: StageRequestRow): { kind: 'stage'; id: number; featureId: string; repoId: string; prompt: string; createdAt: string } {
+function stageRequestToPendingApproval(sr: StageRequestRow): { kind: 'stage'; id: number; featureId: string; repoId: string; prompt: string; createdAt: string; requestKind: 'approval' | 'input'; options?: string[] } {
   return {
     kind: 'stage' as const,
     id: sr.id,
@@ -49,6 +51,8 @@ function stageRequestToPendingApproval(sr: StageRequestRow): { kind: 'stage'; id
     repoId: '',
     prompt: sr.prompt,
     createdAt: sr.createdAt,
+    requestKind: sr.kind,
+    options: sr.options ?? undefined,
   };
 }
 
@@ -57,7 +61,8 @@ function collectGates(): MsqWebState['gates'] {
     const gates = openGates().map(gateToPendingApproval);
     const stageRequests = listPendingStageRequests().map(stageRequestToPendingApproval);
     return [...gates, ...stageRequests];
-  } catch {
+  } catch (error) {
+    logCaughtError('web/state.collectGates', error);
     return [];
   }
 }
@@ -65,7 +70,8 @@ function collectGates(): MsqWebState['gates'] {
 function collectRuns(): RunSummary[] {
   try {
     return sortRunsByGroup(listRunsForTui(2000));
-  } catch {
+  } catch (error) {
+    logCaughtError('web/state.collectRuns', error);
     return [];
   }
 }
@@ -73,7 +79,8 @@ function collectRuns(): RunSummary[] {
 function collectRunningTasks(): RunningTaskSummary[] {
   try {
     return listRunningTaskRuns(50);
-  } catch {
+  } catch (error) {
+    logCaughtError('web/state.collectRunningTasks', error);
     return [];
   }
 }
@@ -92,7 +99,8 @@ function collectTimeoutApprovals(): TimeoutApprovalState[] {
       notificationAttempts: request.notificationAttempts,
       createdAt: request.createdAt,
     }));
-  } catch {
+  } catch (error) {
+    logCaughtError('web/state.collectTimeoutApprovals', error);
     return [];
   }
 }
@@ -107,7 +115,8 @@ function collectPendingFeatures(runs: RunSummary[], repoId: string): FeatureCata
         .map((run) => run.featureId),
     );
     return getPendingFeatures(catalog, doneFeatureIds, activeFeatureIds);
-  } catch {
+  } catch (error) {
+    logCaughtError('web/state.collectPendingFeatures', error);
     return [];
   }
 }
@@ -126,7 +135,8 @@ function computeTokenStats(sinceDays = 7): TokenStats {
 function collectDashboardRows(): StatsRunRow[] {
   try {
     return listRunsForStats({ sinceDays: 7 });
-  } catch {
+  } catch (error) {
+    logCaughtError('web/state.collectDashboardRows', error);
     return [];
   }
 }
@@ -144,8 +154,7 @@ function normalizeFeatureCatalog(catalog: Record<string, FeatureCatalogEntry>): 
 
 function buildThemeSnapshot(): ThemeSnapshot {
   try {
-    const config = resolveRuntimeConfig(process.cwd());
-    const resolution = resolveThemePreference(config.theme);
+    const resolution = resolveThemePreference(undefined);
     const textColor = resolution.profile.roles.text.color ?? FALLBACK_ROLE_COLOR;
     const roles = Object.fromEntries(
       (Object.entries(resolution.profile.roles) as [ThemeRoleName, { color?: string }][]).map(
@@ -153,7 +162,8 @@ function buildThemeSnapshot(): ThemeSnapshot {
       ),
     ) as Record<ThemeRoleName, string>;
     return { name: resolution.active, roles };
-  } catch {
+  } catch (error) {
+    logCaughtError('web/state.buildThemeSnapshot', error);
     return {
       name: 'default',
       roles: {
@@ -173,12 +183,29 @@ function buildThemeSnapshot(): ThemeSnapshot {
 /** Strips notification credentials (Slack/Discord/webhook URLs, Telegram chat
  * id) before the config crosses the WebSocket boundary — with auth 'none' any
  * local process can read the state broadcast. */
-export function sanitizeRuntimeConfig(config: Config): WebRuntimeConfig {
-  const { telegramChatId: _telegramChatId, notifications, ...rest } = config;
+function isNotificationChannelConfigured(channel: Config['notifications']['channels'][number]): boolean {
+  switch (channel.type) {
+    case 'desktop': return true;
+    case 'telegram': return channel.chatId.trim().length > 0;
+    case 'slack':
+    case 'discord': return channel.webhookUrl.trim().length > 0;
+    case 'webhook': return channel.url.trim().length > 0;
+  }
+}
+
+export function sanitizeRuntimeConfig(
+  config: Config,
+  writability: WebRuntimeConfig['writability'],
+): WebRuntimeConfig {
+  const { notifications, ...rest } = config;
   return {
     ...rest,
+    writability,
     notifications: {
-      channels: notifications.channels.map((channel) => ({ type: channel.type })),
+      channels: notifications.channels.map((channel) => ({
+        type: channel.type,
+        configured: isNotificationChannelConfigured(channel),
+      })),
       events: notifications.events,
     },
   };
@@ -193,20 +220,26 @@ let skillsCatalogCache: { value: Skill[]; expiresAt: number } | null = null;
 
 /** Test hook: drop the runtime-config/skills caches. */
 export function resetWebStateCaches(): void {
-  runtimeConfigCache = null;
+  invalidateRuntimeConfigCache();
   skillsCatalogCache = null;
 }
 
-function collectRuntimeConfig(): WebRuntimeConfig {
+/** Drop cached config after a settings write so the next state reflects it immediately. */
+export function invalidateRuntimeConfigCache(): void {
+  runtimeConfigCache = null;
+}
+
+function collectRuntimeConfig(writability: WebRuntimeConfig['writability']): WebRuntimeConfig {
   const now = Date.now();
   if (runtimeConfigCache && runtimeConfigCache.expiresAt > now) return runtimeConfigCache.value;
   let config: Config;
   try {
     config = resolveRuntimeConfig(process.cwd());
-  } catch {
+  } catch (error) {
+    logCaughtError('web/state.collectRuntimeConfig', error);
     config = ConfigSchema.parse({});
   }
-  const value = sanitizeRuntimeConfig(config);
+  const value = sanitizeRuntimeConfig(config, writability);
   runtimeConfigCache = { value, expiresAt: now + CONFIG_CACHE_TTL_MS };
   return value;
 }
@@ -217,7 +250,8 @@ function collectSkillsCatalog(): Skill[] {
   let value: Skill[];
   try {
     value = createSkillRegistry().discover(process.cwd());
-  } catch {
+  } catch (error) {
+    logCaughtError('web/state.collectSkillsCatalog', error);
     value = [];
   }
   skillsCatalogCache = { value, expiresAt: now + CONFIG_CACHE_TTL_MS };
@@ -234,6 +268,7 @@ export function buildMsqWebState(): MsqWebState {
   const timeoutApprovals = collectTimeoutApprovals();
   const featureCatalog = normalizeFeatureCatalog(getFeatureCatalog());
   const backlogSettings = getBacklogSettings();
+  const environment = collectEnvironmentInfo();
   const executionRuns = runs.filter((run) => getRunGroup(run.status) === 'execution');
   const doneRuns = runs.filter((run) => run.status === 'done');
   const falhaRunsList = runs.filter((run) => getRunGroup(run.status) === 'canceled');
@@ -247,6 +282,7 @@ export function buildMsqWebState(): MsqWebState {
     timeoutApprovals,
     featureCatalog,
     backlogSettings,
+    environment,
     stats: {
       totalRuns: runs.length,
       doneRuns: doneRuns.length,
@@ -260,7 +296,10 @@ export function buildMsqWebState(): MsqWebState {
     },
     notifications: [],
     theme: buildThemeSnapshot(),
-    runtimeConfig: collectRuntimeConfig(),
+    runtimeConfig: collectRuntimeConfig({
+      dbWritable: environment.dbWritable,
+      configWritable: environment.configWritable,
+    }),
     skillsCatalog: collectSkillsCatalog(),
   };
 }

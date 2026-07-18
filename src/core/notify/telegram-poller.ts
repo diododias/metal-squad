@@ -1,5 +1,8 @@
 import { getSecret } from '../../security/secrets.js';
 import { resolveRuntimeConfig } from '../../config/index.js';
+import { msqEventBus } from '../events/bus.js';
+import { logCaughtError } from '../events/logging.js';
+import { resumeBlockedRun } from '../runner/resume-blocked-run.js';
 import {
   getFeatureTopicAssociation,
   getGate,
@@ -36,6 +39,7 @@ const INPUT_CMD = /^input:(\d+)\s+([\s\S]+)$/i;
 // Matches a tap on an option button: input:<requestId>:<optionIndex>
 const INPUT_OPTION_CMD = /^input:(\d+):(\d+)$/;
 const TIMEOUT_CMD = /^timeout:(\d+)\s+(retry|keep_blocked)$/i;
+const BLOCKED_CMD = /^blocked:(approve|intervene):(\d+)$/i;
 
 function parseDecision(raw: string): GateDecision | null {
   const lower = raw.toLowerCase();
@@ -48,7 +52,7 @@ function parseDecision(raw: string): GateDecision | null {
 function configuredTelegramChatId(): string | undefined {
   const config = resolveRuntimeConfig(process.cwd());
   const explicit = config.notifications.channels.find((channel) => channel.type === 'telegram');
-  return explicit?.type === 'telegram' ? explicit.chatId : config.telegramChatId;
+  return explicit?.type === 'telegram' ? explicit.chatId : undefined;
 }
 
 function updateContext(update: TelegramUpdate): { chatId?: string; threadId?: number } {
@@ -81,6 +85,11 @@ async function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+function notifyActionFailed(action: string, error: unknown): void {
+  logCaughtError(`telegram-poller.${action}`, error);
+  msqEventBus.emit('ui:notice', { message: `Telegram action "${action}" failed silently — check logs.` });
+}
+
 export class TelegramPoller {
   private offset = 0;
   private stopped = false;
@@ -100,7 +109,7 @@ export class TelegramPoller {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ callback_query_id: callbackQueryId }),
-    }).catch(() => { /* ignore answer errors */ });
+    }).catch((error: unknown) => { logCaughtError('telegram-poller.answerCallback', error); });
   }
 
   private async loop(): Promise<void> {
@@ -129,9 +138,9 @@ export class TelegramPoller {
             try {
               const gate = typeof getGate === 'function' ? getGate(gateId) : null;
               featureId = gate?.featureId;
-            } catch { /* DB may be unavailable */ }
+            } catch (error) { logCaughtError('telegram-poller.getGate', error); }
             if (decision !== null && matchesFeatureTopic(featureId, update)) {
-              try { resolveGate(gateId, decision); } catch { /* DB may be unavailable */ }
+              try { resolveGate(gateId, decision); } catch (error) { notifyActionFailed('resolveGate', error); }
             }
             if (callbackId) void this.answerCallback(token, callbackId);
             continue;
@@ -144,10 +153,10 @@ export class TelegramPoller {
             if (!requestId || !response) continue;
             let featureId: string | undefined;
             if (updateContext(update).chatId !== undefined) {
-              try { featureId = getStageRequest(Number(requestId))?.featureId; } catch { /* DB may be unavailable */ }
+              try { featureId = getStageRequest(Number(requestId))?.featureId; } catch (error) { logCaughtError('telegram-poller.getStageRequest', error); }
             }
             if (matchesFeatureTopic(featureId, update)) {
-              try { resolveStageRequest(Number(requestId), response.toLowerCase()); } catch { /* DB may be unavailable */ }
+              try { resolveStageRequest(Number(requestId), response.toLowerCase()); } catch (error) { notifyActionFailed('resolveStageRequest', error); }
             }
             if (callbackId) void this.answerCallback(token, callbackId);
             continue;
@@ -163,7 +172,7 @@ export class TelegramPoller {
               if (label !== undefined && matchesFeatureTopic(row?.featureId, update)) {
                 resolveStageRequest(requestId, label);
               }
-            } catch { /* DB may be unavailable */ }
+            } catch (error) { notifyActionFailed('resolveStageRequest(option)', error); }
             if (callbackId) void this.answerCallback(token, callbackId);
             continue;
           }
@@ -188,7 +197,20 @@ export class TelegramPoller {
                   });
                 void won;
               }
-            } catch { /* DB may be unavailable or callback may be stale */ }
+            } catch (error) { notifyActionFailed('resolveTimeoutApproval', error); }
+            if (callbackId) void this.answerCallback(token, callbackId);
+            continue;
+          }
+
+          const blockedMatch = BLOCKED_CMD.exec(text);
+          if (blockedMatch) {
+            const action = blockedMatch[1]?.toLowerCase();
+            const runId = Number(blockedMatch[2]);
+            if (action === 'approve') {
+              try { resumeBlockedRun(runId); } catch (error) { notifyActionFailed('resumeBlockedRun', error); }
+            } else {
+              msqEventBus.emit('ui:info', { message: `Blocked run ${String(runId)} remains blocked for human intervention.` });
+            }
             if (callbackId) void this.answerCallback(token, callbackId);
             continue;
           }
@@ -200,10 +222,10 @@ export class TelegramPoller {
             if (!requestId || !response) continue;
             let featureId: string | undefined;
             if (updateContext(update).chatId !== undefined) {
-              try { featureId = getStageRequest(Number(requestId))?.featureId; } catch { /* DB may be unavailable */ }
+              try { featureId = getStageRequest(Number(requestId))?.featureId; } catch (error) { logCaughtError('telegram-poller.getStageRequest', error); }
             }
             if (matchesFeatureTopic(featureId, update)) {
-              try { resolveStageRequest(Number(requestId), response.trim()); } catch { /* DB may be unavailable */ }
+              try { resolveStageRequest(Number(requestId), response.trim()); } catch (error) { notifyActionFailed('resolveStageRequest', error); }
             }
             if (callbackId) void this.answerCallback(token, callbackId);
             continue;
@@ -212,13 +234,14 @@ export class TelegramPoller {
           if (text.startsWith('resume_pipeline:')) {
             const pipelineId = Number(text.split(':')[1]);
             if (pipelineId && matchesConfiguredChat(updateContext(update).chatId, configuredTelegramChatId())) {
-              try { resumePipeline(pipelineId); } catch { /* DB may be unavailable */ }
+              try { resumePipeline(pipelineId); } catch (error) { notifyActionFailed('resumePipeline', error); }
             }
             if (callbackId) void this.answerCallback(token, callbackId);
             continue;
           }
         }
-      } catch {
+      } catch (error) {
+        logCaughtError('telegram-poller.loop', error);
         if (this.stopped) break; // eslint-disable-line @typescript-eslint/no-unnecessary-condition -- stopped may change during await
         await sleep(5_000);
       }

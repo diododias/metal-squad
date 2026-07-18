@@ -1,9 +1,12 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { mergeExecutionDefaults, resolveConfigSnapshot, type ResolvedConfigSources, type ResolvedExecutionDefaults } from '../config/index.js';
+import type { ToolCapabilities } from '../core/adapters/types.js';
 import { loadBacklogFromCatalog } from '../core/backlog/load.js';
 import { resolveRepo } from '../core/repo.js';
-import type { Budget, Retry, Task, Workflow } from '../core/backlog/schema.js';
+import { getCatalogMeta } from '../db/backlogCatalog.js';
+import { DefaultsSchema, type Budget, type Defaults, type Retry, type Task, type Workflow } from '../core/backlog/schema.js';
+import { logCaughtError } from '../core/events/index.js';
 
 const DESCRIPTION_CHAR_LIMIT = 4000;
 
@@ -12,10 +15,14 @@ export interface FeatureCatalogEntry {
   /** Persistent catalog identity; kept separate from display-only fallbacks. */
   persistedId?: string;
   title: string;
+  /** Parent epic identity — surfaced muted on web kanban cards. */
+  epicId?: string;
+  epicTitle?: string;
   skills: string[];
   tool: string;
   model?: string;
   effort: string;
+  thinking?: string;
   /** Full spec/feature description (D2): inline `spec` summary, or the
    * content of `specFile` when no inline summary is declared. Truncated to
    * DESCRIPTION_CHAR_LIMIT so it stays readable inside the Ink detail view. */
@@ -43,16 +50,33 @@ export interface FeatureCatalogEntry {
   pendingDependencies?: string[];
 }
 
-/** F31 section 5b: backlog-level settings shown alongside per-feature config
- * (budget and stageSkills live on the backlog/defaults, not per feature). */
+/** F31 section 5b: project-level settings shown alongside per-feature config. */
 export interface BacklogSettings {
   budget?: Budget;
   stageSkills: Record<string, string[]>;
+  toolCapabilities?: Record<string, ToolCapabilities>;
   configSources?: ResolvedConfigSources;
+  /** Read-only project execution defaults, used to resolve a feature through
+   * the sole Feature -> Project inheritance path. */
   resolvedDefaults?: ResolvedExecutionDefaults;
+  /** SET-16: raw project defaults as stored in `backlog_catalog_meta`
+   * (`defaults_json`), separate from `resolvedDefaults` — this is the
+   * editable shape `action:updateProjectDefaults` patches. Falls back to
+   * schema defaults for a project that hasn't loaded a catalog yet. */
+  projectDefaults: Defaults;
 }
 
-const DEFAULT_BACKLOG_SETTINGS: BacklogSettings = { stageSkills: {} };
+const DEFAULT_TOOL_CAPABILITIES: Record<string, ToolCapabilities> = {
+  claude: { model: true, effort: true, thinking: true },
+  codex: { model: true, effort: true, thinking: false },
+  opencode: { model: true, effort: false, thinking: false },
+};
+
+const DEFAULT_BACKLOG_SETTINGS: BacklogSettings = {
+  stageSkills: {},
+  toolCapabilities: DEFAULT_TOOL_CAPABILITIES,
+  projectDefaults: DefaultsSchema.parse({}),
+};
 
 function truncateDescription(text: string): string {
   if (text.length <= DESCRIPTION_CHAR_LIMIT) return text;
@@ -71,7 +95,8 @@ function readFeatureDescription(
     if (!existsSync(abs)) return null;
     const content = readFileSync(abs, 'utf8').trim();
     return content ? truncateDescription(content) : null;
-  } catch {
+  } catch (error) {
+    logCaughtError('ui/catalog.readFeatureDescription', error);
     return null;
   }
 }
@@ -88,13 +113,7 @@ function loadCatalogAndSettings(cwd: string): void {
     const snapshot = resolveConfigSnapshot(cwd);
     const { repoId } = resolveRepo(cwd);
     const backlog = loadBacklogFromCatalog(repoId, cwd);
-    const resolvedDefaults = mergeExecutionDefaults({
-      tool: snapshot.repoDefaults.tool ?? 'claude',
-      model: snapshot.repoDefaults.model,
-      effort: snapshot.repoDefaults.effort ?? 'medium',
-      skills: snapshot.repoDefaults.skills ?? [],
-      stageSkills: snapshot.repoDefaults.stageSkills ?? {},
-    }, backlog.defaults);
+    const resolvedDefaults = mergeExecutionDefaults(DefaultsSchema.parse({}), backlog.defaults);
     cachedCatalog = Object.fromEntries(
       backlog.epics.flatMap((epic) =>
         epic.features.map((feature) => [
@@ -103,10 +122,13 @@ function loadCatalogAndSettings(cwd: string): void {
             id: feature.id,
             persistedId: feature.id,
             title: feature.title,
+            epicId: epic.id,
+            epicTitle: epic.title,
             skills: feature.skills ?? [],
             tool: feature.tool,
             model: feature.model,
             effort: feature.effort,
+            thinking: feature.thinking,
             description: readFeatureDescription(feature.spec, feature.specFile, cwd),
             tasks: feature.tasks,
             dependsOn: feature.dependsOn,
@@ -120,13 +142,21 @@ function loadCatalogAndSettings(cwd: string): void {
         ]),
       ),
     );
+    const catalogMeta = getCatalogMeta(repoId);
+    const projectDefaults = catalogMeta
+      ? DefaultsSchema.parse(JSON.parse(catalogMeta.defaults_json))
+      : DefaultsSchema.parse({});
+
     cachedSettings = {
       budget: backlog.budget,
-      stageSkills: 'defaults' in backlog ? backlog.defaults.stageSkills : {},
+      stageSkills: backlog.defaults.stageSkills,
+      toolCapabilities: DEFAULT_TOOL_CAPABILITIES,
       configSources: snapshot.sources,
       resolvedDefaults,
+      projectDefaults,
     };
-  } catch {
+  } catch (error) {
+    logCaughtError('ui/catalog.loadCatalogAndSettings', error);
     cachedCatalog = {};
     cachedSettings = DEFAULT_BACKLOG_SETTINGS;
   }

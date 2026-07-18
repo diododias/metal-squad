@@ -32,8 +32,8 @@ export function ToolCallCard({ tool, status = 'done', command, output, time }: T
         fontFamily: 'var(--font-mono)',
       }}
     >
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '7px 10px', background: 'var(--bg-panel-alt)' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 6, padding: '7px 10px', background: 'var(--bg-panel-alt)' }}>
+        <div style={{ display: 'flex', alignItems: 'center', flex: 1, flexWrap: 'wrap', gap: 8, minWidth: 0 }}>
           <span
             style={{
               fontSize: 'var(--text-2xs)',
@@ -50,7 +50,7 @@ export function ToolCallCard({ tool, status = 'done', command, output, time }: T
             {STATUS_GLYPH[status]} tool:{tool}
           </span>
           {command && (
-            <code style={{ fontSize: 'var(--text-xs)', color: 'var(--text-dim)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+            <code style={{ flex: 1, minWidth: 0, fontSize: 'var(--text-xs)', color: 'var(--text-dim)', whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }}>
               {command}
             </code>
           )}

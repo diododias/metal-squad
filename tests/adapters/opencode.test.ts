@@ -15,13 +15,16 @@ const mockCliAbortErrorClass = class CliAbortError extends Error {
 const mockEmit = vi.fn();
 const mockMsqEventBus = { emit: mockEmit };
 const mockParseControlSignal = vi.fn();
+const mockResolveToolInvocation = vi.fn(() => ({ command: 'opencode', baseArgs: [], env: {}, versionCheck: ['--version'] }));
 
 vi.mock('../../src/core/adapters/spawn.js', () => ({
   runCli: mockRunCli,
+  resolveToolInvocation: mockResolveToolInvocation,
   CliAbortError: mockCliAbortErrorClass,
 }));
 vi.mock('../../src/core/events/index.js', () => ({
   msqEventBus: mockMsqEventBus,
+  logCaughtError: vi.fn(),
 }));
 vi.mock('../../src/core/adapters/control.js', () => ({
   parseControlSignal: mockParseControlSignal,
@@ -31,6 +34,7 @@ const MOCK_FEATURE = {
   id: 'feat-1',
   title: 'Test Feature',
   tool: 'opencode' as const,
+  effort: 'medium' as const,
   skills: [],
 };
 
@@ -45,6 +49,7 @@ beforeEach(() => {
   mockRunCli.mockReset();
   mockEmit.mockReset();
   mockParseControlSignal.mockReset().mockReturnValue(undefined);
+  mockResolveToolInvocation.mockReturnValue({ command: 'opencode', baseArgs: [], env: {}, versionCheck: ['--version'] });
 });
 
 describe('opencodeAdapter.effortFlag', () => {
@@ -125,14 +130,14 @@ describe('opencodeAdapter.runFeature', () => {
     expect(args).toContain('anthropic/claude-opus-4');
   });
 
-  it('enables thinking output for parity with claude/codex live output', async () => {
+  it('does not send --thinking since opencode does not support it natively', async () => {
     mockRunCli.mockResolvedValue({ code: 0, stdout: JSON.stringify({ response: 'done' }), stderr: '' });
 
     const { opencodeAdapter } = await import('../../src/core/adapters/opencode.js');
     await opencodeAdapter.runFeature(MOCK_FEATURE as never, 'prompt', MOCK_OPTS);
 
     const [, args] = mockRunCli.mock.calls[0]!;
-    expect(args).toContain('--thinking');
+    expect(args).not.toContain('--thinking');
   });
 
   it('does not include model flag when feature.model is not set', async () => {

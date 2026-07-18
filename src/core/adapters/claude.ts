@@ -1,18 +1,12 @@
 import { randomUUID } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
-import { sanitizeToolCallRecord, type SessionHandle, type ToolAdapter, type RunResult, type RunFeatureOptions, type TokenUsage, type ToolCallRecord } from './types.js';
+import { detectStderrLevel, sanitizeToolCallRecord, type SessionHandle, type ToolAdapter, type RunResult, type RunFeatureOptions, type TokenUsage, type ToolCallRecord } from './types.js';
 import type { Effort, Feature } from '../backlog/schema.js';
-import { CliAbortError, CliTimeoutError, runCli } from './spawn.js';
+import { CliAbortError, CliTimeoutError, resolveToolInvocation, runCli } from './spawn.js';
+import { logCaughtError } from '../events/logging.js';
 import { msqEventBus } from '../events/index.js';
 import { parseControlSignal } from './control.js';
 import { resolveRuntimeConfig } from '../../config/index.js';
-
-// Sem flag nativa de "effort": mapeia para o tier de modelo.
-const EFFORT_MODEL: Record<Effort, string> = {
-  low: 'haiku',
-  medium: 'sonnet',
-  high: 'opus',
-};
 
 type ContentBlock =
   | { type: 'text'; text: string }
@@ -39,13 +33,14 @@ interface StreamJsonEvent {
 export const claudeAdapter: ToolAdapter = {
   tool: 'claude',
 
-  effortFlag(effort: Effort): string[] {
-    return ['--model', EFFORT_MODEL[effort]];
+  effortFlag(_effort: Effort): string[] {
+    return [];
   },
 
   isAvailable(): boolean {
     try {
-      execFileSync('claude', ['--version'], { stdio: 'ignore' });
+      const invocation = resolveToolInvocation('claude');
+      execFileSync(invocation.command, invocation.versionCheck, { stdio: 'ignore' });
       return true;
     } catch {
       return false;
@@ -53,11 +48,14 @@ export const claudeAdapter: ToolAdapter = {
   },
 
   async runFeature(feature: Feature, prompt: string, opts: RunFeatureOptions): Promise<RunResult> {
-    const model = feature.model ? ['--model', feature.model] : this.effortFlag(feature.effort);
+    const invocation = resolveToolInvocation(feature.tool, opts.cwd);
+    const model = feature.model ? ['--model', feature.model] : [];
+    const maxThinkingTokens = feature.thinking === 'on' ? invocation.thinkingBudget[feature.effort] : 0;
     const assignedSessionId = opts.session?.mode === 'resume'
       ? opts.session.handle?.sessionId ?? null
       : randomUUID();
     const args = [
+      ...invocation.baseArgs,
       '--print',
       '--output-format', 'stream-json',
       '--verbose',
@@ -83,9 +81,11 @@ export const claudeAdapter: ToolAdapter = {
     });
 
     try {
-      ({ code, stdout, stderr } = await runCli('claude', args, {
+      ({ code, stdout, stderr } = await runCli(invocation.command, args, {
         cwd: opts.cwd,
+        env: { ...invocation.env, MAX_THINKING_TOKENS: String(maxThinkingTokens) },
         idleThresholdMs: resolveRuntimeConfig(opts.cwd).idleThresholdMs,
+        heartbeatMs: resolveRuntimeConfig(opts.cwd).heartbeatMs,
         runId: opts.runId,
         featureId: feature.id,
         tool: feature.tool,
@@ -95,9 +95,9 @@ export const claudeAdapter: ToolAdapter = {
         onStatus: opts.onStatus ?? ((snapshot): void => { msqEventBus.emit('run:status', snapshot); }),
         signal: opts.signal,
         onStdoutLine: (line) => {
-          const updates = progress.onStdoutLine(line);
+          const updates = progress.onStdoutLine(line, opts.stageSkills ?? {});
           for (const update of updates) {
-            if (update.output) emitRunOutput(opts.runId, feature, update.output.line, 'stdout', update.output.source);
+            if (update.output) emitRunOutput(opts.runId, feature, update.output.line, 'stdout', update.output.source, update.output);
             if (update.usage) emitUsage(opts.runId, feature, update.usage);
             if (update.stage) emitTaskStage(opts.runId, feature, update.stage);
             if (update.toolCall) emitToolCall(opts, feature, update.toolCall, seenToolCalls);
@@ -106,7 +106,7 @@ export const claudeAdapter: ToolAdapter = {
         onStderrLine: (line) => {
           const updates = progress.onStderrLine(line);
           for (const update of updates) {
-            if (update.output) emitRunOutput(opts.runId, feature, update.output.line, 'stderr', update.output.source);
+            if (update.output) emitRunOutput(opts.runId, feature, update.output.line, 'stderr', update.output.source, update.output);
             if (update.toolCall) emitToolCall(opts, feature, update.toolCall, seenToolCalls);
           }
         },
@@ -181,7 +181,8 @@ function sanitizeTimeoutProgress(value: string): string {
 function safeJson<T>(s: string): T | null { // eslint-disable-line @typescript-eslint/no-unnecessary-type-parameters
   try {
     return JSON.parse(s) as T;
-  } catch {
+  } catch (error) {
+    logCaughtError('adapters/claude.safeJson', error);
     return null;
   }
 }
@@ -256,7 +257,8 @@ function detectTouchedFiles(cwd: string): string[] {
       .split('\n')
       .map((line) => parseGitStatusPath(line))
       .filter((path): path is string => Boolean(path));
-  } catch {
+  } catch (error) {
+    logCaughtError('adapters/claude.detectTouchedFiles', error);
     return [];
   }
 }
@@ -280,13 +282,15 @@ function formatTouchedFiles(files: string[]): string {
 }
 
 function normalizeSnippet(text: string): string {
-  return text.replace(/\s+/g, ' ').trim().slice(0, 160);
+  return text.replace(/\s+/g, ' ').trim();
 }
 
 interface ProgressUpdate {
   output?: {
     line: string;
     source: 'agent' | 'tool' | 'stderr';
+    toolName?: string;
+    level?: 'error' | 'warn';
   };
   usage?: TokenUsage;
   /** true quando `usage` ja e o total autoritativo (evento `result`). */
@@ -296,7 +300,7 @@ interface ProgressUpdate {
 }
 
 function createClaudeProgress(): {
-  onStdoutLine: (line: string) => ProgressUpdate[];
+  onStdoutLine: (line: string, stageSkills: Record<string, string[]>) => ProgressUpdate[];
   onStderrLine: (line: string) => ProgressUpdate[];
   heartbeatSuffix: () => string | undefined;
 } {
@@ -313,8 +317,8 @@ function createClaudeProgress(): {
   let latestCachedInput = 0;
 
   return {
-    onStdoutLine(line: string): ProgressUpdate[] {
-      const updates = parseClaudeLine(line);
+    onStdoutLine(line: string, stageSkills: Record<string, string[]>): ProgressUpdate[] {
+      const updates = parseClaudeLine(line, stageSkills);
       for (const u of updates) {
         if (u.output) {
           eventCount += 1;
@@ -347,7 +351,7 @@ function createClaudeProgress(): {
       if (!text) return [];
       stderrCount += 1;
       lastStderrSnippet = text;
-      return [{ output: { line: text, source: 'stderr' } }];
+      return [{ output: { line: text, source: 'stderr', level: detectStderrLevel(line) } }];
     },
     heartbeatSuffix(): string | undefined {
       const parts: string[] = [];
@@ -361,7 +365,7 @@ function createClaudeProgress(): {
   };
 }
 
-function parseClaudeLine(line: string): ProgressUpdate[] {
+function parseClaudeLine(line: string, stageSkills: Record<string, string[]>): ProgressUpdate[] {
   const evt = safeJson<StreamJsonEvent>(line);
   if (!evt?.type) return [];
 
@@ -387,7 +391,7 @@ function parseClaudeLine(line: string): ProgressUpdate[] {
       } else if (block.type === 'tool_result') {
         const output = normalizeSnippet(JSON.stringify(block.content ?? ''));
         updates.push({
-          output: output ? { line: `tool result ${output}`, source: 'tool' } : undefined,
+          output: output ? { line: `tool result ${output}`, source: 'tool', toolName: 'tool result', level: block.is_error ? 'error' : undefined } : undefined,
           toolCall: {
             id: block.tool_use_id ?? `tool-result-${String(updates.length)}`,
             sequence: updates.length + 1,
@@ -404,10 +408,10 @@ function parseClaudeLine(line: string): ProgressUpdate[] {
       } else {
         const name = normalizeSnippet(block.name);
         const input = normalizeSnippet(JSON.stringify(block.input ?? {}));
-        const stage = detectStageFromSkill(name);
+        const stage = detectStageFromSkill(name, stageSkills);
         const outputLine = normalizeSnippet(`tool ${name}${input && input !== '{}' ? ` ${input}` : ''}`);
         updates.push({
-          output: { line: outputLine, source: 'tool' },
+          output: { line: outputLine, source: 'tool', toolName: name },
           ...(stage ? { stage } : {}),
           toolCall: {
             id: block.id ?? `${name}-${String(updates.length)}`,
@@ -453,6 +457,7 @@ function emitRunOutput(
   line: string,
   stream: 'stdout' | 'stderr',
   source: 'agent' | 'tool' | 'stderr' | 'heartbeat',
+  extra?: { toolName?: string; level?: 'error' | 'warn' },
 ): void {
   msqEventBus.emit('run:output', {
     runId,
@@ -461,6 +466,9 @@ function emitRunOutput(
     line,
     stream,
     source,
+    createdAt: new Date().toISOString(),
+    ...(extra?.toolName !== undefined ? { toolName: extra.toolName } : {}),
+    ...(extra?.level !== undefined ? { level: extra.level } : {}),
   });
 }
 
@@ -476,21 +484,10 @@ function emitUsage(runId: number, feature: Feature, usage: TokenUsage): void {
   });
 }
 
-const SKILL_STAGE_MAP: Record<string, string> = {
-  'speckit-specify': 'specify',
-  'speckit_specify': 'specify',
-  'speckit-plan': 'plan',
-  'speckit_plan': 'plan',
-  'speckit-implement': 'implement',
-  'speckit_implement': 'implement',
-  'speckit-tasks': 'tasks',
-  'speckit_tasks': 'tasks',
-};
-
-function detectStageFromSkill(skillName: string): string | null {
+function detectStageFromSkill(skillName: string, stageSkills: Record<string, string[]>): string | null {
   const lower = skillName.toLowerCase();
-  for (const [pattern, stage] of Object.entries(SKILL_STAGE_MAP)) {
-    if (lower.includes(pattern)) return stage;
+  for (const [stage, skills] of Object.entries(stageSkills)) {
+    if (skills.some((skill) => lower.includes(skill.toLowerCase()))) return stage;
   }
   return null;
 }

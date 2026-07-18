@@ -33,10 +33,20 @@ const mocks = vi.hoisted(() => ({
   assertWritableDbPath: vi.fn(),
   updateCatalogFeature: vi.fn(),
   updateCatalogTask: vi.fn(),
+  updateCatalogDefaults: vi.fn(),
   loadBacklogFromCatalog: vi.fn(),
   validateBacklogSkills: vi.fn(),
+  loadConfig: vi.fn(),
   resolveRuntimeConfig: vi.fn(),
+  saveConfig: vi.fn(),
+  saveNotificationsPatch: vi.fn(),
+  saveAppConfigPatch: vi.fn(),
+  setSecret: vi.fn(),
+  clearSecret: vi.fn(),
+  parseConfig: vi.fn((value) => value),
   spawn: vi.fn(),
+  getPipeline: vi.fn(),
+  getAdapter: vi.fn(),
 }));
 
 vi.mock('../../src/core/repo.js', () => ({
@@ -50,6 +60,7 @@ vi.mock('../../src/db/index.js', () => ({
 vi.mock('../../src/db/backlogCatalog.js', () => ({
   updateCatalogFeature: mocks.updateCatalogFeature,
   updateCatalogTask: mocks.updateCatalogTask,
+  updateCatalogDefaults: mocks.updateCatalogDefaults,
 }));
 
 vi.mock('../../src/core/backlog/load.js', () => ({
@@ -61,7 +72,21 @@ vi.mock('../../src/core/skills/index.js', () => ({
 }));
 
 vi.mock('../../src/config/index.js', () => ({
+  CONFIG_DIR: '/tmp',
+  DATA_DIR: '/tmp',
+  DB_PATH_ENV: 'MSQ_DB_PATH',
+  resolveDbPath: () => '/tmp/metal-squad-web-test.db',
+  loadConfig: mocks.loadConfig,
   resolveRuntimeConfig: mocks.resolveRuntimeConfig,
+  saveConfig: mocks.saveConfig,
+  saveNotificationsPatch: mocks.saveNotificationsPatch,
+  saveAppConfigPatch: mocks.saveAppConfigPatch,
+  ConfigSchema: { parse: mocks.parseConfig },
+}));
+
+vi.mock('../../src/security/secrets.js', () => ({
+  setSecret: mocks.setSecret,
+  clearSecret: mocks.clearSecret,
 }));
 
 vi.mock('node:child_process', async () => {
@@ -93,6 +118,11 @@ vi.mock('../../src/db/repo.js', () => ({
   requestFeatureAbort: mocks.requestFeatureAbort,
   forceResolveGate: mocks.forceResolveGate,
   listCompletedFeatureIds: mocks.listCompletedFeatureIds,
+  getPipeline: mocks.getPipeline,
+}));
+
+vi.mock('../../src/core/adapters/index.js', () => ({
+  getAdapter: mocks.getAdapter,
 }));
 
 vi.mock('../../src/core/stats.js', () => ({
@@ -212,6 +242,18 @@ describe('web server', () => {
     mocks.getBacklogSettings.mockReturnValue({ stageSkills: {} });
     mocks.loadBacklogFromCatalog.mockReturnValue({ epics: [] });
     mocks.validateBacklogSkills.mockReturnValue(undefined);
+    mocks.loadConfig.mockReturnValue({
+      concurrency: 3,
+      staleRunThresholdMinutes: 120,
+      toolTimeoutMs: 600_000,
+      idleThresholdMs: 30_000,
+      promptContextCharLimit: 20_000,
+      stageSkills: {},
+      notifications: { channels: [], events: [] },
+      workflow: { autoAdvanceStages: false, pollIntervalMs: 2_000 },
+      budget: { alertAtPercent: 80 },
+      web: { host: '127.0.0.1', port: 8743, auth: 'token' },
+    });
     mocks.resolveRuntimeConfig.mockReturnValue({
       concurrency: 3,
       staleRunThresholdMinutes: 120,
@@ -349,11 +391,13 @@ describe('web server', () => {
       featureId: 'feat-1',
       tool: 'claude',
       reason: 'gate',
+      code: 'dependency_unavailable',
       summary: 'aguardando decisão humana',
     });
     const message = await waitForSocketMessage(socket);
     expect((message as { type: string }).type).toBe('run:blocked');
     expect((message as { payload: { reason: string } }).payload.reason).toBe('gate');
+    expect((message as { payload: { code?: string } }).payload.code).toBe('dependency_unavailable');
     socket.close();
   });
 
@@ -596,9 +640,9 @@ describe('web server', () => {
     expect(json.theme.roles.error).toBeTruthy();
   });
 
-  it('persists a feature config patch and broadcasts state:full on success', async () => {
+  it('persists tool and model config patches and broadcasts state:full on success', async () => {
     const { createWebServer } = await import('../../src/web/server.js');
-    mocks.updateCatalogFeature.mockReturnValue({ id: 'feat1', effort: 'high' });
+    mocks.updateCatalogFeature.mockReturnValue({ id: 'feat1', tool: 'codex', model: 'gpt-5.6' });
 
     server = createWebServer({ host: '127.0.0.1', port: 0, auth: 'token', token: 'secret' });
     await new Promise<void>((resolve) => server!.server.listen(0, '127.0.0.1', resolve));
@@ -613,17 +657,83 @@ describe('web server', () => {
     socket.send(JSON.stringify({
       type: 'action:updateFeatureConfig',
       featureId: 'feat1',
-      patch: { effort: 'high', maxTokens: 5000 },
+      patch: { tool: 'codex', model: 'gpt-5.6' },
     }));
 
     const stateMessage = await waitForMessageType(socket, 'state:full');
     expect(mocks.updateCatalogFeature).toHaveBeenCalledWith(
       'repo-1',
       'feat1',
-      expect.objectContaining({ effort: 'high', maxTokens: 5000 }),
+      { tool: 'codex', model: 'gpt-5.6' },
     );
     expect((stateMessage as { type: string }).type).toBe('state:full');
 
+    socket.close();
+  });
+
+  it('acknowledges an accepted stages-only workflow reorder patch to its initiating client before reconciling state', async () => {
+    const { createWebServer } = await import('../../src/web/server.js');
+    mocks.updateCatalogFeature.mockReturnValue({ id: 'feat1' });
+
+    server = createWebServer({ host: '127.0.0.1', port: 0, auth: 'token', token: 'secret' });
+    await new Promise<void>((resolve) => server!.server.listen(0, '127.0.0.1', resolve));
+    const address = server!.server.address() as { port: number };
+    const socket = new WebSocket(`ws://127.0.0.1:${address.port}/ws`);
+    await waitForOpen(socket);
+    socket.send(JSON.stringify({ type: 'auth', token: 'secret' }));
+    await waitForSocketMessage(socket);
+
+    const saveResult = waitForMessageType(socket, 'featureConfig:saveResult');
+    const reconciledState = waitForMessageType(socket, 'state:full');
+    socket.send(JSON.stringify({
+      type: 'action:updateFeatureConfig',
+      featureId: 'feat1',
+      patch: { workflow: { stages: ['plan', 'specify', 'implement'] } },
+    }));
+
+    expect(await saveResult).toMatchObject({
+      payload: { featureId: 'feat1', ok: true },
+    });
+    await reconciledState;
+    expect(mocks.updateCatalogFeature).toHaveBeenCalledWith('repo-1', 'feat1', {
+      workflow: { stages: ['plan', 'specify', 'implement'] },
+    });
+    socket.close();
+  });
+
+  it('forwards a workflow isolation cleanup patch through the narrow config action', async () => {
+    const { createWebServer } = await import('../../src/web/server.js');
+    mocks.updateCatalogFeature.mockReturnValue({ id: 'feat1' });
+
+    server = createWebServer({ host: '127.0.0.1', port: 0, auth: 'token', token: 'secret' });
+    await new Promise<void>((resolve) => server!.server.listen(0, '127.0.0.1', resolve));
+    const address = server!.server.address() as { port: number };
+    const socket = new WebSocket(`ws://127.0.0.1:${address.port}/ws`);
+    await waitForOpen(socket);
+    socket.send(JSON.stringify({ type: 'auth', token: 'secret' }));
+    await waitForSocketMessage(socket);
+
+    const saveResult = waitForMessageType(socket, 'featureConfig:saveResult');
+    socket.send(JSON.stringify({
+      type: 'action:updateFeatureConfig',
+      featureId: 'feat1',
+      patch: {
+        workflow: {
+          stages: ['specify', 'validate'],
+          stepGuidance: { validate: { prompt: 'Keep this.' } },
+          sessionPolicy: { alwaysIsolatedStages: ['validate'] },
+        },
+      },
+    }));
+
+    expect(await saveResult).toMatchObject({ payload: { featureId: 'feat1', ok: true } });
+    expect(mocks.updateCatalogFeature).toHaveBeenCalledWith('repo-1', 'feat1', {
+      workflow: {
+        stages: ['specify', 'validate'],
+        stepGuidance: { validate: { prompt: 'Keep this.' } },
+        sessionPolicy: { alwaysIsolatedStages: ['validate'] },
+      },
+    });
     socket.close();
   });
 
@@ -657,6 +767,34 @@ describe('web server', () => {
     socket.close();
   });
 
+  it('persists a specification patch through action:updateFeatureConfig', async () => {
+    const { createWebServer } = await import('../../src/web/server.js');
+    mocks.updateCatalogFeature.mockReturnValue({ id: 'feat1', spec: '# Updated specification' });
+
+    server = createWebServer({ host: '127.0.0.1', port: 0, auth: 'token', token: 'secret' });
+    await new Promise<void>((resolve) => server!.server.listen(0, '127.0.0.1', resolve));
+    const address = server!.server.address() as { port: number };
+    const socket = new WebSocket(`ws://127.0.0.1:${address.port}/ws`);
+    await waitForOpen(socket);
+    socket.send(JSON.stringify({ type: 'auth', token: 'secret' }));
+    await waitForSocketMessage(socket);
+
+    socket.send(JSON.stringify({
+      type: 'action:updateFeatureConfig',
+      featureId: 'feat1',
+      patch: { spec: '# Updated specification' },
+    }));
+
+    await waitForMessageType(socket, 'state:full');
+    expect(mocks.updateCatalogFeature).toHaveBeenCalledWith(
+      'repo-1',
+      'feat1',
+      expect.objectContaining({ spec: '# Updated specification' }),
+    );
+
+    socket.close();
+  });
+
   it('emits ui:notice without throwing when the feature config patch fails', async () => {
     const { createWebServer } = await import('../../src/web/server.js');
     mocks.updateCatalogFeature.mockImplementation(() => {
@@ -682,6 +820,38 @@ describe('web server', () => {
     const notice = await waitForMessageType(socket, 'ui:notice');
     expect((notice as { payload: { message: string } }).payload.message).toContain('nope');
 
+    socket.close();
+  });
+
+  it('returns stable workflow issues without reconciling state when a config save is rejected', async () => {
+    const { createWebServer } = await import('../../src/web/server.js');
+    const error = Object.assign(new Error('Invalid workflow'), {
+      issues: [{ path: ['workflow', 'approvals', 'channel'], message: 'Invalid enum value.' }],
+    });
+    mocks.updateCatalogFeature.mockImplementation(() => { throw error; });
+
+    server = createWebServer({ host: '127.0.0.1', port: 0, auth: 'token', token: 'secret' });
+    await new Promise<void>((resolve) => server!.server.listen(0, '127.0.0.1', resolve));
+    const address = server!.server.address() as { port: number };
+    const socket = new WebSocket(`ws://127.0.0.1:${address.port}/ws`);
+    await waitForOpen(socket);
+    socket.send(JSON.stringify({ type: 'auth', token: 'secret' }));
+    await waitForSocketMessage(socket);
+
+    socket.send(JSON.stringify({
+      type: 'action:updateFeatureConfig',
+      featureId: 'feat1',
+      patch: { workflow: { approvals: { channel: 'telegram' } } },
+    }));
+
+    expect(await waitForMessageType(socket, 'featureConfig:saveResult')).toMatchObject({
+      payload: {
+        featureId: 'feat1',
+        ok: false,
+        issues: [{ message: 'Approval channel "telegram" is not configured or has no credentials.' }],
+      },
+    });
+    expect(mocks.updateCatalogFeature).not.toHaveBeenCalled();
     socket.close();
   });
 
@@ -739,6 +909,141 @@ describe('web server', () => {
     const notice = await waitForMessageType(socket, 'ui:notice');
     expect((notice as { payload: { message: string } }).payload.message).toContain('nope');
 
+    socket.close();
+  });
+
+  it('persists a project defaults patch and broadcasts state:full on success', async () => {
+    const { createWebServer } = await import('../../src/web/server.js');
+    mocks.updateCatalogDefaults.mockReturnValue({ defaults: { tool: 'codex', effort: 'high', skills: [], stageSkills: {} } });
+
+    server = createWebServer({ host: '127.0.0.1', port: 0, auth: 'token', token: 'secret' });
+    await new Promise<void>((resolve) => server!.server.listen(0, '127.0.0.1', resolve));
+    const address = server!.server.address() as { port: number };
+    const wsUrl = `ws://127.0.0.1:${address.port}/ws`;
+
+    const socket = new WebSocket(wsUrl);
+    await waitForOpen(socket);
+    socket.send(JSON.stringify({ type: 'auth', token: 'secret' }));
+    await waitForSocketMessage(socket); // state:full
+
+    socket.send(JSON.stringify({
+      type: 'action:updateProjectDefaults',
+      patch: { tool: 'codex', effort: 'high' },
+    }));
+
+    const stateMessage = await waitForMessageType(socket, 'state:full');
+    expect(mocks.updateCatalogDefaults).toHaveBeenCalledWith('repo-1', { tool: 'codex', effort: 'high' });
+    expect((stateMessage as { type: string }).type).toBe('state:full');
+
+    socket.close();
+  });
+
+  it('emits ui:notice without throwing when the project defaults patch fails', async () => {
+    const { createWebServer } = await import('../../src/web/server.js');
+    mocks.updateCatalogDefaults.mockImplementation(() => {
+      throw new Error('Catalog defaults not found for repo "repo-1".');
+    });
+
+    server = createWebServer({ host: '127.0.0.1', port: 0, auth: 'token', token: 'secret' });
+    await new Promise<void>((resolve) => server!.server.listen(0, '127.0.0.1', resolve));
+    const address = server!.server.address() as { port: number };
+    const wsUrl = `ws://127.0.0.1:${address.port}/ws`;
+
+    const socket = new WebSocket(wsUrl);
+    await waitForOpen(socket);
+    socket.send(JSON.stringify({ type: 'auth', token: 'secret' }));
+    await waitForSocketMessage(socket); // state:full
+
+    socket.send(JSON.stringify({
+      type: 'action:updateProjectDefaults',
+      patch: { tool: 'codex' },
+    }));
+
+    const notice = await waitForMessageType(socket, 'ui:notice');
+    expect((notice as { payload: { message: string } }).payload.message).toContain('repo-1');
+
+    socket.close();
+  });
+
+  it('persists a valid App budget alert to global config.json', async () => {
+    const { createWebServer } = await import('../../src/web/server.js');
+    server = createWebServer({ host: '127.0.0.1', port: 0, auth: 'token', token: 'secret' });
+    await new Promise<void>((resolve) => server!.server.listen(0, '127.0.0.1', resolve));
+    const address = server!.server.address() as { port: number };
+    const socket = new WebSocket(`ws://127.0.0.1:${address.port}/ws`);
+    await waitForOpen(socket);
+    socket.send(JSON.stringify({ type: 'auth', token: 'secret' }));
+    await waitForSocketMessage(socket);
+
+    socket.send(JSON.stringify({ type: 'action:updateBudgetConfig', patch: { alertAtPercent: 0 } }));
+
+    await waitForMessageType(socket, 'state:full');
+    expect(mocks.saveConfig).toHaveBeenCalledWith(expect.objectContaining({ budget: { alertAtPercent: 0 } }));
+    socket.close();
+  });
+
+  it('rejects an invalid App budget alert without writing global config.json', async () => {
+    const { createWebServer } = await import('../../src/web/server.js');
+    server = createWebServer({ host: '127.0.0.1', port: 0, auth: 'token', token: 'secret' });
+    await new Promise<void>((resolve) => server!.server.listen(0, '127.0.0.1', resolve));
+    const address = server!.server.address() as { port: number };
+    const socket = new WebSocket(`ws://127.0.0.1:${address.port}/ws`);
+    await waitForOpen(socket);
+    socket.send(JSON.stringify({ type: 'auth', token: 'secret' }));
+    await waitForSocketMessage(socket);
+
+    socket.send(JSON.stringify({ type: 'action:updateBudgetConfig', patch: { alertAtPercent: 101 } }));
+
+    const notice = await waitForMessageType(socket, 'ui:notice');
+    expect((notice as { payload: { message: string } }).payload.message).toContain('whole number between 0 and 100');
+    expect(mocks.saveConfig).not.toHaveBeenCalled();
+    socket.close();
+  });
+
+  it('persists a write-only notification patch and refreshes state', async () => {
+    const { createWebServer } = await import('../../src/web/server.js');
+    server = createWebServer({ host: '127.0.0.1', port: 0, auth: 'token', token: 'secret' });
+    await new Promise<void>((resolve) => server!.server.listen(0, '127.0.0.1', resolve));
+    const address = server!.server.address() as { port: number };
+    const socket = new WebSocket(`ws://127.0.0.1:${address.port}/ws`);
+    await waitForOpen(socket);
+    socket.send(JSON.stringify({ type: 'auth', token: 'secret' }));
+    await waitForSocketMessage(socket);
+
+    socket.send(JSON.stringify({
+      type: 'action:updateNotifications',
+      patch: { channels: [{ type: 'webhook', url: 'https://example.test/new-secret' }], events: ['run:done'] },
+    }));
+
+    await waitForMessageType(socket, 'state:full');
+    expect(mocks.saveNotificationsPatch).toHaveBeenCalledWith({
+      channels: [{ type: 'webhook', url: 'https://example.test/new-secret' }],
+      events: ['run:done'],
+    });
+    socket.close();
+  });
+
+  it('persists a complete App tool registry and broadcasts refreshed state', async () => {
+    const { createWebServer } = await import('../../src/web/server.js');
+    const tool = {
+      id: 'codex-canary', adapter: 'codex', command: 'codex-canary', baseArgs: [], env: {}, versionCheck: ['--version'],
+      capabilities: { model: true, effort: true, thinking: false }, thinkingBudget: { low: 0, medium: 0, high: 0 }, minTimeoutMs: 0,
+    };
+    mocks.loadConfig.mockReturnValue({ concurrency: 3 });
+
+    server = createWebServer({ host: '127.0.0.1', port: 0, auth: 'token', token: 'secret' });
+    await new Promise<void>((resolve) => server!.server.listen(0, '127.0.0.1', resolve));
+    const address = server!.server.address() as { port: number };
+    const socket = new WebSocket(`ws://127.0.0.1:${address.port}/ws`);
+    await waitForOpen(socket);
+    socket.send(JSON.stringify({ type: 'auth', token: 'secret' }));
+    await waitForSocketMessage(socket);
+
+    socket.send(JSON.stringify({ type: 'action:updateToolsRegistry', tools: [tool] }));
+
+    const stateMessage = await waitForMessageType(socket, 'state:full');
+    expect(mocks.saveConfig).toHaveBeenCalledWith({ concurrency: 3, tools: [tool] });
+    expect((stateMessage as { type: string }).type).toBe('state:full');
     socket.close();
   });
 
@@ -1174,6 +1479,100 @@ describe('web server', () => {
     socket.close();
   });
 
+  it('spawns resume with override args when the override tool is available', async () => {
+    const { createWebServer } = await import('../../src/web/server.js');
+
+    mocks.getPipeline.mockReturnValue({ id: 99, cwd, repoId: 'repo-1', featureId: 'feat-1' });
+    mocks.getAdapter.mockReturnValue({ isAvailable: () => true });
+
+    server = createWebServer({ host: '127.0.0.1', port: 0, auth: 'token', token: 'secret' });
+    await new Promise<void>((resolve) => server!.server.listen(0, '127.0.0.1', resolve));
+    const address = server!.server.address() as { port: number };
+    const socket = new WebSocket(`ws://127.0.0.1:${address.port}/ws`);
+    await waitForOpen(socket);
+    socket.send(JSON.stringify({ type: 'auth', token: 'secret' }));
+    await waitForSocketMessage(socket);
+
+    socket.send(JSON.stringify({
+      type: 'action:resumeWithOverride',
+      pipelineId: 99,
+      featureId: 'feat-1',
+      tool: 'codex',
+      model: 'gpt-5',
+      effort: 'high',
+    }));
+
+    await vi.waitFor(() => expect(mocks.spawn).toHaveBeenCalled());
+    expect(mocks.getAdapter).toHaveBeenCalledWith('codex');
+    const spawnArgs = mocks.spawn.mock.calls[0]?.[1] as string[];
+    expect(spawnArgs).toEqual(expect.arrayContaining(['resume', '99', '--tool', 'codex', '--model', 'gpt-5', '--effort', 'high']));
+    expect(mocks.loadBacklogFromCatalog).not.toHaveBeenCalled();
+    expect(mocks.updateCatalogFeature).not.toHaveBeenCalled();
+
+    socket.close();
+  });
+
+  it('blocks resumeWithOverride and emits ui:notice without spawning when the override tool is unavailable', async () => {
+    const { createWebServer } = await import('../../src/web/server.js');
+
+    mocks.getPipeline.mockReturnValue({ id: 99, cwd, repoId: 'repo-1', featureId: 'feat-1' });
+    mocks.getAdapter.mockReturnValue({ isAvailable: () => false });
+
+    server = createWebServer({ host: '127.0.0.1', port: 0, auth: 'token', token: 'secret' });
+    await new Promise<void>((resolve) => server!.server.listen(0, '127.0.0.1', resolve));
+    const address = server!.server.address() as { port: number };
+    const socket = new WebSocket(`ws://127.0.0.1:${address.port}/ws`);
+    await waitForOpen(socket);
+    socket.send(JSON.stringify({ type: 'auth', token: 'secret' }));
+    await waitForSocketMessage(socket);
+
+    const noticePromise = waitForMatchingMessage(
+      socket,
+      (message) => message.type === 'state:full'
+        && ((message.payload as { notifications: Array<{ type: string }> }).notifications.length > 0),
+    );
+    socket.send(JSON.stringify({
+      type: 'action:resumeWithOverride',
+      pipelineId: 99,
+      featureId: 'feat-1',
+      tool: 'opencode',
+    }));
+
+    const noticeState = await noticePromise;
+    expect((noticeState.payload as { notifications: Array<{ type: string; message: string }> }).notifications[0]?.type).toBe('notice');
+    expect(mocks.spawn).not.toHaveBeenCalled();
+
+    socket.close();
+  });
+
+  it('resumes without override flags when tool/model/effort are omitted', async () => {
+    const { createWebServer } = await import('../../src/web/server.js');
+
+    mocks.getPipeline.mockReturnValue({ id: 99, cwd, repoId: 'repo-1', featureId: 'feat-1' });
+
+    server = createWebServer({ host: '127.0.0.1', port: 0, auth: 'token', token: 'secret' });
+    await new Promise<void>((resolve) => server!.server.listen(0, '127.0.0.1', resolve));
+    const address = server!.server.address() as { port: number };
+    const socket = new WebSocket(`ws://127.0.0.1:${address.port}/ws`);
+    await waitForOpen(socket);
+    socket.send(JSON.stringify({ type: 'auth', token: 'secret' }));
+    await waitForSocketMessage(socket);
+
+    socket.send(JSON.stringify({
+      type: 'action:resumeWithOverride',
+      pipelineId: 99,
+      featureId: 'feat-1',
+    }));
+
+    await vi.waitFor(() => expect(mocks.spawn).toHaveBeenCalled());
+    expect(mocks.getAdapter).not.toHaveBeenCalled();
+    const spawnArgs = mocks.spawn.mock.calls[0]?.[1] as string[];
+    expect(spawnArgs).toEqual(expect.arrayContaining(['resume', '99']));
+    expect(spawnArgs).not.toContain('--tool');
+
+    socket.close();
+  });
+
   it('serves a login form on GET /auth and never puts the password in the URL', async () => {
     const { createWebServer } = await import('../../src/web/server.js');
     server = createWebServer({ host: '127.0.0.1', port: 0, auth: 'token', token: 'secret' });
@@ -1246,6 +1645,76 @@ describe('web server', () => {
     expect(res.headers.get('location')).toBe('/');
   });
 
+  it('redirects unauthenticated GET / to the login screen', async () => {
+    const { createWebServer } = await import('../../src/web/server.js');
+    server = createWebServer({ host: '127.0.0.1', port: 0, auth: 'token', token: 'secret' });
+    await new Promise<void>((resolve) => server!.server.listen(0, '127.0.0.1', resolve));
+    const address = server!.server.address() as { port: number };
+    const base = `http://127.0.0.1:${address.port}`;
+
+    const res = await fetch(`${base}/`, { redirect: 'manual' });
+    expect(res.status).toBe(302);
+    expect(res.headers.get('location')).toBe('/auth');
+  });
+
+  it('serves the SPA at / for a request carrying a valid session cookie', async () => {
+    const { createWebServer } = await import('../../src/web/server.js');
+    server = createWebServer({ host: '127.0.0.1', port: 0, auth: 'token', token: 'secret' });
+    await new Promise<void>((resolve) => server!.server.listen(0, '127.0.0.1', resolve));
+    const address = server!.server.address() as { port: number };
+    const base = `http://127.0.0.1:${address.port}`;
+
+    const login = await fetch(`${base}/auth`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({ password: 'secret' }),
+      redirect: 'manual',
+    });
+    const cookie = (login.headers.get('set-cookie') ?? '').split(';')[0] ?? '';
+
+    const res = await fetch(`${base}/`, { headers: { Cookie: cookie }, redirect: 'manual' });
+    expect(res.status).toBe(200);
+    const body = await res.text();
+    expect(body).toContain('METAL SQUAD');
+  });
+
+  it('invalidates the session and redirects to the login screen on POST /logout', async () => {
+    const { createWebServer } = await import('../../src/web/server.js');
+    server = createWebServer({ host: '127.0.0.1', port: 0, auth: 'token', token: 'secret' });
+    await new Promise<void>((resolve) => server!.server.listen(0, '127.0.0.1', resolve));
+    const address = server!.server.address() as { port: number };
+    const base = `http://127.0.0.1:${address.port}`;
+
+    const login = await fetch(`${base}/auth`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({ password: 'secret' }),
+      redirect: 'manual',
+    });
+    const cookie = (login.headers.get('set-cookie') ?? '').split(';')[0] ?? '';
+
+    const logout = await fetch(`${base}/logout`, { method: 'POST', headers: { Cookie: cookie }, redirect: 'manual' });
+    expect(logout.status).toBe(302);
+    expect(logout.headers.get('location')).toBe('/auth');
+    const clearedCookie = logout.headers.get('set-cookie') ?? '';
+    expect(clearedCookie).toContain('Max-Age=0');
+
+    const afterLogout = await fetch(`${base}/`, { headers: { Cookie: cookie }, redirect: 'manual' });
+    expect(afterLogout.status).toBe(302);
+    expect(afterLogout.headers.get('location')).toBe('/auth');
+  });
+
+  it('rejects GET /logout', async () => {
+    const { createWebServer } = await import('../../src/web/server.js');
+    server = createWebServer({ host: '127.0.0.1', port: 0, auth: 'token', token: 'secret' });
+    await new Promise<void>((resolve) => server!.server.listen(0, '127.0.0.1', resolve));
+    const address = server!.server.address() as { port: number };
+    const base = `http://127.0.0.1:${address.port}`;
+
+    const res = await fetch(`${base}/logout`, { redirect: 'manual' });
+    expect(res.status).toBe(405);
+  });
+
   it('authenticates the WebSocket by session cookie without an auth message', async () => {
     const { createWebServer } = await import('../../src/web/server.js');
     server = createWebServer({ host: '127.0.0.1', port: 0, auth: 'token', token: 'secret' });
@@ -1315,6 +1784,49 @@ describe('web server', () => {
     const message = await waitForSocketMessage(socket);
     expect((message as { type: string }).type).toBe('state:full');
     socket.close();
+  });
+
+  it('saves App config and write-only secrets through authenticated WebSocket actions', async () => {
+    const { createWebServer } = await import('../../src/web/server.js');
+    server = createWebServer({ host: '127.0.0.1', port: 0, auth: 'token', token: 'secret' });
+    await new Promise<void>((resolve) => server!.server.listen(0, '127.0.0.1', resolve));
+    const address = server!.server.address() as { port: number };
+    const socket = new WebSocket(`ws://127.0.0.1:${address.port}/ws`);
+    await waitForOpen(socket);
+    socket.send(JSON.stringify({ type: 'auth', token: 'secret' }));
+    await waitForSocketMessage(socket);
+
+    socket.send(JSON.stringify({ type: 'action:updateAppConfig', patch: { concurrency: 5 } }));
+    await waitForMatchingMessage(socket, (message) => message.type === 'ui:info' && JSON.stringify(message).includes('Saved App config.'));
+    expect(mocks.saveAppConfigPatch).toHaveBeenCalledWith({ concurrency: 5 });
+
+    socket.send(JSON.stringify({
+      type: 'action:setSecret',
+      patch: { account: 'telegram-bot-token', value: 'never-return-this-value' },
+    }));
+    const saved = await waitForMatchingMessage(socket, (message) => message.type === 'ui:info' && JSON.stringify(message).includes('Saved secret'));
+    expect(mocks.setSecret).toHaveBeenCalledWith('telegram-bot-token', 'never-return-this-value');
+    expect(JSON.stringify(saved)).not.toContain('never-return-this-value');
+
+    socket.send(JSON.stringify({ type: 'action:clearSecret', account: 'telegram-bot-token' }));
+    await waitForMatchingMessage(socket, (message) => message.type === 'ui:info' && JSON.stringify(message).includes('Cleared secret'));
+    expect(mocks.clearSecret).toHaveBeenCalledWith('telegram-bot-token');
+    socket.close();
+  });
+
+  it('rejects sensitive WebSocket actions without authentication', async () => {
+    const { createWebServer } = await import('../../src/web/server.js');
+    server = createWebServer({ host: '127.0.0.1', port: 0, auth: 'token', token: 'secret' });
+    await new Promise<void>((resolve) => server!.server.listen(0, '127.0.0.1', resolve));
+    const address = server!.server.address() as { port: number };
+    const socket = new WebSocket(`ws://127.0.0.1:${address.port}/ws`);
+    await waitForOpen(socket);
+    socket.send(JSON.stringify({
+      type: 'action:setSecret',
+      patch: { account: 'telegram-bot-token', value: 'never-return-this-value' },
+    }));
+    await waitForClose(socket);
+    expect(mocks.setSecret).not.toHaveBeenCalled();
   });
 
   it('rejects HTTP requests with a foreign Host header', async () => {

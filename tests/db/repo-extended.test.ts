@@ -20,6 +20,7 @@ vi.mock('../../src/config/index.js', () => ({
 }));
 vi.mock('../../src/core/events/index.js', () => ({
   msqEventBus: { emit: mockEmit },
+  logCaughtError: vi.fn(),
 }));
 
 beforeEach(async () => {
@@ -654,6 +655,23 @@ describe('createPipeline', () => {
     expect(mockRun.mock.calls[0]).toContain(JSON.stringify(['feat-a', 'feat-b']));
     expect(mockRun.mock.calls[0]).toContain(JSON.stringify(['feat-a']));
   });
+
+  it('encodes structural workflow revisions with the pipeline snapshot', async () => {
+    const { createPipeline } = await import('../../src/db/repo.js');
+    const workflowRevisions = {
+      'feat-a': {
+        mode: 'staged' as const,
+        stages: ['specify', 'plan'],
+        syncTasksToBacklog: true,
+        sessionPolicy: { mode: 'isolated' as const, alwaysIsolatedStages: ['plan'] },
+        stepGuidance: { plan: { prompt: 'Use revision A.' } },
+      },
+    };
+    createPipeline('repo-1', 'feat-a', false, {
+      snapshot: { plan: ['feat-a'], done: [], pending: ['feat-a'], active: [], aborted: [], workflowRevisions },
+    });
+    expect(mockRun.mock.calls[0]).toContain(JSON.stringify(workflowRevisions));
+  });
 });
 
 describe('updatePipelineStage', () => {
@@ -750,6 +768,7 @@ describe('getPipelineSnapshot', () => {
       pendingJson: '["feat-b"]',
       activeJson: '[]',
       abortedJson: '[]',
+      workflowSnapshotJson: '{"feat-a":{"mode":"staged","stages":["specify","plan"],"syncTasksToBacklog":true,"sessionPolicy":{"mode":"isolated","alwaysIsolatedStages":["plan"]},"stepGuidance":{"plan":{"prompt":"Use revision A."}}}}',
       requestedAbortFeatureId: null, resumeCount: 0, resumeSummary: null,
       createdAt: '', updatedAt: '', endedAt: null,
     };
@@ -759,6 +778,9 @@ describe('getPipelineSnapshot', () => {
     expect(snapshot.pending).toEqual(['feat-b']);
     expect(snapshot.active).toEqual([]);
     expect(snapshot.aborted).toEqual([]);
+    expect(snapshot.workflowRevisions).toEqual({
+      'feat-a': expect.objectContaining({ stages: ['specify', 'plan'] }),
+    });
   });
 
   it('handles null/undefined JSON gracefully', async () => {

@@ -1,13 +1,9 @@
 import React, { useState } from 'react';
-import { Card } from '../components/core/Card.js';
-import { Tag } from '../components/core/Tag.js';
-import { FeatureIdentity } from '../components/data/FeatureIdentity.js';
 import { KanbanCard } from '../components/data/KanbanCard.js';
+import { formatElapsed } from '../lib/format.js';
 import { PageHeader } from '../PageHeader.js';
 import type { MsqWebState } from '../../types.js';
 import type { RunSummary } from '../../../db/repo.js';
-
-const WORKFLOW_STAGES = ['specify', 'plan', 'tasks', 'implement', 'validate'];
 
 export interface BoardPageProps {
   state: MsqWebState;
@@ -42,7 +38,6 @@ interface Column {
 export function BoardPage({ state, isMobile, onOpenRun, onOpenBacklogItem }: BoardPageProps): React.JSX.Element {
   const [query, setQuery] = useState('');
   const [toolFilter, setToolFilter] = useState('all');
-  const [viewMode, setViewMode] = useState<'status' | 'workflow'>('status');
 
   const q = query.trim().toLowerCase();
   const matches = (title: string | null | undefined, id: string): boolean =>
@@ -53,26 +48,11 @@ export function BoardPage({ state, isMobile, onOpenRun, onOpenBacklogItem }: Boa
 
   const todo = state.pendingFeatures.filter((f) => matches(f.title, f.id) && (toolFilter === 'all' || f.tool === toolFilter));
 
-  let columns: Column[];
-  if (viewMode === 'status') {
-    columns = [
-      { key: 'progress', label: 'IN PROGRESS / BLOCKED', items: state.runs.filter((r) => (r.status === 'running' || r.status === 'blocked') && matchesRun(r)), empty: 'No active runs' },
-      { key: 'done', label: 'DONE', items: state.runs.filter((r) => r.status === 'done' && matchesRun(r)), empty: 'No completed runs' },
-      { key: 'failed', label: 'FALHA / CANCELED', items: state.runs.filter((r) => (r.status === 'failed' || r.status === 'aborted') && matchesRun(r)), empty: 'No failed runs' },
-    ];
-  } else {
-    const active = state.runs.filter((r) => r.status !== 'done' && matchesRun(r));
-    const done = state.runs.filter((r) => r.status === 'done' && matchesRun(r));
-    columns = [
-      ...WORKFLOW_STAGES.map((stage) => ({
-        key: stage,
-        label: stage.toUpperCase(),
-        items: active.filter((r) => (r.stage ?? 'implement') === stage),
-        empty: 'No runs at this stage',
-      })),
-      { key: 'done', label: 'DONE', items: done, empty: 'No completed runs' },
-    ];
-  }
+  const columns: Column[] = [
+    { key: 'progress', label: 'IN PROGRESS / BLOCKED', items: state.runs.filter((r) => (r.status === 'running' || r.status === 'blocked') && matchesRun(r)), empty: 'No active runs' },
+    { key: 'done', label: 'DONE', items: state.runs.filter((r) => r.status === 'done' && matchesRun(r)), empty: 'No completed runs' },
+    { key: 'failed', label: 'FALHA / CANCELED', items: state.runs.filter((r) => (r.status === 'failed' || r.status === 'aborted') && matchesRun(r)), empty: 'No failed runs' },
+  ];
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
@@ -114,26 +94,6 @@ export function BoardPage({ state, isMobile, onOpenRun, onOpenBacklogItem }: Boa
               <option value="codex">codex</option>
               <option value="opencode">opencode</option>
             </select>
-            <div style={{ display: 'flex', border: '1px solid var(--border-dim)', borderRadius: 'var(--radius-sm)', overflow: 'hidden', marginLeft: 4 }}>
-              {(['status', 'workflow'] as const).map((opt) => (
-                <button
-                  key={opt}
-                  onClick={() => { setViewMode(opt); }}
-                  style={{
-                    fontFamily: 'var(--font-mono)',
-                    fontSize: 'var(--text-xs)',
-                    padding: '7px 12px',
-                    border: 'none',
-                    cursor: 'pointer',
-                    background: viewMode === opt ? 'var(--accent-info-10)' : 'transparent',
-                    color: viewMode === opt ? 'var(--accent-info)' : 'var(--text-dim)',
-                    fontWeight: viewMode === opt ? 600 : 400,
-                  }}
-                >
-                  {opt === 'status' ? 'by status' : 'by workflow stage'}
-                </button>
-              ))}
-            </div>
           </div>
         }
       />
@@ -173,13 +133,20 @@ export function BoardPage({ state, isMobile, onOpenRun, onOpenBacklogItem }: Boa
               {todo.length === 0 && <div style={{ color: 'var(--text-faint)', fontSize: 'var(--text-xs)', textAlign: 'center', padding: 20 }}>No pending features</div>}
               {todo.map((f) => (
                 <div key={f.id} {...cardInteraction(() => { onOpenBacklogItem(f.id); })} style={{ cursor: 'pointer' }}>
-                  <Card>
-                    <div style={{ marginBottom: 6, fontSize: 'var(--text-sm)' }}><FeatureIdentity title={f.title} id={f.id} /></div>
-                    <div style={{ display: 'flex', gap: 6 }}>
-                      <Tag>{f.tool}</Tag>
-                      <Tag>{f.effort}</Tag>
-                    </div>
-                  </Card>
+                  <KanbanCard
+                    run={{
+                      featureId: f.id,
+                      persistedId: f.persistedId,
+                      title: f.title,
+                      epicTitle: f.epicTitle,
+                      status: 'todo',
+                      stages: f.workflow.stages,
+                      tool: f.tool,
+                      model: f.model,
+                      effort: f.effort,
+                      autoAdvance: f.workflow.autoAdvance,
+                    }}
+                  />
                 </div>
               ))}
             </div>
@@ -223,10 +190,18 @@ export function BoardPage({ state, isMobile, onOpenRun, onOpenBacklogItem }: Boa
                         featureId: r.featureId,
                         persistedId: state.featureCatalog[r.featureId]?.persistedId,
                         title: state.featureCatalog[r.featureId]?.title,
+                        epicTitle: state.featureCatalog[r.featureId]?.epicTitle,
                         status: r.status,
+                        stages: state.featureCatalog[r.featureId]?.workflow.stages,
                         tool: r.tool,
+                        model: state.featureCatalog[r.featureId]?.model,
+                        effort: state.featureCatalog[r.featureId]?.effort,
+                        autoAdvance: state.featureCatalog[r.featureId]?.workflow.autoAdvance,
                         stage: r.stage,
+                        elapsed: formatElapsed(r.startedAt, r.endedAt),
                         tokens: r.totalTokens,
+                        prUrl: r.prUrl,
+                        prNumber: r.prNumber,
                       }}
                     />
                   </div>

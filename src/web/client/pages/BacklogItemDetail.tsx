@@ -1,8 +1,8 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Button } from '../components/core/Button.js';
 import { FeatureConfigDetail } from '../components/FeatureConfigDetail.js';
 import { PageHeader } from '../PageHeader.js';
-import type { MsqWebState, FeatureConfigPatch, TaskConfigPatch } from '../../types.js';
+import type { MsqWebState, FeatureConfigPatch, FeatureConfigSaveResult, TaskConfigPatch } from '../../types.js';
 import type { RunHistoryEntry } from '../../../db/repo.js';
 
 export interface BacklogItemDetailProps {
@@ -13,6 +13,7 @@ export interface BacklogItemDetailProps {
   onBack: () => void;
   onStart: (featureId: string) => void;
   onSaveConfig: (featureId: string, patch: FeatureConfigPatch) => void;
+  workflowSaveResult?: FeatureConfigSaveResult;
   onSaveTaskConfig: (featureId: string, taskId: string, patch: TaskConfigPatch) => void;
   onOpenRun: (featureId: string) => void;
 }
@@ -24,12 +25,15 @@ export function BacklogItemDetail({
   onBack,
   onStart,
   onSaveConfig,
+  workflowSaveResult,
 }: BacklogItemDetailProps): React.JSX.Element {
   const feature = state.featureCatalog[featureId];
+  const [specDraft, setSpecDraft] = useState('');
   const blockedByDependencies = feature?.pendingDependencies ?? [];
   const canStart = blockedByDependencies.length === 0;
 
   useEffect(() => onSubscribeHistory(featureId), [featureId, onSubscribeHistory]);
+  useEffect(() => { setSpecDraft(feature?.description ?? ''); }, [feature?.description]);
 
   if (!feature) {
     return (
@@ -77,7 +81,32 @@ export function BacklogItemDetail({
         }
       />
       <div style={{ flex: 1, overflow: 'auto', padding: 20 }}>
-        <FeatureConfigDetail feature={feature} backlogSettings={state.backlogSettings} onSaveConfig={(patch) => { onSaveConfig(featureId, patch); }} />
+        <section style={{ marginBottom: 20, padding: 16, border: '1px solid var(--border-dim)', borderRadius: 'var(--radius-md)', background: 'var(--bg-panel)' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, marginBottom: 10 }}>
+            <div>
+              <div style={{ color: 'var(--text-primary)', fontWeight: 600 }}>Specification</div>
+              <div style={{ color: 'var(--text-dim)', fontSize: 'var(--text-xs)' }}>{feature.specFile ?? 'Stored in the backlog catalog'}</div>
+            </div>
+            <Button variant="primary" size="sm" disabled={specDraft === (feature.description ?? '')} onClick={() => { onSaveConfig(featureId, { spec: specDraft }); }}>
+              save spec
+            </Button>
+          </div>
+          <textarea
+            aria-label="Feature specification"
+            value={specDraft}
+            onChange={(event) => { setSpecDraft(event.target.value); }}
+            placeholder="Write the feature specification…"
+            style={{ width: '100%', minHeight: 280, boxSizing: 'border-box', resize: 'vertical', background: 'var(--bg-sunken)', border: '1px solid var(--border-dim)', borderRadius: 'var(--radius-sm)', color: 'var(--text-primary)', fontFamily: 'var(--font-mono)', fontSize: 'var(--text-sm)', lineHeight: 1.5, padding: 12 }}
+          />
+        </section>
+        <FeatureConfigDetail
+          feature={feature}
+          backlogSettings={state.backlogSettings}
+          approvalChannels={state.runtimeConfig.notifications.channels.map((channel) => channel.type)}
+          toolIds={state.runtimeConfig.tools.map((tool) => tool.id)}
+          onSaveConfig={(patch) => { onSaveConfig(featureId, patch); }}
+          workflowSaveResult={workflowSaveResult}
+        />
       </div>
     </div>
   );

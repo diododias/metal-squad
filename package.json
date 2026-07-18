@@ -11,13 +11,18 @@
     "dist"
   ],
   "scripts": {
-    "build": "tsc && rm -rf dist/web/static dist/web/client && cp -r src/web/static dist/web/static && node esbuild.web.mjs && chmod +x dist/index.js && node scripts/migrate-db.mjs",
+    "build": "tsc && rm -rf dist/web/static dist/web/client && cp -r src/web/static dist/web/static && node esbuild.web.mjs && chmod +x dist/index.js",
     "migrate:db": "node scripts/migrate-db.mjs",
+    "db:backup": "node scripts/backup-db.mjs",
+    "db:fixture": "node scripts/db-fixture.mjs",
+    "gate:fast": "node scripts/gate.mjs fast",
+    "gate:full": "node scripts/with-sandbox-db.mjs node scripts/gate.mjs full",
     "dev": "tsx src/index.ts",
     "start": "node dist/index.js",
     "typecheck": "tsc --noEmit",
     "lint": "eslint src",
     "format": "prettier --write src",
+    "pretest": "node scripts/assert-node-version.mjs",
     "test": "vitest run",
     "test:coverage": "vitest run --coverage",
     "test:coverage:gate": "mkdir -p coverage/.tmp && vitest run --config vitest.coverage-gate.config.ts --coverage",
@@ -28,15 +33,15 @@
     "verify:repo": "npm run verify:doc-refs && npm run verify:skill-shims && npm run verify:backlog",
     "prepare": "husky",
     "clean:db": "rm -f ~/.local/share/metal-squad/app.db && rm -rf .metal-squad",
-    "web": "npm run build && export MSQ_WEB_PASSWORD=diodex && msq web --host 0.0.0.0"
+    "web": "npm run build && npm run migrate:db && export MSQ_WEB_PASSWORD=diodex && msq web --host 0.0.0.0"
   },
   "engines": {
-    "node": ">=20.17.0"
+    "node": ">=24.16.0 <25"
   },
   "dependencies": {
     "@napi-rs/keyring": "^1.1.6",
     "@types/ws": "^8.18.1",
-    "better-sqlite3": "^11.8.1",
+    "better-sqlite3": "^11.10.0",
     "commander": "^13.1.0",
     "ink": "^5.1.0",
     "react": "^18.3.1",
@@ -59,6 +64,7 @@
     "eslint": "^9.18.0",
     "eslint-plugin-react": "^7.37.5",
     "eslint-plugin-react-hooks": "^7.1.1",
+    "happy-dom": "^20.10.6",
     "husky": "^9.1.7",
     "ink-testing-library": "^4.0.0",
     "prettier": "^3.4.2",

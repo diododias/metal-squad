@@ -1,8 +1,8 @@
 import React from 'react';
 import { Card } from '../core/Card.js';
 import { StatusPill, type PillStatus } from '../core/StatusPill.js';
-import { Tag } from '../core/Tag.js';
-import { FeatureIdentity } from './FeatureIdentity.js';
+import { WorkflowStepper } from '../navigation/WorkflowStepper.js';
+import { formatTokens } from '../../lib/format.js';
 
 /** Deterministic 8-hex-digit short id from a feature id string, so the same
  * feature always renders the same F-XXXXXXXX badge without a backend. */
@@ -16,19 +16,30 @@ export function toShortFeatureId(featureId: string): string {
   return `F-${hex}`;
 }
 
+/** Short display label for a model id (`claude-sonnet-4-5` → `sonnet-4-5`);
+ * the full value stays available via the cell's hover title. */
+export function toShortModelLabel(model: string): string {
+  return model.replace(/^claude-/, '');
+}
+
 export interface KanbanCardRun {
   featureId: string;
   persistedId?: string | null;
   title?: string | null;
-  status: PillStatus;
+  epicTitle?: string | null;
+  status: PillStatus | (string & {});
   stage?: string | null;
+  stages?: string[];
   tool?: string | null;
   model?: string | null;
   effort?: string | null;
+  autoAdvance?: boolean;
   elapsed?: string | null;
   tokens?: number | null;
   tasksTotal?: number | null;
   tasksDone?: number | null;
+  prUrl?: string | null;
+  prNumber?: number | null;
 }
 
 export interface KanbanCardProps {
@@ -37,31 +48,147 @@ export interface KanbanCardProps {
   onClick?: () => void;
 }
 
+const mutedTextStyle: React.CSSProperties = {
+  fontSize: 'var(--text-2xs)',
+  color: 'var(--text-faint)',
+  fontFamily: 'var(--font-mono)',
+  lineHeight: 1.3,
+};
+
+interface ToolRailCell {
+  key: string;
+  icon: string;
+  label: string;
+  title: string;
+  color?: string;
+}
+
+function buildToolRailCells(run: KanbanCardRun): ToolRailCell[] {
+  const cells: ToolRailCell[] = [];
+  if (run.tool) cells.push({ key: 'tool', icon: '◷', label: run.tool, title: `tool: ${run.tool}` });
+  if (run.model) cells.push({ key: 'model', icon: '⚙', label: toShortModelLabel(run.model), title: `model: ${run.model}` });
+  if (run.effort) cells.push({ key: 'effort', icon: '▁▃▅', label: run.effort, title: `effort: ${run.effort}` });
+  if (run.autoAdvance) cells.push({ key: 'auto', icon: '≫', label: 'auto', title: 'auto-advance', color: 'var(--accent-ok)' });
+  return cells;
+}
+
 export function KanbanCard({ run, selected, onClick }: KanbanCardProps): React.JSX.Element {
   const tasksLabel = run.tasksTotal != null ? `${String(run.tasksDone ?? 0)}/${String(run.tasksTotal)} tasks` : null;
+  const isDone = run.status === 'done';
+  const displayId = run.persistedId ?? toShortFeatureId(run.featureId);
+  const displayTitle = run.title?.trim();
+  const railCells = buildToolRailCells(run);
 
   return (
-    <Card selected={selected} onClick={onClick}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 8, marginBottom: 6 }}>
+    <Card
+      selected={selected}
+      onClick={onClick}
+      style={isDone ? { borderLeft: '3px solid var(--accent-ok)' } : undefined}
+    >
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 8, marginBottom: 4 }}>
         <div style={{ flex: '1 1 0%', minWidth: 0, fontSize: 'var(--text-sm)' }}>
-          <FeatureIdentity title={run.title} id={run.persistedId ?? toShortFeatureId(run.featureId)} />
+          {displayTitle && (
+            <div
+              style={{
+                color: 'var(--text-primary)',
+                fontWeight: 600,
+                lineHeight: 1.3,
+                display: '-webkit-box',
+                WebkitLineClamp: 2,
+                WebkitBoxOrient: 'vertical',
+                overflow: 'hidden',
+              }}
+            >
+              {displayTitle}
+            </div>
+          )}
         </div>
         <div style={{ flexShrink: 0 }}>
           <StatusPill status={run.status} />
         </div>
       </div>
 
-      {run.stage && <div style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', marginBottom: 8 }}><span style={{ fontSize: 'var(--text-2xs)', color: 'var(--accent-info)' }}>→ {run.stage}</span></div>}
-
-      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginBottom: 8 }}>
-        {run.tool && <Tag>{run.tool}</Tag>}
-        {run.model && <Tag>{run.model}</Tag>}
-        {run.effort && <Tag tone="accent">{run.effort}</Tag>}
+      {/* Muted context line below the title: epic truncates on its own line;
+        * the feature id never truncates — it wraps to the line below whenever
+        * the epic title leaves no room next to it. */}
+      <div style={{ display: 'flex', flexWrap: 'wrap', columnGap: 8, rowGap: 2, marginBottom: 6, ...mutedTextStyle }}>
+        {run.epicTitle && (
+          <span style={{ flexShrink: 0, maxWidth: '100%', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+            {run.epicTitle}
+          </span>
+        )}
+        <span style={{ flexShrink: 0, whiteSpace: 'nowrap' }}>{displayId}</span>
       </div>
+
+      {isDone && run.prUrl ? (
+        <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 8 }}>
+          <a
+            href={run.prUrl}
+            target="_blank"
+            rel="noreferrer"
+            onClick={(e) => { e.stopPropagation(); }}
+            style={{ fontSize: 'var(--text-2xs)', fontFamily: 'var(--font-mono)', color: 'var(--accent-info)', textDecoration: 'none', whiteSpace: 'nowrap' }}
+          >
+            ↗ {run.prNumber != null ? `PR #${String(run.prNumber)}` : 'PR'}
+          </a>
+        </div>
+      ) : (
+        run.stages && run.stages.length > 0 && (
+          <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 8 }}>
+            <WorkflowStepper
+              stages={run.stages}
+              currentStage={isDone ? null : (run.stage ?? null)}
+              completed={isDone}
+              variant="bar"
+              allPending={run.status === 'todo'}
+            />
+          </div>
+        )
+      )}
+
+      {/* Tool rail: tool / model / effort / auto as bordered icon cells;
+        * hover shows the full value. */}
+      {railCells.length > 0 && (
+        <div
+          style={{
+            display: 'flex',
+            maxWidth: '100%',
+            width: 'fit-content',
+            border: '1px solid var(--border-dim)',
+            borderRadius: 'var(--radius-sm)',
+            overflow: 'hidden',
+            marginBottom: 8,
+          }}
+        >
+          {railCells.map((cell, i) => (
+            <span
+              key={cell.key}
+              title={cell.title}
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 5,
+                padding: '4px 9px',
+                fontSize: 'var(--text-2xs)',
+                fontFamily: 'var(--font-mono)',
+                color: cell.color ?? 'var(--text-dim)',
+                borderLeft: i > 0 ? '1px solid var(--border-dim)' : 'none',
+                minWidth: 0,
+                overflow: 'hidden',
+                textOverflow: 'ellipsis',
+                whiteSpace: 'nowrap',
+              }}
+            >
+              <span aria-hidden="true">{cell.icon}</span>
+              {cell.label}
+            </span>
+          ))}
+        </div>
+      )}
 
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: '2px 10px', fontSize: 'var(--text-2xs)', color: 'var(--text-dim)' }}>
         {run.elapsed && <span>{run.elapsed}</span>}
-        {run.tokens != null && <span>{run.tokens.toLocaleString()} tok</span>}
+        {run.tokens != null && <span>{formatTokens(run.tokens)} tok</span>}
         {tasksLabel && <span>{tasksLabel}</span>}
       </div>
     </Card>

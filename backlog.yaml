@@ -1,21 +1,27 @@
 version: 2
 repo: metal-squad
-defaults:
-  tool: codex
-  model: gpt-5.6-luna
-  effort: high
-  skills: []
-  stageSkills:
-    specify:
-      - speckit-specify
-    plan:
-      - speckit-plan
-    tasks:
-      - speckit-tasks
-    implement:
-      - speckit-implement
-      - dev-flow
 epics:
-  - id: v1-foundation-quick-wins
-    title: V1 — Marco 1 (Fundação + Quick Wins)
+  - id: m0-governanca
+    title: M0 — Governança, publicação e vocabulário
+    features: []
+  - id: m1-persistencia-bootstrap
+    title: M1 — Persistência e bootstrap recuperável
+    features: []
+  - id: m2-dominio-headless
+    title: "M2 — Domínio headless: Projects, Epics e repos"
+    features: []
+  - id: m3-runtime-multi-repo
+    title: M3 — Catálogo e execução multi-repo reais
+    features: []
+  - id: m4-experiencia-web
+    title: M4 — Experiência web de Projects, Epics e Kanban
+    features: []
+  - id: m5-tipos-templates
+    title: M5 — Work Item types e Workflow Templates
+    features: []
+  - id: m6-ciclo-vida
+    title: M6 — Ciclo de vida, tombstones e restore
+    features: []
+  - id: m7-recovery-encerramento
+    title: M7 — Export, disaster recovery, documentação e E2E
     features: []

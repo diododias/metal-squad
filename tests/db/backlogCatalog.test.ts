@@ -8,7 +8,21 @@ function makeBacklog(overrides: Partial<BacklogV2> = {}): BacklogV2 {
   return {
     version: 2,
     repo: 'demo',
-    defaults: { tool: 'claude', effort: 'medium', skills: [], stageSkills: {} },
+    defaults: {
+      tool: 'claude',
+      effort: 'medium',
+      thinking: 'off',
+      skills: [],
+      stageSkills: {},
+      workflow: {
+        mode: 'staged',
+        stages: ['specify', 'plan', 'tasks', 'implement', 'validate'],
+        approvals: { channel: 'telegram', autoAdvance: false },
+        syncTasksToBacklog: true,
+        sessionPolicy: { mode: 'isolated', alwaysIsolatedStages: [] },
+        stepGuidance: {},
+      },
+    },
     epics: [
       {
         id: 'epic-1',
@@ -235,27 +249,101 @@ describe('backlogCatalog upsert/diff/load', () => {
       expect(reloaded.epics[0]?.features[0]?.maxTokens).toBe(12345);
     });
 
-    it('deep-merges workflow so patching only stages preserves approvals', async () => {
+    it('preserves every other execution field when patching one execution value', async () => {
+      const { upsertBacklogCatalog, updateCatalogFeature } = await setup();
+      const backlog = makeBacklog({
+        epics: [{
+          id: 'epic-1',
+          title: 'Epic One',
+          features: [{
+            ...makeBacklog().epics[0]!.features[0]!,
+            tool: 'codex',
+            model: 'gpt-5.6',
+            effort: 'low',
+            maxTokens: 4000,
+            autoStart: true,
+          }],
+        }],
+      });
+      upsertBacklogCatalog(backlog, 'repo-1');
+
+      const updated = updateCatalogFeature('repo-1', 'feat-1', { effort: 'high' });
+      expect(updated).toMatchObject({
+        tool: 'codex',
+        model: 'gpt-5.6',
+        effort: 'high',
+        maxTokens: 4000,
+        autoStart: true,
+      });
+    });
+
+    it('deep-merges a stages-only reorder while preserving the project autoAdvance value', async () => {
       const { upsertBacklogCatalog, updateCatalogFeature } = await setup();
       upsertBacklogCatalog(makeBacklog(), 'repo-1');
 
       const updated = updateCatalogFeature('repo-1', 'feat-1', {
-        workflow: { stages: ['plan', 'implement'] },
+        workflow: { stages: ['plan', 'specify', 'tasks', 'implement', 'validate'] },
       });
-      expect(updated.workflow.stages).toEqual(['plan', 'implement']);
-      expect(updated.workflow.approvals).toEqual({ channel: 'telegram', autoAdvance: false });
+      expect(updated.workflow.stages).toEqual(['plan', 'specify', 'tasks', 'implement', 'validate']);
+      expect(updated.workflow.approvals).toEqual({ channel: 'telegram' });
+      expect(updated.workflow.autoAdvance).toBe(false);
       expect(updated.workflow.syncTasksToBacklog).toBe(true);
     });
 
-    it('deep-merges workflow.approvals so patching only autoAdvance preserves channel', async () => {
+    it('persists a complete reordered stages array without changing guidance or isolation', async () => {
+      const { db, upsertBacklogCatalog, updateCatalogFeature } = await setup();
+      const workflow = {
+        mode: 'staged' as const,
+        stages: ['specify', 'plan', 'implement'],
+        approvals: { channel: 'telegram' as const },
+        autoAdvance: false,
+        syncTasksToBacklog: true,
+        sessionPolicy: { mode: 'isolated' as const, alwaysIsolatedStages: ['plan'] },
+        stepGuidance: { plan: { skills: ['planner'], prompt: 'Plan carefully.' } },
+      };
+      upsertBacklogCatalog(makeBacklog({ epics: [{ id: 'epic-1', title: 'Epic One', features: [{ ...makeBacklog().epics[0]!.features[0]!, workflow }] }] }), 'repo-1');
+
+      const updated = updateCatalogFeature('repo-1', 'feat-1', {
+        workflow: { stages: ['plan', 'specify', 'implement'] },
+      });
+      const stored = JSON.parse((db.prepare(`SELECT data_json FROM backlog_features WHERE feature_id = 'feat-1'`).get() as { data_json: string }).data_json) as { workflow: typeof workflow };
+
+      expect(updated.workflow.stages).toEqual(['plan', 'specify', 'implement']);
+      expect(updated.workflow.stepGuidance).toEqual(workflow.stepGuidance);
+      expect(updated.workflow.sessionPolicy).toEqual(workflow.sessionPolicy);
+      expect(stored.workflow).toEqual(updated.workflow);
+    });
+
+    it('updates workflow.autoAdvance without changing the approval channel', async () => {
       const { upsertBacklogCatalog, updateCatalogFeature } = await setup();
       upsertBacklogCatalog(makeBacklog(), 'repo-1');
 
       const updated = updateCatalogFeature('repo-1', 'feat-1', {
-        workflow: { approvals: { autoAdvance: true } },
+        workflow: { autoAdvance: true },
       });
-      expect(updated.workflow.approvals).toEqual({ channel: 'telegram', autoAdvance: true });
+      expect(updated.workflow.approvals).toEqual({ channel: 'telegram' });
+      expect(updated.workflow.autoAdvance).toBe(true);
       expect(updated.workflow.stages).toEqual(['specify', 'plan', 'tasks', 'implement', 'validate']);
+    });
+
+    it('deep-merges each sparse editable workflow patch without changing siblings', async () => {
+      const { upsertBacklogCatalog, updateCatalogFeature } = await setup();
+      const workflow = {
+        mode: 'staged' as const,
+        stages: ['specify', 'plan'],
+        approvals: { channel: 'telegram' as const },
+        autoAdvance: false,
+        syncTasksToBacklog: true,
+        sessionPolicy: { mode: 'isolated' as const, alwaysIsolatedStages: ['specify'] },
+        stepGuidance: { specify: { prompt: 'Keep this guidance.' } },
+        stagePublishes: {},
+      };
+      upsertBacklogCatalog(makeBacklog({ epics: [{ id: 'epic-1', title: 'Epic One', features: [{ ...makeBacklog().epics[0]!.features[0]!, workflow }] }] }), 'repo-1');
+
+      const updated = updateCatalogFeature('repo-1', 'feat-1', { workflow: { mode: 'single' } });
+      expect(updated.workflow).toEqual({ ...workflow, mode: 'single' });
+      expect(updated.title).toBe('Feature One');
+      expect(updated.effort).toBe('medium');
     });
 
     it('deep-merges workflow.sessionPolicy so patching only mode preserves alwaysIsolatedStages', async () => {
@@ -286,6 +374,35 @@ describe('backlogCatalog upsert/diff/load', () => {
       });
     });
 
+    it('persists one valid removal patch that clears only the removed stage references', async () => {
+      const { upsertBacklogCatalog, updateCatalogFeature } = await setup();
+      const workflow = {
+        mode: 'staged' as const,
+        stages: ['specify', 'implement', 'validate'],
+        approvals: { channel: 'telegram' as const, autoAdvance: false },
+        syncTasksToBacklog: true,
+        sessionPolicy: { mode: 'isolated' as const, alwaysIsolatedStages: ['implement', 'validate'] },
+        stepGuidance: {
+          specify: { prompt: 'Keep this.' },
+          implement: { prompt: 'Remove this.' },
+          validate: { prompt: 'Keep this too.' },
+        },
+      };
+      upsertBacklogCatalog(makeBacklog({ epics: [{ id: 'epic-1', title: 'Epic One', features: [{ ...makeBacklog().epics[0]!.features[0]!, workflow }] }] }), 'repo-1');
+
+      const updated = updateCatalogFeature('repo-1', 'feat-1', {
+        workflow: {
+          stages: ['specify', 'validate'],
+          stepGuidance: { specify: { prompt: 'Keep this.' }, validate: { prompt: 'Keep this too.' } },
+          sessionPolicy: { alwaysIsolatedStages: ['validate'] },
+        },
+      });
+
+      expect(updated.workflow.stages).toEqual(['specify', 'validate']);
+      expect(updated.workflow.stepGuidance).toEqual({ specify: { prompt: 'Keep this.' }, validate: { prompt: 'Keep this too.' } });
+      expect(updated.workflow.sessionPolicy).toEqual({ mode: 'isolated', alwaysIsolatedStages: ['validate'] });
+    });
+
     it('throws on an invalid patch and writes nothing', async () => {
       const { db, upsertBacklogCatalog, updateCatalogFeature } = await setup();
       upsertBacklogCatalog(makeBacklog(), 'repo-1');
@@ -298,6 +415,51 @@ describe('backlogCatalog upsert/diff/load', () => {
       const after = db
         .prepare(`SELECT data_json, updated_at FROM backlog_features WHERE feature_id = 'feat-1'`)
         .get() as { data_json: string; updated_at: string };
+      expect(after).toEqual(before);
+    });
+
+    it('rejects an invalid merged workflow atomically', async () => {
+      const { db, upsertBacklogCatalog, updateCatalogFeature } = await setup();
+      const workflow = {
+        mode: 'staged' as const,
+        stages: ['specify', 'plan'],
+        approvals: { channel: 'telegram' as const, autoAdvance: false },
+        syncTasksToBacklog: true,
+        sessionPolicy: { mode: 'isolated' as const, alwaysIsolatedStages: ['specify'] },
+      };
+      upsertBacklogCatalog(makeBacklog({ epics: [{ id: 'epic-1', title: 'Epic One', features: [{ ...makeBacklog().epics[0]!.features[0]!, workflow }] }] }), 'repo-1');
+      const before = db.prepare(`SELECT data_json, updated_at FROM backlog_features WHERE feature_id = 'feat-1'`).get();
+
+      expect(() => updateCatalogFeature('repo-1', 'feat-1', { workflow: { stages: ['plan'] } })).toThrow(/permutation/);
+
+      expect(db.prepare(`SELECT data_json, updated_at FROM backlog_features WHERE feature_id = 'feat-1'`).get()).toEqual(before);
+    });
+
+    it('rejects a non-permutation stages-only reorder without changing the catalog revision', async () => {
+      const { db, upsertBacklogCatalog, updateCatalogFeature } = await setup();
+      const workflow = {
+        mode: 'staged' as const,
+        stages: ['specify', 'plan', 'implement'],
+        approvals: { channel: 'telegram' as const, autoAdvance: false },
+        syncTasksToBacklog: true,
+        sessionPolicy: { mode: 'isolated' as const, alwaysIsolatedStages: [] },
+      };
+      upsertBacklogCatalog(makeBacklog({ epics: [{ id: 'epic-1', title: 'Epic One', features: [{ ...makeBacklog().epics[0]!.features[0]!, workflow }] }] }), 'repo-1');
+      const before = db.prepare(`SELECT data_json FROM backlog_features WHERE feature_id = 'feat-1'`).get();
+
+      expect(() => updateCatalogFeature('repo-1', 'feat-1', { workflow: { stages: ['plan', 'specify', 'plan'] } })).toThrow(/permutation/);
+
+      expect(db.prepare(`SELECT data_json FROM backlog_features WHERE feature_id = 'feat-1'`).get()).toEqual(before);
+    });
+
+    it('rejects unsupported tools atomically', async () => {
+      const { db, upsertBacklogCatalog, updateCatalogFeature } = await setup();
+      upsertBacklogCatalog(makeBacklog(), 'repo-1');
+      const before = db.prepare(`SELECT data_json FROM backlog_features WHERE feature_id = 'feat-1'`).get();
+
+      expect(() => updateCatalogFeature('repo-1', 'feat-1', { tool: 'legacy-tool' as never })).toThrow();
+
+      const after = db.prepare(`SELECT data_json FROM backlog_features WHERE feature_id = 'feat-1'`).get();
       expect(after).toEqual(before);
     });
 
@@ -363,6 +525,119 @@ describe('backlogCatalog upsert/diff/load', () => {
       const reloaded = loadBacklogFromCatalog('repo-1');
       const task = reloaded.epics[0]?.features[0]?.tasks[0];
       expect(task).toMatchObject({ id: 'task-1', title: 'Renamed Task', status: 'done' });
+    });
+  });
+
+  describe('updateCatalogDefaults', () => {
+    it('persists a partial defaults patch without clearing untouched fields', async () => {
+      const { db, upsertBacklogCatalog, updateCatalogDefaults } = await setup();
+      upsertBacklogCatalog(
+        makeBacklog({
+          defaults: {
+            tool: 'claude',
+            model: 'sonnet-5',
+            effort: 'medium',
+            thinking: 'off',
+            skills: ['review'],
+            stageSkills: {},
+            workflow: {
+              mode: 'staged',
+              stages: ['specify', 'plan', 'tasks', 'implement', 'validate'],
+              approvals: { channel: 'telegram', autoAdvance: false },
+              syncTasksToBacklog: true,
+              sessionPolicy: { mode: 'isolated', alwaysIsolatedStages: [] },
+              stepGuidance: {},
+            },
+          },
+        }),
+        'repo-1',
+      );
+
+      const updated = updateCatalogDefaults('repo-1', { effort: 'high' });
+      expect(updated.defaults).toMatchObject({
+        tool: 'claude',
+        model: 'sonnet-5',
+        effort: 'high',
+        skills: ['review'],
+      });
+
+      const row = db
+        .prepare(`SELECT defaults_json FROM backlog_catalog_meta WHERE repo_id = 'repo-1'`)
+        .get() as { defaults_json: string };
+      const stored = JSON.parse(row.defaults_json) as { effort: string; model: string };
+      expect(stored.effort).toBe('high');
+      expect(stored.model).toBe('sonnet-5');
+    });
+
+    it('updates inherited feature values while preserving workflow siblings', async () => {
+      const { upsertBacklogCatalog, updateCatalogDefaults } = await setup();
+      const { loadBacklogFromCatalog } = await import('../../src/core/backlog/load.js');
+      upsertBacklogCatalog(makeBacklog(), 'repo-1');
+
+      updateCatalogDefaults('repo-1', {
+        effort: 'high',
+        workflow: { mode: 'single', autoAdvance: true },
+        maxTokens: 9000,
+      });
+
+      const feature = loadBacklogFromCatalog('repo-1').epics[0]?.features[0];
+      expect(feature).toMatchObject({
+        effort: 'high',
+        maxTokens: 9000,
+        workflow: {
+          mode: 'single',
+          autoAdvance: true,
+          stages: ['specify', 'plan', 'tasks', 'implement', 'validate'],
+          syncTasksToBacklog: true,
+        },
+      });
+    });
+
+    it('updates inherited autoAdvance but preserves a feature override', async () => {
+      const { upsertBacklogCatalog, updateCatalogDefaults, updateCatalogFeature } = await setup();
+      const { loadBacklogFromCatalog } = await import('../../src/core/backlog/load.js');
+      upsertBacklogCatalog(makeBacklog(), 'repo-1');
+
+      updateCatalogFeature('repo-1', 'feat-1', { workflow: { autoAdvance: true } });
+      updateCatalogDefaults('repo-1', { workflow: { autoAdvance: false } });
+
+      const feature = loadBacklogFromCatalog('repo-1').epics[0]?.features[0];
+      expect(feature?.workflow.autoAdvance).toBe(true);
+
+    });
+
+    it('merges a budget patch onto existing budget fields without dropping siblings', async () => {
+      const { upsertBacklogCatalog, updateCatalogDefaults } = await setup();
+      upsertBacklogCatalog(makeBacklog({ budget: { maxTokens: 100000, perFeatureMaxTokens: 5000 } }), 'repo-1');
+
+      const updated = updateCatalogDefaults('repo-1', { budget: { maxTokens: 200000 } });
+      expect(updated.budget).toMatchObject({ maxTokens: 200000, perFeatureMaxTokens: 5000 });
+    });
+
+    it('sets budget from scratch when none was previously stored', async () => {
+      const { upsertBacklogCatalog, updateCatalogDefaults } = await setup();
+      upsertBacklogCatalog(makeBacklog(), 'repo-1');
+
+      const updated = updateCatalogDefaults('repo-1', { budget: { maxTokens: 50000 } });
+      expect(updated.budget).toMatchObject({ maxTokens: 50000 });
+    });
+
+    it('throws on an invalid patch and writes nothing', async () => {
+      const { db, upsertBacklogCatalog, updateCatalogDefaults } = await setup();
+      upsertBacklogCatalog(makeBacklog(), 'repo-1');
+
+      expect(() => updateCatalogDefaults('repo-1', { tool: 'legacy-tool' as never })).toThrow();
+
+      const row = db
+        .prepare(`SELECT defaults_json FROM backlog_catalog_meta WHERE repo_id = 'repo-1'`)
+        .get() as { defaults_json: string };
+      const stored = JSON.parse(row.defaults_json) as { tool: string };
+      expect(stored.tool).toBe('claude');
+    });
+
+    it('throws BacklogCatalogNotFoundError for an unknown repo', async () => {
+      const { updateCatalogDefaults } = await setup();
+      expect(() => updateCatalogDefaults('nope', { effort: 'high' })).toThrow(/not found/);
     });
   });
 });
