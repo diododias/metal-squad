@@ -103,6 +103,11 @@ export function registerBacklogFeatures(
         ...input,
         id,
         dependsOn: (input.dependsOn ?? []).map((dependency) => aliases.get(dependency) ?? dependency),
+        ...(input.dependencyTypes === undefined ? {} : {
+          dependencyTypes: Object.fromEntries(
+            Object.entries(input.dependencyTypes).map(([dependencyId, type]) => [aliases.get(dependencyId) ?? dependencyId, type]),
+          ),
+        }),
       });
       registrations.push({
         feature,
