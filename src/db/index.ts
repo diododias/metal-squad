@@ -114,6 +114,47 @@ function migrate(d: Database.Database): void {
       created_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
 
+    CREATE TABLE IF NOT EXISTS projects (
+      project_id   TEXT PRIMARY KEY,
+      name         TEXT NOT NULL,
+      description  TEXT,
+      position     INTEGER NOT NULL DEFAULT 0,
+      archived_at  TEXT,
+      deleted_at   TEXT,
+      revision     INTEGER NOT NULL DEFAULT 1,
+      created_at   TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at   TEXT NOT NULL DEFAULT (datetime('now')),
+      CHECK (archived_at IS NULL OR deleted_at IS NULL)
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_projects_position ON projects(position);
+    CREATE INDEX IF NOT EXISTS idx_projects_archived_at ON projects(archived_at);
+    CREATE INDEX IF NOT EXISTS idx_projects_deleted_at ON projects(deleted_at);
+
+    CREATE TABLE IF NOT EXISTS project_repos (
+      repo_id      TEXT PRIMARY KEY REFERENCES repos(repo_id) ON DELETE RESTRICT,
+      project_id   TEXT NOT NULL REFERENCES projects(project_id) ON DELETE RESTRICT,
+      position     INTEGER NOT NULL DEFAULT 0,
+      created_at   TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at   TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_project_repos_project ON project_repos(project_id, position);
+
+    CREATE TABLE IF NOT EXISTS audit_events (
+      id           INTEGER PRIMARY KEY AUTOINCREMENT,
+      request_id   TEXT,
+      actor        TEXT,
+      entity_kind  TEXT NOT NULL,
+      entity_id    TEXT NOT NULL,
+      action       TEXT NOT NULL,
+      before_json  TEXT,
+      after_json   TEXT,
+      created_at   TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_audit_events_entity ON audit_events(entity_kind, entity_id, id DESC);
+
     CREATE TABLE IF NOT EXISTS runs (
       id         INTEGER PRIMARY KEY AUTOINCREMENT,
       repo_id    TEXT NOT NULL REFERENCES repos(repo_id),
@@ -575,6 +616,43 @@ function migrate(d: Database.Database): void {
     }
   };
   ensureStageRequestColumn('options', `ALTER TABLE stage_requests ADD COLUMN options TEXT`);
+
+  const epicColumns = d
+    .prepare(`PRAGMA table_info(backlog_epics)`)
+    .all() as { name?: string }[];
+  const ensureEpicColumn = (name: string, sql: string): void => {
+    if (!epicColumns.some((column) => column.name === name)) {
+      d.exec(sql);
+      epicColumns.push({ name });
+    }
+  };
+  ensureEpicColumn('project_id', `ALTER TABLE backlog_epics ADD COLUMN project_id TEXT REFERENCES projects(project_id)`);
+  ensureEpicColumn('description', `ALTER TABLE backlog_epics ADD COLUMN description TEXT`);
+  ensureEpicColumn('status', `ALTER TABLE backlog_epics ADD COLUMN status TEXT`);
+  ensureEpicColumn('deleted_at', `ALTER TABLE backlog_epics ADD COLUMN deleted_at TEXT`);
+  ensureEpicColumn('revision', `ALTER TABLE backlog_epics ADD COLUMN revision INTEGER NOT NULL DEFAULT 1`);
+  d.exec(`CREATE INDEX IF NOT EXISTS idx_backlog_epics_project ON backlog_epics(project_id)`);
+  d.exec(`CREATE INDEX IF NOT EXISTS idx_backlog_epics_deleted_at ON backlog_epics(deleted_at)`);
+
+  const backlogFeatureColumns = d
+    .prepare(`PRAGMA table_info(backlog_features)`)
+    .all() as { name?: string }[];
+  const ensureBacklogFeatureColumn = (name: string, sql: string): void => {
+    if (!backlogFeatureColumns.some((column) => column.name === name)) {
+      d.exec(sql);
+      backlogFeatureColumns.push({ name });
+    }
+  };
+  ensureBacklogFeatureColumn('description', `ALTER TABLE backlog_features ADD COLUMN description TEXT`);
+  ensureBacklogFeatureColumn('deleted_at', `ALTER TABLE backlog_features ADD COLUMN deleted_at TEXT`);
+  ensureBacklogFeatureColumn('revision', `ALTER TABLE backlog_features ADD COLUMN revision INTEGER NOT NULL DEFAULT 1`);
+  d.exec(`CREATE INDEX IF NOT EXISTS idx_backlog_features_deleted_at ON backlog_features(deleted_at)`);
+
+  ensureRunColumn('project_id', `ALTER TABLE runs ADD COLUMN project_id TEXT REFERENCES projects(project_id)`);
+  d.exec(`CREATE INDEX IF NOT EXISTS idx_runs_project ON runs(project_id)`);
+
+  ensurePipelineColumn('project_id', `ALTER TABLE pipelines ADD COLUMN project_id TEXT REFERENCES projects(project_id)`);
+  d.exec(`CREATE INDEX IF NOT EXISTS idx_pipelines_project ON pipelines(project_id)`);
 }
 
 function toDbAccessError(error: unknown, dbPath: string): Error {

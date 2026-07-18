@@ -217,17 +217,36 @@ const FeatureInputSchemaShape = z.object({
 
 export const FeatureInputSchema = FeatureInputSchemaShape.superRefine(validateDependencyTypes);
 
+export const EpicStatusSchema = z.enum(['todo', 'in_progress', 'done']);
+
 export const EpicSchema = z.object({
   id: z.string(),
   title: z.string(),
+  description: z.string().optional(),
+  status: EpicStatusSchema.default('todo'),
   features: z.array(FeatureSchema).default([]),
 });
 
 export const EpicInputSchema = z.object({
   id: z.string(),
   title: z.string(),
+  description: z.string().optional(),
+  status: EpicStatusSchema.optional(),
   features: z.array(FeatureInputSchema).default([]),
 });
+
+/**
+ * Work Item is the forward-looking name for a backlog Feature row. It
+ * currently wraps FeatureSchema unchanged and adds `description` as a
+ * functional summary kept separate from `spec` (the technical spec).
+ */
+export const WorkItemSchema = FeatureSchema.and(z.object({
+  description: z.string().optional(),
+}));
+
+export const WorkItemInputSchema = FeatureInputSchema.and(z.object({
+  description: z.string().optional(),
+}));
 
 export const BacklogV1Schema = z.object({
   version: z.literal(1).default(1 as const),
@@ -281,8 +300,11 @@ export type StepGuidance = z.infer<typeof StepGuidanceSchema>;
 export type Workflow = z.infer<typeof WorkflowSchema>;
 export type Feature = z.infer<typeof FeatureSchema>;
 export type FeatureInput = z.infer<typeof FeatureInputSchema>;
+export type EpicStatus = z.infer<typeof EpicStatusSchema>;
 export type Epic = z.infer<typeof EpicSchema>;
 export type EpicInput = z.infer<typeof EpicInputSchema>;
+export type WorkItem = z.infer<typeof WorkItemSchema>;
+export type WorkItemInput = z.infer<typeof WorkItemInputSchema>;
 export type BacklogV1 = z.infer<typeof BacklogV1Schema>;
 export type BacklogV1Input = z.infer<typeof BacklogV1InputSchema>;
 export type BacklogV2 = z.infer<typeof BacklogV2Schema>;
