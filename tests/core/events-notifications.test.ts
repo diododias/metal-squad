@@ -199,6 +199,80 @@ describe('attachEventNotifications', () => {
     detach();
   });
 
+  it('dispatches human run:blocked notifications with approval and intervention buttons', async () => {
+    const { attachEventNotifications } = await import('../../src/core/events/notifications.js');
+    const eventBus = createMsqEventBus();
+    const detach = attachEventNotifications(eventBus);
+
+    eventBus.emit('run:blocked', {
+      runId: 31,
+      featureId: 'feat-blocked',
+      tool: 'codex',
+      reason: 'gate',
+      code: 'dependency_unavailable',
+      summary: 'The dependency service is unavailable.',
+    });
+
+    expect(mockDispatch).toHaveBeenCalledWith(
+      'run:blocked',
+      expect.stringContaining('dependency_unavailable'),
+      expect.objectContaining({
+        runId: 31,
+        featureId: 'feat-blocked',
+        reason: 'gate',
+        code: 'dependency_unavailable',
+        reply_markup: {
+          inline_keyboard: [[
+            { text: '✅ Aprovar avanço', callback_data: 'blocked:approve:31' },
+            { text: '🛠 Intervir', callback_data: 'blocked:intervene:31' },
+          ]],
+        },
+      }),
+    );
+
+    detach();
+  });
+
+  it('does not dispatch protective run:blocked outcomes', async () => {
+    const { attachEventNotifications } = await import('../../src/core/events/notifications.js');
+    const eventBus = createMsqEventBus();
+    const detach = attachEventNotifications(eventBus);
+
+    eventBus.emit('run:blocked', {
+      runId: 32,
+      featureId: 'feat-budget',
+      tool: 'codex',
+      reason: 'budget',
+      summary: 'Budget limit reached.',
+    });
+
+    expect(mockDispatch).not.toHaveBeenCalled();
+
+    detach();
+  });
+
+  it('uses the blocked reason when run:blocked has no code', async () => {
+    const { attachEventNotifications } = await import('../../src/core/events/notifications.js');
+    const eventBus = createMsqEventBus();
+    const detach = attachEventNotifications(eventBus);
+
+    eventBus.emit('run:blocked', {
+      runId: 33,
+      featureId: 'feat-input',
+      tool: 'codex',
+      reason: 'needs_input',
+      summary: 'A response is needed.',
+    });
+
+    expect(mockDispatch).toHaveBeenCalledWith(
+      'run:blocked',
+      expect.stringContaining('Blocked: needs_input'),
+      expect.objectContaining({ runId: 33, reason: 'needs_input' }),
+    );
+
+    detach();
+  });
+
   it('adds a resume button to budget alerts when a paused pipeline exists', async () => {
     mockGetPausedPipelineIdForBudget.mockReturnValue(14);
     const { attachEventNotifications } = await import('../../src/core/events/notifications.js');
