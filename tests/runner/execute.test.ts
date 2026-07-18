@@ -37,6 +37,8 @@ const mockListCompletedFeatureIds = vi.fn();
 const mockListRunsForTui = vi.fn();
 const mockSpawn = vi.fn();
 const mockVerifyPublishContract = vi.fn();
+const mockFetchDependencyBranches = vi.fn();
+const mockResolveDependencyPublications = vi.fn();
 const mockResolveRuntimeConfig = vi.fn();
 const rawMockResolvedValue = mockRunFeature.mockResolvedValue.bind(mockRunFeature);
 const rawMockResolvedValueOnce = mockRunFeature.mockResolvedValueOnce.bind(mockRunFeature);
@@ -112,6 +114,11 @@ vi.mock('../../src/core/git/publish.js', () => ({
   verifyPublishContract: mockVerifyPublishContract,
 }));
 
+vi.mock('../../src/core/git/dependencies.js', () => ({
+  fetchDependencyBranches: mockFetchDependencyBranches,
+  resolveDependencyPublications: mockResolveDependencyPublications,
+}));
+
 vi.mock('../../src/core/notify/telegram.js', () => ({
   notify: mockNotify,
 }));
@@ -168,6 +175,10 @@ beforeEach(() => {
   mockRunFeature.mockResolvedValue = ((result: unknown) => rawMockResolvedValue(declareCompletion(result as { ok: boolean }))) as typeof mockRunFeature.mockResolvedValue;
   mockRunFeature.mockResolvedValueOnce = ((result: unknown) => rawMockResolvedValueOnce(declareCompletion(result as { ok: boolean }))) as typeof mockRunFeature.mockResolvedValueOnce;
   mockVerifyPublishContract.mockReset();
+  mockFetchDependencyBranches.mockReset();
+  mockFetchDependencyBranches.mockReturnValue(null);
+  mockResolveDependencyPublications.mockReset();
+  mockResolveDependencyPublications.mockReturnValue([]);
   mockResolveRuntimeConfig.mockReset();
   mockResolveRuntimeConfig.mockReturnValue({
     staleRunThresholdMinutes: 120,
@@ -357,6 +368,58 @@ function createPublishStageBacklog(stage = 'implement', publishes = true): Backl
 }
 
 describe('executeBacklog failure persistence', () => {
+  it('fetches published dependency refs in the agent cwd before spawning the adapter', async () => {
+    mockResolveDependencyPublications.mockReturnValue([{
+      featureId: 'feat-parent',
+      prNumber: 1,
+      prUrl: 'https://example.test/pr/1',
+      branchName: 'feat/parent',
+      remoteBranch: 'origin/feat/parent',
+    }]);
+    mockRunFeature.mockResolvedValue({ ok: true, summary: 'done' });
+
+    const { executeBacklog } = await import('../../src/core/runner/execute.js');
+    await executeBacklog(createPublishStageBacklog(), { cwd: '/repo', concurrency: 1 });
+
+    expect(mockFetchDependencyBranches).toHaveBeenCalledWith(expect.any(Array), '/repo');
+    expect(mockFetchDependencyBranches.mock.invocationCallOrder[0])
+      .toBeLessThan(mockRunFeature.mock.invocationCallOrder[0]!);
+  });
+
+  it('blocks a run and waits for the gate when a dependency fetch fails without spawning the adapter', async () => {
+    mockResolveDependencyPublications.mockReturnValue([{
+      featureId: 'feat-parent',
+      prNumber: 1,
+      prUrl: 'https://example.test/pr/1',
+      branchName: 'feat/parent',
+      remoteBranch: 'origin/feat/parent',
+    }]);
+    mockFetchDependencyBranches.mockReturnValueOnce({
+      featureId: 'feat-parent', remote: 'origin', ref: 'feat/parent',
+    });
+    mockRunFeature.mockResolvedValue({ ok: true, summary: 'done after dependency became available' });
+
+    const { executeBacklog } = await import('../../src/core/runner/execute.js');
+    const pipelinePromise = executeBacklog(createPublishStageBacklog(), { cwd: '/repo', concurrency: 1 });
+
+    await vi.waitFor(() => {
+      expect(mockEventEmit).toHaveBeenCalledWith('run:blocked', expect.objectContaining({
+        featureId: 'feat-implement',
+        reason: 'precondition_failed',
+        summary: expect.stringContaining('MSQ_BLOCKED: dependency_unavailable'),
+      }));
+    });
+    expect(mockCreateGate).toHaveBeenCalledWith(7, 'feat-implement', 'repo-1');
+    expect(mockRunFeature).not.toHaveBeenCalled();
+
+    // Simulate the operator resolving the gate after publishing the branch.
+    pipelineRow = { ...pipelineRow, status: 'running' };
+    await pipelinePromise;
+
+    expect(mockFetchDependencyBranches).toHaveBeenCalledTimes(2);
+    expect(mockRunFeature).toHaveBeenCalledTimes(1);
+  });
+
   it('verifies publish evidence after a successful publishing stage', async () => {
     mockRunFeature.mockImplementation(async () => ({
       ok: true,

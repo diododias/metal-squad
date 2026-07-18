@@ -160,6 +160,8 @@ export interface RunFeatureOptions {
 export interface RunResult {
   ok: boolean;
   summary: string;
+  /** A pre-run condition failed and needs an operator action before retrying. */
+  blocked?: boolean;
   usage?: TokenUsage;
   control?: RunControl;
   aborted?: boolean;
