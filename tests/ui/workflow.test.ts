@@ -15,7 +15,7 @@ function task(overrides: Partial<TaskRun> & Pick<TaskRun, 'id' | 'stage'>): Task
 }
 
 describe('summarizeTaskRuns', () => {
-  it('orders stages by the hardcoded default when no custom stages are passed', () => {
+  it('orders stages by the canonical default when no custom stages are passed', () => {
     const tasks = [
       task({ id: 1, stage: 'implement' }),
       task({ id: 2, stage: 'specify' }),
@@ -27,9 +27,9 @@ describe('summarizeTaskRuns', () => {
 
   // F31 item 4: a feature that customizes workflow.stages must have that
   // exact order reflected here — otherwise a stage outside the hardcoded
-  // STAGE_ORDER falls to `length` and desyncs from the stepper reading the
+  // default stage order falls to `length` and desyncs from the stepper reading the
   // same feature's declared stages.
-  it('orders stages by the custom order passed in, not the hardcoded default', () => {
+  it('orders stages by the custom order passed in, not the canonical default', () => {
     const tasks = [
       task({ id: 1, stage: 'review' }),
       task({ id: 2, stage: 'draft' }),
