@@ -285,6 +285,7 @@ beforeEach(() => {
   mockAttachEventNotifications.mockReturnValue(vi.fn());
   mockAttachRunPersistence.mockReturnValue(vi.fn());
   mockCreateSkillRegistry.mockReturnValue({
+    has: vi.fn(() => true),
     resolve: vi.fn((names: string[]) =>
       names.map((name) => ({
         name,
@@ -773,7 +774,7 @@ describe('executeBacklog failure persistence', () => {
           specify: ['speckit-specify'],
           plan: ['speckit-plan'],
           tasks: ['speckit-tasks'],
-          implement: ['speckit-implement', 'dev-flow'],
+          implement: ['implement'],
           validate: ['review'],
         },
       },
@@ -1230,7 +1231,7 @@ describe('executeBacklog failure persistence', () => {
           specify: ['speckit-specify'],
           plan: ['speckit-plan'],
           tasks: ['speckit-tasks'],
-          implement: ['speckit-implement', 'dev-flow'],
+          implement: ['implement'],
           validate: ['review'],
         },
       },
@@ -1547,7 +1548,7 @@ describe('executeBacklog failure persistence', () => {
         specify: ['speckit-specify'],
         plan: ['speckit-plan'],
         tasks: ['speckit-tasks'],
-        implement: ['speckit-implement', 'dev-flow'],
+        implement: ['implement'],
         validate: ['review'],
       },
     });
@@ -1692,7 +1693,7 @@ describe('executeBacklog failure persistence', () => {
         specify: ['speckit-specify'],
         plan: ['speckit-plan'],
         tasks: ['speckit-tasks'],
-        implement: ['speckit-implement', 'dev-flow'],
+        implement: ['implement'],
         validate: ['review'],
       },
     });
@@ -1759,7 +1760,7 @@ describe('executeBacklog failure persistence', () => {
         specify: ['speckit-specify'],
         plan: ['speckit-plan'],
         tasks: ['speckit-tasks'],
-        implement: ['speckit-implement', 'dev-flow'],
+        implement: ['implement'],
         validate: ['review'],
       },
     });
@@ -1802,7 +1803,7 @@ describe('executeBacklog failure persistence', () => {
         specify: ['speckit-specify'],
         plan: ['speckit-plan'],
         tasks: ['speckit-tasks'],
-        implement: ['speckit-implement', 'dev-flow'],
+        implement: ['implement'],
         validate: ['review'],
       },
     });
@@ -1849,7 +1850,7 @@ describe('executeBacklog failure persistence', () => {
         specify: ['speckit-specify'],
         plan: ['speckit-plan'],
         tasks: ['speckit-tasks'],
-        implement: ['speckit-implement', 'dev-flow'],
+        implement: ['implement'],
         validate: ['review'],
       },
     });
@@ -1896,7 +1897,7 @@ describe('executeBacklog failure persistence', () => {
         specify: ['speckit-specify'],
         plan: ['speckit-plan'],
         tasks: ['speckit-tasks'],
-        implement: ['speckit-implement', 'dev-flow'],
+        implement: ['implement'],
         validate: ['review'],
       },
     });
@@ -1944,7 +1945,7 @@ describe('executeBacklog failure persistence', () => {
         specify: ['speckit-specify'],
         plan: ['speckit-plan'],
         tasks: ['speckit-tasks'],
-        implement: ['speckit-implement', 'dev-flow'],
+        implement: ['implement'],
         validate: ['review'],
       },
     });
@@ -1992,7 +1993,7 @@ describe('executeBacklog failure persistence', () => {
         specify: ['speckit-specify'],
         plan: ['speckit-plan'],
         tasks: ['speckit-tasks'],
-        implement: ['speckit-implement', 'dev-flow'],
+        implement: ['implement'],
         validate: ['review'],
       },
     });

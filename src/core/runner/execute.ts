@@ -58,7 +58,7 @@ import { COMMUNICATION_PROTOCOL } from './communicationProtocol.js';
 import { createSkillRegistry } from '../skills/index.js';
 import { syncFeatureTasksToBacklog } from '../backlog/sync.js';
 import type { Skill } from '../skills/types.js';
-import { collectEffectiveStageSkills } from '../workflow/stageSkills.js';
+import { collectEffectiveStageSkills, resolveDefaultStageSkillNames } from '../workflow/stageSkills.js';
 import { decideStageTransition } from '../workflow/sessionPolicy.js';
 import {
   createBudgetTracker,
@@ -629,6 +629,7 @@ export async function executeBacklog(
           opts,
           executeStageRun,
           effectiveStageSkills,
+          repoStageSkills,
           controller.signal,
           dependencyPublications,
         );
@@ -991,6 +992,7 @@ async function executeStagedFeature(
   opts: ExecuteOptions,
   executeStageRun: StageExecutor,
   stageSkills: Record<string, string[]>,
+  repoStageSkills: Record<string, string[]>,
   abortSignal?: AbortSignal,
   dependencyPublications: DependencyPublication[] = [],
 ): Promise<RunResult> {
@@ -1034,7 +1036,7 @@ async function executeStagedFeature(
   for (let index = startIndex; index < stages.length; index += 1) {
     const stage = stages[index] ?? 'implement';
     updatePipelineStage(pipelineId, stage);
-    const stageSkillList = resolveStageSkill(feature, stage, registry, opts.cwd, stageSkills);
+    const stageSkillList = resolveStageSkill(feature, stage, registry, opts.cwd, stageSkills, repoStageSkills);
     const stepGuidanceSkills = resolveStepGuidanceSkills(feature, stage, registry, opts.cwd);
     const prompt = buildStagePrompt(
       feature,
@@ -1192,8 +1194,11 @@ function resolveStageSkill(
   registry: ReturnType<typeof createSkillRegistry>,
   cwd: string,
   stageSkills: Record<string, string[]>,
+  repoStageSkills: Record<string, string[]> = {},
 ): Skill[] {
-  const mappedNames = stageSkills[stage];
+  const mappedNames = Object.hasOwn(repoStageSkills, stage)
+    ? stageSkills[stage]
+    : resolveDefaultStageSkillNames(stage, registry, cwd);
   if (mappedNames && mappedNames.length > 0) {
     const resolved = registry.resolve(mappedNames, cwd);
     if (resolved.length > 0) return resolved;
