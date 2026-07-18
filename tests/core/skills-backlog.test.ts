@@ -118,8 +118,9 @@ describe('collectBacklogSkillNames', () => {
     });
     const names = collectBacklogSkillNames(backlog, DEFAULT_PROJECT_TEMPLATE.stageSkills);
     expect(names).toContain('speckit-specify');
-    expect(names).toContain('speckit-implement');
-    expect(names).toContain('dev-flow');
+    expect(names).toContain('implement');
+    expect(names).not.toContain('speckit-implement');
+    expect(names).not.toContain('dev-flow');
     expect(names).toContain('review');
     expect(names).not.toContain('validate');
   });
@@ -142,8 +143,9 @@ describe('collectBacklogSkillNames', () => {
     });
     const names = collectBacklogSkillNames(backlog, DEFAULT_PROJECT_TEMPLATE.stageSkills);
     expect(names).toContain('analyze');
-    expect(names).toContain('speckit-implement');
-    expect(names).toContain('dev-flow');
+    expect(names).toContain('implement');
+    expect(names).not.toContain('speckit-implement');
+    expect(names).not.toContain('dev-flow');
   });
 
   it('deduplicates skill names across all sources', () => {

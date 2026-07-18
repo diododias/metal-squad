@@ -1,4 +1,4 @@
-export const MIN_NODE_VERSION = '20.17.0';
+export const REQUIRED_NODE_VERSION = '24.16.0';
 
 const TEST_FILE_PATTERN = /^tests\/.+\.test\.tsx?$/;
 const RELEVANT_FILE_PATTERN = /^(src|tests)\/.+\.(ts|tsx|js|mjs)$/;
@@ -7,9 +7,10 @@ function parseVersion(version) {
   return version.replace(/^v/, '').split('.').map(Number);
 }
 
-export function isNodeVersionSupported(current, minimum = MIN_NODE_VERSION) {
+export function isNodeVersionSupported(current, minimum = REQUIRED_NODE_VERSION) {
   const currentParts = parseVersion(current);
   const minimumParts = parseVersion(minimum);
+  if (currentParts[0] !== minimumParts[0]) return false;
   for (let index = 0; index < 3; index += 1) {
     const currentPart = currentParts[index] ?? 0;
     const minimumPart = minimumParts[index] ?? 0;
@@ -22,7 +23,7 @@ export function isNodeVersionSupported(current, minimum = MIN_NODE_VERSION) {
 export function assertNodeVersion(current = process.versions.node) {
   if (!isNodeVersionSupported(current)) {
     throw new Error(
-      `Node ${current} is below the required minimum ${MIN_NODE_VERSION} (see package.json engines).`,
+      `Node ${current} is not supported; use Node ${REQUIRED_NODE_VERSION} (see package.json engines).`,
     );
   }
 }

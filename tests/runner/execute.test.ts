@@ -35,9 +35,33 @@ const mockCreateSkillRegistry = vi.fn();
 const mockGetCatalogFeature = vi.fn();
 const mockListCompletedFeatureIds = vi.fn();
 const mockListRunsForTui = vi.fn();
+const mockGetLatestPublishedRunForFeature = vi.fn();
 const mockSpawn = vi.fn();
 const mockVerifyPublishContract = vi.fn();
+const mockIsDescendantOfBase = vi.fn();
+const mockFetchDependencyBranches = vi.fn();
+const mockResolveDependencyPublications = vi.fn();
+const mockResolveRuntimeConfig = vi.fn();
+const rawMockResolvedValue = mockRunFeature.mockResolvedValue.bind(mockRunFeature);
+const rawMockResolvedValueOnce = mockRunFeature.mockResolvedValueOnce.bind(mockRunFeature);
 let pipelineRow: any;
+
+function declareCompletion<T extends { ok: boolean; control?: unknown }>(result: T): T {
+  if (!result.ok || result.control) return result;
+  return {
+    ...result,
+    control: {
+      type: 'done',
+      summary: 'completed',
+      publication: {
+        prUrl: 'https://example/pr/1',
+        prNumber: 1,
+        base: 'develop',
+        head: 'feat/test',
+      },
+    },
+  };
+}
 
 vi.mock('../../src/core/repo.js', () => ({
   resolveRepo: mockResolveRepo,
@@ -76,7 +100,7 @@ vi.mock('../../src/db/repo.js', () => ({
   saveBudgetState: vi.fn(),
   listCompletedFeatureIds: mockListCompletedFeatureIds,
   listRunsForTui: mockListRunsForTui,
-  getLatestPublishedRunForFeature: vi.fn(() => null),
+  getLatestPublishedRunForFeature: mockGetLatestPublishedRunForFeature,
 }));
 
 vi.mock('node:child_process', async (importOriginal) => {
@@ -90,6 +114,12 @@ vi.mock('../../src/core/adapters/index.js', () => ({
 
 vi.mock('../../src/core/git/publish.js', () => ({
   verifyPublishContract: mockVerifyPublishContract,
+  isDescendantOfBase: mockIsDescendantOfBase,
+}));
+
+vi.mock('../../src/core/git/dependencies.js', () => ({
+  fetchDependencyBranches: mockFetchDependencyBranches,
+  resolveDependencyPublications: mockResolveDependencyPublications,
 }));
 
 vi.mock('../../src/core/notify/telegram.js', () => ({
@@ -111,12 +141,7 @@ vi.mock('../../src/core/skills/index.js', () => ({
 }));
 
 vi.mock('../../src/config/index.js', () => ({
-  resolveRuntimeConfig: () => ({
-    staleRunThresholdMinutes: 120,
-    promptContextCharLimit: 20_000,
-    workflow: { autoAdvanceStages: false, pollIntervalMs: 1 },
-    budget: {},
-  }),
+  resolveRuntimeConfig: mockResolveRuntimeConfig,
   saveConfig: vi.fn(),
 }));
 
@@ -147,7 +172,26 @@ beforeEach(() => {
   mockUpdatePipelineSnapshot.mockReset();
   mockNotify.mockReset();
   mockRunFeature.mockReset();
+  // Existing successful-run fixtures predate the explicit completion
+  // protocol. Keep their test intent focused while making a real completion
+  // declaration; protocol-negative cases use mockImplementation directly.
+  mockRunFeature.mockResolvedValue = ((result: unknown) => rawMockResolvedValue(declareCompletion(result as { ok: boolean }))) as typeof mockRunFeature.mockResolvedValue;
+  mockRunFeature.mockResolvedValueOnce = ((result: unknown) => rawMockResolvedValueOnce(declareCompletion(result as { ok: boolean }))) as typeof mockRunFeature.mockResolvedValueOnce;
   mockVerifyPublishContract.mockReset();
+  mockIsDescendantOfBase.mockReset();
+  mockIsDescendantOfBase.mockReturnValue(true);
+  mockFetchDependencyBranches.mockReset();
+  mockFetchDependencyBranches.mockReturnValue(null);
+  mockResolveDependencyPublications.mockReset();
+  mockResolveDependencyPublications.mockReturnValue([]);
+  mockResolveRuntimeConfig.mockReset();
+  mockResolveRuntimeConfig.mockReturnValue({
+    staleRunThresholdMinutes: 120,
+    promptContextCharLimit: 20_000,
+    workflow: { autoAdvanceStages: false, pollIntervalMs: 1 },
+    budget: {},
+    integration: { baseBranch: 'develop' },
+  });
   mockEventEmit.mockReset();
   mockAttachDefaultEventLogger.mockReset();
   mockAttachEventNotifications.mockReset();
@@ -162,6 +206,8 @@ beforeEach(() => {
   mockListCompletedFeatureIds.mockImplementation(() => new Set(JSON.parse(pipelineRow.doneJson)));
   mockListRunsForTui.mockReset();
   mockListRunsForTui.mockReturnValue([]);
+  mockGetLatestPublishedRunForFeature.mockReset();
+  mockGetLatestPublishedRunForFeature.mockReturnValue(null);
   mockSpawn.mockReset();
   mockSpawn.mockReturnValue({ once: vi.fn(), unref: vi.fn() });
   mockResolveRepo.mockReturnValue({ repoId: 'repo-1', path: '/repo' });
@@ -239,6 +285,7 @@ beforeEach(() => {
   mockAttachEventNotifications.mockReturnValue(vi.fn());
   mockAttachRunPersistence.mockReturnValue(vi.fn());
   mockCreateSkillRegistry.mockReturnValue({
+    has: vi.fn(() => true),
     resolve: vi.fn((names: string[]) =>
       names.map((name) => ({
         name,
@@ -251,7 +298,7 @@ beforeEach(() => {
   mockVerifyPublishContract.mockReturnValue({
     ok: true,
     status: 'done',
-    summary: 'implement publish verified on feat/test (https://example/pr/1).',
+    summary: 'publish verified on feat/test (https://example/pr/1).',
     evidence: {
       branch: 'feat/test',
       baseBranch: 'develop',
@@ -295,7 +342,7 @@ function createAdaptiveBacklog(alwaysIsolatedStages: string[] = []): Backlog {
   };
 }
 
-function createImplementStageBacklog(): Backlog {
+function createPublishStageBacklog(stage = 'implement', publishes = true): Backlog {
   return {
     version: 2,
     repo: 'repo',
@@ -306,8 +353,8 @@ function createImplementStageBacklog(): Backlog {
         title: 'Epic',
         features: [
           {
-            id: 'feat-implement',
-            title: 'Implement Feature',
+            id: `feat-${stage}`,
+            title: `${stage} Feature`,
             spec: 'spec',
             tasks: [],
             tool: 'codex',
@@ -315,7 +362,8 @@ function createImplementStageBacklog(): Backlog {
             dependsOn: [],
             workflow: {
               mode: 'staged',
-              stages: ['implement'],
+              stages: [stage],
+              stagePublishes: { [stage]: publishes },
               approvals: { channel: 'telegram', autoAdvance: false },
               syncTasksToBacklog: false,
               sessionPolicy: { mode: 'isolated', alwaysIsolatedStages: [] },
@@ -328,20 +376,94 @@ function createImplementStageBacklog(): Backlog {
 }
 
 describe('executeBacklog failure persistence', () => {
-  it('verifies publish evidence after a successful implement stage', async () => {
-    mockRunFeature.mockResolvedValue({
+  it('fetches published dependency refs in the agent cwd before spawning the adapter', async () => {
+    mockResolveDependencyPublications.mockReturnValue([{
+      featureId: 'feat-parent',
+      prNumber: 1,
+      prUrl: 'https://example.test/pr/1',
+      branchName: 'feat/parent',
+      remoteBranch: 'origin/feat/parent',
+    }]);
+    mockRunFeature.mockResolvedValue({ ok: true, summary: 'done' });
+
+    const { executeBacklog } = await import('../../src/core/runner/execute.js');
+    await executeBacklog(createPublishStageBacklog(), { cwd: '/repo', concurrency: 1 });
+
+    expect(mockFetchDependencyBranches).toHaveBeenCalledWith(expect.any(Array), '/repo');
+    expect(mockFetchDependencyBranches.mock.invocationCallOrder[0])
+      .toBeLessThan(mockRunFeature.mock.invocationCallOrder[0]!);
+  });
+
+  it('blocks a run and waits for the gate when a dependency fetch fails without spawning the adapter', async () => {
+    mockResolveDependencyPublications.mockReturnValue([{
+      featureId: 'feat-parent',
+      prNumber: 1,
+      prUrl: 'https://example.test/pr/1',
+      branchName: 'feat/parent',
+      remoteBranch: 'origin/feat/parent',
+    }]);
+    mockFetchDependencyBranches.mockReturnValueOnce({
+      featureId: 'feat-parent', remote: 'origin', ref: 'feat/parent',
+    });
+    mockRunFeature.mockResolvedValue({ ok: true, summary: 'done after dependency became available' });
+
+    const { executeBacklog } = await import('../../src/core/runner/execute.js');
+    const pipelinePromise = executeBacklog(createPublishStageBacklog(), { cwd: '/repo', concurrency: 1 });
+
+    await vi.waitFor(() => {
+      expect(mockEventEmit).toHaveBeenCalledWith('run:blocked', expect.objectContaining({
+        featureId: 'feat-implement',
+        reason: 'precondition_failed',
+        summary: expect.stringContaining('MSQ_BLOCKED: dependency_unavailable'),
+      }));
+    });
+    expect(mockCreateGate).toHaveBeenCalledWith(7, 'feat-implement', 'repo-1');
+    expect(mockRunFeature).not.toHaveBeenCalled();
+
+    // Simulate the operator resolving the gate after publishing the branch.
+    pipelineRow = { ...pipelineRow, status: 'running' };
+    await pipelinePromise;
+
+    expect(mockFetchDependencyBranches).toHaveBeenCalledTimes(2);
+    expect(mockRunFeature).toHaveBeenCalledTimes(1);
+  });
+
+  it('verifies publish evidence after a successful publishing stage', async () => {
+    mockRunFeature.mockImplementation(async () => ({
       ok: true,
       summary: 'implemented and published',
-    });
+      control: {
+        type: 'done',
+        summary: 'implemented and published',
+        publication: {
+          prUrl: 'https://example/pr/1',
+          prNumber: 1,
+          base: 'develop',
+          head: 'feat/test',
+        },
+      },
+    }));
 
     const { executeBacklog } = await import('../../src/core/runner/execute.js');
 
     await expect(
-      executeBacklog(createImplementStageBacklog(), { cwd: '/repo', concurrency: 1 }),
+      executeBacklog(createPublishStageBacklog(), { cwd: '/repo', concurrency: 1 }),
     ).resolves.toBeUndefined();
 
     expect(mockVerifyPublishContract).toHaveBeenCalledWith('/repo', ['develop']);
-    expect(mockUpdateRunPublishState).toHaveBeenCalledWith(7, {
+    expect(mockUpdateRunPublishState).toHaveBeenNthCalledWith(1, 7, {
+      verified: false,
+      error: null,
+      evidence: {
+        branch: 'feat/test',
+        baseBranch: 'develop',
+        commitSha: null,
+        remoteBranch: null,
+        prNumber: 1,
+        prUrl: 'https://example/pr/1',
+      },
+    });
+    expect(mockUpdateRunPublishState).toHaveBeenNthCalledWith(2, 7, {
       verified: true,
       error: null,
       evidence: {
@@ -356,11 +478,231 @@ describe('executeBacklog failure persistence', () => {
     expect(mockFinishRun).toHaveBeenCalledWith(
       7,
       'done',
-      'implement publish verified on feat/test (https://example/pr/1).',
+      'publish verified on feat/test (https://example/pr/1).',
+    );
+    expect(mockIsDescendantOfBase).toHaveBeenCalledWith('/repo', 'develop');
+  });
+
+  it('blocks a successful run when HEAD does not descend from the configured base', async () => {
+    mockRunFeature.mockResolvedValue({ ok: true, summary: 'completed on the wrong branch' });
+    mockIsDescendantOfBase.mockReturnValue(false);
+
+    const { executeBacklog } = await import('../../src/core/runner/execute.js');
+
+    await expect(
+      executeBacklog(createPublishStageBacklog(), { cwd: '/repo', concurrency: 1 }),
+    ).rejects.toThrow('MSQ_BLOCKED: validation_failed');
+
+    expect(mockFinishRun).toHaveBeenCalledWith(7, 'blocked', expect.stringContaining('HEAD does not descend from the declared base develop.'));
+    expect(mockEventEmit).toHaveBeenCalledWith('run:blocked', expect.objectContaining({
+      runId: 7,
+      featureId: 'feat-implement',
+      reason: 'gate',
+    }));
+  });
+
+  it('blocks a successful run when Git cannot verify the configured base', async () => {
+    mockRunFeature.mockResolvedValue({ ok: true, summary: 'completed' });
+    mockIsDescendantOfBase.mockReturnValue(null);
+
+    const { executeBacklog } = await import('../../src/core/runner/execute.js');
+
+    await expect(
+      executeBacklog(createPublishStageBacklog(), { cwd: '/repo', concurrency: 1 }),
+    ).rejects.toThrow('MSQ_BLOCKED: validation_failed');
+
+    expect(mockFinishRun).toHaveBeenCalledWith(7, 'blocked', expect.stringContaining('could not verify whether HEAD descends from the declared base develop.'));
+  });
+
+  it('reconciles against the recommended published dependency branch before the configured base', async () => {
+    const backlog = createPublishStageBacklog();
+    const feature = backlog.epics[0]?.features[0];
+    if (!feature) throw new Error('expected implement feature');
+    backlog.epics[0]?.features.push({
+      ...feature,
+      id: 'feat-dependency',
+      title: 'Dependency Feature',
+      dependsOn: [],
+    });
+    feature.dependsOn = ['feat-dependency'];
+    mockGetLatestPublishedRunForFeature.mockReturnValue({
+      featureId: 'feat-dependency',
+      prNumber: 169,
+      prUrl: 'https://example.test/pr/169',
+      branchName: 'feat/dependency-base',
+      remoteBranch: 'origin/feat/dependency-base',
+      baseBranch: 'develop',
+      startedAt: '2026-07-17T12:00:00.000Z',
+    });
+    mockResolveDependencyPublications.mockReturnValue([{
+      featureId: 'feat-dependency',
+      prNumber: 169,
+      prUrl: 'https://example.test/pr/169',
+      branchName: 'feat/dependency-base',
+      remoteBranch: 'origin/feat/dependency-base',
+    }]);
+    mockListCompletedFeatureIds.mockReturnValue(new Set(['feat-dependency']));
+    mockRunFeature.mockResolvedValue({ ok: true, summary: 'completed on dependency base' });
+
+    const { executeBacklog } = await import('../../src/core/runner/execute.js');
+
+    await expect(executeBacklog(backlog, {
+      cwd: '/repo', concurrency: 1, featureId: 'feat-implement',
+    })).resolves.toBeUndefined();
+
+    expect(mockIsDescendantOfBase).toHaveBeenCalledWith('/repo', 'feat/dependency-base');
+  });
+
+  it('blocks a clean adapter exit that does not declare MSQ_DONE', async () => {
+    mockRunFeature.mockImplementation(async () => ({ ok: true, summary: 'finished quietly' }));
+
+    const { executeBacklog } = await import('../../src/core/runner/execute.js');
+
+    await expect(executeBacklog(createPublishStageBacklog(), { cwd: '/repo', concurrency: 1 }))
+      .rejects.toThrow('Feature feat-implement falhou: implement: agent finished without declaring MSQ_DONE');
+
+    expect(mockFinishRun).toHaveBeenCalledWith(7, 'blocked', 'agent finished without declaring MSQ_DONE');
+    expect(mockEventEmit).toHaveBeenCalledWith('run:blocked', expect.objectContaining({
+      runId: 7,
+      reason: 'gate',
+      summary: 'agent finished without declaring MSQ_DONE',
+    }));
+  });
+
+  it('recovers via one protocol-reinforcement turn when the agent has a resumable session and declares MSQ_DONE on retry', async () => {
+    let callCount = 0;
+    mockRunFeature.mockImplementation(async () => {
+      callCount += 1;
+      if (callCount === 1) {
+        return {
+          ok: true,
+          summary: 'finished quietly',
+          session: { tool: 'codex', sessionId: 'sess-1', capturedFromRunId: 7, capturedAt: '2026-07-18T00:00:00.000Z' },
+        };
+      }
+      return {
+        ok: true,
+        summary: 'completed after reinforcement',
+        control: {
+          type: 'done',
+          summary: 'completed after reinforcement',
+          publication: { prUrl: 'https://example/pr/1', prNumber: 1, base: 'develop', head: 'feat/test' },
+        },
+      };
+    });
+
+    const { executeBacklog } = await import('../../src/core/runner/execute.js');
+
+    await expect(
+      executeBacklog(createPublishStageBacklog(), { cwd: '/repo', concurrency: 1 }),
+    ).resolves.toBeUndefined();
+
+    expect(mockRunFeature).toHaveBeenCalledTimes(2);
+    const reinforcementCall = mockRunFeature.mock.calls[1];
+    expect(reinforcementCall?.[2]).toEqual(expect.objectContaining({
+      session: { mode: 'resume', handle: expect.objectContaining({ sessionId: 'sess-1' }) },
+    }));
+    expect(mockFinishRun).toHaveBeenCalledWith(
+      7,
+      'done',
+      'publish verified on feat/test (https://example/pr/1).',
     );
   });
 
-  it('blocks implement completion when publish verification is inconclusive', async () => {
+  it('gives up after one protocol-reinforcement attempt and marks the run blocked', async () => {
+    mockRunFeature.mockImplementation(async () => ({
+      ok: true,
+      summary: 'finished quietly',
+      session: { tool: 'codex', sessionId: 'sess-2', capturedFromRunId: 7, capturedAt: '2026-07-18T00:00:00.000Z' },
+    }));
+
+    const { executeBacklog } = await import('../../src/core/runner/execute.js');
+
+    await expect(executeBacklog(createPublishStageBacklog(), { cwd: '/repo', concurrency: 1 }))
+      .rejects.toThrow('agent finished without declaring MSQ_DONE (protocol reinforcement attempted)');
+
+    expect(mockRunFeature).toHaveBeenCalledTimes(2);
+    expect(mockFinishRun).toHaveBeenCalledWith(
+      7,
+      'blocked',
+      'agent finished without declaring MSQ_DONE (protocol reinforcement attempted)',
+    );
+  });
+
+  it('blocks MSQ_DONE without required publication fields as validation_failed', async () => {
+    mockRunFeature.mockImplementation(async () => ({
+      ok: true,
+      summary: 'declared done without publication',
+      control: { type: 'done', summary: 'declared done without publication' },
+    }));
+
+    const { executeBacklog } = await import('../../src/core/runner/execute.js');
+
+    await expect(executeBacklog(createPublishStageBacklog(), { cwd: '/repo', concurrency: 1 }))
+      .rejects.toThrow('MSQ_DONE is missing required pr_url, pr_number, base, and head publication fields.');
+
+    expect(mockEventEmit).toHaveBeenCalledWith('run:blocked', expect.objectContaining({
+      code: 'validation_failed',
+      reason: 'gate',
+    }));
+  });
+
+  it('keeps declared PR fields and blocks a divergent verification as validation_failed', async () => {
+    mockRunFeature.mockImplementation(async () => ({
+      ok: true,
+      summary: 'declared publication',
+      control: {
+        type: 'done',
+        summary: 'declared publication',
+        publication: {
+          prUrl: 'https://example/pr/77', prNumber: 77, base: 'develop', head: 'feat/declared',
+        },
+      },
+    }));
+    mockVerifyPublishContract.mockReturnValue({
+      ok: true,
+      status: 'done',
+      summary: 'verified a different pull request',
+      evidence: {
+        branch: 'feat/observed', baseBranch: 'develop', commitSha: 'abc1234',
+        remoteBranch: 'origin/feat/observed', prNumber: 78, prUrl: 'https://example/pr/78',
+      },
+    });
+
+    const { executeBacklog } = await import('../../src/core/runner/execute.js');
+
+    await expect(executeBacklog(createPublishStageBacklog(), { cwd: '/repo', concurrency: 1 }))
+      .rejects.toThrow('declared publication does not match verified publication');
+
+    expect(mockUpdateRunPublishState).toHaveBeenLastCalledWith(7, expect.objectContaining({
+      verified: false,
+      error: 'declared publication\nimplement: declared publication does not match verified publication.',
+      evidence: expect.objectContaining({
+        branch: 'feat/declared', prNumber: 77, prUrl: 'https://example/pr/77', baseBranch: 'develop',
+      }),
+    }));
+    expect(mockEventEmit).toHaveBeenCalledWith('run:blocked', expect.objectContaining({ code: 'validation_failed' }));
+  });
+
+  it('persists an explicit MSQ_BLOCKED control with its reason code', async () => {
+    mockRunFeature.mockImplementation(async () => ({
+      ok: true,
+      summary: 'dependency is unavailable',
+      control: { type: 'blocked', code: 'dependency_unavailable', reason: 'T06 is unavailable' },
+    }));
+
+    const { executeBacklog } = await import('../../src/core/runner/execute.js');
+
+    await expect(executeBacklog(createPublishStageBacklog(), { cwd: '/repo', concurrency: 1 }))
+      .rejects.toThrow('Feature feat-implement falhou: implement: dependency is unavailable');
+
+    expect(mockFinishRun).toHaveBeenCalledWith(7, 'blocked', 'dependency is unavailable');
+    expect(mockEventEmit).toHaveBeenCalledWith('run:blocked', expect.objectContaining({
+      reason: 'gate', code: 'dependency_unavailable', summary: 'dependency is unavailable',
+    }));
+  });
+
+  it('blocks publishing-stage completion when publish verification is inconclusive', async () => {
     mockRunFeature.mockResolvedValue({
       ok: true,
       summary: 'implemented but publish verification pending',
@@ -368,7 +710,7 @@ describe('executeBacklog failure persistence', () => {
     mockVerifyPublishContract.mockReturnValue({
       ok: false,
       status: 'blocked',
-      summary: 'implement: GitHub CLI is unavailable, so PR verification could not be completed.',
+      summary: 'publish: GitHub CLI is unavailable, so PR verification could not be completed.',
       evidence: {
         branch: 'feat/test',
         baseBranch: 'develop',
@@ -382,28 +724,57 @@ describe('executeBacklog failure persistence', () => {
     const { executeBacklog } = await import('../../src/core/runner/execute.js');
 
     await expect(
-      executeBacklog(createImplementStageBacklog(), { cwd: '/repo', concurrency: 1 }),
+      executeBacklog(createPublishStageBacklog(), { cwd: '/repo', concurrency: 1 }),
     ).rejects.toThrow(
-      'Feature feat-implement falhou: implement: implemented but publish verification pending\nimplement: GitHub CLI is unavailable, so PR verification could not be completed.',
+      'Feature feat-implement falhou: implement: implemented but publish verification pending\npublish: GitHub CLI is unavailable, so PR verification could not be completed.',
     );
 
     expect(mockFinishRun).toHaveBeenCalledWith(
       7,
       'blocked',
-      'implemented but publish verification pending\nimplement: GitHub CLI is unavailable, so PR verification could not be completed.',
+      'implemented but publish verification pending\npublish: GitHub CLI is unavailable, so PR verification could not be completed.',
     );
-    expect(mockUpdateRunPublishState).toHaveBeenCalledWith(7, {
+    expect(mockUpdateRunPublishState).toHaveBeenLastCalledWith(7, {
       verified: false,
-      error: 'implemented but publish verification pending\nimplement: GitHub CLI is unavailable, so PR verification could not be completed.',
+      error: 'implemented but publish verification pending\npublish: GitHub CLI is unavailable, so PR verification could not be completed.',
       evidence: {
         branch: 'feat/test',
         baseBranch: 'develop',
         commitSha: 'abc1234',
         remoteBranch: 'origin/feat/test',
-        prNumber: null,
-        prUrl: null,
+        prNumber: 1,
+        prUrl: 'https://example/pr/1',
       },
     });
+  });
+
+  it('runs the gate for a custom dev-flow stage and uses the configured base branch', async () => {
+    mockResolveRuntimeConfig.mockReturnValue({
+      staleRunThresholdMinutes: 120,
+      promptContextCharLimit: 20_000,
+      workflow: { autoAdvanceStages: false, pollIntervalMs: 1 },
+      budget: {},
+      integration: { baseBranch: 'main' },
+    });
+    mockRunFeature.mockResolvedValue({ ok: true, summary: 'published through dev-flow' });
+
+    const { executeBacklog } = await import('../../src/core/runner/execute.js');
+
+    await expect(executeBacklog(createPublishStageBacklog('dev-flow'), { cwd: '/repo', concurrency: 1 }))
+      .resolves.toBeUndefined();
+
+    expect(mockVerifyPublishContract).toHaveBeenCalledWith('/repo', ['main']);
+  });
+
+  it('does not run the gate for a stage with publishes disabled', async () => {
+    mockRunFeature.mockResolvedValue({ ok: true, summary: 'build complete' });
+
+    const { executeBacklog } = await import('../../src/core/runner/execute.js');
+
+    await expect(executeBacklog(createPublishStageBacklog('build', false), { cwd: '/repo', concurrency: 1 }))
+      .resolves.toBeUndefined();
+
+    expect(mockVerifyPublishContract).not.toHaveBeenCalled();
   });
 
   it('stores failed status with partial summary from adapter timeout', async () => {
@@ -463,7 +834,7 @@ describe('executeBacklog failure persistence', () => {
           specify: ['speckit-specify'],
           plan: ['speckit-plan'],
           tasks: ['speckit-tasks'],
-          implement: ['speckit-implement', 'dev-flow'],
+          implement: ['implement'],
           validate: ['review'],
         },
       },
@@ -721,6 +1092,26 @@ describe('executeBacklog failure persistence', () => {
     };
 
     mockCreateRun.mockReturnValueOnce(7).mockReturnValueOnce(8);
+    mockGetLatestPublishedRunForFeature.mockImplementation((_repoId, featureId) => (
+      featureId === 'feat-11'
+        ? {
+            featureId,
+            prNumber: 11,
+            prUrl: 'https://example.test/pr/11',
+            branchName: 'feat/11',
+            remoteBranch: 'origin/feat/11',
+            baseBranch: 'develop',
+            startedAt: '2026-07-18T10:00:00Z',
+          }
+        : null
+    ));
+    mockResolveDependencyPublications.mockReturnValue([{
+      featureId: 'feat-11',
+      prNumber: 11,
+      prUrl: 'https://example.test/pr/11',
+      branchName: 'feat/11',
+      remoteBranch: 'origin/feat/11',
+    }]);
     mockRunFeature
       .mockResolvedValueOnce({ ok: false, summary: 'falha tolerada' })
       .mockResolvedValueOnce({ ok: true, summary: 'ok' });
@@ -824,7 +1215,7 @@ describe('executeBacklog failure persistence', () => {
               dependsOn: [],
               workflow: {
                 mode: 'staged',
-                stages: ['specify', 'plan'],
+                stages: ['specify', 'plan', 'dev-flow'],
                 approvals: { channel: 'telegram', autoAdvance: false },
                 syncTasksToBacklog: false,
                 sessionPolicy: { mode: 'isolated', alwaysIsolatedStages: [] },
@@ -842,7 +1233,8 @@ describe('executeBacklog failure persistence', () => {
 
     mockRunFeature
       .mockResolvedValueOnce({ ok: true, summary: 'spec ok' })
-      .mockResolvedValueOnce({ ok: true, summary: 'plan ok' });
+      .mockResolvedValueOnce({ ok: true, summary: 'plan ok' })
+      .mockResolvedValueOnce({ ok: true, summary: 'dev-flow ok' });
     mockGetStageRequest.mockReturnValue({ status: 'resolved', response: 'advance' });
 
     const { executeBacklog } = await import('../../src/core/runner/execute.js');
@@ -860,7 +1252,7 @@ describe('executeBacklog failure persistence', () => {
         snapshot: expect.objectContaining({
           workflowRevisions: {
             'feat-27': expect.objectContaining({
-              stages: ['specify', 'plan'],
+              stages: ['specify', 'plan', 'dev-flow'],
               stepGuidance: { plan: { prompt: 'Focus only on planning output.' } },
             }),
           },
@@ -874,6 +1266,10 @@ describe('executeBacklog failure persistence', () => {
     expect(mockCreateRun).toHaveBeenNthCalledWith(2, 'repo-1', 'feat-27', 'codex', {
       pipelineId: 9,
       stage: 'plan',
+    });
+    expect(mockCreateRun).toHaveBeenNthCalledWith(3, 'repo-1', 'feat-27', 'codex', {
+      pipelineId: 9,
+      stage: 'dev-flow',
     });
     expect(mockCreateStageRequest).toHaveBeenCalledWith(
       9,
@@ -895,7 +1291,7 @@ describe('executeBacklog failure persistence', () => {
           specify: ['speckit-specify'],
           plan: ['speckit-plan'],
           tasks: ['speckit-tasks'],
-          implement: ['speckit-implement', 'dev-flow'],
+          implement: ['implement'],
           validate: ['review'],
         },
       },
@@ -903,6 +1299,10 @@ describe('executeBacklog failure persistence', () => {
     expect(mockRunFeature.mock.calls[0]?.[1]).toContain('Feature: Feature');
     expect(mockRunFeature.mock.calls[0]?.[1]).toContain('Summary:\nspec');
     expect(mockRunFeature.mock.calls[1]?.[1]).toContain('Focus only on planning output.');
+    const { COMMUNICATION_PROTOCOL } = await import('../../src/core/runner/communicationProtocol.js');
+    for (const [, prompt] of mockRunFeature.mock.calls) {
+      expect(prompt).toContain(COMMUNICATION_PROTOCOL);
+    }
     expect(mockFinishPipeline).toHaveBeenCalledWith(9, 'done');
   });
 
@@ -1208,7 +1608,7 @@ describe('executeBacklog failure persistence', () => {
         specify: ['speckit-specify'],
         plan: ['speckit-plan'],
         tasks: ['speckit-tasks'],
-        implement: ['speckit-implement', 'dev-flow'],
+        implement: ['implement'],
         validate: ['review'],
       },
     });
@@ -1353,7 +1753,7 @@ describe('executeBacklog failure persistence', () => {
         specify: ['speckit-specify'],
         plan: ['speckit-plan'],
         tasks: ['speckit-tasks'],
-        implement: ['speckit-implement', 'dev-flow'],
+        implement: ['implement'],
         validate: ['review'],
       },
     });
@@ -1420,7 +1820,7 @@ describe('executeBacklog failure persistence', () => {
         specify: ['speckit-specify'],
         plan: ['speckit-plan'],
         tasks: ['speckit-tasks'],
-        implement: ['speckit-implement', 'dev-flow'],
+        implement: ['implement'],
         validate: ['review'],
       },
     });
@@ -1463,7 +1863,7 @@ describe('executeBacklog failure persistence', () => {
         specify: ['speckit-specify'],
         plan: ['speckit-plan'],
         tasks: ['speckit-tasks'],
-        implement: ['speckit-implement', 'dev-flow'],
+        implement: ['implement'],
         validate: ['review'],
       },
     });
@@ -1510,7 +1910,7 @@ describe('executeBacklog failure persistence', () => {
         specify: ['speckit-specify'],
         plan: ['speckit-plan'],
         tasks: ['speckit-tasks'],
-        implement: ['speckit-implement', 'dev-flow'],
+        implement: ['implement'],
         validate: ['review'],
       },
     });
@@ -1557,7 +1957,7 @@ describe('executeBacklog failure persistence', () => {
         specify: ['speckit-specify'],
         plan: ['speckit-plan'],
         tasks: ['speckit-tasks'],
-        implement: ['speckit-implement', 'dev-flow'],
+        implement: ['implement'],
         validate: ['review'],
       },
     });
@@ -1605,7 +2005,7 @@ describe('executeBacklog failure persistence', () => {
         specify: ['speckit-specify'],
         plan: ['speckit-plan'],
         tasks: ['speckit-tasks'],
-        implement: ['speckit-implement', 'dev-flow'],
+        implement: ['implement'],
         validate: ['review'],
       },
     });
@@ -1653,7 +2053,7 @@ describe('executeBacklog failure persistence', () => {
         specify: ['speckit-specify'],
         plan: ['speckit-plan'],
         tasks: ['speckit-tasks'],
-        implement: ['speckit-implement', 'dev-flow'],
+        implement: ['implement'],
         validate: ['review'],
       },
     });
@@ -2033,6 +2433,100 @@ describe('executeBacklog auto-pilot', () => {
 });
 
 describe('executeBacklog dependency-aware manual start', () => {
+  it('blocks before spawning when a stack dependency has no published PR', async () => {
+    const backlog: Backlog = {
+      version: 2,
+      repo: 'repo',
+      defaults: { tool: 'codex', effort: 'medium', skills: [], stageSkills: {} },
+      epics: [{
+        id: 'epic-1',
+        title: 'Epic',
+        features: [{
+          id: 'feat-parent',
+          title: 'Parent',
+          spec: 'spec',
+          tasks: [],
+          tool: 'codex',
+          effort: 'medium',
+          dependsOn: [],
+          workflow: { mode: 'single', stages: [], approvals: { channel: 'telegram', autoAdvance: false }, syncTasksToBacklog: true, sessionPolicy: { mode: 'isolated', alwaysIsolatedStages: [] } },
+        }, {
+          id: 'feat-child',
+          title: 'Child',
+          spec: 'spec',
+          tasks: [],
+          tool: 'codex',
+          effort: 'medium',
+          dependsOn: ['feat-parent'],
+          dependencyTypes: { 'feat-parent': 'stack' },
+          autoStart: true,
+          workflow: { mode: 'single', stages: [], approvals: { channel: 'telegram', autoAdvance: false }, syncTasksToBacklog: true, sessionPolicy: { mode: 'isolated', alwaysIsolatedStages: [] } },
+        }],
+      }],
+    };
+    mockListCompletedFeatureIds.mockReturnValue(new Set(['feat-parent']));
+
+    const { executeBacklog } = await import('../../src/core/runner/execute.js');
+    await expect(executeBacklog(backlog, { cwd: '/repo', concurrency: 1, featureId: 'feat-child' })).rejects.toThrow(
+      'Feature feat-child falhou: dependency_unavailable: feat-parent',
+    );
+
+    expect(mockRunFeature).not.toHaveBeenCalled();
+    expect(mockFinishRun).toHaveBeenCalledWith(7, 'blocked', 'dependency_unavailable: feat-parent');
+    expect(mockEventEmit).toHaveBeenCalledWith('run:blocked', {
+      runId: 7,
+      featureId: 'feat-child',
+      tool: 'codex',
+      reason: 'gate',
+      code: 'dependency_unavailable',
+      summary: 'dependency_unavailable: feat-parent',
+    });
+    expect(mockSpawn).not.toHaveBeenCalled();
+    expect(mockEventEmit).toHaveBeenCalledWith('autopilot:decision', expect.objectContaining({
+      triggerFeatureId: 'feat-child',
+      action: 'stop',
+    }));
+  });
+
+  it('uses only stack dependencies when resolving a PR base', async () => {
+    const backlog: Backlog = {
+      version: 2,
+      repo: 'repo',
+      defaults: { tool: 'codex', effort: 'medium', skills: [], stageSkills: {} },
+      epics: [{
+        id: 'epic-1',
+        title: 'Epic',
+        features: [{
+          id: 'feat-logical-parent',
+          title: 'Logical parent',
+          spec: 'spec',
+          tasks: [],
+          tool: 'codex',
+          effort: 'medium',
+          dependsOn: [],
+          workflow: { mode: 'single', stages: [], approvals: { channel: 'telegram', autoAdvance: false }, syncTasksToBacklog: true, sessionPolicy: { mode: 'isolated', alwaysIsolatedStages: [] } },
+        }, {
+          id: 'feat-child',
+          title: 'Child',
+          spec: 'spec',
+          tasks: [],
+          tool: 'codex',
+          effort: 'medium',
+          dependsOn: ['feat-logical-parent'],
+          dependencyTypes: { 'feat-logical-parent': 'logical' },
+          workflow: { mode: 'single', stages: [], approvals: { channel: 'telegram', autoAdvance: false }, syncTasksToBacklog: true, sessionPolicy: { mode: 'isolated', alwaysIsolatedStages: [] } },
+        }],
+      }],
+    };
+    mockListCompletedFeatureIds.mockReturnValue(new Set(['feat-logical-parent']));
+    mockRunFeature.mockResolvedValue({ ok: true, summary: 'done' });
+
+    const { executeBacklog } = await import('../../src/core/runner/execute.js');
+    await executeBacklog(backlog, { cwd: '/repo', concurrency: 1, featureId: 'feat-child' });
+
+    expect(mockGetLatestPublishedRunForFeature).not.toHaveBeenCalled();
+  });
+
   it('starts only the requested feature when dependencies are already completed', async () => {
     const backlog: Backlog = {
       version: 2,
@@ -2068,6 +2562,22 @@ describe('executeBacklog dependency-aware manual start', () => {
       ],
     } as unknown as Backlog;
     mockListCompletedFeatureIds.mockReturnValue(new Set(['feat-parent']));
+    mockGetLatestPublishedRunForFeature.mockReturnValue({
+      featureId: 'feat-parent',
+      prNumber: 1,
+      prUrl: 'https://example.test/pr/1',
+      branchName: 'feat/parent',
+      remoteBranch: 'origin/feat/parent',
+      baseBranch: 'develop',
+      startedAt: '2026-07-18T10:00:00Z',
+    });
+    mockResolveDependencyPublications.mockReturnValue([{
+      featureId: 'feat-parent',
+      prNumber: 1,
+      prUrl: 'https://example.test/pr/1',
+      branchName: 'feat/parent',
+      remoteBranch: 'origin/feat/parent',
+    }]);
     mockRunFeature.mockResolvedValue({ ok: true, summary: 'done' });
 
     const { executeBacklog } = await import('../../src/core/runner/execute.js');

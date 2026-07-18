@@ -5,18 +5,19 @@ import { Tabs } from '../components/navigation/Tabs.js';
 import { ApprovalBanner } from '../components/feedback/ApprovalBanner.js';
 import { QuestionBanner } from '../components/feedback/QuestionBanner.js';
 import { AgentTranscript, type TranscriptEntry } from '../components/transcript/AgentTranscript.js';
-import { ToolCallGroup } from '../components/transcript/ToolCallGroup.js';
 import { RunStatusStrip } from '../components/status/RunStatusStrip.js';
 import { FeatureConfigDetail } from '../components/FeatureConfigDetail.js';
 import { PageHeader } from '../PageHeader.js';
 import { useIsMobile } from '../Responsive.js';
-import { formatClockTime, formatElapsed, formatPercent, formatPublishTarget, formatTokens, getPublishStatusLabel, getRunStatusLabel } from '../lib/format.js';
+import { formatClockTime, formatElapsed, formatPercent, formatPublishTarget, formatTokens, getPublishStatusLabel, getRunStatusLabel, parseTimestampMs } from '../lib/format.js';
 import { summarizeTaskRuns } from '../lib/workflow.js';
+import { STAGE_ORDER } from '../../../core/workflow/stageOrder.js';
 import type { MsqWebState, FeatureConfigPatch, WebSocketClientMessage } from '../../types.js';
 import type { TaskRun } from '../../../db/repo.js';
 import type { RunBreakdown } from '../../../core/stats.js';
 import type { OutputLine } from '../hooks/useLocalOutput.js';
 import type { SessionStatusSnapshot, ToolCallRecord } from '../../../core/adapters/types.js';
+import { detectStderrLevel } from '../../../core/adapters/types.js';
 
 export interface RunDetailPageProps {
   state: MsqWebState;
@@ -48,22 +49,43 @@ const inputStyle: React.CSSProperties = {
   padding: '6px 9px',
 };
 
-function outputToTranscript(lines: OutputLine[]): TranscriptEntry[] {
+type TimedEntry = TranscriptEntry & { sortKey: number };
+
+function outputToTranscript(lines: OutputLine[]): TimedEntry[] {
   return lines.map((line, i) => {
     const source = line.source ?? 'stdout';
-    const isError = line.level === 'error';
+    // Historical rows (and any adapter path that doesn't tag `level` itself) still
+    // carry the raw stderr log line, so re-detect error/warn from the text as a
+    // fallback rather than trusting only the persisted `level` column.
+    const level = line.level ?? detectStderrLevel(line.line);
+    const isError = level === 'error';
     const type: TranscriptEntry['type'] = source === 'tool' || isError ? 'tool' : source === 'agent' ? 'agent' : 'system';
-    const text = line.level === 'warn' ? `[warn] ${line.line}` : line.line;
+    const text = level === 'warn' ? `[warn] ${line.line}` : line.line;
     return {
       id: line.id ?? i,
       type,
       status: isError ? 'error' : undefined,
       tool: line.toolName ?? line.tool,
       text,
-      command: type === 'tool' ? text : undefined,
+      command: type === 'tool' && !isError && source === 'tool' ? text : undefined,
+      output: type === 'tool' && isError ? text : undefined,
       time: formatClockTime(line.createdAt),
+      sortKey: parseTimestampMs(line.createdAt) ?? i,
     };
   });
+}
+
+function toolCallsToTranscript(calls: ToolCallRecord[]): TimedEntry[] {
+  return calls.map((call) => ({
+    id: `tool-${call.id}`,
+    type: 'tool',
+    status: call.phase === 'started' ? 'running' : call.phase === 'failed' ? 'error' : 'done',
+    tool: call.name,
+    command: call.arguments == null ? undefined : JSON.stringify(call.arguments),
+    output: call.error ?? call.output ?? undefined,
+    time: formatClockTime(call.startedAt),
+    sortKey: parseTimestampMs(call.startedAt) ?? call.sequence,
+  }));
 }
 
 export function RunDetailPage({
@@ -93,8 +115,17 @@ export function RunDetailPage({
 
   const detail = run ? runDetails[run.runId] : undefined;
   const stageGroups = useMemo(() => summarizeTaskRuns(detail?.taskRuns ?? [], feature?.workflow.stages), [detail, feature]);
-  const transcript = useMemo(() => outputToTranscript(run ? (linesByRun[run.runId] ?? []) : []), [run, linesByRun]);
-  const toolCalls = detail?.toolCalls ?? [];
+  const toolCalls = useMemo(() => detail?.toolCalls ?? [], [detail]);
+  const combinedOutput = useMemo(() => {
+    const lineEntries = outputToTranscript(run ? (linesByRun[run.runId] ?? []) : []).filter(
+      // Duplicate tool-echo lines are dropped once structured tool calls cover them, but
+      // error lines (e.g. raw stderr router failures) have no structured counterpart and
+      // must always surface, even when the run has other successful tool calls.
+      (entry) => entry.type !== 'tool' || entry.status === 'error' || toolCalls.length === 0,
+    );
+    const toolEntries = toolCallsToTranscript(toolCalls);
+    return [...lineEntries, ...toolEntries].sort((a, b) => a.sortKey - b.sortKey);
+  }, [run, linesByRun, toolCalls]);
   const toolIds = state.runtimeConfig.tools.map((tool) => tool.id);
 
   useEffect(() => {
@@ -102,7 +133,7 @@ export function RunDetailPage({
     const el = scrollRef.current;
     if (!el || !stickToBottomRef.current) return;
     el.scrollTop = el.scrollHeight;
-  }, [activeTab, transcript, toolCalls.length]);
+  }, [activeTab, combinedOutput]);
 
   if (!run) {
     return (
@@ -122,7 +153,7 @@ export function RunDetailPage({
     );
   }
 
-  const stages = feature?.workflow.stages ?? ['specify', 'plan', 'tasks', 'implement', 'validate'];
+  const stages = feature?.workflow.stages ?? [...STAGE_ORDER];
   const canPause = run.pipelineStatus === 'running';
   const canAbort = run.pipelineStatus === 'running' || run.pipelineStatus === 'blocked';
   const canResumeWithOverride = run.pipelineId != null
@@ -163,7 +194,7 @@ export function RunDetailPage({
   const tabContent: Record<string, React.ReactNode> = {
     summary: (
       <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-        <WorkflowStepper stages={stages} currentStage={run.pipelineCurrentStage ?? run.stage} />
+        <WorkflowStepper stages={stages} currentStage={run.pipelineCurrentStage ?? run.stage} completed={run.status === 'done'} />
         <div style={{ marginTop: 14, display: 'flex', flexDirection: 'column', gap: 6 }}>
           {stageGroups.map((g) => (
             <div key={g.stage} style={{ display: 'flex', justifyContent: 'space-between', fontSize: 'var(--text-sm)', color: 'var(--text-dim)' }}>
@@ -251,8 +282,11 @@ export function RunDetailPage({
     ),
     output: (
       <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-        {toolCalls.length > 0 && <ToolCallGroup groupKey={`${String(runId ?? 0)}:${run.stage ?? 'run'}:0`} calls={toolCalls} />}
-        {transcript.length > 0 ? <AgentTranscript entries={transcript.filter((entry) => entry.type !== 'tool' || toolCalls.length === 0)} /> : toolCalls.length === 0 && <div style={{ color: 'var(--text-faint)', fontSize: 'var(--text-sm)' }}>No output captured for this run yet.</div>}
+        {combinedOutput.length > 0 ? (
+          <AgentTranscript entries={combinedOutput} />
+        ) : (
+          <div style={{ color: 'var(--text-faint)', fontSize: 'var(--text-sm)' }}>No output captured for this run yet.</div>
+        )}
       </div>
     ),
   };

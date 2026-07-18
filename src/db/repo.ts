@@ -182,7 +182,7 @@ export interface PipelineSnapshot {
   workflowRevisions?: PipelineWorkflowRevisions;
 }
 
-export type PipelineWorkflowRevision = Pick<Workflow, 'mode' | 'stages' | 'syncTasksToBacklog' | 'sessionPolicy' | 'stepGuidance'>;
+export type PipelineWorkflowRevision = Pick<Workflow, 'mode' | 'stages' | 'syncTasksToBacklog' | 'sessionPolicy' | 'stepGuidance' | 'stagePublishes'>;
 export type PipelineWorkflowRevisions = Record<string, PipelineWorkflowRevision>;
 
 export function createRun(
@@ -367,7 +367,14 @@ export function listRunToolCalls(runId: number, limit = 200): RunToolCallRow[] {
     `SELECT run_id AS runId, id, feature_id AS featureId, tool, sequence, phase, name,
             arguments_json AS argumentsJson, output, step, started_at AS startedAt,
             completed_at AS completedAt, error
-       FROM run_tool_calls WHERE run_id = ? ORDER BY sequence ASC, started_at ASC LIMIT ?`,
+       FROM (
+         SELECT *
+         FROM run_tool_calls
+         WHERE run_id = ?
+         ORDER BY sequence DESC, started_at DESC
+         LIMIT ?
+       ) recent
+       ORDER BY sequence ASC, started_at ASC`,
   ).all(runId, limit) as RawToolCallRow[];
   return rows.map(({ argumentsJson, ...row }) => ({
     ...row,
@@ -378,7 +385,7 @@ export function listRunToolCalls(runId: number, limit = 200): RunToolCallRow[] {
 export function getRunSessionStatus(runId: number): SessionStatusSnapshot | null {
   if (!hasDbFile()) return null;
   const row = getDb('readonly').prepare(
-    `SELECT run_id AS runId, feature_id AS featureId, tool, session_status AS status,
+    `SELECT id AS runId, feature_id AS featureId, tool, session_status AS status,
             session_started_at AS startedAt, session_updated_at AS updatedAt,
             session_elapsed_ms AS elapsedMs, session_last_output_at AS lastOutputAt,
             session_idle_ms AS idleMs, session_reason AS reason, session_terminal AS terminal
@@ -664,6 +671,13 @@ export function listRuns(limit = 50): RunRow[] {
         LIMIT ?`,
     )
     .all(limit) as RunRow[];
+}
+
+export function getRun(runId: number): RunRow | null {
+  if (!hasDbFile()) return null;
+  return (getDb('readonly')
+    .prepare(`SELECT * FROM runs WHERE id = ?`)
+    .get(runId) as RunRow | undefined) ?? null;
 }
 
 // T002: RunSummary interface

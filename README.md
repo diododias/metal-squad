@@ -22,7 +22,7 @@ repositories, and can ask for human approval or input through Telegram.
 
 ## Requirements
 
-- Node.js `>=20`
+- Node.js `24.16.x` (use `nvm use` to load the repository version)
 - One or more supported CLIs installed and authenticated when used:
   - `codex`
   - `claude`
@@ -56,6 +56,20 @@ For local development without rebuilding:
 ```bash
 npm run dev -- <command>
 ```
+
+## Continuous Integration
+
+The `CI / qualidade-completa` GitHub Actions check runs for pull requests to
+`develop`, pushes to `develop`, and manual dispatches. It uses the same complete,
+disposable-database quality gate as local development:
+
+```bash
+npm run gate:full
+```
+
+After the workflow succeeds for the first time, configure the `develop` GitHub
+ruleset to require `CI / qualidade-completa` and require source branches to be
+up to date before merge.
 
 Examples:
 
@@ -95,6 +109,7 @@ msq ui
 - Example backlog: [backlog.example.yaml](./backlog.example.yaml)
 - Global config: `~/.config/metal-squad/config.json`
 - Global DB: `~/.local/share/metal-squad/app.db`
+- SQLite backups: `~/.config/metal-squad/backup/<timestamp>/app.db` (run `npm run db:backup`)
 - Repo skills: `./.msq/skills/<skill-name>/`
 - Global skills: `~/.config/metal-squad/skills/<skill-name>/`
 - Generated task decomposition output: `./.msq/generated/<featureId>/decompose.yaml`

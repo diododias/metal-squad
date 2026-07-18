@@ -1,11 +1,11 @@
 import type { TaskRun } from '../db/repo.js';
+import { STAGE_ORDER } from '../core/workflow/stageOrder.js';
 
 // F31 item 4: fallback default only — matches WorkflowSchema's own default
 // `stages` (schema.ts). Features that declare a custom `workflow.stages`
 // must have that order passed in explicitly (see summarizeTaskRuns below),
-// otherwise a stage outside this hardcoded list fell to `length` and could
+// otherwise a stage outside the default list fell to `length` and could
 // desync from the stepper, which reads the same feature's declared stages.
-const STAGE_ORDER = ['specify', 'plan', 'tasks', 'implement', 'validate'];
 
 export interface WorkflowStageSummary {
   stage: string;
@@ -21,7 +21,7 @@ export interface WorkflowStageSummary {
   skipped: number;
 }
 
-function stageOrder(stage: string | null, stages: string[]): number {
+function stageOrder(stage: string | null, stages: readonly string[]): number {
   if (!stage) return stages.length + 1;
   const index = stages.indexOf(stage);
   return index === -1 ? stages.length : index;
@@ -46,7 +46,7 @@ function taskOrder(status: TaskRun['status']): number {
   }
 }
 
-export function summarizeTaskRuns(taskRuns: TaskRun[], stages: string[] = STAGE_ORDER): WorkflowStageSummary[] {
+export function summarizeTaskRuns(taskRuns: TaskRun[], stages: readonly string[] = STAGE_ORDER): WorkflowStageSummary[] {
   const groups = new Map<string, TaskRun[]>();
 
   for (const task of taskRuns) {

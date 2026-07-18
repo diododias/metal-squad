@@ -400,10 +400,11 @@ describe('createCodexProgress — onStdoutLine', () => {
     }));
   });
 
-  it('emits run:output with source=agent for item.completed agent_message', async () => {
+  it('emits the complete agent message for item.completed agent_message', async () => {
+    const agentMessage = `Hello from agent ${'with detailed progress. '.repeat(20)}`;
     const agentEvent = JSON.stringify({
       type: 'item.completed',
-      item: { type: 'agent_message', text: 'Hello from agent' },
+      item: { type: 'agent_message', text: agentMessage },
     });
     mockRunCli.mockImplementation(async (_bin, _args, opts) => {
       opts.onStdoutLine?.(agentEvent);
@@ -415,7 +416,7 @@ describe('createCodexProgress — onStdoutLine', () => {
 
     const outputCall = mockEventEmit.mock.calls.find(c => c[0] === 'run:output' && c[1].source === 'agent');
     expect(outputCall).toBeDefined();
-    expect(outputCall![1].line).toBe('Hello from agent');
+    expect(outputCall![1].line).toBe(agentMessage.trim());
     expect(outputCall![1].stream).toBe('stdout');
   });
 

@@ -12,6 +12,8 @@ const MARKER_COLOR: Record<Marker, string> = {
 export interface WorkflowStepperProps {
   stages: string[];
   currentStage?: string | null;
+  /** `currentStage` is null both before the runner persists its first stage and after completion. */
+  completed?: boolean;
   size?: 'default' | 'compact';
   allPending?: boolean;
   /** 'text' renders the named stage sequence; 'bar' renders a segmented
@@ -19,7 +21,7 @@ export interface WorkflowStepperProps {
   variant?: 'text' | 'bar';
 }
 
-export function WorkflowStepper({ stages, currentStage, size = 'default', allPending = false, variant = 'text' }: WorkflowStepperProps): React.JSX.Element {
+export function WorkflowStepper({ stages, currentStage, completed = false, size = 'default', allPending = false, variant = 'text' }: WorkflowStepperProps): React.JSX.Element {
   const currentIndex = currentStage != null ? stages.indexOf(currentStage) : -1;
   const isCompact = size === 'compact';
 
@@ -28,7 +30,7 @@ export function WorkflowStepper({ stages, currentStage, size = 'default', allPen
     const hasCurrent = !allPending && currentStage != null && currentIndex >= 0;
     const doneCount = allPending
       ? 0
-      : currentStage == null
+      : completed
         ? total
         : currentIndex >= 0
           ? currentIndex
@@ -36,7 +38,7 @@ export function WorkflowStepper({ stages, currentStage, size = 'default', allPen
     const filledCount = doneCount + (hasCurrent ? 1 : 0);
     const label = allPending
       ? 'todo'
-      : currentStage ?? 'complete';
+      : currentStage ?? (completed ? 'complete' : 'starting');
     return (
       <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontFamily: 'var(--font-mono)', fontSize: 'var(--text-2xs)', minWidth: 0 }}>
         <span aria-hidden="true" style={{ display: 'inline-flex', gap: 1, letterSpacing: '1px', flexShrink: 0 }}>
@@ -61,7 +63,7 @@ export function WorkflowStepper({ stages, currentStage, size = 'default', allPen
   return (
     <div style={{ display: 'flex', flexWrap: 'wrap', gap: isCompact ? 2 : 4, fontSize: isCompact ? 'var(--text-2xs)' : 'var(--text-sm)', fontFamily: 'var(--font-mono)' }}>
       {stages.map((stage, i) => {
-        const marker: Marker = allPending ? 'next' : stage === currentStage ? 'current' : currentIndex > i || currentStage == null ? 'done' : 'next';
+        const marker: Marker = allPending ? 'next' : stage === currentStage ? 'current' : currentIndex > i || completed ? 'done' : 'next';
         return (
           <React.Fragment key={stage}>
             <span style={{ color: MARKER_COLOR[marker], fontWeight: marker === 'current' ? 600 : 400 }}>

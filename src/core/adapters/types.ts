@@ -47,16 +47,17 @@ export function detectStderrLevel(line: string): 'error' | 'warn' | undefined {
   return match[1] === 'ERROR' ? 'error' : 'warn';
 }
 
-export function sanitizeToolCallValue(value: unknown, depth = 0): unknown {
-  if (depth > 4) return '[truncated]';
+export function sanitizeToolCallValue(value: unknown, seen = new WeakSet<object>()): unknown {
   if (value == null || typeof value === 'number' || typeof value === 'boolean') return value;
-  if (typeof value === 'string') return value.slice(0, 2_000);
-  if (Array.isArray(value)) return value.slice(0, 50).map((entry) => sanitizeToolCallValue(entry, depth + 1));
+  if (typeof value === 'string') return value;
+  if (Array.isArray(value)) return value.map((entry) => sanitizeToolCallValue(entry, seen));
   if (typeof value === 'object') {
+    if (seen.has(value)) return '[circular]';
+    seen.add(value);
     return Object.fromEntries(
-      Object.entries(value).slice(0, 50).map(([key, entry]) => [
+      Object.entries(value).map(([key, entry]) => [
         key,
-        SENSITIVE_KEY.test(key) ? '[REDACTED]' : sanitizeToolCallValue(entry, depth + 1),
+        SENSITIVE_KEY.test(key) ? '[REDACTED]' : sanitizeToolCallValue(entry, seen),
       ]),
     );
   }
@@ -69,9 +70,9 @@ export function sanitizeToolCallRecord(record: ToolCallRecord): ToolCallRecord {
     id: record.id.slice(0, 200),
     name: record.name.slice(0, 200),
     arguments: sanitizeToolCallValue(record.arguments),
-    output: record.output?.slice(0, 20_000) ?? null,
+    output: record.output ?? null,
     step: record.step?.slice(0, 200) ?? null,
-    error: record.error?.slice(0, 500) ?? null,
+    error: record.error ?? null,
   };
 }
 
@@ -88,13 +89,42 @@ export interface RunControlNeedsInput {
   options?: string[];
 }
 
+export const RUN_BLOCKED_CODES = [
+  'dependency_unavailable',
+  'precondition_failed',
+  'environment_error',
+  'spec_ambiguous',
+  'validation_failed',
+] as const;
+
+export type RunBlockedCode = (typeof RUN_BLOCKED_CODES)[number];
+
+export interface DeclaredPublication {
+  prUrl: string;
+  prNumber: number | null;
+  base: string;
+  head: string;
+}
+
+export interface RunControlDone {
+  type: 'done';
+  summary: string;
+  publication?: DeclaredPublication;
+}
+
+export interface RunControlBlocked {
+  type: 'blocked';
+  code: RunBlockedCode;
+  reason: string;
+}
+
 export interface TimeoutResult {
   timeoutMs: number;
   runtimeMs: number;
   lastProgress?: string;
 }
 
-export type RunControl = RunControlNeedsInput;
+export type RunControl = RunControlNeedsInput | RunControlDone | RunControlBlocked;
 
 export interface SessionHandle {
   tool: Tool;
@@ -130,6 +160,8 @@ export interface RunFeatureOptions {
 export interface RunResult {
   ok: boolean;
   summary: string;
+  /** A pre-run condition failed and needs an operator action before retrying. */
+  blocked?: boolean;
   usage?: TokenUsage;
   control?: RunControl;
   aborted?: boolean;
@@ -137,6 +169,8 @@ export interface RunResult {
   publishEvidence?: PublishEvidence;
   publishVerified?: boolean;
   publishVerificationStatus?: 'blocked' | 'failed';
+  /** True when the agent-declared PR and the independently observed PR disagree. */
+  publishValidationFailed?: boolean;
   timeout?: TimeoutResult;
 }
 
