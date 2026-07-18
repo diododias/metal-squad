@@ -133,6 +133,9 @@ export function createSkillRegistry(): SkillRegistry {
 
   return {
     discover,
+    has(name: string, cwd: string): boolean {
+      return discover(cwd).some((skill) => skill.name === name);
+    },
     resolve(names: string[], cwd: string): Skill[] {
       const byName = new Map(discover(cwd).map((skill) => [skill.name, skill]));
       return names.map((name) => byName.get(name)).filter((skill): skill is Skill => skill !== undefined);

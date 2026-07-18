@@ -22,6 +22,7 @@ export interface SkillValidationResult {
 
 export interface SkillRegistry {
   discover(cwd: string): Skill[];
+  has(name: string, cwd: string): boolean;
   resolve(names: string[], cwd: string): Skill[];
   validate(names: string[], cwd: string): SkillValidationResult;
 }
