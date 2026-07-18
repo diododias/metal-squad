@@ -212,6 +212,7 @@ describe('getBacklogSettings projectDefaults (SET-16)', () => {
           syncTasksToBacklog: true,
           sessionPolicy: { mode: 'isolated', alwaysIsolatedStages: [] },
           stepGuidance: {},
+          stagePublishes: {},
         },
       });
     } finally {
