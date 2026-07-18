@@ -1,6 +1,8 @@
 import { execFileSync } from 'node:child_process';
 import type { PublishEvidence } from '../adapters/types.js';
 import { logCaughtError } from '../events/logging.js';
+import { GithubForge } from './forge/github.js';
+import type { ForgeAdapter, ForgePullRequestView } from './forge/types.js';
 
 export interface PublishVerification {
   ok: boolean;
@@ -9,55 +11,17 @@ export interface PublishVerification {
   evidence: PublishEvidence;
 }
 
-interface GhPullRequestView {
-  number?: number;
-  url?: string;
-  state?: string;
-  baseRefName?: string;
-  headRefName?: string;
-}
-
-function runCommand(command: string, args: string[], cwd: string): string {
-  return execFileSync(command, args, {
-    cwd,
-    encoding: 'utf8',
-    stdio: ['ignore', 'pipe', 'ignore'],
-  }).trim();
-}
-
 function tryRunGit(args: string[], cwd: string): string | null {
   try {
-    return runCommand('git', args, cwd);
+    // Git failures remain non-fatal evidence checks; GH failures are handled
+    // through ForgeAdapter below so their diagnostics are preserved.
+    return execFileSync('git', args, {
+      cwd,
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'pipe'],
+    }).trim();
   } catch (error) {
     logCaughtError(`git/publish.tryRunGit(${args.join(' ')})`, error);
-    return null;
-  }
-}
-
-function tryRunCommand(command: string, args: string[], cwd: string): string | null {
-  try {
-    return runCommand(command, args, cwd);
-  } catch (error) {
-    logCaughtError(`git/publish.tryRunCommand(${command})`, error);
-    return null;
-  }
-}
-
-function ghAvailable(): boolean {
-  try {
-    execFileSync('gh', ['--version'], { stdio: 'ignore' });
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-function parsePrView(raw: string | null): GhPullRequestView | null {
-  if (!raw) return null;
-  try {
-    return JSON.parse(raw) as GhPullRequestView;
-  } catch (error) {
-    logCaughtError('git/publish.parsePrView', error);
     return null;
   }
 }
@@ -84,19 +48,10 @@ function resolveRemoteBranch(cwd: string): string | null {
   return `${remote}/${remoteRef}`;
 }
 
-function resolvePullRequest(cwd: string): GhPullRequestView | null {
-  if (!ghAvailable()) return null;
-  const raw = tryRunCommand(
-    'gh',
-    ['pr', 'view', '--json', 'number,url,state,baseRefName,headRefName'],
-    cwd,
-  );
-  return parsePrView(raw);
-}
-
 export function verifyPublishContract(
   cwd: string,
   allowedBaseBranches: string[] = ['develop'],
+  forge: ForgeAdapter = new GithubForge(),
 ): PublishVerification {
   // The set of acceptable PR base branches: always `develop`, plus any
   // dependency branch a dependent feature may stack its PR on top of.
@@ -106,7 +61,9 @@ export function verifyPublishContract(
   const branch = tryRunGit(['rev-parse', '--abbrev-ref', 'HEAD'], cwd);
   const commitSha = tryRunGit(['rev-parse', 'HEAD'], cwd);
   const remoteBranch = resolveRemoteBranch(cwd);
-  const pr = resolvePullRequest(cwd);
+  const forgeAvailable = forge.available();
+  const pullRequestResult = forgeAvailable ? forge.viewPullRequest(cwd) : null;
+  const pr: ForgePullRequestView | null = pullRequestResult?.ok ? pullRequestResult.value : null;
   // The effective base is the PR's actual base when it is one of the allowed
   // branches (agent may have chosen any dependency branch); otherwise fall back
   // to the primary base for reporting/comparison.
@@ -168,11 +125,20 @@ export function verifyPublishContract(
     };
   }
 
-  if (!ghAvailable()) {
+  if (!forgeAvailable) {
     return {
       ok: false,
       status: 'blocked',
       summary: 'implement: GitHub CLI is unavailable, so PR verification could not be completed.',
+      evidence,
+    };
+  }
+
+  if (pullRequestResult && !pullRequestResult.ok) {
+    return {
+      ok: false,
+      status: 'blocked',
+      summary: `implement: GitHub CLI could not read the pull request: ${pullRequestResult.stderr}`,
       evidence,
     };
   }
