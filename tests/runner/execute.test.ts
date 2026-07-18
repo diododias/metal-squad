@@ -785,7 +785,7 @@ describe('executeBacklog failure persistence', () => {
     expect(mockCreateRetryRecord).toHaveBeenNthCalledWith(3, 7, 3, 'codex falha', expect.any(Number), 'codex', undefined);
 
     expect(mockUpdateRunTool).toHaveBeenCalledWith(7, 'opencode');
-    expect(mockFinishRun).toHaveBeenCalledWith(7, 'done', 'publish verified on feat/test (https://example/pr/1).');
+    expect(mockFinishRun).toHaveBeenCalledWith(7, 'done', 'opencode ok');
   });
 
   it('applies onFail only after every candidate (primary + all fallbacks) is exhausted', async () => {
@@ -902,7 +902,7 @@ describe('executeBacklog failure persistence', () => {
 
     expect(mockRunFeature).toHaveBeenCalledTimes(2);
     expect(mockFinishRun).toHaveBeenNthCalledWith(1, 7, 'failed', 'falha tolerada');
-    expect(mockFinishRun).toHaveBeenNthCalledWith(2, 8, 'done', 'publish verified on feat/test (https://example/pr/1).');
+    expect(mockFinishRun).toHaveBeenNthCalledWith(2, 8, 'done', 'ok');
   });
 
   it('creates a gate, pauses the pipeline, and resumes the same feature once the gate is approved', async () => {
@@ -969,7 +969,7 @@ describe('executeBacklog failure persistence', () => {
     await pipelinePromise;
 
     expect(mockRunFeature).toHaveBeenCalledTimes(2);
-    expect(mockFinishRun).toHaveBeenCalledWith(8, 'done', 'publish verified on feat/test (https://example/pr/1).');
+    expect(mockFinishRun).toHaveBeenCalledWith(8, 'done', 'ok apos aprovacao');
     expect(mockFinishPipeline).toHaveBeenCalledWith(9, 'done');
   });
 

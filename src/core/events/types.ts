@@ -62,7 +62,6 @@ export interface RunBlockedEvent {
   reason: RunBlockedReason;
   code?: RunBlockedCode;
   summary: string;
-  code?: RunBlockedCode;
 }
 
 export interface GateCreatedEvent {
