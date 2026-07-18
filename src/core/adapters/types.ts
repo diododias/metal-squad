@@ -167,6 +167,8 @@ export interface RunResult {
   publishEvidence?: PublishEvidence;
   publishVerified?: boolean;
   publishVerificationStatus?: 'blocked' | 'failed';
+  /** True when the agent-declared PR and the independently observed PR disagree. */
+  publishValidationFailed?: boolean;
   timeout?: TimeoutResult;
 }
 

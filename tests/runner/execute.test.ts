@@ -37,7 +37,26 @@ const mockListCompletedFeatureIds = vi.fn();
 const mockListRunsForTui = vi.fn();
 const mockSpawn = vi.fn();
 const mockVerifyPublishContract = vi.fn();
+const rawMockResolvedValue = mockRunFeature.mockResolvedValue.bind(mockRunFeature);
+const rawMockResolvedValueOnce = mockRunFeature.mockResolvedValueOnce.bind(mockRunFeature);
 let pipelineRow: any;
+
+function declareCompletion<T extends { ok: boolean; control?: unknown }>(result: T): T {
+  if (!result.ok || result.control) return result;
+  return {
+    ...result,
+    control: {
+      type: 'done',
+      summary: 'completed',
+      publication: {
+        prUrl: 'https://example/pr/1',
+        prNumber: 1,
+        base: 'develop',
+        head: 'feat/test',
+      },
+    },
+  };
+}
 
 vi.mock('../../src/core/repo.js', () => ({
   resolveRepo: mockResolveRepo,
@@ -147,6 +166,11 @@ beforeEach(() => {
   mockUpdatePipelineSnapshot.mockReset();
   mockNotify.mockReset();
   mockRunFeature.mockReset();
+  // Existing successful-run fixtures predate the explicit completion
+  // protocol. Keep their test intent focused while making a real completion
+  // declaration; protocol-negative cases use mockImplementation directly.
+  mockRunFeature.mockResolvedValue = ((result: unknown) => rawMockResolvedValue(declareCompletion(result as { ok: boolean }))) as typeof mockRunFeature.mockResolvedValue;
+  mockRunFeature.mockResolvedValueOnce = ((result: unknown) => rawMockResolvedValueOnce(declareCompletion(result as { ok: boolean }))) as typeof mockRunFeature.mockResolvedValueOnce;
   mockVerifyPublishContract.mockReset();
   mockEventEmit.mockReset();
   mockAttachDefaultEventLogger.mockReset();
@@ -329,10 +353,20 @@ function createImplementStageBacklog(): Backlog {
 
 describe('executeBacklog failure persistence', () => {
   it('verifies publish evidence after a successful implement stage', async () => {
-    mockRunFeature.mockResolvedValue({
+    mockRunFeature.mockImplementation(async () => ({
       ok: true,
       summary: 'implemented and published',
-    });
+      control: {
+        type: 'done',
+        summary: 'implemented and published',
+        publication: {
+          prUrl: 'https://example/pr/1',
+          prNumber: 1,
+          base: 'develop',
+          head: 'feat/test',
+        },
+      },
+    }));
 
     const { executeBacklog } = await import('../../src/core/runner/execute.js');
 
@@ -341,7 +375,19 @@ describe('executeBacklog failure persistence', () => {
     ).resolves.toBeUndefined();
 
     expect(mockVerifyPublishContract).toHaveBeenCalledWith('/repo', ['develop']);
-    expect(mockUpdateRunPublishState).toHaveBeenCalledWith(7, {
+    expect(mockUpdateRunPublishState).toHaveBeenNthCalledWith(1, 7, {
+      verified: false,
+      error: null,
+      evidence: {
+        branch: 'feat/test',
+        baseBranch: 'develop',
+        commitSha: null,
+        remoteBranch: null,
+        prNumber: 1,
+        prUrl: 'https://example/pr/1',
+      },
+    });
+    expect(mockUpdateRunPublishState).toHaveBeenNthCalledWith(2, 7, {
       verified: true,
       error: null,
       evidence: {
@@ -358,6 +404,95 @@ describe('executeBacklog failure persistence', () => {
       'done',
       'implement publish verified on feat/test (https://example/pr/1).',
     );
+  });
+
+  it('blocks a clean adapter exit that does not declare MSQ_DONE', async () => {
+    mockRunFeature.mockImplementation(async () => ({ ok: true, summary: 'finished quietly' }));
+
+    const { executeBacklog } = await import('../../src/core/runner/execute.js');
+
+    await expect(executeBacklog(createImplementStageBacklog(), { cwd: '/repo', concurrency: 1 }))
+      .rejects.toThrow('Feature feat-implement falhou: implement: agent finished without declaring MSQ_DONE');
+
+    expect(mockFinishRun).toHaveBeenCalledWith(7, 'blocked', 'agent finished without declaring MSQ_DONE');
+    expect(mockEventEmit).toHaveBeenCalledWith('run:blocked', expect.objectContaining({
+      runId: 7,
+      reason: 'gate',
+      summary: 'agent finished without declaring MSQ_DONE',
+    }));
+  });
+
+  it('blocks MSQ_DONE without required publication fields as validation_failed', async () => {
+    mockRunFeature.mockImplementation(async () => ({
+      ok: true,
+      summary: 'declared done without publication',
+      control: { type: 'done', summary: 'declared done without publication' },
+    }));
+
+    const { executeBacklog } = await import('../../src/core/runner/execute.js');
+
+    await expect(executeBacklog(createImplementStageBacklog(), { cwd: '/repo', concurrency: 1 }))
+      .rejects.toThrow('MSQ_DONE is missing required pr_url, pr_number, base, and head publication fields.');
+
+    expect(mockEventEmit).toHaveBeenCalledWith('run:blocked', expect.objectContaining({
+      code: 'validation_failed',
+      reason: 'gate',
+    }));
+  });
+
+  it('keeps declared PR fields and blocks a divergent verification as validation_failed', async () => {
+    mockRunFeature.mockImplementation(async () => ({
+      ok: true,
+      summary: 'declared publication',
+      control: {
+        type: 'done',
+        summary: 'declared publication',
+        publication: {
+          prUrl: 'https://example/pr/77', prNumber: 77, base: 'develop', head: 'feat/declared',
+        },
+      },
+    }));
+    mockVerifyPublishContract.mockReturnValue({
+      ok: true,
+      status: 'done',
+      summary: 'verified a different pull request',
+      evidence: {
+        branch: 'feat/observed', baseBranch: 'develop', commitSha: 'abc1234',
+        remoteBranch: 'origin/feat/observed', prNumber: 78, prUrl: 'https://example/pr/78',
+      },
+    });
+
+    const { executeBacklog } = await import('../../src/core/runner/execute.js');
+
+    await expect(executeBacklog(createImplementStageBacklog(), { cwd: '/repo', concurrency: 1 }))
+      .rejects.toThrow('declared publication does not match verified publication');
+
+    expect(mockUpdateRunPublishState).toHaveBeenLastCalledWith(7, expect.objectContaining({
+      verified: false,
+      error: 'declared publication\nimplement: declared publication does not match verified publication.',
+      evidence: expect.objectContaining({
+        branch: 'feat/declared', prNumber: 77, prUrl: 'https://example/pr/77', baseBranch: 'develop',
+      }),
+    }));
+    expect(mockEventEmit).toHaveBeenCalledWith('run:blocked', expect.objectContaining({ code: 'validation_failed' }));
+  });
+
+  it('persists an explicit MSQ_BLOCKED control with its reason code', async () => {
+    mockRunFeature.mockImplementation(async () => ({
+      ok: true,
+      summary: 'dependency is unavailable',
+      control: { type: 'blocked', code: 'dependency_unavailable', reason: 'T06 is unavailable' },
+    }));
+
+    const { executeBacklog } = await import('../../src/core/runner/execute.js');
+
+    await expect(executeBacklog(createImplementStageBacklog(), { cwd: '/repo', concurrency: 1 }))
+      .rejects.toThrow('Feature feat-implement falhou: implement: dependency is unavailable');
+
+    expect(mockFinishRun).toHaveBeenCalledWith(7, 'blocked', 'dependency is unavailable');
+    expect(mockEventEmit).toHaveBeenCalledWith('run:blocked', expect.objectContaining({
+      reason: 'gate', code: 'dependency_unavailable', summary: 'dependency is unavailable',
+    }));
   });
 
   it('blocks implement completion when publish verification is inconclusive', async () => {
@@ -392,7 +527,7 @@ describe('executeBacklog failure persistence', () => {
       'blocked',
       'implemented but publish verification pending\nimplement: GitHub CLI is unavailable, so PR verification could not be completed.',
     );
-    expect(mockUpdateRunPublishState).toHaveBeenCalledWith(7, {
+    expect(mockUpdateRunPublishState).toHaveBeenLastCalledWith(7, {
       verified: false,
       error: 'implemented but publish verification pending\nimplement: GitHub CLI is unavailable, so PR verification could not be completed.',
       evidence: {
@@ -400,8 +535,8 @@ describe('executeBacklog failure persistence', () => {
         baseBranch: 'develop',
         commitSha: 'abc1234',
         remoteBranch: 'origin/feat/test',
-        prNumber: null,
-        prUrl: null,
+        prNumber: 1,
+        prUrl: 'https://example/pr/1',
       },
     });
   });
@@ -616,7 +751,7 @@ describe('executeBacklog failure persistence', () => {
     expect(mockCreateRetryRecord).toHaveBeenNthCalledWith(3, 7, 3, 'codex falha', expect.any(Number), 'codex', undefined);
 
     expect(mockUpdateRunTool).toHaveBeenCalledWith(7, 'opencode');
-    expect(mockFinishRun).toHaveBeenCalledWith(7, 'done', 'opencode ok');
+    expect(mockFinishRun).toHaveBeenCalledWith(7, 'done', 'implement publish verified on feat/test (https://example/pr/1).');
   });
 
   it('applies onFail only after every candidate (primary + all fallbacks) is exhausted', async () => {
@@ -733,7 +868,7 @@ describe('executeBacklog failure persistence', () => {
 
     expect(mockRunFeature).toHaveBeenCalledTimes(2);
     expect(mockFinishRun).toHaveBeenNthCalledWith(1, 7, 'failed', 'falha tolerada');
-    expect(mockFinishRun).toHaveBeenNthCalledWith(2, 8, 'done', 'ok');
+    expect(mockFinishRun).toHaveBeenNthCalledWith(2, 8, 'done', 'implement publish verified on feat/test (https://example/pr/1).');
   });
 
   it('creates a gate, pauses the pipeline, and resumes the same feature once the gate is approved', async () => {
@@ -800,7 +935,7 @@ describe('executeBacklog failure persistence', () => {
     await pipelinePromise;
 
     expect(mockRunFeature).toHaveBeenCalledTimes(2);
-    expect(mockFinishRun).toHaveBeenCalledWith(8, 'done', 'ok apos aprovacao');
+    expect(mockFinishRun).toHaveBeenCalledWith(8, 'done', 'implement publish verified on feat/test (https://example/pr/1).');
     expect(mockFinishPipeline).toHaveBeenCalledWith(9, 'done');
   });
 

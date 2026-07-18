@@ -1,5 +1,5 @@
 import type { Tool } from '../backlog/schema.js';
-import type { RunResult, SessionStatusSnapshot, ToolCallRecord } from '../adapters/types.js';
+import type { RunBlockedCode, RunResult, SessionStatusSnapshot, ToolCallRecord } from '../adapters/types.js';
 import type { StageTransitionDecision } from '../workflow/sessionPolicy.js';
 
 export type GateDecision = 'approved' | 'skipped' | 'retried';
@@ -60,6 +60,7 @@ export interface RunBlockedEvent {
   tool: Tool;
   reason: RunBlockedReason;
   summary: string;
+  code?: RunBlockedCode;
 }
 
 export interface GateCreatedEvent {
