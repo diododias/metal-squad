@@ -74,7 +74,7 @@ import {
 } from '../events/index.js';
 import { loadBudgetState, saveBudgetState } from '../../db/repo.js';
 import { saveConfig } from '../../config/index.js';
-import { verifyPublishContract } from '../git/publish.js';
+import { isDescendantOfBase, verifyPublishContract } from '../git/publish.js';
 import {
   fetchDependencyBranches,
   resolveDependencyPublications,
@@ -322,16 +322,22 @@ export async function executeBacklog(
         resumeOverride: opts.resumeOverride?.featureId === feature.id ? opts.resumeOverride : undefined,
         stageSkills: effectiveStageSkills,
       });
-      const res = applyPublishGate(initialRes, {
+      const dependencyPublications = dependencyPublicationsFor(feature.id);
+      const publishGatedRes = applyPublishGate(initialRes, {
         publishes: stage !== undefined && stagePublishesResolved(
           stage,
           feature.workflow.mode,
           feature.workflow.stagePublishes,
         ),
         cwd: opts.cwd,
-        dependencyBranches: dependencyPublicationsFor(feature.id).map((pub) => pub.branchName),
+        dependencyBranches: dependencyPublications.map((pub) => pub.branchName),
         baseBranch: config.integration.baseBranch,
       });
+      const res = applyBaseReconciliation(
+        publishGatedRes,
+        opts.cwd,
+        dependencyPublications[0]?.branchName ?? config.integration.baseBranch,
+      );
       if (res.usage) {
         recordUsage(runId, res.usage);
         applyBudgetUsage(feature, res.usage, runId);
@@ -1290,6 +1296,33 @@ function applyPublishGate(
       ? undefined
       : (diverged ? 'blocked' : verification.status === 'done' ? 'failed' : verification.status),
     publishValidationFailed: diverged,
+  };
+}
+
+function applyBaseReconciliation(
+  result: RunResult,
+  cwd: string,
+  baseBranch: string | undefined,
+): RunResult {
+  if (!result.ok || !baseBranch) return result;
+
+  const descendant = isDescendantOfBase(cwd, baseBranch);
+  if (descendant === true) return result;
+
+  const detail = descendant === false
+    ? `HEAD does not descend from the declared base ${baseBranch}.`
+    : `could not verify whether HEAD descends from the declared base ${baseBranch}.`;
+  const summary = [
+    'MSQ_BLOCKED: validation_failed',
+    `post-run: ${detail}`,
+    'Resolve the branch base or Git error, then retry the run.',
+    result.summary,
+  ].join('\n');
+  return {
+    ...result,
+    ok: false,
+    summary,
+    publishVerificationStatus: 'blocked',
   };
 }
 

@@ -35,6 +35,29 @@ function countCommitsAheadOfBase(cwd: string, baseBranch: string): number | null
   return Number.isFinite(value) ? value : null;
 }
 
+/**
+ * Checks whether the current HEAD descends from the declared integration base.
+ * Git uses exit code 1 for a valid negative answer, while any other failure is
+ * operationally inconclusive and must remain distinguishable from `false`.
+ */
+export function isDescendantOfBase(cwd: string, baseBranch: string): boolean | null {
+  try {
+    execFileSync('git', ['merge-base', '--is-ancestor', baseBranch, 'HEAD'], {
+      cwd,
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+    return true;
+  } catch (error) {
+    const exitCode = typeof error === 'object' && error !== null && 'status' in error
+      ? error.status
+      : undefined;
+    if (exitCode === 1) return false;
+    logCaughtError(`git/publish.isDescendantOfBase(${baseBranch})`, error);
+    return null;
+  }
+}
+
 function resolveRemoteBranch(cwd: string): string | null {
   const upstream = tryRunGit(['rev-parse', '--abbrev-ref', '--symbolic-full-name', '@{u}'], cwd);
   if (upstream) return upstream;
