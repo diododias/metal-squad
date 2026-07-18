@@ -10,6 +10,7 @@ export interface PromptBuildOptions {
   activeStage?: string | null;
   stepGuidanceSkills?: Skill[];
   dependencyPublications?: DependencyPublication[];
+  baseBranch?: string;
 }
 
 function normalizePrompt(prompt: string): string {
@@ -97,19 +98,25 @@ function buildTasksSection(feature: Feature, cwd: string): string | null {
 
 export function buildDependencyPublicationsSection(
   publications: DependencyPublication[] | undefined,
+  baseBranch = 'develop',
 ): string | null {
-  // Most-recent-first ordering makes the first entry the recommended base.
   const recommended = publications?.[0];
   if (!recommended) return null;
-  const lines = publications.map((pub) => {
-    const prLabel = pub.prNumber ? `PR #${String(pub.prNumber)} ${pub.prUrl}` : `PR ${pub.prUrl}`;
-    return `- ${pub.featureId} — ${prLabel} (branch ${pub.branchName})`;
-  });
+
+  // `remoteBranch` is persisted from the dependency's verified publication.
+  // T11 will ensure it is always present; use origin/<branch> for older runs.
+  const remoteBranch = recommended.remoteBranch ?? `origin/${recommended.branchName}`;
+  const slashIndex = remoteBranch.indexOf('/');
+  const remote = slashIndex === -1 ? 'origin' : remoteBranch.slice(0, slashIndex);
+  const branch = slashIndex === -1 ? recommended.branchName : remoteBranch.slice(slashIndex + 1);
+
   return [
-    'Dependency pull requests (base your working branch on one of these instead of develop):',
-    ...lines,
-    `Recommended base: ${recommended.branchName}. Create your working branch from that branch and open`,
-    'your pull request targeting that same branch (stacked PR), not develop.',
+    '# dependency base',
+    `base_branch=${baseBranch}`,
+    `base_remote=${remoteBranch}`,
+    `base_ref=${recommended.branchName}`,
+    `pr_base=${recommended.branchName}`,
+    `git fetch ${remote} ${branch} && git switch -c <your-working-branch> FETCH_HEAD`,
   ].join('\n');
 }
 
@@ -140,7 +147,10 @@ export function buildPrompt(
     effectiveSkills,
     opts.stepGuidanceSkills ?? [],
   ).map((skill) => `/${skill.name}`);
-  const dependencySection = buildDependencyPublicationsSection(opts.dependencyPublications);
+  const dependencySection = buildDependencyPublicationsSection(
+    opts.dependencyPublications,
+    opts.baseBranch,
+  );
   const technicalSpecification = [
     `Feature: ${feature.id} — ${feature.title}`,
     specContent,

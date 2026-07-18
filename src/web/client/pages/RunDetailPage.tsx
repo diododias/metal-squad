@@ -11,6 +11,7 @@ import { PageHeader } from '../PageHeader.js';
 import { useIsMobile } from '../Responsive.js';
 import { formatClockTime, formatElapsed, formatPercent, formatPublishTarget, formatTokens, getPublishStatusLabel, getRunStatusLabel, parseTimestampMs } from '../lib/format.js';
 import { summarizeTaskRuns } from '../lib/workflow.js';
+import { STAGE_ORDER } from '../../../core/workflow/stageOrder.js';
 import type { MsqWebState, FeatureConfigPatch, WebSocketClientMessage } from '../../types.js';
 import type { TaskRun } from '../../../db/repo.js';
 import type { RunBreakdown } from '../../../core/stats.js';
@@ -152,7 +153,7 @@ export function RunDetailPage({
     );
   }
 
-  const stages = feature?.workflow.stages ?? ['specify', 'plan', 'tasks', 'implement', 'validate'];
+  const stages = feature?.workflow.stages ?? [...STAGE_ORDER];
   const canPause = run.pipelineStatus === 'running';
   const canAbort = run.pipelineStatus === 'running' || run.pipelineStatus === 'blocked';
   const canResumeWithOverride = run.pipelineId != null

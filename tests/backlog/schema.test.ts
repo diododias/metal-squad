@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { BacklogInputSchema, BacklogSchema, BacklogV1Schema, BacklogV2Schema, createRegisteredToolSchema, EpicSchema, FallbackAlternativeSchema, RetrySchema } from '../../src/core/backlog/schema.js';
+import { BacklogInputSchema, BacklogSchema, BacklogV1Schema, BacklogV2Schema, createRegisteredToolSchema, dependencyType, EpicSchema, FallbackAlternativeSchema, RetrySchema, stackDependencies } from '../../src/core/backlog/schema.js';
+import { stagePublishesResolved } from '../../src/core/workflow/stagePublishes.js';
 
 const V1_YAML_OBJ = {
   version: 1,
@@ -108,6 +109,46 @@ describe('tool registry references', () => {
 });
 
 describe('BacklogV2Schema', () => {
+  it('defaults dependencies to stack and excludes explicitly logical dependencies from stack bases', () => {
+    const feature = BacklogV2Schema.parse({
+      ...V2_YAML_OBJ,
+      epics: [{
+        ...V2_YAML_OBJ.epics[0],
+        features: [{
+          ...V2_YAML_OBJ.epics[0].features[0],
+          dependsOn: ['feat-stack', 'feat-logical'],
+          dependencyTypes: { 'feat-logical': 'logical' },
+        }],
+      }],
+    }).epics[0]?.features[0];
+
+    expect(feature?.dependsOn).toEqual(['feat-stack', 'feat-logical']);
+    expect(dependencyType(feature!, 'feat-stack')).toBe('stack');
+    expect(dependencyType(feature!, 'feat-logical')).toBe('logical');
+    expect(stackDependencies(feature!)).toEqual(['feat-stack']);
+  });
+
+  it('rejects dependency types that do not reference dependsOn', () => {
+    const result = BacklogV2Schema.safeParse({
+      ...V2_YAML_OBJ,
+      epics: [{
+        ...V2_YAML_OBJ.epics[0],
+        features: [{
+          ...V2_YAML_OBJ.epics[0].features[0],
+          dependsOn: ['feat-stack'],
+          dependencyTypes: { 'feat-other': 'logical' },
+        }],
+      }],
+    });
+
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.error.issues).toContainEqual(expect.objectContaining({
+        path: ['epics', 0, 'features', 0, 'dependencyTypes', 'feat-other'],
+      }));
+    }
+  });
+
   it('accepts an approval channel that references a configured notification type', () => {
     const result = BacklogV2Schema.safeParse({
       ...V2_YAML_OBJ,
@@ -235,6 +276,51 @@ describe('BacklogV2Schema', () => {
         alwaysIsolatedStages: [],
       });
       expect(result.data.epics[0]?.features[0]?.workflow.stepGuidance).toEqual({});
+      expect(result.data.epics[0]?.features[0]?.workflow.stagePublishes).toEqual({});
+    }
+  });
+
+  it('parses stagePublishes for declared stages', () => {
+    const result = BacklogV2Schema.safeParse({
+      ...V2_YAML_OBJ,
+      epics: [{
+        ...V2_YAML_OBJ.epics[0],
+        features: [{
+          ...V2_YAML_OBJ.epics[0].features[0],
+          workflow: {
+            ...V2_YAML_OBJ.epics[0].features[0].workflow,
+            stagePublishes: { specify: true, plan: false },
+          },
+        }],
+      }],
+    });
+
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.epics[0]?.features[0]?.workflow.stagePublishes).toEqual({ specify: true, plan: false });
+    }
+  });
+
+  it('rejects stagePublishes keys not present in workflow.stages', () => {
+    const result = BacklogV2Schema.safeParse({
+      ...V2_YAML_OBJ,
+      epics: [{
+        ...V2_YAML_OBJ.epics[0],
+        features: [{
+          ...V2_YAML_OBJ.epics[0].features[0],
+          workflow: {
+            ...V2_YAML_OBJ.epics[0].features[0].workflow,
+            stagePublishes: { validate: true },
+          },
+        }],
+      }],
+    });
+
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.error.issues).toContainEqual(expect.objectContaining({
+        message: 'Stage "validate" must exist in workflow.stages.',
+      }));
     }
   });
 
@@ -439,6 +525,21 @@ describe('FallbackAlternativeSchema / RetrySchema.fallback', () => {
     if (v2Result.success) {
       expect(v2Result.data.epics[0]?.features[0]?.retry?.fallback).toEqual(retryWithFallback.fallback);
     }
+  });
+});
+
+describe('stagePublishesResolved', () => {
+  it('uses staged defaults when no override is configured', () => {
+    expect(stagePublishesResolved('implement', 'staged', {})).toBe(true);
+    expect(stagePublishesResolved('specify', 'staged', {})).toBe(false);
+  });
+
+  it('uses an explicit override before defaults', () => {
+    expect(stagePublishesResolved('specify', 'staged', { specify: true })).toBe(true);
+  });
+
+  it('defaults unknown single-stage workflow stages to publish', () => {
+    expect(stagePublishesResolved('dev-flow', 'single', {})).toBe(true);
   });
 });
 

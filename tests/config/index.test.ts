@@ -5,10 +5,11 @@ import { join } from 'node:path';
 
 const DEFAULT_NOTIFICATIONS = {
   channels: [],
-  events: ['run:start', 'gate:created', 'run:failed', 'run:done', 'stage:approval', 'stage:input'],
+  events: ['run:start', 'gate:created', 'run:failed', 'run:blocked', 'run:done', 'stage:approval', 'stage:input'],
 };
 const DEFAULT_BUDGET = { alertAtPercent: 80 };
 const DEFAULT_WEB = { host: '127.0.0.1', port: 8_743, auth: 'token', statusSpinner: true };
+const DEFAULT_INTEGRATION = { baseBranch: 'develop' };
 const DEFAULT_TOOLS = [
   {
     id: 'claude', adapter: 'claude', command: 'claude', baseArgs: [], env: {}, versionCheck: ['--version'],
@@ -68,6 +69,7 @@ describe('config', () => {
       notifications: DEFAULT_NOTIFICATIONS,
       budget: DEFAULT_BUDGET,
       web: DEFAULT_WEB,
+      integration: DEFAULT_INTEGRATION,
       tools: DEFAULT_TOOLS,
     });
   });
@@ -129,6 +131,7 @@ describe('config', () => {
       notifications: DEFAULT_NOTIFICATIONS,
       budget: DEFAULT_BUDGET,
       web: DEFAULT_WEB,
+      integration: DEFAULT_INTEGRATION,
       tools: DEFAULT_TOOLS,
     });
 
@@ -143,6 +146,7 @@ describe('config', () => {
       notifications: DEFAULT_NOTIFICATIONS,
       budget: DEFAULT_BUDGET,
       web: DEFAULT_WEB,
+      integration: DEFAULT_INTEGRATION,
       tools: DEFAULT_TOOLS,
     });
   });
@@ -364,6 +368,28 @@ describe('config', () => {
     expect(runtime.notifications.channels).toEqual([
       { type: 'slack', webhookUrl: 'https://example.test/hook' },
     ]);
+    expect(runtime.integration).toEqual(DEFAULT_INTEGRATION);
+  });
+
+  it('resolves integration.baseBranch from repo runtime config', async () => {
+    home = mkdtempSync(join(tmpdir(), 'msq-config-'));
+    process.env.HOME = home;
+
+    await import('node:fs').then(({ mkdirSync, writeFileSync }) => {
+      mkdirSync(join(home, 'repo', '.msq'), { recursive: true });
+      writeFileSync(join(home, 'repo', '.msq', 'config.yaml'), [
+        'runtime:',
+        '  integration:',
+        '    baseBranch: main',
+      ].join('\n'));
+    });
+
+    const { loadRepoConfig, resolveRuntimeConfig } = await import('../../src/config/index.js');
+
+    expect(loadRepoConfig(join(home, 'repo'))).toEqual({ runtime: {
+      integration: { baseBranch: 'main' },
+    } });
+    expect(resolveRuntimeConfig(join(home, 'repo')).integration).toEqual({ baseBranch: 'main' });
   });
 
   it('fails clearly when repo config references a missing environment variable', async () => {

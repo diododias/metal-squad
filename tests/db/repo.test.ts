@@ -523,6 +523,13 @@ describe('getLatestPublishedRunForFeature', () => {
     expect(getLatestPublishedRunForFeature('repo1', 'feat-a')).toBeNull();
   });
 
+  it('returns null for a done run without a pull request URL', async () => {
+    mockAll.mockReturnValue(publishColumns);
+    mockGet.mockReturnValue(undefined);
+    const { getLatestPublishedRunForFeature } = await import('../../src/db/repo.js');
+    expect(getLatestPublishedRunForFeature('repo1', 'feat-a')).toBeNull();
+  });
+
   it('returns null when the runs table has no pr_url column', async () => {
     mockAll.mockReturnValue([{ name: 'feature_id' }]);
     const { getLatestPublishedRunForFeature } = await import('../../src/db/repo.js');

@@ -182,7 +182,7 @@ export interface PipelineSnapshot {
   workflowRevisions?: PipelineWorkflowRevisions;
 }
 
-export type PipelineWorkflowRevision = Pick<Workflow, 'mode' | 'stages' | 'syncTasksToBacklog' | 'sessionPolicy' | 'stepGuidance'>;
+export type PipelineWorkflowRevision = Pick<Workflow, 'mode' | 'stages' | 'syncTasksToBacklog' | 'sessionPolicy' | 'stepGuidance' | 'stagePublishes'>;
 export type PipelineWorkflowRevisions = Record<string, PipelineWorkflowRevision>;
 
 export function createRun(
@@ -671,6 +671,13 @@ export function listRuns(limit = 50): RunRow[] {
         LIMIT ?`,
     )
     .all(limit) as RunRow[];
+}
+
+export function getRun(runId: number): RunRow | null {
+  if (!hasDbFile()) return null;
+  return (getDb('readonly')
+    .prepare(`SELECT * FROM runs WHERE id = ?`)
+    .get(runId) as RunRow | undefined) ?? null;
 }
 
 // T002: RunSummary interface

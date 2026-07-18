@@ -9,6 +9,7 @@ describe('ConfigSchema notifications defaults', () => {
       'run:start',
       'gate:created',
       'run:failed',
+      'run:blocked',
       'run:done',
       'stage:approval',
       'stage:input',
@@ -25,7 +26,7 @@ describe('ConfigSchema notifications defaults', () => {
           { type: 'webhook', url: 'https://example.com/hook' },
           { type: 'desktop' },
         ],
-        events: ['run:start', 'gate:created', 'run:failed', 'budget:alert', 'run:done', 'stage:approval', 'stage:input'],
+        events: ['run:start', 'gate:created', 'run:failed', 'run:blocked', 'budget:alert', 'run:done', 'stage:approval', 'stage:input'],
       },
     });
     expect(cfg.notifications.channels).toHaveLength(5);
@@ -43,6 +44,7 @@ describe('ConfigSchema notifications defaults', () => {
     expect(NOTIFICABLE_EVENTS).toContain('run:start');
     expect(NOTIFICABLE_EVENTS).toContain('gate:created');
     expect(NOTIFICABLE_EVENTS).toContain('run:failed');
+    expect(NOTIFICABLE_EVENTS).toContain('run:blocked');
     expect(NOTIFICABLE_EVENTS).toContain('budget:alert');
     expect(NOTIFICABLE_EVENTS).toContain('run:done');
     expect(NOTIFICABLE_EVENTS).toContain('stage:approval');

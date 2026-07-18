@@ -1,6 +1,7 @@
 import React from 'react';
 import { Box, Text } from 'ink';
 import type { Retry, Workflow } from '../../core/backlog/schema.js';
+import { STAGE_ORDER } from '../../core/workflow/stageOrder.js';
 import type { BacklogSettings, FeatureCatalogEntry } from '../catalog.js';
 import { truncateText } from '../format.js';
 import { useTheme } from '../theme/context.js';
@@ -18,12 +19,13 @@ const DEFAULT_RETRY: Required<Retry> = {
 // consistent with this component's own "never blank, show the default" rule.
 const _DEFAULT_WORKFLOW: Workflow = {
   mode: 'staged',
-  stages: ['specify', 'plan', 'tasks', 'implement', 'validate'],
+  stages: [...STAGE_ORDER],
   approvals: { channel: 'telegram' },
   autoAdvance: false,
   syncTasksToBacklog: true,
   sessionPolicy: { mode: 'isolated', alwaysIsolatedStages: [] },
   stepGuidance: {},
+  stagePublishes: {},
 };
 
 interface Props {

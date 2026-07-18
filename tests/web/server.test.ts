@@ -391,11 +391,13 @@ describe('web server', () => {
       featureId: 'feat-1',
       tool: 'claude',
       reason: 'gate',
+      code: 'dependency_unavailable',
       summary: 'aguardando decisão humana',
     });
     const message = await waitForSocketMessage(socket);
     expect((message as { type: string }).type).toBe('run:blocked');
     expect((message as { payload: { reason: string } }).payload.reason).toBe('gate');
+    expect((message as { payload: { code?: string } }).payload.code).toBe('dependency_unavailable');
     socket.close();
   });
 

@@ -1,8 +1,9 @@
 import type { SkillRegistry } from '../skills/types.js';
+import { STAGE_ORDER } from './stageOrder.js';
 
 /** Builtin-backed defaults that work in every repository. */
 export const DEFAULT_PROJECT_TEMPLATE: { stages: string[]; stageSkills: Record<string, string[]> } = {
-  stages: ['specify', 'plan', 'tasks', 'implement', 'validate'],
+  stages: [...STAGE_ORDER],
   stageSkills: {
     specify: ['speckit-specify'],
     plan: ['speckit-plan'],
