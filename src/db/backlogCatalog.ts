@@ -405,8 +405,8 @@ export function upsertBacklogCatalog(
   );
 
   const upsertEpic = db.prepare(
-    `INSERT INTO backlog_epics (epic_id, repo_id, title, position, data_json, archived_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, NULL, datetime('now'))
+    `INSERT INTO backlog_epics (epic_id, project_id, repo_id, title, position, data_json, archived_at, updated_at)
+     VALUES (?, (SELECT project_id FROM project_repos WHERE repo_id = ?), ?, ?, ?, ?, NULL, datetime('now'))
      ON CONFLICT(epic_id) DO UPDATE SET
        title = excluded.title,
        position = excluded.position,
@@ -478,7 +478,7 @@ export function upsertBacklogCatalog(
     );
 
     backlog.epics.forEach((epic, epicIndex) => {
-      upsertEpic.run(epic.id, repoId, epic.title, epicIndex, JSON.stringify(epic));
+      upsertEpic.run(epic.id, repoId, repoId, epic.title, epicIndex, JSON.stringify(epic));
 
       epic.features.forEach((feature, featureIndex) => {
         upsertFeature.run(
