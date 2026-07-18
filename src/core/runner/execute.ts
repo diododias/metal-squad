@@ -107,6 +107,7 @@ function captureWorkflowRevisions(features: Feature[]): PipelineWorkflowRevision
       ...guidance,
       ...(guidance.skills ? { skills: [...guidance.skills] } : {}),
     }])),
+    stagePublishes: { ...feature.workflow.stagePublishes },
   }]));
 }
 
