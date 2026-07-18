@@ -1,5 +1,5 @@
 import type { Tool } from '../backlog/schema.js';
-import type { RunResult, SessionStatusSnapshot, ToolCallRecord } from '../adapters/types.js';
+import type { RunBlockedCode, RunResult, SessionStatusSnapshot, ToolCallRecord } from '../adapters/types.js';
 import type { StageTransitionDecision } from '../workflow/sessionPolicy.js';
 
 export type GateDecision = 'approved' | 'skipped' | 'retried';
@@ -58,7 +58,9 @@ export interface RunBlockedEvent {
   runId: number;
   featureId: string;
   tool: Tool;
+  /** `reason` routes recovery; `code` explains the specific blocking cause. */
   reason: RunBlockedReason;
+  code?: RunBlockedCode;
   summary: string;
 }
 

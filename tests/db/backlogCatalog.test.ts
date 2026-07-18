@@ -336,6 +336,7 @@ describe('backlogCatalog upsert/diff/load', () => {
         syncTasksToBacklog: true,
         sessionPolicy: { mode: 'isolated' as const, alwaysIsolatedStages: ['specify'] },
         stepGuidance: { specify: { prompt: 'Keep this guidance.' } },
+        stagePublishes: {},
       };
       upsertBacklogCatalog(makeBacklog({ epics: [{ id: 'epic-1', title: 'Epic One', features: [{ ...makeBacklog().epics[0]!.features[0]!, workflow }] }] }), 'repo-1');
 
