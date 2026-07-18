@@ -11,6 +11,39 @@ beforeEach(() => {
 });
 
 describe('verifyPublishContract', () => {
+  it('accepts main as the configured allowed base branch', async () => {
+    mockExecFileSync.mockImplementation((command: string, args?: string[]) => {
+      const joined = `${command} ${(args ?? []).join(' ')}`;
+      if (joined === 'git rev-parse --abbrev-ref HEAD') return 'feat/test\n';
+      if (joined === 'git rev-parse HEAD') return 'abc1234\n';
+      if (joined === 'git rev-parse --abbrev-ref --symbolic-full-name @{u}') return 'origin/feat/test\n';
+      if (joined === 'git rev-parse --verify main') return 'base123\n';
+      if (joined === 'git rev-list --count main..HEAD') return '2\n';
+      if (joined === 'gh --version') return '2.0.0\n';
+      if (joined === 'gh pr view --json number,url,state,baseRefName,headRefName') {
+        return JSON.stringify({ number: 42, url: 'https://example.test/pr/42', state: 'OPEN', baseRefName: 'main' });
+      }
+      throw new Error(`unexpected command: ${joined}`);
+    });
+
+    const { verifyPublishContract } = await import('../../src/core/git/publish.js');
+    expect(verifyPublishContract('/repo', ['main'])).toMatchObject({
+      ok: true,
+      evidence: { baseBranch: 'main' },
+    });
+  });
+
+  it('fails with an actionable error when no base branches are supplied', async () => {
+    const { verifyPublishContract } = await import('../../src/core/git/publish.js');
+
+    expect(verifyPublishContract('/repo', [])).toMatchObject({
+      ok: false,
+      status: 'failed',
+      summary: 'publish: no allowed base branches were configured; set integration.baseBranch or dependency branches.',
+    });
+    expect(mockExecFileSync).not.toHaveBeenCalled();
+  });
+
   it('accepts a branch with commits ahead, upstream, and an open PR to develop', async () => {
     mockExecFileSync.mockImplementation((command: string, args?: string[]) => {
       const joined = `${command} ${(args ?? []).join(' ')}`;
@@ -33,10 +66,10 @@ describe('verifyPublishContract', () => {
     });
 
     const { verifyPublishContract } = await import('../../src/core/git/publish.js');
-    expect(verifyPublishContract('/repo')).toEqual({
+    expect(verifyPublishContract('/repo', ['develop'])).toEqual({
       ok: true,
       status: 'done',
-      summary: 'implement publish verified on feat/test (https://example.test/pr/42).',
+      summary: 'publish verified on feat/test (https://example.test/pr/42).',
       evidence: {
         branch: 'feat/test',
         baseBranch: 'develop',
@@ -57,10 +90,10 @@ describe('verifyPublishContract', () => {
     });
 
     const { verifyPublishContract } = await import('../../src/core/git/publish.js');
-    expect(verifyPublishContract('/repo')).toMatchObject({
+    expect(verifyPublishContract('/repo', ['develop'])).toMatchObject({
       ok: false,
       status: 'failed',
-      summary: 'implement: branch must not be develop.',
+      summary: 'publish: branch must not be develop.',
       evidence: {
         branch: 'develop',
         baseBranch: 'develop',
@@ -77,15 +110,15 @@ describe('verifyPublishContract', () => {
       if (joined === 'git rev-parse --abbrev-ref --symbolic-full-name @{u}') return 'origin/feat/test\n';
       if (joined === 'git rev-parse --verify develop') return 'base123\n';
       if (joined === 'git rev-list --count develop..HEAD') return '1\n';
-      if (joined === 'gh --version') throw new Error('gh missing');
       throw new Error(`unexpected command: ${joined}`);
     });
 
     const { verifyPublishContract } = await import('../../src/core/git/publish.js');
-    expect(verifyPublishContract('/repo')).toMatchObject({
+    const forge = { available: () => false, viewPullRequest: vi.fn() };
+    expect(verifyPublishContract('/repo', ['develop'], forge)).toMatchObject({
       ok: false,
       status: 'blocked',
-      summary: 'implement: GitHub CLI is unavailable, so PR verification could not be completed.',
+      summary: 'publish: GitHub CLI is unavailable, so PR verification could not be completed.',
     });
   });
 
@@ -99,10 +132,10 @@ describe('verifyPublishContract', () => {
     });
 
     const { verifyPublishContract } = await import('../../src/core/git/publish.js');
-    expect(verifyPublishContract('/repo')).toMatchObject({
+    expect(verifyPublishContract('/repo', ['develop'])).toMatchObject({
       ok: false,
       status: 'failed',
-      summary: 'implement: repository is not on a named working branch.',
+      summary: 'publish: repository is not on a named working branch.',
     });
   });
 
@@ -118,10 +151,10 @@ describe('verifyPublishContract', () => {
     });
 
     const { verifyPublishContract } = await import('../../src/core/git/publish.js');
-    expect(verifyPublishContract('/repo')).toMatchObject({
+    expect(verifyPublishContract('/repo', ['develop'])).toMatchObject({
       ok: false,
       status: 'blocked',
-      summary: 'implement: could not compare HEAD against develop.',
+      summary: 'publish: could not compare HEAD against develop.',
     });
   });
 
@@ -139,10 +172,10 @@ describe('verifyPublishContract', () => {
     });
 
     const { verifyPublishContract } = await import('../../src/core/git/publish.js');
-    expect(verifyPublishContract('/repo')).toMatchObject({
+    expect(verifyPublishContract('/repo', ['develop'])).toMatchObject({
       ok: false,
       status: 'blocked',
-      summary: 'implement: could not compare HEAD against develop.',
+      summary: 'publish: could not compare HEAD against develop.',
     });
   });
 
@@ -160,10 +193,10 @@ describe('verifyPublishContract', () => {
     });
 
     const { verifyPublishContract } = await import('../../src/core/git/publish.js');
-    expect(verifyPublishContract('/repo')).toMatchObject({
+    expect(verifyPublishContract('/repo', ['develop'])).toMatchObject({
       ok: false,
       status: 'failed',
-      summary: 'implement: branch has no commits ahead of develop.',
+      summary: 'publish: branch has no commits ahead of develop.',
     });
   });
 
@@ -180,10 +213,10 @@ describe('verifyPublishContract', () => {
     });
 
     const { verifyPublishContract } = await import('../../src/core/git/publish.js');
-    expect(verifyPublishContract('/repo')).toMatchObject({
+    expect(verifyPublishContract('/repo', ['develop'])).toMatchObject({
       ok: false,
       status: 'blocked',
-      summary: 'implement: branch has no upstream remote configured; push evidence is missing.',
+      summary: 'publish: branch has no upstream remote configured; push evidence is missing.',
       evidence: { remoteBranch: null },
     });
   });
@@ -205,7 +238,7 @@ describe('verifyPublishContract', () => {
     });
 
     const { verifyPublishContract } = await import('../../src/core/git/publish.js');
-    expect(verifyPublishContract('/repo')).toMatchObject({
+    expect(verifyPublishContract('/repo', ['develop'])).toMatchObject({
       ok: true,
       status: 'done',
       evidence: { remoteBranch: 'origin/feat/test' },
@@ -220,16 +253,15 @@ describe('verifyPublishContract', () => {
       if (joined === 'git rev-parse --abbrev-ref --symbolic-full-name @{u}') return 'origin/feat/test\n';
       if (joined === 'git rev-parse --verify develop') return 'base123\n';
       if (joined === 'git rev-list --count develop..HEAD') return '1\n';
-      if (joined === 'gh --version') return '2.0.0\n';
-      if (joined === 'gh pr view --json number,url,state,baseRefName,headRefName') throw new Error('no pr');
       throw new Error(`unexpected command: ${joined}`);
     });
 
     const { verifyPublishContract } = await import('../../src/core/git/publish.js');
-    expect(verifyPublishContract('/repo')).toMatchObject({
+    const forge = { available: () => true, viewPullRequest: () => ({ ok: true as const, value: null }) };
+    expect(verifyPublishContract('/repo', ['develop'], forge)).toMatchObject({
       ok: false,
       status: 'blocked',
-      summary: 'implement: no pull request is open for the current branch against develop.',
+      summary: 'publish: no pull request is open for the current branch against develop.',
     });
   });
 
@@ -247,10 +279,33 @@ describe('verifyPublishContract', () => {
     });
 
     const { verifyPublishContract } = await import('../../src/core/git/publish.js');
-    expect(verifyPublishContract('/repo')).toMatchObject({
+    expect(verifyPublishContract('/repo', ['develop'])).toMatchObject({
       ok: false,
       status: 'blocked',
-      summary: 'implement: no pull request is open for the current branch against develop.',
+      summary: expect.stringContaining('GitHub CLI could not read the pull request'),
+    });
+  });
+
+  it('propagates stderr from a failing ForgeAdapter instead of treating it as no PR', async () => {
+    mockExecFileSync.mockImplementation((command: string, args?: string[]) => {
+      const joined = `${command} ${(args ?? []).join(' ')}`;
+      if (joined === 'git rev-parse --abbrev-ref HEAD') return 'feat/test\n';
+      if (joined === 'git rev-parse HEAD') return 'abc1234\n';
+      if (joined === 'git rev-parse --abbrev-ref --symbolic-full-name @{u}') return 'origin/feat/test\n';
+      if (joined === 'git rev-parse --verify develop') return 'base123\n';
+      if (joined === 'git rev-list --count develop..HEAD') return '1\n';
+      throw new Error(`unexpected command: ${joined}`);
+    });
+
+    const { verifyPublishContract } = await import('../../src/core/git/publish.js');
+    const forge = {
+      available: () => true,
+      viewPullRequest: () => ({ ok: false as const, stderr: 'authentication token expired', code: 4 }),
+    };
+    expect(verifyPublishContract('/repo', ['develop'], forge)).toMatchObject({
+      ok: false,
+      status: 'blocked',
+      summary: 'publish: GitHub CLI could not read the pull request: authentication token expired',
     });
   });
 
@@ -270,10 +325,10 @@ describe('verifyPublishContract', () => {
     });
 
     const { verifyPublishContract } = await import('../../src/core/git/publish.js');
-    expect(verifyPublishContract('/repo')).toMatchObject({
+    expect(verifyPublishContract('/repo', ['develop'])).toMatchObject({
       ok: false,
       status: 'failed',
-      summary: 'implement: pull request base is main, expected develop.',
+      summary: 'publish: pull request base is main, expected develop.',
     });
   });
 
@@ -302,7 +357,7 @@ describe('verifyPublishContract', () => {
     expect(verifyPublishContract('/repo', ['feat/dep-a', 'develop'])).toMatchObject({
       ok: true,
       status: 'done',
-      summary: 'implement publish verified on feat/child (https://example.test/pr/55).',
+      summary: 'publish verified on feat/child (https://example.test/pr/55).',
       evidence: { branch: 'feat/child', baseBranch: 'feat/dep-a', prNumber: 55 },
     });
   });
@@ -326,7 +381,7 @@ describe('verifyPublishContract', () => {
     expect(verifyPublishContract('/repo', ['feat/dep-a', 'develop'])).toMatchObject({
       ok: false,
       status: 'failed',
-      summary: 'implement: pull request base is main, expected feat/dep-a or develop.',
+      summary: 'publish: pull request base is main, expected feat/dep-a or develop.',
     });
   });
 
@@ -346,10 +401,10 @@ describe('verifyPublishContract', () => {
     });
 
     const { verifyPublishContract } = await import('../../src/core/git/publish.js');
-    expect(verifyPublishContract('/repo')).toMatchObject({
+    expect(verifyPublishContract('/repo', ['develop'])).toMatchObject({
       ok: false,
       status: 'failed',
-      summary: 'implement: pull request is not open (state=MERGED).',
+      summary: 'publish: pull request is not open (state=MERGED).',
     });
   });
 });
@@ -364,7 +419,7 @@ describe('isDescendantOfBase', () => {
     expect(mockExecFileSync).toHaveBeenCalledWith('git', ['merge-base', '--is-ancestor', 'develop', 'HEAD'], {
       cwd: '/repo',
       encoding: 'utf8',
-      stdio: ['ignore', 'pipe', 'ignore'],
+      stdio: ['ignore', 'pipe', 'pipe'],
     });
   });
 
