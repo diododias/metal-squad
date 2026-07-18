@@ -83,6 +83,7 @@ const WorkflowSchemaShape = z.object({
   syncTasksToBacklog: z.boolean().default(true),
   sessionPolicy: WorkflowSessionPolicySchema.default({}),
   stepGuidance: z.record(z.string(), StepGuidanceSchema).default({}),
+  stagePublishes: z.record(z.string(), z.boolean()).default({}),
 });
 
 /** Normalizes the former approvals.autoAdvance input into workflow.autoAdvance. */
@@ -127,6 +128,16 @@ export const WorkflowSchema = z.preprocess((value) => {
     }
     if ((guidance.skills?.length ?? 0) === 0 && guidance.prompt === undefined) {
       continue;
+    }
+  }
+
+  for (const stage of Object.keys(workflow.stagePublishes)) {
+    if (!workflow.stages.includes(stage)) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['stagePublishes', stage],
+        message: `Stage "${stage}" must exist in workflow.stages.`,
+      });
     }
   }
 });
@@ -256,6 +267,7 @@ export type Tool = z.infer<typeof ToolSchema>;
 export type Effort = z.infer<typeof EffortSchema>;
 export type Thinking = z.infer<typeof ThinkingSchema>;
 export type DependencyType = z.infer<typeof DependencyTypeSchema>;
+export type WorkflowMode = z.infer<typeof WorkflowModeSchema>;
 export type OnFail = z.infer<typeof OnFailSchema>;
 export type SessionPolicyMode = z.infer<typeof SessionPolicyModeSchema>;
 export type Budget = z.infer<typeof BudgetSchema>;

@@ -24,6 +24,7 @@ const _DEFAULT_WORKFLOW: Workflow = {
   syncTasksToBacklog: true,
   sessionPolicy: { mode: 'isolated', alwaysIsolatedStages: [] },
   stepGuidance: {},
+  stagePublishes: {},
 };
 
 interface Props {

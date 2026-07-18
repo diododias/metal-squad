@@ -306,6 +306,38 @@ describe('buildPrompt — dynamic skill-based prompt builder', () => {
     expect(implementPrompt).toContain('Touch only implementation files.');
     expect(planPrompt).toBe('/speckit-implement\n\n---\n\nFeature: feat-1 — My Feature');
   });
+
+  it('renders a deterministic dependency-base block using the persisted remote branch and configured base', async () => {
+    const { buildDependencyPublicationsSection } = await import('../../src/core/backlog/prompt.js');
+
+    expect(buildDependencyPublicationsSection([{
+      featureId: 'feat-dependency',
+      prNumber: 160,
+      prUrl: 'https://github.com/example/repo/pull/160',
+      branchName: 'feat/dependency',
+      remoteBranch: 'upstream/stack/feat/dependency',
+    }], 'main')).toBe([
+      '# dependency base',
+      'base_branch=main',
+      'base_remote=upstream/stack/feat/dependency',
+      'base_ref=feat/dependency',
+      'pr_base=feat/dependency',
+      'git fetch upstream stack/feat/dependency && git switch -c <your-working-branch> FETCH_HEAD',
+    ].join('\n'));
+  });
+
+  it('falls back to origin branch syntax and omits the block without publications', async () => {
+    const { buildDependencyPublicationsSection } = await import('../../src/core/backlog/prompt.js');
+
+    expect(buildDependencyPublicationsSection([{
+      featureId: 'feat-dependency',
+      prNumber: null,
+      prUrl: 'https://github.com/example/repo/pull/160',
+      branchName: 'feat/dependency',
+      remoteBranch: null,
+    }])).toContain('base_remote=origin/feat/dependency');
+    expect(buildDependencyPublicationsSection([], 'main')).toBeNull();
+  });
 });
 
 describe('backlog loading and prompt generation', () => {
