@@ -516,6 +516,7 @@ export async function executeBacklog(
     const prompt = buildPrompt(feature, skills, opts.cwd, {
       maxContextChars: config.promptContextCharLimit,
       dependencyPublications,
+      baseBranch: config.integration.baseBranch,
     });
     try {
       const { res } = await executeStageRun(feature, prompt, undefined, controller.signal);
@@ -917,6 +918,7 @@ async function executeStagedFeature(
       config.promptContextCharLimit,
       stageInputs.get(stage) ?? [],
       dependencyPublications,
+      config.integration.baseBranch,
     );
     const { runId, res } = await executeStageRun(feature, prompt, stage, abortSignal, nextStageSession);
     if (pendingTransitionDecisionId !== null) {
@@ -1085,12 +1087,14 @@ function buildStagePrompt(
   maxContextChars: number,
   adminInputs: string[],
   dependencyPublications: DependencyPublication[] = [],
+  baseBranch = 'develop',
 ): string {
   const basePrompt = buildPrompt(feature, skills, cwd, {
     maxContextChars,
     activeStage: stage,
     stepGuidanceSkills,
     dependencyPublications,
+    baseBranch,
   });
   const stageNotes = [
     `Current workflow stage: ${stage}.`,
@@ -1110,21 +1114,14 @@ function buildStagePrompt(
     }
   }
   if (stage === 'implement') {
-    const stackedBase = dependencyPublications[0]?.branchName;
-    const branchLine = stackedBase
-      ? `- create your working branch from the dependency branch ${stackedBase} (not develop)`
-      : `- work on a named branch that is not develop`;
-    const prLine = stackedBase
-      ? `- open a pull request targeting the dependency branch ${stackedBase} (stacked PR), not develop`
-      : '- open a pull request targeting develop';
     stageNotes.push([
       'Implementation exit contract:',
-      branchLine,
+      '- work on a named branch',
       '- complete the implementation in this session',
       '- run the relevant validation commands before finishing',
       '- create a commit for the implementation',
       '- push the branch to its remote upstream',
-      prLine,
+      `- open a pull request targeting ${baseBranch}, unless # dependency base specifies pr_base for a stacked PR`,
       '- do not claim the stage is complete unless all items above were actually completed',
     ].join('\n'));
   }

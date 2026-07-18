@@ -116,6 +116,7 @@ vi.mock('../../src/config/index.js', () => ({
     promptContextCharLimit: 20_000,
     workflow: { autoAdvanceStages: false, pollIntervalMs: 1 },
     budget: {},
+    integration: { baseBranch: 'develop' },
   }),
   saveConfig: vi.fn(),
 }));
