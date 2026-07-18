@@ -96,6 +96,10 @@ const WebConfig = z.object({
   statusSpinner: z.boolean().default(true),
 });
 
+const IntegrationConfig = z.object({
+  baseBranch: z.string().min(1).default('develop'),
+});
+
 const ToolCapabilitiesConfig = z.object({
   model: z.boolean(),
   effort: z.boolean(),
@@ -182,6 +186,7 @@ const RuntimeConfigOverrideSchema = z.object({
   notifications: NotificationsConfig.partial().optional(),
   budget: BudgetConfig.partial().optional(),
   web: WebConfig.partial().optional(),
+  integration: IntegrationConfig.partial().optional(),
 });
 
 export const REPO_CONFIG_PATH = '.msq/config.yaml';
@@ -197,13 +202,15 @@ export const ConfigSchema = z.object({
   notifications: NotificationsConfig.default({}),
   budget: BudgetConfig.default({}),
   web: WebConfig.default({}),
+  integration: IntegrationConfig.default({}),
   tools: ToolRegistrySchema.default(DEFAULT_TOOL_REGISTRY),
 });
 export type Config = z.infer<typeof ConfigSchema>;
-export interface AppConfigPatch extends Omit<Partial<Config>, 'notifications' | 'budget' | 'web'> {
+export interface AppConfigPatch extends Omit<Partial<Config>, 'notifications' | 'budget' | 'web' | 'integration'> {
   notifications?: Partial<Config['notifications']>;
   budget?: Partial<Config['budget']>;
   web?: Partial<Config['web']>;
+  integration?: Partial<Config['integration']>;
 }
 export type ToolRegistryEntry = z.infer<typeof ToolRegistryEntrySchema>;
 export type WebConfig = z.infer<typeof WebConfig>;
@@ -359,6 +366,7 @@ export function saveAppConfigPatch(patch: AppConfigPatch): Config {
     notifications: patch.notifications ? { ...current.notifications, ...patch.notifications } : current.notifications,
     budget: patch.budget ? { ...current.budget, ...patch.budget } : current.budget,
     web: patch.web ? { ...current.web, ...patch.web } : current.web,
+    integration: patch.integration ? { ...current.integration, ...patch.integration } : current.integration,
   });
 
   if (!configWritable()) {
@@ -503,6 +511,12 @@ export function mergeRuntimeConfig(base: Config, overlay: RuntimeConfigOverride 
           ...overlay.web,
         }
       : base.web,
+    integration: overlay.integration
+      ? {
+          ...base.integration,
+          ...overlay.integration,
+        }
+      : base.integration,
   });
 }
 
