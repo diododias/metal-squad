@@ -824,7 +824,7 @@ describe('executeBacklog failure persistence', () => {
               dependsOn: [],
               workflow: {
                 mode: 'staged',
-                stages: ['specify', 'plan'],
+                stages: ['specify', 'plan', 'dev-flow'],
                 approvals: { channel: 'telegram', autoAdvance: false },
                 syncTasksToBacklog: false,
                 sessionPolicy: { mode: 'isolated', alwaysIsolatedStages: [] },
@@ -842,7 +842,8 @@ describe('executeBacklog failure persistence', () => {
 
     mockRunFeature
       .mockResolvedValueOnce({ ok: true, summary: 'spec ok' })
-      .mockResolvedValueOnce({ ok: true, summary: 'plan ok' });
+      .mockResolvedValueOnce({ ok: true, summary: 'plan ok' })
+      .mockResolvedValueOnce({ ok: true, summary: 'dev-flow ok' });
     mockGetStageRequest.mockReturnValue({ status: 'resolved', response: 'advance' });
 
     const { executeBacklog } = await import('../../src/core/runner/execute.js');
@@ -860,7 +861,7 @@ describe('executeBacklog failure persistence', () => {
         snapshot: expect.objectContaining({
           workflowRevisions: {
             'feat-27': expect.objectContaining({
-              stages: ['specify', 'plan'],
+              stages: ['specify', 'plan', 'dev-flow'],
               stepGuidance: { plan: { prompt: 'Focus only on planning output.' } },
             }),
           },
@@ -874,6 +875,10 @@ describe('executeBacklog failure persistence', () => {
     expect(mockCreateRun).toHaveBeenNthCalledWith(2, 'repo-1', 'feat-27', 'codex', {
       pipelineId: 9,
       stage: 'plan',
+    });
+    expect(mockCreateRun).toHaveBeenNthCalledWith(3, 'repo-1', 'feat-27', 'codex', {
+      pipelineId: 9,
+      stage: 'dev-flow',
     });
     expect(mockCreateStageRequest).toHaveBeenCalledWith(
       9,
@@ -903,6 +908,10 @@ describe('executeBacklog failure persistence', () => {
     expect(mockRunFeature.mock.calls[0]?.[1]).toContain('Feature: Feature');
     expect(mockRunFeature.mock.calls[0]?.[1]).toContain('Summary:\nspec');
     expect(mockRunFeature.mock.calls[1]?.[1]).toContain('Focus only on planning output.');
+    const { COMMUNICATION_PROTOCOL } = await import('../../src/core/runner/communicationProtocol.js');
+    for (const [, prompt] of mockRunFeature.mock.calls) {
+      expect(prompt).toContain(COMMUNICATION_PROTOCOL);
+    }
     expect(mockFinishPipeline).toHaveBeenCalledWith(9, 'done');
   });
 

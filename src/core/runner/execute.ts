@@ -54,6 +54,7 @@ import { dispatch } from '../notify/manager.js';
 import { startTelegramPoller, stopTelegramPoller } from '../notify/telegram-poller.js';
 import { resolveRuntimeConfig } from '../../config/index.js';
 import { buildPrompt } from '../backlog/prompt.js';
+import { COMMUNICATION_PROTOCOL } from './communicationProtocol.js';
 import { createSkillRegistry } from '../skills/index.js';
 import { syncFeatureTasksToBacklog } from '../backlog/sync.js';
 import type { Skill } from '../skills/types.js';
@@ -1096,8 +1097,7 @@ function buildStagePrompt(
     `Current workflow stage: ${stage}.`,
     'Run only this stage in this session.',
     'Do not continue to later stages after finishing the current stage.',
-    'If you need admin input, end your final response with exactly: MSQ_INPUT_REQUIRED: <question>',
-    'If the question has 1-8 discrete answer options, add a line `OPTIONS:` right after it, followed by one `- <label>` line per option (each label 1-60 characters, no duplicates); otherwise omit it for free-text input.',
+    COMMUNICATION_PROTOCOL,
   ];
   const stageContext: string[] = [];
   if (stage === 'specify') {
