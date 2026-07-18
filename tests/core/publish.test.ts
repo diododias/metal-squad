@@ -77,12 +77,12 @@ describe('verifyPublishContract', () => {
       if (joined === 'git rev-parse --abbrev-ref --symbolic-full-name @{u}') return 'origin/feat/test\n';
       if (joined === 'git rev-parse --verify develop') return 'base123\n';
       if (joined === 'git rev-list --count develop..HEAD') return '1\n';
-      if (joined === 'gh --version') throw new Error('gh missing');
       throw new Error(`unexpected command: ${joined}`);
     });
 
     const { verifyPublishContract } = await import('../../src/core/git/publish.js');
-    expect(verifyPublishContract('/repo')).toMatchObject({
+    const forge = { available: () => false, viewPullRequest: vi.fn() };
+    expect(verifyPublishContract('/repo', ['develop'], forge)).toMatchObject({
       ok: false,
       status: 'blocked',
       summary: 'implement: GitHub CLI is unavailable, so PR verification could not be completed.',
@@ -220,13 +220,12 @@ describe('verifyPublishContract', () => {
       if (joined === 'git rev-parse --abbrev-ref --symbolic-full-name @{u}') return 'origin/feat/test\n';
       if (joined === 'git rev-parse --verify develop') return 'base123\n';
       if (joined === 'git rev-list --count develop..HEAD') return '1\n';
-      if (joined === 'gh --version') return '2.0.0\n';
-      if (joined === 'gh pr view --json number,url,state,baseRefName,headRefName') throw new Error('no pr');
       throw new Error(`unexpected command: ${joined}`);
     });
 
     const { verifyPublishContract } = await import('../../src/core/git/publish.js');
-    expect(verifyPublishContract('/repo')).toMatchObject({
+    const forge = { available: () => true, viewPullRequest: () => ({ ok: true as const, value: null }) };
+    expect(verifyPublishContract('/repo', ['develop'], forge)).toMatchObject({
       ok: false,
       status: 'blocked',
       summary: 'implement: no pull request is open for the current branch against develop.',
@@ -250,7 +249,30 @@ describe('verifyPublishContract', () => {
     expect(verifyPublishContract('/repo')).toMatchObject({
       ok: false,
       status: 'blocked',
-      summary: 'implement: no pull request is open for the current branch against develop.',
+      summary: expect.stringContaining('GitHub CLI could not read the pull request'),
+    });
+  });
+
+  it('propagates stderr from a failing ForgeAdapter instead of treating it as no PR', async () => {
+    mockExecFileSync.mockImplementation((command: string, args?: string[]) => {
+      const joined = `${command} ${(args ?? []).join(' ')}`;
+      if (joined === 'git rev-parse --abbrev-ref HEAD') return 'feat/test\n';
+      if (joined === 'git rev-parse HEAD') return 'abc1234\n';
+      if (joined === 'git rev-parse --abbrev-ref --symbolic-full-name @{u}') return 'origin/feat/test\n';
+      if (joined === 'git rev-parse --verify develop') return 'base123\n';
+      if (joined === 'git rev-list --count develop..HEAD') return '1\n';
+      throw new Error(`unexpected command: ${joined}`);
+    });
+
+    const { verifyPublishContract } = await import('../../src/core/git/publish.js');
+    const forge = {
+      available: () => true,
+      viewPullRequest: () => ({ ok: false as const, stderr: 'authentication token expired', code: 4 }),
+    };
+    expect(verifyPublishContract('/repo', ['develop'], forge)).toMatchObject({
+      ok: false,
+      status: 'blocked',
+      summary: 'implement: GitHub CLI could not read the pull request: authentication token expired',
     });
   });
 
