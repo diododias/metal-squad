@@ -2,6 +2,7 @@ import { getSecret } from '../../security/secrets.js';
 import { resolveRuntimeConfig } from '../../config/index.js';
 import { msqEventBus } from '../events/bus.js';
 import { logCaughtError } from '../events/logging.js';
+import { resumeBlockedRun } from '../runner/resume-blocked-run.js';
 import {
   getFeatureTopicAssociation,
   getGate,
@@ -38,6 +39,7 @@ const INPUT_CMD = /^input:(\d+)\s+([\s\S]+)$/i;
 // Matches a tap on an option button: input:<requestId>:<optionIndex>
 const INPUT_OPTION_CMD = /^input:(\d+):(\d+)$/;
 const TIMEOUT_CMD = /^timeout:(\d+)\s+(retry|keep_blocked)$/i;
+const BLOCKED_CMD = /^blocked:(approve|intervene):(\d+)$/i;
 
 function parseDecision(raw: string): GateDecision | null {
   const lower = raw.toLowerCase();
@@ -196,6 +198,19 @@ export class TelegramPoller {
                 void won;
               }
             } catch (error) { notifyActionFailed('resolveTimeoutApproval', error); }
+            if (callbackId) void this.answerCallback(token, callbackId);
+            continue;
+          }
+
+          const blockedMatch = BLOCKED_CMD.exec(text);
+          if (blockedMatch) {
+            const action = blockedMatch[1]?.toLowerCase();
+            const runId = Number(blockedMatch[2]);
+            if (action === 'approve') {
+              try { resumeBlockedRun(runId); } catch (error) { notifyActionFailed('resumeBlockedRun', error); }
+            } else {
+              msqEventBus.emit('ui:info', { message: `Blocked run ${String(runId)} remains blocked for human intervention.` });
+            }
             if (callbackId) void this.answerCallback(token, callbackId);
             continue;
           }

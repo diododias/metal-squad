@@ -8,6 +8,7 @@ const mockGetGate = vi.fn();
 const mockGetFeatureTopicAssociation = vi.fn();
 const mockGetTimeoutApprovalRequest = vi.fn();
 const mockResolveTimeoutApproval = vi.fn();
+const mockResumeBlockedRun = vi.fn();
 const mockFetch = vi.fn();
 
 vi.mock('../../src/security/secrets.js', () => ({ getSecret: mockGetSecret }));
@@ -20,6 +21,7 @@ vi.mock('../../src/db/repo.js', () => ({
   getTimeoutApprovalRequest: mockGetTimeoutApprovalRequest,
   resolveTimeoutApproval: mockResolveTimeoutApproval,
 }));
+vi.mock('../../src/core/runner/resume-blocked-run.js', () => ({ resumeBlockedRun: mockResumeBlockedRun }));
 vi.mock('../../src/config/index.js', () => ({
   resolveRuntimeConfig: vi.fn(() => ({
     telegramChatId: undefined,
@@ -58,6 +60,7 @@ beforeEach(() => {
   mockGetFeatureTopicAssociation.mockReset();
   mockGetTimeoutApprovalRequest.mockReset();
   mockResolveTimeoutApproval.mockReset();
+  mockResumeBlockedRun.mockReset();
   mockFetch.mockReset();
 });
 
@@ -313,6 +316,88 @@ describe('TelegramPoller', () => {
       chatId: 'chat-1',
       threadId: 321,
     });
+    poller.stop();
+  });
+
+  it('approves a blocked run from a callback and acknowledges Telegram', async () => {
+    mockGetSecret.mockResolvedValue('TOKEN');
+    let fetchCount = 0;
+    let answeredCallback = false;
+    mockFetch.mockImplementation((url: string) => {
+      if (url.includes('getUpdates') && ++fetchCount === 1) {
+        return Promise.resolve(makeUpdateResponse([
+          { update_id: 101, callback_query: { id: 'cb-blocked-approve', data: 'blocked:approve:276' } },
+        ]));
+      }
+      if (url.includes('answerCallbackQuery')) {
+        answeredCallback = true;
+        return Promise.resolve({ ok: true });
+      }
+      return new Promise(() => {});
+    });
+
+    const { TelegramPoller } = await import('../../src/core/notify/telegram-poller.js');
+    const poller = new TelegramPoller();
+    poller.start();
+    await flushMicrotasks(40);
+
+    expect(mockResumeBlockedRun).toHaveBeenCalledWith(276);
+    expect(answeredCallback).toBe(true);
+    poller.stop();
+  });
+
+  it('keeps a blocked run untouched on intervene and acknowledges Telegram', async () => {
+    mockGetSecret.mockResolvedValue('TOKEN');
+    let fetchCount = 0;
+    let answeredCallback = false;
+    mockFetch.mockImplementation((url: string) => {
+      if (url.includes('getUpdates') && ++fetchCount === 1) {
+        return Promise.resolve(makeUpdateResponse([
+          { update_id: 102, callback_query: { id: 'cb-blocked-intervene', data: 'blocked:intervene:276' } },
+        ]));
+      }
+      if (url.includes('answerCallbackQuery')) {
+        answeredCallback = true;
+        return Promise.resolve({ ok: true });
+      }
+      return new Promise(() => {});
+    });
+
+    const { TelegramPoller } = await import('../../src/core/notify/telegram-poller.js');
+    const poller = new TelegramPoller();
+    poller.start();
+    await flushMicrotasks(40);
+
+    expect(mockResumeBlockedRun).not.toHaveBeenCalled();
+    expect(answeredCallback).toBe(true);
+    poller.stop();
+  });
+
+  it('acknowledges a failed blocked-run approval without breaking the poller', async () => {
+    mockGetSecret.mockResolvedValue('TOKEN');
+    mockResumeBlockedRun.mockImplementation(() => { throw new Error('already resolved'); });
+    let fetchCount = 0;
+    let answeredCallback = false;
+    mockFetch.mockImplementation((url: string) => {
+      if (url.includes('getUpdates') && ++fetchCount === 1) {
+        return Promise.resolve(makeUpdateResponse([
+          { update_id: 103, callback_query: { id: 'cb-blocked-failure', data: 'blocked:approve:276' } },
+        ]));
+      }
+      if (url.includes('answerCallbackQuery')) {
+        answeredCallback = true;
+        return Promise.resolve({ ok: true });
+      }
+      return new Promise(() => {});
+    });
+
+    const { TelegramPoller } = await import('../../src/core/notify/telegram-poller.js');
+    const poller = new TelegramPoller();
+    poller.start();
+    await flushMicrotasks(40);
+
+    expect(mockResumeBlockedRun).toHaveBeenCalledWith(276);
+    expect(answeredCallback).toBe(true);
     poller.stop();
   });
 
