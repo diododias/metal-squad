@@ -1,0 +1,37 @@
+# Contrato de portabilidade: este repo-alvo minimo nao depende de convencoes
+# locais do metal-squad. Regressao aqui significa re-acoplamento do harness.
+version: 2
+repo: portability-minimal-target
+defaults:
+  tool: codex
+  effort: medium
+  skills: []
+  stageSkills:
+    build:
+      - review
+epics:
+  - id: portability
+    title: Repo-alvo minimo para contratos portaveis
+    features:
+      - id: portability-logical-source
+        title: Predecessora logica sem requisito de PR
+        tool: codex
+        effort: medium
+        skills: []
+        tasks: []
+      - id: portability-build
+        title: Build com publish gate em branch main
+        tool: codex
+        effort: medium
+        skills: []
+        dependsOn:
+          - portability-logical-source
+        dependencyTypes:
+          portability-logical-source: logical
+        workflow:
+          mode: single
+          stages:
+            - build
+          stagePublishes:
+            build: true
+        tasks: []

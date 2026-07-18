@@ -7,7 +7,7 @@ import { DEFAULT_DB_PATH, resolveDbPath } from '../config/index.js';
 import { registerRepo } from './repo.js';
 import { upsertBacklogCatalog, type BacklogCatalogDiff } from './backlogCatalog.js';
 
-export const FIXTURE_SCENARIOS = ['settings'] as const;
+export const FIXTURE_SCENARIOS = ['settings', 'portability'] as const;
 export type FixtureScenario = (typeof FIXTURE_SCENARIOS)[number];
 
 export interface FixtureOptions {

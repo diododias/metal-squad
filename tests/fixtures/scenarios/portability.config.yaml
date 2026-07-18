@@ -1,0 +1,4 @@
+# Configuracao do repo-alvo minimo usada junto da fixture portability.backlog.yaml.
+runtime:
+  integration:
+    baseBranch: main

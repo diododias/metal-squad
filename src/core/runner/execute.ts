@@ -645,7 +645,8 @@ export async function executeBacklog(
       baseBranch: config.integration.baseBranch,
     });
     try {
-      const { res } = await executeStageRun(feature, prompt, undefined, controller.signal);
+        const singleStage = feature.workflow.stages[0];
+        const { res } = await executeStageRun(feature, prompt, singleStage, controller.signal);
       return res;
     } finally {
       activeControllers.delete(feature.id);
@@ -1276,7 +1277,7 @@ function declaredPublicationEvidence(publication: DeclaredPublication): PublishE
   };
 }
 
-function applyPublishGate(
+export function applyPublishGate(
   result: RunResult,
   opts: {
     publishes: boolean;
@@ -1284,6 +1285,7 @@ function applyPublishGate(
     dependencyBranches: string[];
     baseBranch: string;
   },
+  verify: typeof verifyPublishContract = verifyPublishContract,
 ): RunResult {
   if (!opts.publishes || !result.ok || result.control?.type !== 'done') return result;
 
@@ -1300,7 +1302,7 @@ function applyPublishGate(
   // A dependent feature may stack its PR on top of any dependency branch, so
   // accept those as valid PR bases alongside the configured integration base.
   const allowedBases = [...opts.dependencyBranches, opts.baseBranch];
-  const verification = verifyPublishContract(opts.cwd, allowedBases);
+  const verification = verify(opts.cwd, allowedBases);
   const declared = declaredPublicationEvidence(result.control.publication);
   const observed = verification.evidence;
   const matchesDeclaration = observed.branch === declared.branch
