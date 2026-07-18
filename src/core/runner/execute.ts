@@ -81,6 +81,7 @@ import {
   type DependencyPublication,
 } from '../git/dependencies.js';
 import { stagePublishesResolved } from '../workflow/stagePublishes.js';
+import { stackDependencies } from '../backlog/schema.js';
 import { updateRunPublishState } from '../../db/repo.js';
 
 export interface ResumeOverride {
@@ -163,15 +164,15 @@ export async function executeBacklog(
   const featureMaxTokens = new Map<string, number>();
   // The `--feature` path clears `dependsOn` on the resolved plan (see below), so
   // capture the original dependency edges here to recover dependency PRs later.
-  const dependsOnByFeature = new Map<string, string[]>();
+  const stackDependenciesByFeature = new Map<string, string[]>();
   for (const epic of backlog.epics) {
     for (const feature of epic.features) {
       if (feature.maxTokens !== undefined) featureMaxTokens.set(feature.id, feature.maxTokens);
-      dependsOnByFeature.set(feature.id, feature.dependsOn);
+      stackDependenciesByFeature.set(feature.id, stackDependencies(feature));
     }
   }
   const dependencyPublicationsFor = (featureId: string): DependencyPublication[] =>
-    resolveDependencyPublications(repoId, dependsOnByFeature.get(featureId) ?? []);
+    resolveDependencyPublications(repoId, stackDependenciesByFeature.get(featureId) ?? []);
   const budget = createBudgetTracker(resolveBudgetLimits(
     backlog.version === 2 ? backlog.budget : undefined,
     config.budget,

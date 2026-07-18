@@ -2352,6 +2352,45 @@ describe('executeBacklog auto-pilot', () => {
 });
 
 describe('executeBacklog dependency-aware manual start', () => {
+  it('uses only stack dependencies when resolving a PR base', async () => {
+    const backlog: Backlog = {
+      version: 2,
+      repo: 'repo',
+      defaults: { tool: 'codex', effort: 'medium', skills: [], stageSkills: {} },
+      epics: [{
+        id: 'epic-1',
+        title: 'Epic',
+        features: [{
+          id: 'feat-logical-parent',
+          title: 'Logical parent',
+          spec: 'spec',
+          tasks: [],
+          tool: 'codex',
+          effort: 'medium',
+          dependsOn: [],
+          workflow: { mode: 'single', stages: [], approvals: { channel: 'telegram', autoAdvance: false }, syncTasksToBacklog: true, sessionPolicy: { mode: 'isolated', alwaysIsolatedStages: [] } },
+        }, {
+          id: 'feat-child',
+          title: 'Child',
+          spec: 'spec',
+          tasks: [],
+          tool: 'codex',
+          effort: 'medium',
+          dependsOn: ['feat-logical-parent'],
+          dependencyTypes: { 'feat-logical-parent': 'logical' },
+          workflow: { mode: 'single', stages: [], approvals: { channel: 'telegram', autoAdvance: false }, syncTasksToBacklog: true, sessionPolicy: { mode: 'isolated', alwaysIsolatedStages: [] } },
+        }],
+      }],
+    };
+    mockListCompletedFeatureIds.mockReturnValue(new Set(['feat-logical-parent']));
+    mockRunFeature.mockResolvedValue({ ok: true, summary: 'done' });
+
+    const { executeBacklog } = await import('../../src/core/runner/execute.js');
+    await executeBacklog(backlog, { cwd: '/repo', concurrency: 1, featureId: 'feat-child' });
+
+    expect(mockGetLatestPublishedRunForFeature).not.toHaveBeenCalled();
+  });
+
   it('starts only the requested feature when dependencies are already completed', async () => {
     const backlog: Backlog = {
       version: 2,
