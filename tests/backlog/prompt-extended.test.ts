@@ -300,17 +300,19 @@ describe('buildPrompt — dependency publications', () => {
     { featureId: 'feat-a', prNumber: 10, prUrl: 'https://example.test/pr/10', branchName: 'feat/a', remoteBranch: 'origin/feat/a' },
   ];
 
-  it('renders the dependency PR section and recommends the first branch as base', async () => {
+  it('renders the structured dependency-base block from the first publication', async () => {
     const { buildPrompt } = await import('../../src/core/backlog/prompt.js');
     const feature = makeFeature();
     const result = buildPrompt(feature as never, [makeSkill('Base prompt')], '/cwd', {
       dependencyPublications: deps,
+      baseBranch: 'main',
     });
-    expect(result).toContain('Dependency pull requests');
-    expect(result).toContain('- feat-b — PR #20 https://example.test/pr/20 (branch feat/b)');
-    expect(result).toContain('- feat-a — PR #10 https://example.test/pr/10 (branch feat/a)');
-    expect(result).toContain('Recommended base: feat/b.');
-    expect(result).toContain('(stacked PR), not develop');
+    expect(result).toContain('# dependency base');
+    expect(result).toContain('base_branch=main');
+    expect(result).toContain('base_remote=origin/feat/b');
+    expect(result).toContain('base_ref=feat/b');
+    expect(result).toContain('pr_base=feat/b');
+    expect(result).toContain('git fetch origin feat/b && git switch -c <your-working-branch> FETCH_HEAD');
   });
 
   it('omits the dependency section when there are no publications', async () => {
@@ -319,13 +321,13 @@ describe('buildPrompt — dependency publications', () => {
     const result = buildPrompt(feature as never, [makeSkill('Base prompt')], '/cwd', {
       dependencyPublications: [],
     });
-    expect(result).not.toContain('Dependency pull requests');
+    expect(result).not.toContain('# dependency base');
   });
 
   it('does not render the section when the option is omitted', async () => {
     const { buildPrompt } = await import('../../src/core/backlog/prompt.js');
     const feature = makeFeature();
     const result = buildPrompt(feature as never, [makeSkill('Base prompt')], '/cwd');
-    expect(result).not.toContain('Dependency pull requests');
+    expect(result).not.toContain('# dependency base');
   });
 });
