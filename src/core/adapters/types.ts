@@ -89,6 +89,16 @@ export interface RunControlNeedsInput {
   options?: string[];
 }
 
+export const RUN_BLOCKED_CODES = [
+  'dependency_unavailable',
+  'precondition_failed',
+  'environment_error',
+  'spec_ambiguous',
+  'validation_failed',
+] as const;
+
+export type RunBlockedCode = (typeof RUN_BLOCKED_CODES)[number];
+
 export interface TimeoutResult {
   timeoutMs: number;
   runtimeMs: number;

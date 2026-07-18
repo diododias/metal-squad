@@ -492,9 +492,38 @@ export async function executeBacklog(
         summary: formatBudgetViolation(violation),
       };
     }
+    const dependencyPublications = dependencyPublicationsFor(feature.id);
+    const publishedDependencyIds = new Set(dependencyPublications.map((publication) => publication.featureId));
+    const missingDependencies = (stackDependenciesByFeature.get(feature.id) ?? [])
+      .filter((dependencyId) => !publishedDependencyIds.has(dependencyId));
+    if (missingDependencies.length > 0) {
+      const stage = feature.workflow.mode === 'staged' ? feature.workflow.stages[0] : undefined;
+      const runId = createRun(repoId, feature.id, feature.tool, { pipelineId, stage });
+      const summary = `dependency_unavailable: ${missingDependencies.join(', ')}`;
+      lastRunIdByFeature.set(feature.id, runId);
+      finishRun(runId, 'blocked', summary);
+      if (stage) {
+        msqEventBus.emit('task:updated', {
+          runId,
+          featureId: feature.id,
+          taskId: stage,
+          status: 'blocked',
+          stage,
+          endedAt: new Date().toISOString(),
+        });
+      }
+      msqEventBus.emit('run:blocked', {
+        runId,
+        featureId: feature.id,
+        tool: feature.tool,
+        reason: 'gate',
+        code: 'dependency_unavailable',
+        summary,
+      });
+      return { ok: false, summary };
+    }
     const controller = new AbortController();
     activeControllers.set(feature.id, controller);
-    const dependencyPublications = dependencyPublicationsFor(feature.id);
     // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- workflow set by Zod default, but callers may pass raw objects
     if (feature.workflow?.mode === 'staged') {
       try {
