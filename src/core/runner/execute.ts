@@ -2,7 +2,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import { resolve, dirname, join } from 'node:path';
 import { spawn } from 'node:child_process';
 import type { Backlog, Effort, Feature, OnFail, Tool } from '../backlog/schema.js';
-import type { RunFeatureOptions, RunResult } from '../adapters/types.js';
+import type { DeclaredPublication, PublishEvidence, RunFeatureOptions, RunResult } from '../adapters/types.js';
 import { topoOrder, selectStartableFeaturePlan } from '../orchestrator/graph.js';
 import { schedule } from '../orchestrator/scheduler.js';
 import {
@@ -332,6 +332,16 @@ export async function executeBacklog(
         recordUsage(runId, res.usage);
         applyBudgetUsage(feature, res.usage, runId);
       }
+      if (res.control?.type === 'done' && res.control.publication) {
+        updateRunPublishState(runId, {
+          // The agent declaration is the source of truth for PR identity.
+          // Verification only contributes the independently observed commit
+          // and remote details; it must never replace declared PR fields.
+          verified: false,
+          error: null,
+          evidence: declaredPublicationEvidence(res.control.publication),
+        });
+      }
       if (res.publishEvidence) {
         updateRunPublishState(runId, {
           verified: res.publishVerified ?? false,
@@ -396,7 +406,31 @@ export async function executeBacklog(
           summary: res.summary,
         });
         activeRunIds.delete(runId);
-        return { runId, res };
+        return { runId, res: { ...res, ok: false } };
+      }
+
+      if (res.control?.type === 'blocked') {
+        finishRun(runId, 'blocked', res.summary);
+        if (stage) {
+          msqEventBus.emit('task:updated', {
+            runId,
+            featureId: feature.id,
+            taskId: stage,
+            status: 'blocked',
+            stage,
+            endedAt: new Date().toISOString(),
+          });
+        }
+        msqEventBus.emit('run:blocked', {
+          runId,
+          featureId: feature.id,
+          tool: feature.tool,
+          reason: 'gate',
+          code: res.control.code,
+          summary: res.summary,
+        });
+        activeRunIds.delete(runId);
+        return { runId, res: { ...res, ok: false } };
       }
 
       if (res.aborted) {
@@ -422,9 +456,30 @@ export async function executeBacklog(
         return { runId, res };
       }
 
+      const declaredDone = res.control?.type === 'done';
+      if (res.ok && !declaredDone) {
+        const summary = 'agent finished without declaring MSQ_DONE';
+        finishRun(runId, 'blocked', summary);
+        if (stage) {
+          msqEventBus.emit('task:updated', {
+            runId, featureId: feature.id, taskId: stage, status: 'blocked', stage,
+            endedAt: new Date().toISOString(),
+          });
+        }
+        msqEventBus.emit('run:blocked', {
+          runId,
+          featureId: feature.id,
+          tool: feature.tool,
+          reason: 'gate',
+          summary,
+        });
+        activeRunIds.delete(runId);
+        return { runId, res: { ...res, ok: false, summary } };
+      }
+
       const failurePolicy = getOnFailPolicy(feature);
       const failureStatus = res.publishVerificationStatus ?? (failurePolicy === 'gate' ? 'blocked' : 'failed');
-      const status = res.ok ? 'done' : failureStatus;
+      const status = res.ok && declaredDone ? 'done' : failureStatus;
       finishRun(runId, status, res.summary);
       if (stage) {
         msqEventBus.emit('task:updated', {
@@ -436,7 +491,7 @@ export async function executeBacklog(
           endedAt: new Date().toISOString(),
         });
       }
-      if (res.ok) {
+      if (res.ok && declaredDone) {
         msqEventBus.emit('run:done', {
           runId,
           featureId: feature.id,
@@ -449,6 +504,7 @@ export async function executeBacklog(
           featureId: feature.id,
           tool: feature.tool,
           reason: 'gate',
+          ...(res.publishValidationFailed ? { code: 'validation_failed' as const } : {}),
           summary: res.summary,
         });
       } else {
@@ -587,6 +643,8 @@ export async function executeBacklog(
       outcomeKind = classifySuccessOutcome();
     } else if (result.control?.type === 'needs_input') {
       outcomeKind = classifyBlockedOutcome('needs_input');
+    } else if (result.control?.type === 'blocked') {
+      outcomeKind = classifyBlockedOutcome('gate');
     } else if (getOnFailPolicy(feature) === 'gate') {
       outcomeKind = classifyBlockedOutcome('gate');
     } else {
@@ -827,7 +885,7 @@ async function runWithRetry(
         ...(opts.stageSkills && Object.keys(opts.stageSkills).length > 0 ? { stageSkills: opts.stageSkills } : {}),
       });
 
-      if (res.ok || res.control?.type === 'needs_input') {
+      if (res.ok || res.control?.type === 'needs_input' || res.control?.type === 'blocked') {
         if (candidate.tool !== feature.tool) updateRunTool(opts.runId, candidate.tool);
         return res;
       }
@@ -1143,6 +1201,17 @@ function buildStagePrompt(
   return `${basePrompt}\n\n---\n\n${appendedSections.join('\n\n')}`.trim();
 }
 
+function declaredPublicationEvidence(publication: DeclaredPublication): PublishEvidence {
+  return {
+    branch: publication.head,
+    baseBranch: publication.base,
+    commitSha: null,
+    remoteBranch: null,
+    prNumber: publication.prNumber,
+    prUrl: publication.prUrl,
+  };
+}
+
 function applyPublishGate(
   result: RunResult,
   opts: {
@@ -1152,19 +1221,52 @@ function applyPublishGate(
     baseBranch: string;
   },
 ): RunResult {
-  if (!opts.publishes || !result.ok) return result;
+  if (!opts.publishes || !result.ok || result.control?.type !== 'done') return result;
+
+  if (!result.control.publication) {
+    return {
+      ...result,
+      ok: false,
+      summary: `${result.summary}\nMSQ_DONE is missing required pr_url, pr_number, base, and head publication fields.`.trim(),
+      publishVerificationStatus: 'blocked',
+      publishValidationFailed: true,
+    };
+  }
 
   // A dependent feature may stack its PR on top of any dependency branch, so
   // accept those as valid PR bases alongside the configured integration base.
   const allowedBases = [...opts.dependencyBranches, opts.baseBranch];
   const verification = verifyPublishContract(opts.cwd, allowedBases);
+  const declared = declaredPublicationEvidence(result.control.publication);
+  const observed = verification.evidence;
+  const matchesDeclaration = observed.branch === declared.branch
+    && observed.baseBranch === declared.baseBranch
+    && observed.prNumber === declared.prNumber
+    && observed.prUrl === declared.prUrl;
+  const evidence = {
+    ...declared,
+    commitSha: observed.commitSha,
+    remoteBranch: observed.remoteBranch,
+  };
+  const diverged = !matchesDeclaration && (
+    (observed.branch !== null && observed.branch !== declared.branch)
+    || observed.baseBranch !== declared.baseBranch
+    || (observed.prNumber !== null && observed.prNumber !== declared.prNumber)
+    || (observed.prUrl !== null && observed.prUrl !== declared.prUrl)
+  );
+  const summary = diverged
+    ? `${result.summary}\nimplement: declared publication does not match verified publication.`.trim()
+    : verification.ok ? verification.summary : `${result.summary}\n${verification.summary}`.trim();
   return {
     ...result,
-    ok: verification.ok,
-    summary: verification.ok ? verification.summary : `${result.summary}\n${verification.summary}`.trim(),
-    publishEvidence: verification.evidence,
-    publishVerified: verification.ok,
-    publishVerificationStatus: verification.status === 'done' ? undefined : verification.status,
+    ok: verification.ok && matchesDeclaration,
+    summary,
+    publishEvidence: evidence,
+    publishVerified: verification.ok && matchesDeclaration,
+    publishVerificationStatus: verification.ok && matchesDeclaration
+      ? undefined
+      : (diverged ? 'blocked' : verification.status === 'done' ? 'failed' : verification.status),
+    publishValidationFailed: diverged,
   };
 }
 
