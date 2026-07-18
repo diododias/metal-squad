@@ -75,6 +75,7 @@ import { loadBudgetState, saveBudgetState } from '../../db/repo.js';
 import { saveConfig } from '../../config/index.js';
 import { verifyPublishContract } from '../git/publish.js';
 import { resolveDependencyPublications, type DependencyPublication } from '../git/dependencies.js';
+import { stagePublishesResolved } from '../workflow/stagePublishes.js';
 import { updateRunPublishState } from '../../db/repo.js';
 
 export interface ResumeOverride {
@@ -107,6 +108,7 @@ function captureWorkflowRevisions(features: Feature[]): PipelineWorkflowRevision
       ...guidance,
       ...(guidance.skills ? { skills: [...guidance.skills] } : {}),
     }])),
+    stagePublishes: { ...feature.workflow.stagePublishes },
   }]));
 }
 
@@ -315,12 +317,16 @@ export async function executeBacklog(
         resumeOverride: opts.resumeOverride?.featureId === feature.id ? opts.resumeOverride : undefined,
         stageSkills: effectiveStageSkills,
       });
-      const res = applyImplementPublishGate(
-        initialRes,
-        stage,
-        opts.cwd,
-        dependencyPublicationsFor(feature.id).map((pub) => pub.branchName),
-      );
+      const res = applyPublishGate(initialRes, {
+        publishes: stage !== undefined && stagePublishesResolved(
+          stage,
+          feature.workflow.mode,
+          feature.workflow.stagePublishes,
+        ),
+        cwd: opts.cwd,
+        dependencyBranches: dependencyPublicationsFor(feature.id).map((pub) => pub.branchName),
+        baseBranch: config.integration.baseBranch,
+      });
       if (res.usage) {
         recordUsage(runId, res.usage);
         applyBudgetUsage(feature, res.usage, runId);
@@ -1137,18 +1143,21 @@ function buildStagePrompt(
   return `${basePrompt}\n\n---\n\n${appendedSections.join('\n\n')}`.trim();
 }
 
-function applyImplementPublishGate(
+function applyPublishGate(
   result: RunResult,
-  stage: string | undefined,
-  cwd: string,
-  dependencyBranches: string[] = [],
+  opts: {
+    publishes: boolean;
+    cwd: string;
+    dependencyBranches: string[];
+    baseBranch: string;
+  },
 ): RunResult {
-  if (stage !== 'implement' || !result.ok) return result;
+  if (!opts.publishes || !result.ok) return result;
 
   // A dependent feature may stack its PR on top of any dependency branch, so
-  // accept those as valid PR bases alongside develop.
-  const allowedBases = [...dependencyBranches, 'develop'];
-  const verification = verifyPublishContract(cwd, allowedBases);
+  // accept those as valid PR bases alongside the configured integration base.
+  const allowedBases = [...opts.dependencyBranches, opts.baseBranch];
+  const verification = verifyPublishContract(opts.cwd, allowedBases);
   return {
     ...result,
     ok: verification.ok,
