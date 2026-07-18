@@ -54,7 +54,7 @@ import { dispatch } from '../notify/manager.js';
 import { startTelegramPoller, stopTelegramPoller } from '../notify/telegram-poller.js';
 import { resolveRuntimeConfig } from '../../config/index.js';
 import { buildPrompt } from '../backlog/prompt.js';
-import { COMMUNICATION_PROTOCOL } from './communicationProtocol.js';
+import { COMMUNICATION_PROTOCOL, PROTOCOL_REINFORCEMENT_PROMPT } from './communicationProtocol.js';
 import { createSkillRegistry } from '../skills/index.js';
 import { syncFeatureTasksToBacklog } from '../backlog/sync.js';
 import type { Skill } from '../skills/types.js';
@@ -324,168 +324,206 @@ export async function executeBacklog(
         stageSkills: effectiveStageSkills,
       });
       const dependencyPublications = dependencyPublicationsFor(feature.id);
+      const publishes = stage !== undefined && stagePublishesResolved(
+        stage,
+        feature.workflow.mode,
+        feature.workflow.stagePublishes,
+      );
       const publishGatedRes = applyPublishGate(initialRes, {
-        publishes: stage !== undefined && stagePublishesResolved(
-          stage,
-          feature.workflow.mode,
-          feature.workflow.stagePublishes,
-        ),
+        publishes,
         cwd: opts.cwd,
         dependencyBranches: dependencyPublications.map((pub) => pub.branchName),
         baseBranch: config.integration.baseBranch,
       });
-      const res = applyBaseReconciliation(
+      let res = applyBaseReconciliation(
         publishGatedRes,
         opts.cwd,
         dependencyPublications[0]?.branchName ?? config.integration.baseBranch,
       );
-      if (res.usage) {
-        recordUsage(runId, res.usage);
-        applyBudgetUsage(feature, res.usage, runId);
-      }
-      if (res.control?.type === 'done' && res.control.publication) {
-        updateRunPublishState(runId, {
-          // The agent declaration is the source of truth for PR identity.
-          // Verification only contributes the independently observed commit
-          // and remote details; it must never replace declared PR fields.
-          verified: false,
-          error: null,
-          evidence: declaredPublicationEvidence(res.control.publication),
-        });
-      }
-      if (res.publishEvidence) {
-        updateRunPublishState(runId, {
-          verified: res.publishVerified ?? false,
-          error: res.publishVerified ? null : res.summary,
-          evidence: res.publishEvidence,
-        });
-      }
 
-      if (res.timeout) {
-        const occurrence = createTimeoutOccurrence({
-          runId,
-          pipelineId,
-          featureId: feature.id,
-          stage,
-          timeoutMs: res.timeout.timeoutMs,
-          runtimeMs: res.timeout.runtimeMs,
-          lastProgress: res.timeout.lastProgress,
-        });
-        const request = occurrence ? createTimeoutApprovalRequest(occurrence.id) : null;
-        finishRun(runId, 'blocked', res.summary);
-        setPipelineStatus(pipelineId, 'blocked');
-        if (stage) {
-          msqEventBus.emit('task:updated', {
-            runId, featureId: feature.id, taskId: stage, status: 'blocked', stage,
-            endedAt: new Date().toISOString(),
+      // A run that exits cleanly but never declares MSQ_DONE gets exactly one
+      // reinforcement turn in the same adapter session before it is finalized
+      // as blocked. Claude in particular tends to pause and ask for
+      // confirmation before push/PR even when the stage prompt already
+      // authorizes it, which otherwise strands genuinely-completed work as
+      // `blocked` (observed on F-4YW66H3T / run 302).
+      let reinforcementUsed = false;
+      let declaredDone = false;
+      for (;;) {
+        if (res.usage) {
+          recordUsage(runId, res.usage);
+          applyBudgetUsage(feature, res.usage, runId);
+        }
+        if (res.control?.type === 'done' && res.control.publication) {
+          updateRunPublishState(runId, {
+            // The agent declaration is the source of truth for PR identity.
+            // Verification only contributes the independently observed commit
+            // and remote details; it must never replace declared PR fields.
+            verified: false,
+            error: null,
+            evidence: declaredPublicationEvidence(res.control.publication),
           });
         }
-        if (occurrence && request) {
-          msqEventBus.emit('timeout:approval-created', {
-            requestId: request.id,
-            occurrenceId: occurrence.id,
+        if (res.publishEvidence) {
+          updateRunPublishState(runId, {
+            verified: res.publishVerified ?? false,
+            error: res.publishVerified ? null : res.summary,
+            evidence: res.publishEvidence,
+          });
+        }
+
+        if (res.timeout) {
+          const occurrence = createTimeoutOccurrence({
             runId,
             pipelineId,
             featureId: feature.id,
-            ...(stage ? { stage } : {}),
-            timeoutMs: occurrence.timeoutMs,
-            runtimeMs: occurrence.runtimeMs,
-            ...(occurrence.lastProgress ? { lastProgress: occurrence.lastProgress } : {}),
+            stage,
+            timeoutMs: res.timeout.timeoutMs,
+            runtimeMs: res.timeout.runtimeMs,
+            lastProgress: res.timeout.lastProgress,
           });
+          const request = occurrence ? createTimeoutApprovalRequest(occurrence.id) : null;
+          finishRun(runId, 'blocked', res.summary);
+          setPipelineStatus(pipelineId, 'blocked');
+          if (stage) {
+            msqEventBus.emit('task:updated', {
+              runId, featureId: feature.id, taskId: stage, status: 'blocked', stage,
+              endedAt: new Date().toISOString(),
+            });
+          }
+          if (occurrence && request) {
+            msqEventBus.emit('timeout:approval-created', {
+              requestId: request.id,
+              occurrenceId: occurrence.id,
+              runId,
+              pipelineId,
+              featureId: feature.id,
+              ...(stage ? { stage } : {}),
+              timeoutMs: occurrence.timeoutMs,
+              runtimeMs: occurrence.runtimeMs,
+              ...(occurrence.lastProgress ? { lastProgress: occurrence.lastProgress } : {}),
+            });
+          }
+          activeRunIds.delete(runId);
+          return { runId, res };
         }
-        activeRunIds.delete(runId);
-        return { runId, res };
-      }
 
-      if (res.control?.type === 'needs_input') {
-        finishRun(runId, 'blocked', res.summary);
-        if (stage) {
-          msqEventBus.emit('task:updated', {
+        if (res.control?.type === 'needs_input') {
+          finishRun(runId, 'blocked', res.summary);
+          if (stage) {
+            msqEventBus.emit('task:updated', {
+              runId,
+              featureId: feature.id,
+              taskId: stage,
+              status: 'blocked',
+              stage,
+              endedAt: new Date().toISOString(),
+            });
+          }
+          msqEventBus.emit('run:blocked', {
             runId,
             featureId: feature.id,
-            taskId: stage,
-            status: 'blocked',
-            stage,
-            endedAt: new Date().toISOString(),
+            tool: feature.tool,
+            reason: 'needs_input',
+            summary: res.summary,
           });
+          activeRunIds.delete(runId);
+          return { runId, res: { ...res, ok: false } };
         }
-        msqEventBus.emit('run:blocked', {
-          runId,
-          featureId: feature.id,
-          tool: feature.tool,
-          reason: 'needs_input',
-          summary: res.summary,
-        });
-        activeRunIds.delete(runId);
-        return { runId, res: { ...res, ok: false } };
-      }
 
-      if (res.control?.type === 'blocked') {
-        finishRun(runId, 'blocked', res.summary);
-        if (stage) {
-          msqEventBus.emit('task:updated', {
+        if (res.control?.type === 'blocked') {
+          finishRun(runId, 'blocked', res.summary);
+          if (stage) {
+            msqEventBus.emit('task:updated', {
+              runId,
+              featureId: feature.id,
+              taskId: stage,
+              status: 'blocked',
+              stage,
+              endedAt: new Date().toISOString(),
+            });
+          }
+          msqEventBus.emit('run:blocked', {
             runId,
             featureId: feature.id,
-            taskId: stage,
-            status: 'blocked',
-            stage,
-            endedAt: new Date().toISOString(),
+            tool: feature.tool,
+            reason: 'gate',
+            code: res.control.code,
+            summary: res.summary,
           });
+          activeRunIds.delete(runId);
+          return { runId, res: { ...res, ok: false } };
         }
-        msqEventBus.emit('run:blocked', {
-          runId,
-          featureId: feature.id,
-          tool: feature.tool,
-          reason: 'gate',
-          code: res.control.code,
-          summary: res.summary,
-        });
-        activeRunIds.delete(runId);
-        return { runId, res: { ...res, ok: false } };
-      }
 
-      if (res.aborted) {
-        finishRun(runId, 'aborted', res.summary);
-        if (stage) {
-          msqEventBus.emit('task:updated', {
+        if (res.aborted) {
+          finishRun(runId, 'aborted', res.summary);
+          if (stage) {
+            msqEventBus.emit('task:updated', {
+              runId,
+              featureId: feature.id,
+              taskId: stage,
+              status: 'failed',
+              stage,
+              endedAt: new Date().toISOString(),
+            });
+          }
+          msqEventBus.emit('run:failed', {
             runId,
             featureId: feature.id,
-            taskId: stage,
-            status: 'failed',
-            stage,
-            endedAt: new Date().toISOString(),
+            tool: feature.tool,
+            error: res.summary,
+            kind: 'aborted',
           });
+          activeRunIds.delete(runId);
+          return { runId, res };
         }
-        msqEventBus.emit('run:failed', {
-          runId,
-          featureId: feature.id,
-          tool: feature.tool,
-          error: res.summary,
-          kind: 'aborted',
-        });
-        activeRunIds.delete(runId);
-        return { runId, res };
-      }
 
-      const declaredDone = res.control?.type === 'done';
-      if (res.ok && !declaredDone) {
-        const summary = 'agent finished without declaring MSQ_DONE';
-        finishRun(runId, 'blocked', summary);
-        if (stage) {
-          msqEventBus.emit('task:updated', {
-            runId, featureId: feature.id, taskId: stage, status: 'blocked', stage,
-            endedAt: new Date().toISOString(),
+        declaredDone = res.control?.type === 'done';
+        if (res.ok && !declaredDone) {
+          if (!reinforcementUsed && res.session) {
+            reinforcementUsed = true;
+            const reinforced = await attemptProtocolReinforcement(feature, res, {
+              cwd: opts.cwd,
+              runId,
+              signal: abortSignal,
+            });
+            if (reinforced) {
+              const reinforcedGated = applyPublishGate(reinforced, {
+                publishes,
+                cwd: opts.cwd,
+                dependencyBranches: dependencyPublications.map((pub) => pub.branchName),
+                baseBranch: config.integration.baseBranch,
+              });
+              res = applyBaseReconciliation(
+                reinforcedGated,
+                opts.cwd,
+                dependencyPublications[0]?.branchName ?? config.integration.baseBranch,
+              );
+              continue;
+            }
+          }
+          const summary = reinforcementUsed
+            ? 'agent finished without declaring MSQ_DONE (protocol reinforcement attempted)'
+            : 'agent finished without declaring MSQ_DONE';
+          finishRun(runId, 'blocked', summary);
+          if (stage) {
+            msqEventBus.emit('task:updated', {
+              runId, featureId: feature.id, taskId: stage, status: 'blocked', stage,
+              endedAt: new Date().toISOString(),
+            });
+          }
+          msqEventBus.emit('run:blocked', {
+            runId,
+            featureId: feature.id,
+            tool: feature.tool,
+            reason: 'gate',
+            summary,
           });
+          activeRunIds.delete(runId);
+          return { runId, res: { ...res, ok: false, summary } };
         }
-        msqEventBus.emit('run:blocked', {
-          runId,
-          featureId: feature.id,
-          tool: feature.tool,
-          reason: 'gate',
-          summary,
-        });
-        activeRunIds.delete(runId);
-        return { runId, res: { ...res, ok: false, summary } };
+
+        break;
       }
 
       const failurePolicy = getOnFailPolicy(feature);
@@ -985,6 +1023,32 @@ async function runWithRetry(
   return lastResult;
 }
 
+// Sends exactly one follow-up turn in the same resumed adapter session,
+// reasserting the communication protocol, when a run exited ok but never
+// declared a control signal. Returns null (never throws) when there is no
+// resumable session or the adapter call itself fails, so the caller falls
+// back to the existing "blocked" classification unchanged.
+async function attemptProtocolReinforcement(
+  feature: Feature,
+  res: RunResult,
+  opts: { cwd: string; runId: number; signal?: AbortSignal },
+): Promise<RunResult | null> {
+  if (!res.session) return null;
+  const adapter = getAdapter(res.session.tool);
+  const reinforcedFeature: Feature = { ...feature, tool: res.session.tool };
+  try {
+    return await adapter.runFeature(reinforcedFeature, PROTOCOL_REINFORCEMENT_PROMPT, {
+      cwd: opts.cwd,
+      runId: opts.runId,
+      signal: opts.signal,
+      session: { mode: 'resume', handle: res.session },
+    });
+  } catch (error) {
+    logCaughtError('execute.attemptProtocolReinforcement', error);
+    return null;
+  }
+}
+
 async function executeStagedFeature(
   feature: Feature,
   pipelineId: number,
@@ -1254,7 +1318,9 @@ function buildStagePrompt(
       '- create a commit for the implementation',
       '- push the branch to its remote upstream',
       `- open a pull request targeting ${baseBranch}, unless # dependency base specifies pr_base for a stacked PR`,
+      '- pushing this branch and opening this pull request are pre-authorized for this session; do not pause to ask for confirmation before doing them',
       '- do not claim the stage is complete unless all items above were actually completed',
+      '- ending your final response with a plain-language question instead of MSQ_DONE, MSQ_INPUT_REQUIRED, or MSQ_BLOCKED is a protocol violation, even if the question itself is reasonable',
     ].join('\n'));
   }
 
