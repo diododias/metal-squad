@@ -89,13 +89,42 @@ export interface RunControlNeedsInput {
   options?: string[];
 }
 
+export const RUN_BLOCKED_CODES = [
+  'dependency_unavailable',
+  'precondition_failed',
+  'environment_error',
+  'spec_ambiguous',
+  'validation_failed',
+] as const;
+
+export type RunBlockedCode = (typeof RUN_BLOCKED_CODES)[number];
+
+export interface DeclaredPublication {
+  prUrl: string;
+  prNumber: number | null;
+  base: string;
+  head: string;
+}
+
+export interface RunControlDone {
+  type: 'done';
+  summary: string;
+  publication?: DeclaredPublication;
+}
+
+export interface RunControlBlocked {
+  type: 'blocked';
+  code: RunBlockedCode;
+  reason: string;
+}
+
 export interface TimeoutResult {
   timeoutMs: number;
   runtimeMs: number;
   lastProgress?: string;
 }
 
-export type RunControl = RunControlNeedsInput;
+export type RunControl = RunControlNeedsInput | RunControlDone | RunControlBlocked;
 
 export interface SessionHandle {
   tool: Tool;
