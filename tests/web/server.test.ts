@@ -35,6 +35,7 @@ const mocks = vi.hoisted(() => ({
   forceResolveGate: vi.fn(),
   resolveStageRequest: vi.fn(),
   listCompletedFeatureIds: vi.fn(() => new Set()),
+  listEpics: vi.fn(() => []),
   getPendingFeatures: vi.fn(() => []),
   computeRunBreakdown: vi.fn(),
   assertWritableDbPath: vi.fn(),
@@ -154,6 +155,7 @@ vi.mock('../../src/db/repo.js', () => ({
   requestFeatureAbort: mocks.requestFeatureAbort,
   forceResolveGate: mocks.forceResolveGate,
   listCompletedFeatureIds: mocks.listCompletedFeatureIds,
+  listEpics: mocks.listEpics,
   getPipeline: mocks.getPipeline,
   getRun: mocks.getRun,
 }));

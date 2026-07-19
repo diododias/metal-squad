@@ -103,6 +103,7 @@ export interface MsqWebState {
   repoLabel: string;
   projects: ProjectSummary[];
   repositories: RepositorySummary[];
+  epics: EpicRow[];
   runs: RunSummary[];
   gates: PendingApproval[];
   pendingFeatures: WorkItemCatalogEntry[];
