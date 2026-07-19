@@ -792,10 +792,10 @@ export function createRun(
 ): number {
   const info = getDb('readwrite')
     .prepare(
-      `INSERT INTO runs (repo_id, feature_id, tool, pipeline_id, stage)
-       VALUES (?, ?, ?, ?, ?)`,
+      `INSERT INTO runs (repo_id, project_id, feature_id, tool, pipeline_id, stage)
+       VALUES (?, (SELECT project_id FROM project_repos WHERE repo_id = ?), ?, ?, ?, ?)`,
     )
-    .run(repoId, featureId, tool, opts.pipelineId ?? null, opts.stage ?? null);
+    .run(repoId, repoId, featureId, tool, opts.pipelineId ?? null, opts.stage ?? null);
   const runId = Number(info.lastInsertRowid);
   recordRunEvent(runId, 'started', opts.stage ? { stage: opts.stage } : undefined);
   return runId;
@@ -1283,6 +1283,9 @@ export function getRun(runId: number): RunRow | null {
 export interface RunSummary {
   runId: number;
   repoId: string;
+  /** Immutable Project snapshot captured when the run was created. */
+  projectId?: string | null;
+  integrityIssue?: string;
   featureId: string;
   tool: 'claude' | 'codex' | 'opencode';
   pipelineId: number | null;
@@ -1346,10 +1349,18 @@ function getRunColumnProjection(
 }
 
 // T003: listRunsForTui — most recent run per feature per repo (US2 deduplication via CTE)
-export function listRunsForTui(limit = 50, repoId?: string): RunSummary[] {
+export interface ProjectScope {
+  projectId?: string;
+}
+
+export function listRunsForTui(limit = 50, repoId?: string, scope: ProjectScope = {}): RunSummary[] {
   if (!hasDbFile()) return [];
-  const repoFilter = repoId ? 'WHERE repo_id = ?' : '';
-  const params = repoId ? [repoId, limit] : [limit];
+  const filters: string[] = [];
+  const params: (string | number)[] = [];
+  if (repoId) { filters.push('repo_id = ?'); params.push(repoId); }
+  if (scope.projectId) { filters.push('project_id = ?'); params.push(scope.projectId); }
+  const repoFilter = filters.length > 0 ? `WHERE ${filters.join(' AND ')}` : '';
+  params.push(limit);
   const db = getDb('readonly');
   const runColumns = new Set(
     (db.prepare(`PRAGMA table_info(runs)`).all() as { name?: string }[])
@@ -1409,6 +1420,7 @@ export function listRunsForTui(limit = 50, repoId?: string): RunSummary[] {
        SELECT
          r.id          AS runId,
          r.repo_id     AS repoId,
+         r.project_id  AS projectId,
          r.feature_id  AS featureId,
          r.tool,
          r.pipeline_id AS pipelineId,
@@ -1484,7 +1496,10 @@ export function listRunsForTui(limit = 50, repoId?: string): RunSummary[] {
        LIMIT ?`,
     )
     .all(...params) as RunSummary[];
-  for (const row of rows) row.pendingStageRequestOptions = decodeStageRequestOptions(row.pendingStageRequestOptions) ?? null;
+  for (const row of rows) {
+    row.pendingStageRequestOptions = decodeStageRequestOptions(row.pendingStageRequestOptions) ?? null;
+    if (!row.projectId) row.integrityIssue = 'Run has no Project snapshot.';
+  }
   return rows;
 }
 
@@ -1564,8 +1579,13 @@ export function listRunHistoryForFeature(repoId: string, featureId: string, limi
 // follows the same policy the scheduler already applies when writing done_json:
 // a feature counts as done if it completed per its retry/onFail policy, not
 // strictly if the underlying run succeeded (see execute.ts shouldCountAsDone).
-export function listCompletedFeatureIds(repoId: string): Set<string> {
+export function listCompletedFeatureIds(repoId?: string, scope: ProjectScope = {}): Set<string> {
   if (!hasDbFile()) return new Set();
+  const clauses: string[] = [];
+  const params: string[] = [];
+  if (repoId) { clauses.push('repo_id = ?'); params.push(repoId); }
+  if (scope.projectId) { clauses.push('project_id = ?'); params.push(scope.projectId); }
+  const where = clauses.length > 0 ? `WHERE ${clauses.join(' AND ')}` : '';
   const rows = getDb('readonly')
     .prepare(
       `SELECT
@@ -1588,9 +1608,9 @@ export function listCompletedFeatureIds(repoId: string): Set<string> {
          updated_at AS updatedAt,
          ended_at AS endedAt
        FROM pipelines
-       WHERE repo_id = ?`,
+       ${where}`,
     )
-    .all(repoId) as PipelineRow[];
+    .all(...params) as PipelineRow[];
   const done = new Set<string>();
   for (const row of rows) {
     for (const featureId of getPipelineSnapshot(row).done) done.add(featureId);
@@ -1665,6 +1685,8 @@ export interface GateRow {
   runId: number;
   featureId: string;
   repoId: string;
+  projectId?: string | null;
+  integrityIssue?: string;
   createdAt: string;
   resolvedAt: string | null;
   decision: GateDecision | null;
@@ -1683,23 +1705,21 @@ export function getGate(id: number): GateRow | null {
 }
 
 // T005: openGates — SELECT WHERE resolved_at IS NULL, ORDER BY created_at ASC
-export function openGates(): GateRow[] {
+export function openGates(scope: ProjectScope = {}): GateRow[] {
   if (!hasDbFile()) return [];
-  return getDb('readonly')
+  const rows = getDb('readonly')
     .prepare(
       `SELECT
-         id,
-         run_id    AS runId,
-         feature_id AS featureId,
-         repo_id   AS repoId,
-         created_at AS createdAt,
-         resolved_at AS resolvedAt,
-         decision
-       FROM gates
-       WHERE resolved_at IS NULL
-       ORDER BY created_at ASC`,
+         g.id, g.run_id AS runId, g.feature_id AS featureId, g.repo_id AS repoId,
+         r.project_id AS projectId, g.created_at AS createdAt, g.resolved_at AS resolvedAt, g.decision
+       FROM gates g
+       LEFT JOIN runs r ON r.id = g.run_id
+       WHERE g.resolved_at IS NULL${scope.projectId ? ' AND r.project_id = ?' : ''}
+       ORDER BY g.created_at ASC`,
     )
-    .all() as GateRow[];
+    .all(...(scope.projectId ? [scope.projectId] : [])) as GateRow[];
+  for (const row of rows) if (!row.projectId) row.integrityIssue = 'Gate has no resolvable Project snapshot.';
+  return rows;
 }
 
 // T006: resolveGate — sets resolved_at + decision atomically, no-op if already resolved
@@ -1861,6 +1881,8 @@ function safeJsonParse(value: string): Record<string, unknown> | null {
 export interface StatsRunRow {
   id: number;
   repoId: string;
+  projectId?: string | null;
+  integrityIssue?: string;
   featureId: string;
   tool: string;
   status: string;
@@ -1877,6 +1899,7 @@ export interface StatsRunRow {
 export interface StatsFilters {
   sinceDays?: number;
   repoId?: string;
+  projectId?: string;
   tool?: string;
 }
 
@@ -1892,12 +1915,16 @@ export function listRunsForStats(filters: StatsFilters = {}): StatsRunRow[] {
     clauses.push('r.repo_id = ?');
     params.push(filters.repoId);
   }
+  if (filters.projectId) {
+    clauses.push('r.project_id = ?');
+    params.push(filters.projectId);
+  }
   if (filters.tool) {
     clauses.push('r.tool = ?');
     params.push(filters.tool);
   }
   const where = clauses.length > 0 ? `WHERE ${clauses.join(' AND ')}` : '';
-  return getDb('readonly')
+  const rows = getDb('readonly')
     .prepare(
       `WITH latest_usage AS (
          SELECT u.run_id AS runId, u.input, u.cached_input AS cachedInput, u.output, u.total
@@ -1911,6 +1938,7 @@ export function listRunsForStats(filters: StatsFilters = {}): StatsRunRow[] {
        SELECT
          r.id,
          r.repo_id AS repoId,
+         r.project_id AS projectId,
          r.feature_id AS featureId,
          r.tool,
          r.status,
@@ -1928,6 +1956,8 @@ export function listRunsForStats(filters: StatsFilters = {}): StatsRunRow[] {
        ORDER BY r.id DESC`,
     )
     .all(...params) as StatsRunRow[];
+  for (const row of rows) if (!row.projectId) row.integrityIssue = 'Run has no Project snapshot.';
+  return rows;
 }
 
 // F34 item 5c: historical average/median total_tokens among completed runs
@@ -2179,6 +2209,9 @@ export interface StageRequestRow {
   pipelineId: number;
   runId: number | null;
   featureId: string;
+  repoId?: string | null;
+  projectId?: string | null;
+  integrityIssue?: string;
   stage: string;
   kind: StageRequestKind;
   prompt: string;
@@ -2318,10 +2351,11 @@ export function createPipeline(
   const info = getDb('readwrite')
     .prepare(
       `INSERT INTO pipelines
-         (repo_id, feature_id, auto_advance, cwd, plan_json, done_json, pending_json, active_json, aborted_json, workflow_snapshot_json, resume_summary)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         (repo_id, project_id, feature_id, auto_advance, cwd, plan_json, done_json, pending_json, active_json, aborted_json, workflow_snapshot_json, resume_summary)
+       VALUES (?, (SELECT project_id FROM project_repos WHERE repo_id = ?), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     )
     .run(
+      repoId,
       repoId,
       featureId,
       autoAdvance ? 1 : 0,
@@ -2687,30 +2721,24 @@ export function getStageRequest(id: number): StageRequestRow | null {
   return row;
 }
 
-export function listPendingStageRequests(): StageRequestRow[] {
+export function listPendingStageRequests(scope: ProjectScope = {}): StageRequestRow[] {
   if (!hasDbFile()) return [];
   const rows = getDb('readonly')
     .prepare(
       `SELECT
-         id,
-         pipeline_id AS pipelineId,
-         run_id AS runId,
-         feature_id AS featureId,
-         stage,
-         kind,
-         prompt,
-         options,
-         status,
-         response,
-         source,
-         created_at AS createdAt,
-         resolved_at AS resolvedAt
-       FROM stage_requests
-       WHERE status = 'pending'
-       ORDER BY id ASC`,
+         sr.id, sr.pipeline_id AS pipelineId, sr.run_id AS runId, sr.feature_id AS featureId,
+         p.repo_id AS repoId, p.project_id AS projectId, sr.stage, sr.kind, sr.prompt, sr.options,
+         sr.status, sr.response, sr.source, sr.created_at AS createdAt, sr.resolved_at AS resolvedAt
+       FROM stage_requests sr
+       LEFT JOIN pipelines p ON p.id = sr.pipeline_id
+       WHERE sr.status = 'pending'${scope.projectId ? ' AND p.project_id = ?' : ''}
+       ORDER BY sr.id ASC`,
     )
-    .all() as StageRequestRow[];
-  for (const row of rows) row.options = decodeStageRequestOptions(row.options);
+    .all(...(scope.projectId ? [scope.projectId] : [])) as StageRequestRow[];
+  for (const row of rows) {
+    row.options = decodeStageRequestOptions(row.options);
+    if (!row.repoId || !row.projectId) row.integrityIssue = 'Stage request has no resolvable repository or Project snapshot.';
+  }
   return rows;
 }
 
