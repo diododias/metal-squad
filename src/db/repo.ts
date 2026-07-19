@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { existsSync } from 'node:fs';
 import { getDb, withTransaction } from './index.js';
 import {
+  EpicNotFoundError,
   ProjectNotFoundError,
   RepoAlreadyLinkedError,
   RepoInUseError,
@@ -21,6 +22,7 @@ import type {
 } from '../core/events/types.js';
 import { resolveContextWindow } from '../core/tasks/blocks.js';
 import type { Tool, Workflow } from '../core/backlog/schema.js';
+import { EpicSchema, type EpicStatus } from '../core/backlog/schema.js';
 import type {
   SessionContextTelemetrySnapshot,
   StageTransitionDecision,
@@ -87,6 +89,35 @@ export interface ProjectCounts {
   workItemCount: number;
 }
 
+export interface EpicRow {
+  epicId: string;
+  projectId: string;
+  repoId: string | null;
+  title: string;
+  description: string | null;
+  status: EpicStatus;
+  position: number;
+  archivedAt: string | null;
+  deletedAt: string | null;
+  revision: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface CreateEpicInput {
+  projectId: string;
+  title: string;
+  description?: string | null;
+  audit?: AuditContext;
+}
+
+export interface UpdateEpicPatch {
+  title?: string;
+  description?: string | null;
+  status?: EpicStatus;
+  position?: number;
+}
+
 type ProjectRepoLinkRow = Omit<ProjectRepoRow, 'path'>;
 
 const PROJECT_SELECT = `
@@ -105,6 +136,13 @@ const PROJECT_REPO_LINK_SELECT = `
   SELECT repo_id AS repoId, project_id AS projectId, position,
          created_at AS createdAt, updated_at AS updatedAt
     FROM project_repos`;
+
+const EPIC_SELECT = `
+  SELECT epic_id AS epicId, project_id AS projectId, repo_id AS repoId,
+         title, description, status, position, archived_at AS archivedAt,
+         deleted_at AS deletedAt, revision, updated_at AS updatedAt,
+         updated_at AS createdAt
+    FROM backlog_epics`;
 
 export function createProject(input: CreateProjectInput): ProjectRow {
   return withTransaction((database) => {
@@ -132,6 +170,66 @@ export function listProjects(options: ProjectQueryOptions = {}): ProjectRow[] {
   return getDb('readonly')
     .prepare(`${PROJECT_SELECT} WHERE 1 = 1${projectVisibilityWhere(options)} ORDER BY position ASC, created_at ASC`)
     .all() as ProjectRow[];
+}
+
+export function createEpic(input: CreateEpicInput): EpicRow {
+  return withTransaction((database) => {
+    assertProjectExists(database, input.projectId);
+    const epicId = randomUUID();
+    const position = nextEpicPosition(database, input.projectId);
+    const entity = epicEntity({ epicId, title: input.title, description: input.description ?? null, status: 'todo' });
+    database.prepare(
+      `INSERT INTO backlog_epics
+         (epic_id, project_id, repo_id, title, description, status, position, data_json, revision)
+       VALUES (?, ?, NULL, ?, ?, ?, ?, ?, 1)`,
+    ).run(epicId, input.projectId, entity.title, input.description ?? null, entity.status, position, JSON.stringify(entity));
+    const epic = getEpicFromDatabase(database, epicId);
+    if (!epic) throw new EpicNotFoundError(epicId);
+    recordAuditEvent(database, input.audit, 'epic', epicId, 'create', null, epic);
+    return epic;
+  });
+}
+
+export function getEpic(epicId: string): EpicRow | null {
+  if (!hasDbFile()) return null;
+  return (getDb('readonly').prepare(`${EPIC_SELECT} WHERE epic_id = ? AND archived_at IS NULL AND deleted_at IS NULL`).get(epicId) as EpicRow | undefined) ?? null;
+}
+
+export function listEpics(projectId?: string): EpicRow[] {
+  if (!hasDbFile()) return [];
+  const query = projectId
+    ? `${EPIC_SELECT} WHERE project_id = ? AND archived_at IS NULL AND deleted_at IS NULL ORDER BY position ASC, updated_at ASC`
+    : `${EPIC_SELECT} WHERE archived_at IS NULL AND deleted_at IS NULL ORDER BY position ASC, updated_at ASC`;
+  return (projectId ? getDb('readonly').prepare(query).all(projectId) : getDb('readonly').prepare(query).all()) as EpicRow[];
+}
+
+export function updateEpic(epicId: string, patch: UpdateEpicPatch, expectedRevision: number, options: { audit?: AuditContext } = {}): EpicRow {
+  return withTransaction((database) => {
+    const before = getEpicFromDatabase(database, epicId);
+    if (!before) throw new EpicNotFoundError(epicId);
+    if (before.revision !== expectedRevision) throw new RevisionConflictError(epicId, expectedRevision, before.revision, 'Epic');
+    const entity = epicEntity({
+      epicId,
+      title: patch.title ?? before.title,
+      description: patch.description === undefined ? before.description : patch.description,
+      status: patch.status ?? before.status,
+    });
+    const position = patch.position ?? before.position;
+    const result = database.prepare(
+      `UPDATE backlog_epics
+          SET title = ?, description = ?, status = ?, position = ?, data_json = ?,
+              revision = revision + 1, updated_at = datetime('now')
+        WHERE epic_id = ? AND revision = ?`,
+    ).run(entity.title, entity.description, entity.status, position, JSON.stringify(entity), epicId, expectedRevision);
+    if (result.changes !== 1) {
+      const current = getEpicFromDatabase(database, epicId);
+      throw new RevisionConflictError(epicId, expectedRevision, current?.revision ?? before.revision, 'Epic');
+    }
+    const after = getEpicFromDatabase(database, epicId);
+    if (!after) throw new EpicNotFoundError(epicId);
+    recordAuditEvent(database, options.audit, 'epic', epicId, 'update', before, after);
+    return after;
+  });
 }
 
 export function updateProject(
@@ -274,6 +372,20 @@ function getProjectFromDatabase(database: ReturnType<typeof getDb>, projectId: s
   return (database.prepare(`${PROJECT_SELECT} WHERE project_id = ?`).get(projectId) as ProjectRow | undefined) ?? null;
 }
 
+function getEpicFromDatabase(database: ReturnType<typeof getDb>, epicId: string): EpicRow | null {
+  return (database.prepare(`${EPIC_SELECT} WHERE epic_id = ?`).get(epicId) as EpicRow | undefined) ?? null;
+}
+
+function epicEntity(input: { epicId: string; title: string; description: string | null; status: EpicStatus }): Record<string, unknown> {
+  return EpicSchema.parse({
+    id: input.epicId,
+    title: input.title,
+    ...(input.description === null ? {} : { description: input.description }),
+    status: input.status,
+    features: [],
+  });
+}
+
 function getProjectRepoLink(database: ReturnType<typeof getDb>, repoId: string): ProjectRepoLinkRow | null {
   return (database.prepare(`${PROJECT_REPO_LINK_SELECT} WHERE repo_id = ?`).get(repoId) as ProjectRepoLinkRow | undefined) ?? null;
 }
@@ -305,6 +417,13 @@ function nextProjectPosition(database: ReturnType<typeof getDb>): number {
 function nextProjectRepoPosition(database: ReturnType<typeof getDb>, projectId: string): number {
   const row = database.prepare(
     `SELECT COALESCE(MAX(position), -1) + 1 AS position FROM project_repos WHERE project_id = ?`,
+  ).get(projectId) as { position: number };
+  return row.position;
+}
+
+function nextEpicPosition(database: ReturnType<typeof getDb>, projectId: string): number {
+  const row = database.prepare(
+    `SELECT COALESCE(MAX(position), -1) + 1 AS position FROM backlog_epics WHERE project_id = ?`,
   ).get(projectId) as { position: number };
   return row.position;
 }

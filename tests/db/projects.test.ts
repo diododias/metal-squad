@@ -184,4 +184,23 @@ describe('Project and repository domain queries', () => {
       projectId: project.projectId, repoCount: 1, epicCount: 1, workItemCount: 1,
     }]);
   });
+
+  it('creates and updates project-level Epics without assigning an arbitrary repo', async () => {
+    const { db, createEpic, createProject, updateEpic, RevisionConflictError } = await setup();
+    const { backfillProjects } = await import('../../src/db/backfill.js');
+    backfillProjects(db);
+    const project = createProject({ name: 'Epics' });
+
+    const epic = createEpic({ projectId: project.projectId, title: 'First Epic', description: 'Initial scope' });
+    expect(epic).toMatchObject({ projectId: project.projectId, repoId: null, title: 'First Epic', status: 'todo', revision: 1 });
+    expect(db.prepare(`SELECT repo_id, status, revision, data_json FROM backlog_epics WHERE epic_id = ?`).get(epic.epicId)).toMatchObject({
+      repo_id: null,
+      status: 'todo',
+      revision: 1,
+    });
+
+    const updated = updateEpic(epic.epicId, { status: 'in_progress', description: null }, 1);
+    expect(updated).toMatchObject({ status: 'in_progress', description: null, revision: 2 });
+    expect(() => updateEpic(epic.epicId, { title: 'stale' }, 1)).toThrowError(RevisionConflictError);
+  });
 });
