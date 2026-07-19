@@ -47,6 +47,10 @@ const mocks = vi.hoisted(() => ({
   spawn: vi.fn(),
   getPipeline: vi.fn(),
   getAdapter: vi.fn(),
+  projectService: {
+    create: vi.fn(),
+    update: vi.fn(),
+  },
 }));
 
 vi.mock('../../src/core/repo.js', () => ({
@@ -123,6 +127,10 @@ vi.mock('../../src/db/repo.js', () => ({
 
 vi.mock('../../src/core/adapters/index.js', () => ({
   getAdapter: mocks.getAdapter,
+}));
+
+vi.mock('../../src/core/projectService.js', () => ({
+  projectService: mocks.projectService,
 }));
 
 vi.mock('../../src/core/stats.js', () => ({
@@ -205,6 +213,21 @@ async function waitForMatchingMessage(
     };
     socket.on('message', handler);
   });
+}
+
+function projectEntity(overrides: Record<string, unknown> = {}): Record<string, unknown> {
+  return {
+    projectId: 'project-1',
+    name: 'Web Project',
+    description: null,
+    position: 0,
+    archivedAt: null,
+    deletedAt: null,
+    revision: 1,
+    createdAt: '2026-07-18T12:00:00.000Z',
+    updatedAt: '2026-07-18T12:00:00.000Z',
+    ...overrides,
+  };
 }
 
 describe('web server', () => {
@@ -450,6 +473,144 @@ describe('web server', () => {
     });
 
     socket.close();
+  });
+
+  it('returns a create result only to the initiating client and publishes reconciled state', async () => {
+    const { createWebServer } = await import('../../src/web/server.js');
+    const created = projectEntity({ description: 'Created through WebSocket' });
+    mocks.projectService.create.mockReturnValue({ entity: created, revision: 1 });
+
+    server = createWebServer({ host: '127.0.0.1', port: 0, auth: 'token', token: 'secret' });
+    await new Promise<void>((resolve) => server!.server.listen(0, '127.0.0.1', resolve));
+    const address = server!.server.address() as { port: number };
+    const origin = new WebSocket(`ws://127.0.0.1:${address.port}/ws`);
+    const peer = new WebSocket(`ws://127.0.0.1:${address.port}/ws`);
+    await Promise.all([waitForOpen(origin), waitForOpen(peer)]);
+    origin.send(JSON.stringify({ type: 'auth', token: 'secret' }));
+    peer.send(JSON.stringify({ type: 'auth', token: 'secret' }));
+    await Promise.all([waitForSocketMessage(origin), waitForSocketMessage(peer)]);
+
+    let peerReceivedActionResult = false;
+    const onPeerMessage = (data: WebSocket.RawData): void => {
+      if ((JSON.parse(data.toString('utf8')) as { type?: string }).type === 'action:result') peerReceivedActionResult = true;
+    };
+    peer.on('message', onPeerMessage);
+    const resultPromise = waitForMatchingMessage(
+      origin,
+      (message) => message.type === 'action:result' && (message.payload as { requestId?: string }).requestId === 'create-1',
+    );
+    const peerStatePromise = waitForMessageType(peer, 'state:full');
+    origin.send(JSON.stringify({
+      type: 'action:createProject',
+      requestId: 'create-1',
+      name: '  Web Project  ',
+      description: 'Created through WebSocket',
+    }));
+
+    expect(await resultPromise).toEqual({
+      type: 'action:result',
+      payload: { requestId: 'create-1', ok: true, entity: created },
+    });
+    await peerStatePromise;
+    peer.off('message', onPeerMessage);
+    expect(peerReceivedActionResult).toBe(false);
+    expect(mocks.projectService.create).toHaveBeenCalledWith({
+      name: '  Web Project  ',
+      description: 'Created through WebSocket',
+    });
+    origin.close();
+    peer.close();
+  });
+
+  it('rejects invalid Project action payloads before calling the service', async () => {
+    const { createWebServer } = await import('../../src/web/server.js');
+    server = createWebServer({ host: '127.0.0.1', port: 0, auth: 'token', token: 'secret' });
+    await new Promise<void>((resolve) => server!.server.listen(0, '127.0.0.1', resolve));
+    const address = server!.server.address() as { port: number };
+    const socket = new WebSocket(`ws://127.0.0.1:${address.port}/ws`);
+    await waitForOpen(socket);
+    socket.send(JSON.stringify({ type: 'auth', token: 'secret' }));
+    await waitForSocketMessage(socket);
+
+    const rejected = waitForMatchingMessage(socket, (message) => message.type === 'action:result');
+    socket.send(JSON.stringify({
+      type: 'action:updateProject',
+      requestId: 'invalid-1',
+      projectId: 'project-1',
+      expectedRevision: 1,
+      patch: { unexpected: 'not allowed' },
+    }));
+
+    expect(await rejected).toEqual({
+      type: 'action:result',
+      payload: {
+        requestId: 'invalid-1',
+        ok: false,
+        error: { code: 'INVALID_PAYLOAD', message: 'Invalid project action payload.' },
+      },
+    });
+    expect(mocks.projectService.create).not.toHaveBeenCalled();
+    expect(mocks.projectService.update).not.toHaveBeenCalled();
+    socket.close();
+  });
+
+  it('returns a stable revision conflict after a stale Project update', async () => {
+    const { createWebServer } = await import('../../src/web/server.js');
+    const updated = projectEntity({ name: 'Current', revision: 2 });
+    mocks.projectService.update
+      .mockReturnValueOnce({ entity: updated, revision: 2 })
+      .mockImplementationOnce(() => { throw { code: 'REVISION_CONFLICT', message: 'database revision detail' }; });
+
+    server = createWebServer({ host: '127.0.0.1', port: 0, auth: 'token', token: 'secret' });
+    await new Promise<void>((resolve) => server!.server.listen(0, '127.0.0.1', resolve));
+    const address = server!.server.address() as { port: number };
+    const socket = new WebSocket(`ws://127.0.0.1:${address.port}/ws`);
+    await waitForOpen(socket);
+    socket.send(JSON.stringify({ type: 'auth', token: 'secret' }));
+    await waitForSocketMessage(socket);
+
+    const accepted = waitForMatchingMessage(
+      socket,
+      (message) => message.type === 'action:result' && (message.payload as { requestId?: string }).requestId === 'update-1',
+    );
+    socket.send(JSON.stringify({
+      type: 'action:updateProject', requestId: 'update-1', projectId: 'project-1', expectedRevision: 1, patch: { name: 'Current' },
+    }));
+    expect(await accepted).toEqual({
+      type: 'action:result',
+      payload: { requestId: 'update-1', ok: true, entity: updated },
+    });
+
+    const conflict = waitForMatchingMessage(
+      socket,
+      (message) => message.type === 'action:result' && (message.payload as { requestId?: string }).requestId === 'update-2',
+    );
+    socket.send(JSON.stringify({
+      type: 'action:updateProject', requestId: 'update-2', projectId: 'project-1', expectedRevision: 1, patch: { description: 'stale' },
+    }));
+    expect(await conflict).toEqual({
+      type: 'action:result',
+      payload: {
+        requestId: 'update-2',
+        ok: false,
+        error: { code: 'REVISION_CONFLICT', message: 'Project was changed by another request. Refresh and try again.' },
+      },
+    });
+    expect(mocks.projectService.update).toHaveBeenNthCalledWith(1, 'project-1', { name: 'Current' }, 1);
+    expect(mocks.projectService.update).toHaveBeenNthCalledWith(2, 'project-1', { description: 'stale' }, 1);
+    socket.close();
+  });
+
+  it('rejects Project mutations before authentication', async () => {
+    const { createWebServer } = await import('../../src/web/server.js');
+    server = createWebServer({ host: '127.0.0.1', port: 0, auth: 'token', token: 'secret' });
+    await new Promise<void>((resolve) => server!.server.listen(0, '127.0.0.1', resolve));
+    const address = server!.server.address() as { port: number };
+    const socket = new WebSocket(`ws://127.0.0.1:${address.port}/ws`);
+    await waitForOpen(socket);
+    socket.send(JSON.stringify({ type: 'action:createProject', requestId: 'unauthorized-1', name: 'Nope' }));
+    await waitForClose(socket);
+    expect(mocks.projectService.create).not.toHaveBeenCalled();
   });
 
   it('includes featureCatalog and backlogSettings in full state', async () => {

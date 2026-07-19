@@ -1,6 +1,6 @@
 import type { MsqEvents } from '../core/events/types.js';
 import type { SessionStatusSnapshot, ToolCallRecord } from '../core/adapters/types.js';
-import type { RunHistoryEntry, RunSummary, RunningTaskSummary, StatsRunRow, TaskRun } from '../db/repo.js';
+import type { ProjectRow, RunHistoryEntry, RunSummary, RunningTaskSummary, StatsRunRow, TaskRun } from '../db/repo.js';
 import type { PendingApproval } from '../ui/hooks/useGates.js';
 import type { FeatureCatalogEntry, BacklogSettings } from '../ui/catalog.js';
 import type { RunBreakdown } from '../core/stats.js';
@@ -207,6 +207,31 @@ export interface FeatureConfigSaveResult {
   payload: { featureId: string; ok: boolean; issues?: FeatureConfigSaveIssue[] };
 }
 
+export type ProjectActionErrorCode =
+  | 'INVALID_PAYLOAD'
+  | 'PROJECT_NOT_FOUND'
+  | 'REVISION_CONFLICT'
+  | 'PROJECT_ACTION_FAILED';
+
+export interface ProjectActionError {
+  code: ProjectActionErrorCode;
+  message: string;
+}
+
+export type ProjectActionResult =
+  | {
+      type: 'action:result';
+      payload: { requestId: string; ok: true; entity: ProjectRow };
+    }
+  | {
+      type: 'action:result';
+      payload: {
+        requestId: string;
+        ok: false;
+        error: ProjectActionError;
+      };
+    };
+
 export type WebSocketClientMessage =
   | { type: 'auth'; token: string }
   | {
@@ -216,6 +241,14 @@ export type WebSocketClientMessage =
   | { type: 'action:updateFeatureConfig'; featureId: string; patch: FeatureConfigPatch }
   | { type: 'action:updateTaskConfig'; featureId: string; taskId: string; patch: TaskConfigPatch }
   | { type: 'action:updateProjectDefaults'; patch: ProjectDefaultsPatch }
+  | { type: 'action:createProject'; requestId: string; name: string; description?: string | null }
+  | {
+      type: 'action:updateProject';
+      requestId: string;
+      projectId: string;
+      expectedRevision: number;
+      patch: { name?: string; description?: string | null; position?: number };
+    }
   | { type: 'action:updateBudgetConfig'; patch: BudgetConfigPatch }
   | { type: 'action:updateNotifications'; patch: NotificationsPatch }
   | { type: 'action:updateAppConfig'; patch: AppConfigPatch }
@@ -249,6 +282,7 @@ export type WebSocketClientMessage =
 export type WebSocketServerMessage =
   | { type: 'state:full'; payload: MsqWebState }
   | FeatureConfigSaveResult
+  | ProjectActionResult
   | { type: 'run:detail'; payload: { runId: number; taskRuns: TaskRun[]; breakdown: RunBreakdown | null; sessionStatus: SessionStatusSnapshot | null; statusHistory: SessionStatusSnapshot[]; toolCalls: ToolCallRecord[] } }
   | { type: 'run:history'; payload: { featureId: string; runs: RunHistoryEntry[] } }
   | { type: 'run:changes'; payload: RunChangesPayload }
