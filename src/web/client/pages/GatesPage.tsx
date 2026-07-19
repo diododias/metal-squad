@@ -3,6 +3,8 @@ import { Button } from '../components/core/Button.js';
 import { QuestionBanner } from '../components/feedback/QuestionBanner.js';
 import { PageHeader } from '../PageHeader.js';
 import type { MsqWebState, WebSocketClientMessage } from '../../types.js';
+import { useActiveProject } from '../hooks/useActiveProject.js';
+import { isInActiveProject } from '../lib/scope.js';
 
 export interface GatesPageProps {
   state: MsqWebState;
@@ -10,6 +12,8 @@ export interface GatesPageProps {
 }
 
 export function GatesPage({ state, send }: GatesPageProps): React.JSX.Element {
+  const { activeProjectId } = useActiveProject();
+  const gates = state.gates.filter((gate) => isInActiveProject(state, activeProjectId, gate));
   function resolve(gateId: number, kind: 'gate' | 'stage', response: 'advance' | 'hold' | 'retry'): void {
     if (kind === 'gate') {
       const decision = response === 'advance' ? 'approved' : response === 'retry' ? 'retried' : 'skipped';
@@ -25,10 +29,10 @@ export function GatesPage({ state, send }: GatesPageProps): React.JSX.Element {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
-      <PageHeader title="Gates" breadcrumb={`${String(state.gates.length)} awaiting decision across all features`} />
+      <PageHeader title="Gates" breadcrumb={`${String(gates.length)} awaiting decision`} />
       <div style={{ flex: 1, overflow: 'auto', padding: 20, display: 'flex', flexDirection: 'column', gap: 10 }}>
-        {state.gates.length === 0 && <div style={{ color: 'var(--text-faint)', textAlign: 'center', padding: 40 }}>No pending gates</div>}
-        {state.gates.map((g) => (
+        {gates.length === 0 && <div style={{ color: 'var(--text-faint)', textAlign: 'center', padding: 40 }}>No pending gates</div>}
+        {gates.map((g) => (
           <div key={`${g.kind}-${String(g.id)}`} style={{ background: 'var(--bg-panel)', border: '1px solid var(--accent-warn)', borderRadius: 'var(--radius-md)', padding: 14 }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12, flexWrap: 'wrap' }}>
               <div style={{ minWidth: 200 }}>
