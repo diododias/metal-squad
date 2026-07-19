@@ -22,7 +22,7 @@ export interface BacklogItemDetailProps {
 export function BacklogItemDetail({
   state,
   featureId,
-  runHistories,
+  runHistories: _runHistories,
   onSubscribeHistory,
   onBack,
   onStart,
