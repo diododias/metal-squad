@@ -421,13 +421,15 @@ export async function executeBacklog(
               endedAt: new Date().toISOString(),
             });
           }
-          msqEventBus.emit('run:blocked', {
-            runId,
-            featureId: feature.id,
-            tool: feature.tool,
-            reason: 'needs_input',
-            summary: res.summary,
-          });
+          // Intentionally NOT emitting `run:blocked` here: that event routes
+          // to the generic "needs human intervention" Telegram handler which
+          // strips the question prompt and the discrete options. Routing a
+          // needs_input must go through `createStageRequest('input', ...)`,
+          // which emits `stage:request-created` and lets the stage:input
+          // notification deliver the actual prompt + options buttons. The
+          // caller (single-stage loop or staged stage loop) is responsible
+          // for creating that stage request so exactly one Telegram message
+          // carries the question.
           activeRunIds.delete(runId);
           return { runId, res: { ...res, ok: false } };
         }
@@ -678,15 +680,68 @@ export async function executeBacklog(
     }
 
     const skills = registry.resolve(feature.skills ?? [], opts.cwd);
-    const prompt = buildPrompt(feature, skills, opts.cwd, {
+    const basePrompt = buildPrompt(feature, skills, opts.cwd, {
       maxContextChars: config.promptContextCharLimit,
       dependencyPublications,
       baseBranch: config.integration.baseBranch,
     });
+    // The single-stage / scheduler path used to ship without the communication
+    // protocol in the prompt — only the staged loop appended it via
+    // buildStagePrompt. Inline it here so EVERY session is born with the
+    // contract, matching the staged behavior and shrinking reliance on the
+    // post-hoc reinforcement turn.
+    const promptWithProtocol = `${basePrompt}\n\n---\n\n${COMMUNICATION_PROTOCOL}`;
     try {
         const singleStage = feature.workflow.stages[0];
-        const { res } = await executeStageRun(feature, prompt, singleStage, controller.signal);
-      return res;
+        // Mirror the staged loop: if the agent asks a question
+        // (MSQ_INPUT_REQUIRED), route it through `createStageRequest` so the
+        // human receives the actual prompt + options buttons in Telegram via
+        // stage:input — NOT the generic "needs human intervention" message
+        // that the old single-stage path implicitly fell back to. Resume the
+        // same adapter session with the human's answer inlined and retry,
+        // reusing the same sessionPolicy decision the staged loop uses.
+        const stageInputs: string[] = [];
+        let nextSession: RunFeatureOptions['session'] | undefined;
+        // Bounded retry: if the agent keeps asking questions, the human can
+        // keep answering; cap the count so a pathological loop cannot run
+        // forever against a misbehaving adapter.
+        const MAX_INPUT_ROUNDS = 8;
+        for (let round = 0; round <= MAX_INPUT_ROUNDS; round += 1) {
+          const prompt = stageInputs.length === 0
+            ? promptWithProtocol
+            : `${promptWithProtocol}\n\n---\n\nAdmin inputs already collected:\n- ${stageInputs.join('\n- ')}`;
+          const { runId, res } = await executeStageRun(feature, prompt, singleStage, controller.signal, nextSession);
+          if (res.control?.type !== 'needs_input') return res;
+          // Stage request routes the question to the operator via stage:input
+          // (notifications.ts) with the OPTIONS buttons when present.
+          const stageLabel = singleStage ?? 'single';
+          const requestId = createStageRequest(
+            pipelineId,
+            feature.id,
+            stageLabel,
+            'input',
+            res.control.prompt,
+            { runId, options: res.control.options },
+          );
+          const response = await waitForStageRequestResponse(requestId, 2_000);
+          stageInputs.push(response);
+          const retryPlan = decideStageTransition({
+            policy: feature.workflow.sessionPolicy,
+            telemetry: getRunContextTelemetry(runId),
+            nextStage: stageLabel,
+            expectedTool: resolvePrimaryTool(
+              feature,
+              opts.resumeOverride?.featureId === feature.id ? opts.resumeOverride : undefined,
+            ),
+            previousSession: res.session,
+          });
+          nextSession = retryPlan.session.mode === 'resume' ? retryPlan.session : undefined;
+        }
+        // Exceeded input rounds — give up rather than spin forever.
+        return {
+          ok: false,
+          summary: 'agent kept asking MSQ_INPUT_REQUIRED after the bound of retry rounds',
+        };
     } finally {
       activeControllers.delete(feature.id);
     }

@@ -190,6 +190,20 @@ describe('parseControlSignal', () => {
       expect(result?.prompt).toBe(text);
     });
 
+    it('detects Portuguese "devo prosseguir" clarification phrasing', () => {
+      const text = 'Devo prosseguir com a abordagem A ou B?';
+      const result = parseControlSignal(text);
+      expect(result?.type).toBe('needs_input');
+      expect(result?.prompt).toBe(text);
+    });
+
+    it('detects Portuguese "voce pode" clarification phrasing', () => {
+      const text = 'Voce pode confirmar qual modulo devo usar?';
+      const result = parseControlSignal(text);
+      expect(result?.type).toBe('needs_input');
+      expect(result?.prompt).toBe(text);
+    });
+
     it('does not trigger on a rhetorical question in a completed summary', () => {
       const text = 'All tests pass and the feature is complete. Should this be revisited later?';
       expect(parseControlSignal(text)).toBeUndefined();
