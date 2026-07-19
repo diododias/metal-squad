@@ -61,6 +61,30 @@ export type WebRuntimeConfig = Omit<Config, 'notifications'> & {
   };
 };
 
+export interface ProjectSummary {
+  projectId: string;
+  name: string;
+  /** Stable ordering for client-only active-project fallback. */
+  position: number;
+  description: string | null;
+  revision: number;
+  counts: { epics: number; workItems: number; archived: number };
+  activeRuns: number;
+  tokens: TokenStats;
+  archivedAt: string | null;
+}
+
+export interface RepositorySummary {
+  repoId: string;
+  label: string;
+  projectId: string | null;
+  health: 'ok' | 'unavailable' | 'unchecked';
+  lastCheckedAt: string | null;
+  /** Omitted from the default broadcast; a future authenticated,
+   * route-specific response may expose it. */
+  path?: string;
+}
+
 /** Read-only diagnostics collected by the backend for the Settings page. */
 export interface EnvironmentInfo {
   databasePath: string;
@@ -75,7 +99,10 @@ export interface EnvironmentInfo {
 }
 
 export interface MsqWebState {
+  revision: number;
   repoLabel: string;
+  projects: ProjectSummary[];
+  repositories: RepositorySummary[];
   runs: RunSummary[];
   gates: PendingApproval[];
   pendingFeatures: FeatureCatalogEntry[];

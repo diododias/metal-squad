@@ -17,6 +17,10 @@ const mocks = vi.hoisted(() => ({
   listRunningTaskRuns: vi.fn(),
   listPendingTimeoutApprovalRequests: vi.fn(),
   listRunsForStats: vi.fn(),
+  listPendingTimeoutApprovalRequests: vi.fn(),
+  getProjectStateRevision: vi.fn(),
+  listProjectStateSummaries: vi.fn(),
+  listRepositoryStateSummaries: vi.fn(),
   getHistoricalTokenStatsForFeatureProfile: vi.fn(),
   resolveGate: vi.fn(),
   listRunOutput: vi.fn(),
@@ -134,6 +138,10 @@ vi.mock('../../src/db/repo.js', () => ({
   listRunningTaskRuns: mocks.listRunningTaskRuns,
   listPendingTimeoutApprovalRequests: mocks.listPendingTimeoutApprovalRequests,
   listRunsForStats: mocks.listRunsForStats,
+  listPendingTimeoutApprovalRequests: mocks.listPendingTimeoutApprovalRequests,
+  getProjectStateRevision: mocks.getProjectStateRevision,
+  listProjectStateSummaries: mocks.listProjectStateSummaries,
+  listRepositoryStateSummaries: mocks.listRepositoryStateSummaries,
   getHistoricalTokenStatsForFeatureProfile: mocks.getHistoricalTokenStatsForFeatureProfile,
   listRunOutput: mocks.listRunOutput,
   listTaskRunsForRun: mocks.listTaskRunsForRun,
@@ -303,6 +311,10 @@ describe('web server', () => {
     mocks.listRunningTaskRuns.mockReturnValue([]);
     mocks.listPendingTimeoutApprovalRequests.mockReturnValue([]);
     mocks.listRunsForStats.mockReturnValue([]);
+    mocks.listPendingTimeoutApprovalRequests.mockReturnValue([]);
+    mocks.getProjectStateRevision.mockReturnValue(0);
+    mocks.listProjectStateSummaries.mockReturnValue([]);
+    mocks.listRepositoryStateSummaries.mockReturnValue([]);
     mocks.listRunOutput.mockReturnValue([]);
     mocks.listTaskRunsForRun.mockReturnValue([]);
     mocks.listRunEvents.mockReturnValue([]);

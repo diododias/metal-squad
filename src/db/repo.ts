@@ -111,6 +111,29 @@ export interface ProjectCounts {
   workItemCount: number;
 }
 
+/** Read-model row for the global web state. Keep aggregation SQL in the DB
+ * layer instead of letting the WebSocket projection own persistence details. */
+export interface ProjectStateSummaryRow {
+  projectId: string;
+  name: string;
+  position: number;
+  description: string | null;
+  revision: number;
+  archivedAt: string | null;
+  epicCount: number;
+  workItemCount: number;
+  archivedCount: number;
+  activeRuns: number;
+  totalTokens: number;
+}
+
+/** Repository metadata for the global state. Path remains server-side. */
+export interface RepositoryStateSummaryRow {
+  repoId: string;
+  projectId: string | null;
+  path: string;
+}
+
 export interface EpicRow {
   epicId: string;
   projectId: string;
@@ -484,6 +507,50 @@ export function listProjectCounts(options: ProjectQueryOptions = {}): ProjectCou
   return getDb('readonly')
     .prepare(`${projectCountsSql(`WHERE 1 = 1${projectVisibilityWhere(options)}`)} ORDER BY p.position ASC, p.created_at ASC`)
     .all() as ProjectCounts[];
+}
+
+/** Active Project summaries for the state-push read model. */
+export function listProjectStateSummaries(): ProjectStateSummaryRow[] {
+  if (!hasDbFile()) return [];
+  return getDb('readonly').prepare(`
+    SELECT p.project_id AS projectId, p.name, p.position, p.description, p.revision,
+           p.archived_at AS archivedAt,
+           (SELECT COUNT(*) FROM backlog_epics e
+             WHERE e.project_id = p.project_id AND e.archived_at IS NULL AND e.deleted_at IS NULL) AS epicCount,
+           (SELECT COUNT(*) FROM backlog_features f JOIN backlog_epics e ON e.epic_id = f.epic_id
+             WHERE e.project_id = p.project_id AND f.archived_at IS NULL AND f.deleted_at IS NULL) AS workItemCount,
+           ((SELECT COUNT(*) FROM backlog_epics e
+              WHERE e.project_id = p.project_id AND e.archived_at IS NOT NULL)
+            + (SELECT COUNT(*) FROM backlog_features f JOIN backlog_epics e ON e.epic_id = f.epic_id
+              WHERE e.project_id = p.project_id AND f.archived_at IS NOT NULL)) AS archivedCount,
+           (SELECT COUNT(*) FROM runs r WHERE r.project_id = p.project_id AND r.status = 'running') AS activeRuns,
+           (SELECT COALESCE(SUM(COALESCE(r.total_tokens, 0)), 0) FROM runs r
+             WHERE r.project_id = p.project_id) AS totalTokens
+      FROM projects p
+     WHERE p.archived_at IS NULL AND p.deleted_at IS NULL
+     ORDER BY p.position ASC, p.created_at ASC
+  `).all() as ProjectStateSummaryRow[];
+}
+
+/** Every registered repository, including unlinked rows. No filesystem health
+ * check is performed in this hot query. */
+export function listRepositoryStateSummaries(): RepositoryStateSummaryRow[] {
+  if (!hasDbFile()) return [];
+  return getDb('readonly').prepare(`
+    SELECT r.repo_id AS repoId, pr.project_id AS projectId, r.path
+      FROM repos r
+      LEFT JOIN project_repos pr ON pr.repo_id = r.repo_id
+      LEFT JOIN projects p ON p.project_id = pr.project_id
+     WHERE p.deleted_at IS NULL OR p.project_id IS NULL
+     ORDER BY r.created_at ASC, r.repo_id ASC
+  `).all() as RepositoryStateSummaryRow[];
+}
+
+/** Monotonic state revision: Project/repository mutations record audit events
+ * in the same transaction, so consumers can detect concurrent mutations. */
+export function getProjectStateRevision(): number {
+  if (!hasDbFile()) return 0;
+  return (getDb('readonly').prepare(`SELECT COALESCE(MAX(id), 0) AS revision FROM audit_events`).get() as { revision: number }).revision;
 }
 
 function projectCountsSql(where: string): string {

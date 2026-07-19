@@ -1,4 +1,5 @@
 import React from 'react';
+import type { ProjectSummary } from '../../../types.js';
 
 export interface SidebarNavItem {
   path: string;
@@ -17,6 +18,10 @@ export interface SidebarProps {
   onToggleCollapsed: () => void;
   onNotifications?: () => void;
   onLogout?: () => void;
+  projects?: ProjectSummary[];
+  activeProjectId?: string | null;
+  selectionInvalidated?: boolean;
+  onSelectProject?: (projectId: string | null) => void;
 }
 
 export function Sidebar({
@@ -30,6 +35,10 @@ export function Sidebar({
   onToggleCollapsed,
   onNotifications,
   onLogout,
+  projects = [],
+  activeProjectId = null,
+  selectionInvalidated = false,
+  onSelectProject,
 }: SidebarProps): React.JSX.Element {
   return (
     <div
@@ -67,6 +76,26 @@ export function Sidebar({
         </button>
         {!collapsed && ' METAL SQUAD'}
       </div>
+
+      {!collapsed && (
+        <div style={{ padding: '10px 8px', borderBottom: '1px solid var(--border-dim)' }}>
+          <label htmlFor="active-project-sidebar" style={{ display: 'block', fontSize: 'var(--text-2xs)', color: 'var(--text-dim)', marginBottom: 5 }}>ACTIVE PROJECT</label>
+          {projects.length > 0 ? (
+            <select
+              id="active-project-sidebar"
+              aria-label="Active project"
+              value={activeProjectId ?? ''}
+              onChange={(event) => { onSelectProject?.(event.target.value || null); }}
+              style={{ width: '100%', padding: '6px', color: 'var(--text-primary)', background: 'var(--bg-panel-alt)', border: '1px solid var(--border-strong)', borderRadius: 'var(--radius-sm)', fontFamily: 'inherit' }}
+            >
+              {projects.map((project) => <option key={project.projectId} value={project.projectId}>{project.name}</option>)}
+            </select>
+          ) : (
+            <a href="#/projects" onClick={(event) => { event.preventDefault(); onNavigate('/projects'); }} style={{ color: 'var(--accent-info)', fontSize: 'var(--text-xs)' }}>Create a Project</a>
+          )}
+          {selectionInvalidated && <div role="status" style={{ marginTop: 6, color: 'var(--accent-warn)', fontSize: 'var(--text-2xs)' }}>Previous Project is unavailable. Choose another Project.</div>}
+        </div>
+      )}
 
       <nav style={{ flex: 1, padding: '10px 8px', display: 'flex', flexDirection: 'column', gap: 2 }}>
         {items.map((item) => {

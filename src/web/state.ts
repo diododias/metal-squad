@@ -6,6 +6,9 @@ import {
   listPendingStageRequests,
   listRunningTaskRuns,
   listPendingTimeoutApprovalRequests,
+  getProjectStateRevision,
+  listProjectStateSummaries,
+  listRepositoryStateSummaries,
   listRunsForStats,
   type GateRow,
   type StageRequestRow,
@@ -14,7 +17,7 @@ import {
   type StatsRunRow,
 } from '../db/repo.js';
 import { resolveRepo } from '../core/repo.js';
-import { getFeatureCatalog, getBacklogSettings, getPendingFeatures, type FeatureCatalogEntry } from '../ui/catalog.js';
+import { getFeatureCatalog, getBacklogSettings, getPendingFeatures, type WorkItemCatalogEntry } from '../ui/catalog.js';
 import { getRunGroup, sortRunsByGroup } from '../ui/dashboardGroups.js';
 import { resolveRuntimeConfig, ConfigSchema, type Config } from '../config/index.js';
 import { resolveThemePreference } from '../ui/theme/resolve.js';
@@ -23,7 +26,7 @@ import { createSkillRegistry } from '../core/skills/registry.js';
 import type { Skill } from '../core/skills/types.js';
 import { collectEnvironmentInfo } from './environment.js';
 import { logCaughtError } from '../core/events/index.js';
-import type { MsqWebState, ThemeSnapshot, TimeoutApprovalState, TokenStats, UiNotification, WebRuntimeConfig } from './types.js';
+import type { MsqWebState, ProjectSummary, RepositorySummary, ThemeSnapshot, TimeoutApprovalState, TokenStats, UiNotification, WebRuntimeConfig } from './types.js';
 
 const DASHBOARD_PERIODS: { label: string; days: number | null }[] = [
   { label: 'today', days: 1 },
@@ -32,25 +35,23 @@ const DASHBOARD_PERIODS: { label: string; days: number | null }[] = [
   { label: 'all time', days: null },
 ];
 
-function gateToPendingApproval(gate: GateRow): { kind: 'gate'; id: number; featureId: string; repoId: string; integrityIssue?: string; prompt: string; createdAt: string } {
+function gateToPendingApproval(gate: GateRow): { kind: 'gate'; id: number; featureId: string; repoId: string; prompt: string; createdAt: string } {
   return {
     kind: 'gate' as const,
     id: gate.id,
     featureId: gate.featureId,
     repoId: gate.repoId,
-    integrityIssue: gate.integrityIssue,
     prompt: '',
     createdAt: gate.createdAt,
   };
 }
 
-function stageRequestToPendingApproval(sr: StageRequestRow): { kind: 'stage'; id: number; featureId: string; repoId: string; integrityIssue?: string; prompt: string; createdAt: string; requestKind: 'approval' | 'input'; options?: string[] } {
+function stageRequestToPendingApproval(sr: StageRequestRow): { kind: 'stage'; id: number; featureId: string; repoId: string; prompt: string; createdAt: string; requestKind: 'approval' | 'input'; options?: string[] } {
   return {
     kind: 'stage' as const,
     id: sr.id,
     featureId: sr.featureId,
-    repoId: sr.repoId ?? '',
-    integrityIssue: sr.integrityIssue,
+    repoId: '',
     prompt: sr.prompt,
     createdAt: sr.createdAt,
     requestKind: sr.kind,
@@ -107,10 +108,10 @@ function collectTimeoutApprovals(): TimeoutApprovalState[] {
   }
 }
 
-function collectPendingFeatures(runs: RunSummary[]): FeatureCatalogEntry[] {
+function collectPendingFeatures(runs: RunSummary[], repoId: string): WorkItemCatalogEntry[] {
   try {
     const catalog = getFeatureCatalog();
-    const doneFeatureIds = listCompletedFeatureIds();
+    const doneFeatureIds = listCompletedFeatureIds(repoId);
     const activeFeatureIds = new Set(
       runs
         .filter((run) => run.status === 'running' || run.status === 'blocked' || run.status === 'done')
@@ -145,13 +146,62 @@ function collectDashboardRows(): StatsRunRow[] {
 
 const FALLBACK_ROLE_COLOR = '#e5e7eb';
 
-function normalizeFeatureCatalog(catalog: Record<string, FeatureCatalogEntry>): Record<string, FeatureCatalogEntry> {
+function normalizeFeatureCatalog(catalog: Record<string, WorkItemCatalogEntry>): Record<string, WorkItemCatalogEntry> {
   return Object.fromEntries(
     Object.entries(catalog).map(([key, feature]) => [
       key,
       { ...feature, persistedId: feature.persistedId ?? feature.id },
     ]),
   );
+}
+
+function collectProjectSummaries(): ProjectSummary[] {
+  try {
+    return listProjectStateSummaries().map((project) => ({
+      projectId: project.projectId,
+      name: project.name,
+      position: project.position,
+      description: project.description,
+      revision: project.revision,
+      counts: {
+        epics: project.epicCount,
+        workItems: project.workItemCount,
+        archived: project.archivedCount,
+      },
+      activeRuns: project.activeRuns,
+      tokens: { status: 'ready', totalTokens: project.totalTokens, error: null },
+      archivedAt: project.archivedAt,
+    }));
+  } catch (error) {
+    logCaughtError('web/state.collectProjectSummaries', error);
+    return [];
+  }
+}
+
+/** The state hot path performs no path/Git/tool checks. Those are future lazy,
+ * per-repository enrichments and must never turn into N filesystem walks. */
+function collectRepositorySummaries(): RepositorySummary[] {
+  try {
+    return listRepositoryStateSummaries().map((repository) => ({
+      repoId: repository.repoId,
+      label: basename(repository.path),
+      projectId: repository.projectId,
+      health: 'unchecked' as const,
+      lastCheckedAt: null,
+    }));
+  } catch (error) {
+    logCaughtError('web/state.collectRepositorySummaries', error);
+    return [];
+  }
+}
+
+function collectProjectStateRevision(): number {
+  try {
+    return getProjectStateRevision();
+  } catch (error) {
+    logCaughtError('web/state.collectProjectStateRevision', error);
+    return 0;
+  }
 }
 
 function buildThemeSnapshot(): ThemeSnapshot {
@@ -265,18 +315,23 @@ export function buildMsqWebState(): MsqWebState {
   const repoLabel = basename(repo.path);
   const runs = collectRuns();
   const gates = collectGates();
-  const pendingFeatures = collectPendingFeatures(runs);
+  const pendingFeatures = collectPendingFeatures(runs, repo.repoId);
   const runningTasks = collectRunningTasks();
   const timeoutApprovals = collectTimeoutApprovals();
   const featureCatalog = normalizeFeatureCatalog(getFeatureCatalog());
   const backlogSettings = getBacklogSettings();
   const environment = collectEnvironmentInfo();
+  const projects = collectProjectSummaries();
+  const repositories = collectRepositorySummaries();
   const executionRuns = runs.filter((run) => getRunGroup(run.status) === 'execution');
   const doneRuns = runs.filter((run) => run.status === 'done');
   const falhaRunsList = runs.filter((run) => getRunGroup(run.status) === 'canceled');
 
   return {
+    revision: collectProjectStateRevision(),
     repoLabel,
+    projects,
+    repositories,
     runs,
     gates,
     pendingFeatures,
