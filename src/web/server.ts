@@ -36,8 +36,10 @@ import { assertConfiguredNotificationChannel } from '../core/notify/manager.js';
 import { clearSecret, setSecret } from '../security/secrets.js';
 import { updateCatalogFeature, updateCatalogTask, updateCatalogDefaults, type FeaturePatch, type CatalogDefaultsPatch } from '../db/backlogCatalog.js';
 import type { Feature, Task } from '../core/backlog/schema.js';
+import { projectService } from '../core/projectService.js';
 import { buildMsqWebState, appendNotification, resetWebStateCaches } from './state.js';
 import { createWebAuth, isAllowedHostHeader, isAllowedOrigin, timingSafeEqualStrings } from './auth.js';
+import { ProjectActionMessageSchema } from './schemas.js';
 import type {
   AppConfigPatch,
   FeatureConfigPatch,
@@ -45,6 +47,8 @@ import type {
   FeatureConfigSaveResult,
   BudgetConfigPatch,
   ProjectDefaultsPatch,
+  ProjectActionError,
+  ProjectActionResult,
   RunChangesPayload,
   SecretPatch,
   TaskConfigPatch,
@@ -704,6 +708,18 @@ export function createWebServer(options: {
     featureCwd: string,
   ): Promise<void> {
     switch (message.type) {
+      case 'action:createProject':
+      case 'action:updateProject': {
+        const result = handleProjectAction(message);
+        sendTo(client, result);
+        if (result.payload.ok) {
+          // Projects are intentionally not projected into MsqWebState until
+          // PRJ-07. Force this publication so current clients still reconcile
+          // after a successful mutation.
+          reconcileWebState(featureCwd, { forceBroadcast: true });
+        }
+        break;
+      }
       case 'action:startFeature': {
         startFeature(message.featureId, featureCwd);
         reconcileWebState(featureCwd);
@@ -860,6 +876,58 @@ export function createWebServer(options: {
       default: {
         break;
       }
+    }
+  }
+
+  function actionResultRequestId(message: unknown): string {
+    if (typeof message !== 'object' || message === null) return '';
+    const requestId = (message as { requestId?: unknown }).requestId;
+    return typeof requestId === 'string' ? requestId : '';
+  }
+
+  function projectActionError(error: unknown): ProjectActionError {
+    const code = typeof error === 'object' && error !== null
+      ? (error as { code?: unknown }).code
+      : undefined;
+    if (code === 'PROJECT_NOT_FOUND') {
+      return { code, message: 'Project was not found.' };
+    }
+    if (code === 'REVISION_CONFLICT') {
+      return { code, message: 'Project was changed by another request. Refresh and try again.' };
+    }
+    return { code: 'PROJECT_ACTION_FAILED', message: 'Could not save project.' };
+  }
+
+  function handleProjectAction(message: unknown): ProjectActionResult {
+    const parsed = ProjectActionMessageSchema.safeParse(message);
+    if (!parsed.success) {
+      return {
+        type: 'action:result',
+        payload: {
+          requestId: actionResultRequestId(message),
+          ok: false,
+          error: { code: 'INVALID_PAYLOAD', message: 'Invalid project action payload.' },
+        },
+      };
+    }
+
+    try {
+      const serviceResult = parsed.data.type === 'action:createProject'
+        ? projectService.create({ name: parsed.data.name, description: parsed.data.description })
+        : projectService.update(parsed.data.projectId, parsed.data.patch, parsed.data.expectedRevision);
+      return {
+        type: 'action:result',
+        payload: { requestId: parsed.data.requestId, ok: true, entity: serviceResult.entity },
+      };
+    } catch (error) {
+      return {
+        type: 'action:result',
+        payload: {
+          requestId: parsed.data.requestId,
+          ok: false,
+          error: projectActionError(error),
+        },
+      };
     }
   }
 
