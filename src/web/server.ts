@@ -36,12 +36,16 @@ import { assertConfiguredNotificationChannel } from '../core/notify/manager.js';
 import { clearSecret, setSecret } from '../security/secrets.js';
 import { updateCatalogFeature, updateCatalogTask, updateCatalogDefaults, type FeaturePatch, type CatalogDefaultsPatch } from '../db/backlogCatalog.js';
 import type { Feature, Task } from '../core/backlog/schema.js';
+import { epicService } from '../core/epicService.js';
+import { workItemService } from '../core/workItemService.js';
 import { projectService, repoLinkService } from '../core/projectService.js';
 import { buildMsqWebState, appendNotification, resetWebStateCaches } from './state.js';
 import { createWebAuth, isAllowedHostHeader, isAllowedOrigin, timingSafeEqualStrings } from './auth.js';
-import { ProjectActionMessageSchema, RepositoryActionMessageSchema } from './schemas.js';
+import { EpicActionMessageSchema, ProjectActionMessageSchema, RepositoryActionMessageSchema, WorkItemActionMessageSchema } from './schemas.js';
 import type {
   AppConfigPatch,
+  EpicActionError,
+  EpicActionResult,
   FeatureConfigPatch,
   FeatureConfigSaveIssue,
   FeatureConfigSaveResult,
@@ -53,6 +57,8 @@ import type {
   RunChangesPayload,
   SecretPatch,
   TaskConfigPatch,
+  WorkItemActionError,
+  WorkItemActionResult,
   WebSocketClientMessage,
   WebSocketServerMessage,
 } from './types.js';
@@ -729,6 +735,19 @@ export function createWebServer(options: {
         if (result.payload.ok) reconcileWebState(featureCwd, { forceBroadcast: true });
         break;
       }
+      case 'action:createEpic':
+      case 'action:updateEpic': {
+        const result = handleEpicAction(message);
+        sendTo(client, result);
+        if (result.payload.ok) reconcileWebState(featureCwd, { forceBroadcast: true });
+        break;
+      }
+      case 'action:createWorkItem': {
+        const result = handleWorkItemAction(message);
+        sendTo(client, result);
+        if (result.payload.ok) reconcileWebState(featureCwd, { forceBroadcast: true });
+        break;
+      }
       case 'action:startFeature': {
         startFeature(message.featureId, featureCwd);
         reconcileWebState(featureCwd);
@@ -982,6 +1001,69 @@ export function createWebServer(options: {
       }
     } catch (error) {
       return { type: 'action:result', payload: { requestId: parsed.data.requestId, ok: false, error: repositoryActionError(error) } };
+    }
+  }
+
+  function epicActionError(error: unknown): EpicActionError {
+    const code = typeof error === 'object' && error !== null
+      ? (error as { code?: unknown }).code
+      : undefined;
+    if (code === 'PROJECT_NOT_FOUND' || code === 'REVISION_CONFLICT') {
+      return { code, message: error instanceof Error ? error.message : 'Epic action failed.' };
+    }
+    return { code: 'EPIC_ACTION_FAILED', message: 'Could not save epic.' };
+  }
+
+  function handleEpicAction(message: unknown): EpicActionResult {
+    const parsed = EpicActionMessageSchema.safeParse(message);
+    if (!parsed.success) {
+      return {
+        type: 'action:result',
+        payload: { requestId: actionResultRequestId(message), ok: false, error: { code: 'INVALID_PAYLOAD', message: 'Invalid epic action payload.' } },
+      };
+    }
+    try {
+      const serviceResult = parsed.data.type === 'action:createEpic'
+        ? epicService.create({ projectId: parsed.data.projectId, title: parsed.data.title, description: parsed.data.description, audit: { actor: 'web', requestId: parsed.data.requestId } })
+        : epicService.update(parsed.data.epicId, parsed.data.patch, parsed.data.expectedRevision, { audit: { actor: 'web', requestId: parsed.data.requestId } });
+      return {
+        type: 'action:result',
+        payload: { requestId: parsed.data.requestId, ok: true, entity: serviceResult.entity },
+      };
+    } catch (error) {
+      return {
+        type: 'action:result',
+        payload: { requestId: parsed.data.requestId, ok: false, error: epicActionError(error) },
+      };
+    }
+  }
+
+  function workItemActionError(error: unknown): WorkItemActionError {
+    const code = typeof error === 'object' && error !== null ? (error as { code?: unknown }).code : undefined;
+    if (code === 'EPIC_NOT_FOUND' || code === 'REPOSITORY_NOT_IN_PROJECT' || code === 'REPOSITORY_UNAVAILABLE'
+      || code === 'DEPENDENCY_NOT_FOUND' || code === 'CROSS_REPOSITORY_DEPENDENCY' || code === 'DEPENDENCY_CYCLE') {
+      return { code, message: error instanceof Error ? error.message : 'Could not create Work Item.' };
+    }
+    return { code: 'WORK_ITEM_ACTION_FAILED', message: 'Could not create Work Item.' };
+  }
+
+  function handleWorkItemAction(message: unknown): WorkItemActionResult {
+    const parsed = WorkItemActionMessageSchema.safeParse(message);
+    if (!parsed.success) {
+      return { type: 'action:result', payload: { requestId: actionResultRequestId(message), ok: false, error: { code: 'INVALID_PAYLOAD', message: 'Invalid Work Item action payload.' } } };
+    }
+    try {
+      const result = workItemService.create({
+        epicId: parsed.data.epicId,
+        repoId: parsed.data.repoId,
+        title: parsed.data.title,
+        description: parsed.data.description,
+        dependsOn: parsed.data.dependsOn,
+        audit: { actor: 'web', requestId: parsed.data.requestId },
+      });
+      return { type: 'action:result', payload: { requestId: parsed.data.requestId, ok: true, workItem: result.entity, revision: result.revision ?? result.entity.revision } };
+    } catch (error) {
+      return { type: 'action:result', payload: { requestId: parsed.data.requestId, ok: false, error: workItemActionError(error) } };
     }
   }
 

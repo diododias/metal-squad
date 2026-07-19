@@ -88,8 +88,8 @@ export interface BacklogSeedPlan {
 }
 
 /** Returns every feature ID, including archived rows, because IDs are never reused. */
-export function listOccupiedFeatureIds(): Set<string> {
-  const db = getReadonlyDbOrNull();
+export function listOccupiedFeatureIds(database?: Database.Database): Set<string> {
+  const db = database ?? getReadonlyDbOrNull();
   if (!db) return new Set();
   const rows = db.prepare(`SELECT feature_id FROM backlog_features`).all() as { feature_id: string }[];
   return new Set(rows.map((row) => row.feature_id));

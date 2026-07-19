@@ -64,3 +64,42 @@ export const RepositoryActionMessageSchema = z.discriminatedUnion('type', [
 });
 
 export type RepositoryActionMessage = z.infer<typeof RepositoryActionMessageSchema>;
+
+export const EpicActionMessageSchema = z.discriminatedUnion('type', [
+  z.object({
+    type: z.literal('action:createEpic'),
+    requestId: RequestIdSchema,
+    projectId: z.string().min(1),
+    title: z.string().min(1),
+    description: z.string().nullable().optional(),
+  }).strict(),
+  z.object({
+    type: z.literal('action:updateEpic'),
+    requestId: RequestIdSchema,
+    epicId: z.string().min(1),
+    expectedRevision: z.number().int().positive(),
+    patch: z.object({
+      title: z.string().optional(),
+      description: z.string().nullable().optional(),
+      status: z.enum(['todo', 'in_progress', 'done']).optional(),
+      position: z.number().int().nonnegative().optional(),
+    }).strict().refine(
+      (patch) => Object.keys(patch).length > 0,
+      { message: 'Epic update requires at least one allowed patch field.' },
+    ),
+  }).strict(),
+]);
+
+export type EpicActionMessage = z.infer<typeof EpicActionMessageSchema>;
+
+export const WorkItemActionMessageSchema = z.object({
+  type: z.literal('action:createWorkItem'),
+  requestId: RequestIdSchema,
+  epicId: z.string().min(1),
+  repoId: z.string().min(1),
+  title: z.string().min(1),
+  description: z.string().nullable().optional(),
+  dependsOn: z.array(z.string().min(1)).optional(),
+}).strict();
+
+export type WorkItemActionMessage = z.infer<typeof WorkItemActionMessageSchema>;

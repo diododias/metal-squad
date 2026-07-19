@@ -58,6 +58,13 @@ const mocks = vi.hoisted(() => ({
     move: vi.fn(),
     unlink: vi.fn(),
   },
+  epicService: {
+    create: vi.fn(),
+    update: vi.fn(),
+  },
+  workItemService: {
+    create: vi.fn(),
+  },
 }));
 
 vi.mock('../../src/core/repo.js', () => ({
@@ -145,6 +152,10 @@ vi.mock('../../src/core/projectService.js', () => ({
 
 vi.mock('../../src/core/epicService.js', () => ({
   epicService: mocks.epicService,
+}));
+
+vi.mock('../../src/core/workItemService.js', () => ({
+  workItemService: mocks.workItemService,
 }));
 
 vi.mock('../../src/core/stats.js', () => ({
@@ -671,6 +682,34 @@ describe('web server', () => {
     expect(peerReceivedResult).toBe(false);
     origin.close();
     peer.close();
+  });
+
+  it('uses createWorkItem/workItemId as the WebSocket contract and reemits state', async () => {
+    const { createWebServer } = await import('../../src/web/server.js');
+    const workItem = {
+      workItemId: 'F-23456789', epicId: 'epic-1', repoId: 'repo-1', title: 'Web Work Item',
+      description: null, type: 'feature', dependsOn: [], tasks: [], tool: 'codex', effort: 'medium', thinking: 'off',
+      skills: [], workflow: { mode: 'staged', stages: ['plan'], approvals: { channel: 'telegram' }, autoAdvance: false, syncTasksToBacklog: true, sessionPolicy: { mode: 'isolated', alwaysIsolatedStages: [] }, stepGuidance: {}, stagePublishes: {} },
+      autoStart: false, revision: 1, createdAt: '2026-07-18T12:00:00.000Z', updatedAt: '2026-07-18T12:00:00.000Z',
+    };
+    mocks.workItemService.create.mockReturnValue({ entity: workItem, revision: 1 });
+    server = createWebServer({ host: '127.0.0.1', port: 0, auth: 'token', token: 'secret' });
+    await new Promise<void>((resolve) => server!.server.listen(0, '127.0.0.1', resolve));
+    const address = server!.server.address() as { port: number };
+    const socket = new WebSocket(`ws://127.0.0.1:${address.port}/ws`);
+    await waitForOpen(socket);
+    socket.send(JSON.stringify({ type: 'auth', token: 'secret' }));
+    await waitForSocketMessage(socket);
+
+    const result = waitForMatchingMessage(socket, (message) => message.type === 'action:result');
+    socket.send(JSON.stringify({ type: 'action:createWorkItem', requestId: 'work-item-1', epicId: 'epic-1', repoId: 'repo-1', title: 'Web Work Item' }));
+
+    expect(await result).toEqual({ type: 'action:result', payload: { requestId: 'work-item-1', ok: true, workItem, revision: 1 } });
+    expect(mocks.workItemService.create).toHaveBeenCalledWith({
+      epicId: 'epic-1', repoId: 'repo-1', title: 'Web Work Item', description: undefined, dependsOn: undefined,
+      audit: { actor: 'web', requestId: 'work-item-1' },
+    });
+    socket.close();
   });
 
   it('returns a typed path confirmation error without registering or linking a repository', async () => {
