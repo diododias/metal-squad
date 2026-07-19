@@ -642,11 +642,14 @@ Supported template variables:
 
 Prompt inputs are assembled from:
 
-- `feature.spec`
-- `feature.specFile`
-- `feature.context`
-- `feature.tasks`
-- `task.taskFile`
+- `feature.spec` — inlined as the feature summary
+- `feature.specFile` — content **inlined** under a `--- path ---` block (the spec
+  stays the only authoritative description of the feature shipped in full)
+- `feature.context` — emitted as **paths only** so the agent loads them on demand
+- `feature.tasks` — task metadata (`id`, `title`, status, deps, skills) is
+  inlined
+- `task.taskFile` — emitted as a `Task file: <path>` line per task, **not**
+  inlined; the agent decides when (or whether) to read it
 
 Long prompt sections are truncated according to `promptContextCharLimit`.
 

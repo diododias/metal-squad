@@ -99,7 +99,7 @@ describe('project and epic domain services', () => {
   describe('repoLinkService', () => {
     it('links a repository by resolving a path and lists it back', () => {
       const project = projectService.create({ name: 'WithRepo' }).entity;
-      const result = repoLinkService.link(project.projectId, { path: directory });
+      const result = repoLinkService.link(project.projectId, { path: directory, confirm: true }, { allowedRoots: [directory] });
       expect(result.revision).toBeNull();
       expect(result.entity.projectId).toBe(project.projectId);
       expect(repoLinkService.list(project.projectId).map((row) => row.repoId)).toContain(result.entity.repoId);
