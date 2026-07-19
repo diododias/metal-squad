@@ -30,6 +30,14 @@ export interface TimeoutApprovalState {
 export interface UiNotification {
   id: string;
   type: 'info' | 'notice';
+  /**
+   * Optional tonal override derived from the originating event. When present,
+   * the toast/feed surfaces use this in preference to `type`. Older clients
+   * (and the persisted `state:full` snapshot) still derive tone from `type`.
+   */
+  tone?: 'info' | 'ok' | 'warn' | 'danger';
+  /** Optional originating event label (e.g. `run:done`, `gate:created`). */
+  event?: string;
   message: string;
   createdAt: string;
 }

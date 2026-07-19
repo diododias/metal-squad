@@ -59,6 +59,7 @@ import type {
   RunChangesPayload,
   SecretPatch,
   TaskConfigPatch,
+  UiNotification,
   WorkItemActionError,
   WorkItemActionResult,
   WebSocketClientMessage,
@@ -287,6 +288,80 @@ export interface RunningWebServer {
   close: () => Promise<void>;
 }
 
+/**
+ * Maps a high-signal broadcast event into a {@link UiNotification} so the web
+ * dashboard can surface it as a toast without diffing raw event payloads. The
+ * notification survives across `reconcileWebState` rebuilds because
+ * `buildCurrentState` preserves `latestState.notifications`.
+ *
+ * Returns `null` for events that are either too noisy (every `run:output`
+ * line) or already adequately covered by the receiving component (e.g. status
+ * diffs that flow into the run detail view).
+ */
+function buildEventNotification(
+  event: keyof MsqEvents,
+  payload: MsqEvents[keyof MsqEvents],
+): UiNotification | null {
+  const now = new Date().toISOString();
+  const id = `${String(Date.now())}-${String(Math.random()).slice(2, 8)}`;
+  if (event === 'ui:info') {
+    const message = (payload as { message?: string }).message ?? '';
+    if (!message) return null;
+    return { id, type: 'info', tone: 'info', event, message, createdAt: now };
+  }
+  if (event === 'ui:notice') {
+    const message = (payload as { message?: string }).message ?? '';
+    if (!message) return null;
+    return { id, type: 'notice', tone: 'warn', event, message, createdAt: now };
+  }
+  if (event === 'run:done') {
+    const p = payload as { featureId?: string; result?: { summary?: string } };
+    const featureId = p.featureId ?? 'feature';
+    const summary = p.result?.summary ?? 'done';
+    return { id, type: 'info', tone: 'ok', event, message: `${featureId} done — ${summary}`, createdAt: now };
+  }
+  if (event === 'run:failed') {
+    const p = payload as { featureId?: string; error?: string; kind?: string };
+    const featureId = p.featureId ?? 'feature';
+    const error = p.error ?? 'unknown error';
+    const kindLabel = p.kind === 'aborted' ? ' (aborted)' : '';
+    return { id, type: 'notice', tone: 'danger', event, message: `${featureId} failed${kindLabel} — ${error}`, createdAt: now };
+  }
+  if (event === 'run:blocked') {
+    const p = payload as { featureId?: string; code?: string; reason?: string; summary?: string };
+    const featureId = p.featureId ?? 'feature';
+    const detail = p.code ?? p.reason ?? 'blocked';
+    return { id, type: 'notice', tone: 'warn', event, message: `${featureId} blocked (${detail}) — ${p.summary ?? ''}`.trim(), createdAt: now };
+  }
+  if (event === 'gate:created') {
+    const p = payload as { gateId?: number; featureId?: string };
+    const featureId = p.featureId ?? 'feature';
+    return { id, type: 'notice', tone: 'warn', event, message: `${featureId} — gate awaiting decision`, createdAt: now };
+  }
+  if (event === 'stage:request-created') {
+    const p = payload as { featureId?: string; stage?: string; kind?: string };
+    const featureId = p.featureId ?? 'feature';
+    const stageLabel = p.stage ? ` · ${p.stage}` : '';
+    const action = p.kind === 'input' ? 'needs input' : 'awaiting approval';
+    return { id, type: 'notice', tone: 'warn', event, message: `${featureId}${stageLabel} — ${action}`, createdAt: now };
+  }
+  if (event === 'budget:alert') {
+    const p = payload as { percent?: number; spent?: number; limit?: number };
+    return {
+      id, type: 'notice', tone: 'warn', event,
+      message: `Budget ${String(p.percent ?? '?')}% reached (${String(p.spent ?? '?')}/${String(p.limit ?? '?')})`,
+      createdAt: now,
+    };
+  }
+  if (event === 'timeout:approval-created') {
+    const p = payload as { featureId?: string; stage?: string };
+    const featureId = p.featureId ?? 'feature';
+    const stageLabel = p.stage ? ` · ${p.stage}` : '';
+    return { id, type: 'notice', tone: 'warn', event, message: `${featureId}${stageLabel} — timed out (retry or keep blocked?)`, createdAt: now };
+  }
+  return null;
+}
+
 export function createWebServer(options: {
   host: string;
   port: number;
@@ -433,18 +508,19 @@ export function createWebServer(options: {
       } else {
         broadcast({ type: event, payload });
       }
-      if (event === 'ui:info' || event === 'ui:notice') {
-        const message =
-          typeof payload === 'object' && 'message' in payload && typeof payload.message === 'string'
-            ? payload.message
-            : '';
-        latestState = appendNotification(latestState, {
-          id: `${String(Date.now())}-${String(Math.random())}`,
-          type: event === 'ui:info' ? 'info' : 'notice',
-          message,
-          createdAt: new Date().toISOString(),
-        });
+      // Surface a toast-tier notification for high-signal events. Append to
+      // `latestState.notifications` so the next reconcile/state:full captures
+      // it; the client diffs seen IDs (see App.tsx) to render toasts.
+      const notification = buildEventNotification(event, payload);
+      if (notification) {
+        latestState = appendNotification(latestState, notification);
         latestStateSignature = JSON.stringify(latestState);
+      }
+      if (event === 'ui:info' || event === 'ui:notice') {
+        // `appendNotification` above already captured the message; the explicit
+        // state:full broadcast below used to live here, but reconcileWebState
+        // (further down) now does that for any non-output, non-budget event —
+        // including these — so the duplicate broadcast is dropped.
         broadcast({ type: 'state:full', payload: latestState });
         return;
       }

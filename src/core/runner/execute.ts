@@ -14,7 +14,6 @@ import {
   shouldEvaluateNextCandidate,
 } from '../orchestrator/autoPilot.js';
 import type { AutoPilotOutcomeKind } from '../events/types.js';
-import { logCaughtError } from '../events/logging.js';
 import { getAdapter } from '../adapters/index.js';
 import { resolveRepo } from '../repo.js';
 import {
@@ -70,6 +69,7 @@ import {
   attachDefaultEventLogger,
   attachEventNotifications,
   attachRunPersistence,
+  logCaughtError,
   msqEventBus,
 } from '../events/index.js';
 import { loadBudgetState, saveBudgetState } from '../../db/repo.js';
@@ -244,6 +244,20 @@ export async function executeBacklog(
   const detachLogger = attachDefaultEventLogger();
   const detachNotifications = attachEventNotifications();
   startTelegramPoller();
+
+  // Process-level surface so any unhandled promise rejection or stray throw
+  // inside an async subscriber (notification dispatch, persistence write,
+  // telemetry) is captured with a labeled `console.error` instead of dying
+  // silently — the runner process keeps running otherwise, hiding the failure
+  // from anyone tailing the logs. Removed in the `finally` block below.
+  const handleUnhandledRejection = (reason: unknown): void => {
+    logCaughtError('unhandledRejection', reason);
+  };
+  const handleUncaughtException = (error: Error): void => {
+    logCaughtError('uncaughtException', error);
+  };
+  process.on('unhandledRejection', handleUnhandledRejection);
+  process.on('uncaughtException', handleUncaughtException);
 
   const handleGlobalBudgetViolation = (violation: BudgetViolation, feature: Feature): void => {
     if (budgetPauseTriggered) return;
@@ -949,7 +963,13 @@ export async function executeBacklog(
     finishPipeline(pipelineId, pipelineStatus);
     const msg = err instanceof Error ? err.message : String(err);
     if (!msg.startsWith('Feature ')) {
-      void dispatch('run:failed', `metal-squad: execution stopped — ${msg}`).catch(() => { /* ignore dispatch errors */ });
+      void dispatch('run:failed', `metal-squad: execution stopped — ${msg}`).catch((dispatchError: unknown) => {
+        // Notification dispatch failures (unconfigured channel, network drop,
+        // credential rotation) should never vanish — the original error is
+        // rethrown on the next line, but the operator may never see *why* the
+        // notification didn't arrive. Log it with a distinct label.
+        logCaughtError('runner.notify.run:failed', dispatchError);
+      });
     }
     throw err;
   } finally {
@@ -960,6 +980,8 @@ export async function executeBacklog(
     detachPersistence();
     process.removeListener('SIGINT', handleSignal);
     process.removeListener('SIGTERM', handleSignal);
+    process.off('unhandledRejection', handleUnhandledRejection);
+    process.off('uncaughtException', handleUncaughtException);
   }
 }
 

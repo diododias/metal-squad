@@ -127,4 +127,55 @@ describe('attachDefaultEventLogger', () => {
     expect(consoleSpy).not.toHaveBeenCalled();
     consoleSpy.mockRestore();
   });
+
+  it('suppresses heartbeat rows from run:output (operator console)', () => {
+    const bus = makeEventBus();
+    const consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    attachDefaultEventLogger(bus as never);
+    bus.emit('run:output', {
+      runId: 1,
+      tool: 'opencode',
+      stream: 'stderr',
+      source: 'heartbeat',
+      line: '[msq] opencode running for 47s (stdout 1500B stderr 0B idle 12s)',
+    });
+    expect(consoleSpy).not.toHaveBeenCalled();
+    consoleSpy.mockRestore();
+  });
+
+  it('logs run:failed with the aborted kind label', () => {
+    const bus = makeEventBus();
+    const consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    attachDefaultEventLogger(bus as never);
+    bus.emit('run:failed', { featureId: 'feat-3', error: 'killed', kind: 'aborted' });
+    const logged = consoleSpy.mock.calls.map((c) => String(c[0]));
+    expect(logged.some((line) => line.includes('feat-3') && line.includes('(aborted)'))).toBe(true);
+    consoleSpy.mockRestore();
+  });
+
+  it('logs gate:created, stage:request-created, budget:alert and run:blocked events', () => {
+    const bus = makeEventBus();
+    const consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    attachDefaultEventLogger(bus as never);
+    bus.emit('gate:created', { gateId: 12, featureId: 'feat-1' });
+    bus.emit('stage:request-created', { requestId: 7, featureId: 'feat-1', stage: 'implement', kind: 'approval', source: 'manual', prompt: 'ok?' });
+    bus.emit('budget:alert', { percent: 90, spent: 900, limit: 1000 });
+    bus.emit('run:blocked', { runId: 5, featureId: 'feat-1', reason: 'gate', code: 'needs_decision', summary: 'awaiting approval' });
+    const lines = consoleSpy.mock.calls.map((c) => String(c[0]));
+    expect(lines.some((l) => l.includes('gate') && l.includes('feat-1'))).toBe(true);
+    expect(lines.some((l) => l.includes('feat-1') && l.includes('approval'))).toBe(true);
+    expect(lines.some((l) => l.includes('budget') && l.includes('90%'))).toBe(true);
+    expect(lines.some((l) => l.includes('blocked') && l.includes('needs_decision'))).toBe(true);
+    consoleSpy.mockRestore();
+  });
+
+  it('logs run:start with stage label when stage is present', () => {
+    const bus = makeEventBus();
+    const consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    attachDefaultEventLogger(bus as never);
+    bus.emit('run:start', { featureId: 'feat-1', tool: 'codex', stage: 'specify' });
+    const logged = consoleSpy.mock.calls.map((c) => String(c[0]));
+    expect(logged.some((l) => l.includes('specify'))).toBe(true);
+    consoleSpy.mockRestore();
+  });
 });
