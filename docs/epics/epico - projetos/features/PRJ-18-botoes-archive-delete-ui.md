@@ -24,7 +24,7 @@ por entidade) e habilita/desabilita botões conforme.
 
 Onde os botões entram: nos cards do Board (`KanbanCard`,
 `src/web/client/components/data/KanbanCard.tsx:75`, já estendido por PRJ-16), no
-detalhe do Work Item (`BacklogItemDetail`, `src/web/client/pages/BacklogItemDetail.tsx:21`)
+detalhe do Work Item (componente legado `BacklogItemDetail`, `src/web/client/pages/BacklogItemDetail.tsx:21`)
 e no detalhe do Project/Epic (`ProjectDetailPage`, PRJ-12). Já existe um padrão de
 cancelamento de execução: `action:abortPipeline`/`action:requestFeatureAbort`
 (`src/web/types.ts:227-228`, handlers em `server.ts:767-777`) — o fluxo "running →
@@ -57,7 +57,7 @@ Archive (reversível) e Delete (tombstone) usa `Tag`/`StatusPill`.
 ## Arquivos afetados
 
 - `src/web/client/components/data/KanbanCard.tsx` — ações de lifecycle no card (`:75`).
-- `src/web/client/pages/BacklogItemDetail.tsx` — ações no detalhe do Work Item (`:21`).
+- `src/web/client/pages/BacklogItemDetail.tsx` — componente legado; ações no detalhe do Work Item (`:21`).
 - `src/web/client/pages/ProjectDetailPage.tsx` — ações no Project/Epic (PRJ-12).
 - `src/web/client/components/LifecycleActions.tsx` (novo) + `Modal` de confirmação
   (`components/feedback/Modal.tsx`).

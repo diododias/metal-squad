@@ -11,6 +11,7 @@ import {
   RepositoryUnavailableError,
   RepoAlreadyLinkedError,
   RepoInUseError,
+  RepoNotLinkedToProjectError,
   RevisionConflictError,
 } from './errors.js';
 import { listOccupiedFeatureIds } from './backlogCatalog.js';
@@ -45,6 +46,18 @@ export function registerRepo(repoId: string, path: string): void {
        ON CONFLICT(repo_id) DO UPDATE SET path = excluded.path`,
     )
     .run(repoId, path);
+}
+
+export interface RegisteredRepoRow {
+  repoId: string;
+  path: string;
+}
+
+export function getRegisteredRepo(repoId: string): RegisteredRepoRow | null {
+  if (!hasDbFile()) return null;
+  return (getDb('readonly').prepare(
+    `SELECT repo_id AS repoId, path FROM repos WHERE repo_id = ?`,
+  ).get(repoId) as RegisteredRepoRow | undefined) ?? null;
 }
 
 export interface AuditContext {
@@ -446,11 +459,14 @@ export function moveRepo(
 
 export function unlinkRepo(
   repoId: string,
-  options: { audit?: AuditContext } = {},
+  options: { audit?: AuditContext; projectId?: string } = {},
 ): boolean {
   return withTransaction((database) => {
     const before = getProjectRepoLink(database, repoId);
     if (!before) return false;
+    if (options.projectId !== undefined && before.projectId !== options.projectId) {
+      throw new RepoNotLinkedToProjectError(repoId, options.projectId);
+    }
     assertRepoHasNoWorkItems(database, repoId, before.projectId);
     database.prepare(`DELETE FROM project_repos WHERE repo_id = ?`).run(repoId);
     recordAuditEvent(database, options.audit, 'project_repo', repoId, 'unlink', before, null);

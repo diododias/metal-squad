@@ -28,7 +28,7 @@ import {
 } from '../db/repo.js';
 import { getAdapter } from '../core/adapters/index.js';
 import { computeRunBreakdown } from '../core/stats.js';
-import { resolveRepo } from '../core/repo.js';
+import { resolveRepo, resolveRepoAllowlist } from '../core/repo.js';
 import { resolveWorkItemExecutionContext } from '../core/workItemExecutionContext.js';
 import { loadBacklogFromCatalog } from '../core/backlog/load.js';
 import { assertNoCrossRepositoryDependencies, selectStartableFeaturePlan } from '../core/orchestrator/graph.js';
@@ -40,21 +40,22 @@ import { getFeatureIdOwner, updateCatalogFeature, updateCatalogTask, updateCatal
 import type { Feature, Task } from '../core/backlog/schema.js';
 import { epicService } from '../core/epicService.js';
 import { workItemService } from '../core/workItemService.js';
-import { projectService } from '../core/projectService.js';
+import { projectService, repoLinkService } from '../core/projectService.js';
 import { buildMsqWebState, appendNotification, resetWebStateCaches } from './state.js';
 import { createWebAuth, isAllowedHostHeader, isAllowedOrigin, timingSafeEqualStrings } from './auth.js';
-import { EpicActionMessageSchema, ProjectActionMessageSchema, WorkItemActionMessageSchema } from './schemas.js';
+import { EpicActionMessageSchema, ProjectActionMessageSchema, RepositoryActionMessageSchema, WorkItemActionMessageSchema } from './schemas.js';
 import type {
   AppConfigPatch,
+  EpicActionError,
+  EpicActionResult,
   FeatureConfigPatch,
   FeatureConfigSaveIssue,
   FeatureConfigSaveResult,
   BudgetConfigPatch,
-  EpicActionError,
-  EpicActionResult,
   ProjectDefaultsPatch,
   ProjectActionError,
   ProjectActionResult,
+  RepositoryActionResult,
   RunChangesPayload,
   SecretPatch,
   TaskConfigPatch,
@@ -752,16 +753,19 @@ export function createWebServer(options: {
         }
         break;
       }
+      case 'action:linkRepo':
+      case 'action:moveRepo':
+      case 'action:unlinkRepo': {
+        const result = handleRepositoryAction(message, featureCwd);
+        sendTo(client, result);
+        if (result.payload.ok) reconcileWebState(featureCwd, { forceBroadcast: true });
+        break;
+      }
       case 'action:createEpic':
       case 'action:updateEpic': {
         const result = handleEpicAction(message);
         sendTo(client, result);
-        if (result.payload.ok) {
-          // Epics are not projected into MsqWebState until PRJ-07. Still
-          // publish reconciliation so every connected client observes the
-          // completed mutation through the established WebSocket contract.
-          reconcileWebState(featureCwd, { forceBroadcast: true });
-        }
+        if (result.payload.ok) reconcileWebState(featureCwd, { forceBroadcast: true });
         break;
       }
       case 'action:createWorkItem': {
@@ -981,18 +985,57 @@ export function createWebServer(options: {
     }
   }
 
+  function repositoryActionError(error: unknown): ProjectActionError {
+    const code = typeof error === 'object' && error !== null
+      ? (error as { code?: unknown }).code
+      : undefined;
+    if (code === 'PROJECT_NOT_FOUND' || code === 'REPO_NOT_FOUND' || code === 'REPO_NOT_LINKED_TO_PROJECT' || code === 'REPO_ALREADY_LINKED' || code === 'REPO_IN_USE'
+      || code === 'REPO_PATH_CONFIRMATION_REQUIRED' || code === 'REPO_PATH_NOT_FOUND' || code === 'REPO_PATH_NOT_DIRECTORY' || code === 'REPO_PATH_NOT_ALLOWED') {
+      return { code, message: error instanceof Error ? error.message : 'Repository action failed.' };
+    }
+    return { code: 'PROJECT_ACTION_FAILED', message: 'Could not change repository links.' };
+  }
+
+  function handleRepositoryAction(message: unknown, featureCwd: string): RepositoryActionResult {
+    const parsed = RepositoryActionMessageSchema.safeParse(message);
+    if (!parsed.success) {
+      return {
+        type: 'action:result',
+        payload: { requestId: actionResultRequestId(message), ok: false, error: { code: 'INVALID_PAYLOAD', message: 'Invalid repository action payload.' } },
+      };
+    }
+    const audit = { actor: 'web', requestId: parsed.data.requestId };
+    try {
+      switch (parsed.data.type) {
+        case 'action:linkRepo': {
+          const result = repoLinkService.link(parsed.data.projectId, parsed.data, {
+            allowedRoots: resolveRepoAllowlist(featureCwd), audit,
+          });
+          return { type: 'action:result', payload: { requestId: parsed.data.requestId, ok: true, entity: result.entity } };
+        }
+        case 'action:moveRepo': {
+          const result = repoLinkService.move(parsed.data.repoId, parsed.data.toProjectId, { audit });
+          return { type: 'action:result', payload: { requestId: parsed.data.requestId, ok: true, entity: result.entity } };
+        }
+        case 'action:unlinkRepo': {
+          const result = repoLinkService.unlink(parsed.data.repoId, { projectId: parsed.data.projectId, audit });
+          return { type: 'action:result', payload: { requestId: parsed.data.requestId, ok: true, entity: result.entity } };
+        }
+        default: {
+          throw new Error('Unsupported repository action.');
+        }
+      }
+    } catch (error) {
+      return { type: 'action:result', payload: { requestId: parsed.data.requestId, ok: false, error: repositoryActionError(error) } };
+    }
+  }
+
   function epicActionError(error: unknown): EpicActionError {
     const code = typeof error === 'object' && error !== null
       ? (error as { code?: unknown }).code
       : undefined;
-    if (code === 'PROJECT_NOT_FOUND') {
-      return { code, message: 'Project was not found.' };
-    }
-    if (code === 'EPIC_NOT_FOUND') {
-      return { code, message: 'Epic was not found.' };
-    }
-    if (code === 'REVISION_CONFLICT') {
-      return { code, message: 'Epic was changed by another request. Refresh and try again.' };
+    if (code === 'PROJECT_NOT_FOUND' || code === 'REVISION_CONFLICT') {
+      return { code, message: error instanceof Error ? error.message : 'Epic action failed.' };
     }
     return { code: 'EPIC_ACTION_FAILED', message: 'Could not save epic.' };
   }
@@ -1002,24 +1045,13 @@ export function createWebServer(options: {
     if (!parsed.success) {
       return {
         type: 'action:result',
-        payload: {
-          requestId: actionResultRequestId(message),
-          ok: false,
-          error: { code: 'INVALID_PAYLOAD', message: 'Invalid epic action payload.' },
-        },
+        payload: { requestId: actionResultRequestId(message), ok: false, error: { code: 'INVALID_PAYLOAD', message: 'Invalid epic action payload.' } },
       };
     }
-
-    const audit = { actor: 'web', requestId: parsed.data.requestId };
     try {
       const serviceResult = parsed.data.type === 'action:createEpic'
-        ? epicService.create({
-            projectId: parsed.data.projectId,
-            title: parsed.data.title,
-            description: parsed.data.description,
-            audit,
-          })
-        : epicService.update(parsed.data.epicId, parsed.data.patch, parsed.data.expectedRevision, { audit });
+        ? epicService.create({ projectId: parsed.data.projectId, title: parsed.data.title, description: parsed.data.description, audit: { actor: 'web', requestId: parsed.data.requestId } })
+        : epicService.update(parsed.data.epicId, parsed.data.patch, parsed.data.expectedRevision, { audit: { actor: 'web', requestId: parsed.data.requestId } });
       return {
         type: 'action:result',
         payload: { requestId: parsed.data.requestId, ok: true, entity: serviceResult.entity },
@@ -1027,11 +1059,7 @@ export function createWebServer(options: {
     } catch (error) {
       return {
         type: 'action:result',
-        payload: {
-          requestId: parsed.data.requestId,
-          ok: false,
-          error: epicActionError(error),
-        },
+        payload: { requestId: parsed.data.requestId, ok: false, error: epicActionError(error) },
       };
     }
   }

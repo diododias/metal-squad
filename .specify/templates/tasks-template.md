@@ -16,6 +16,13 @@ existing coverage is sufficient or why coverage is not applicable.
 
 **Organization**: Tasks are grouped by user story to enable independent implementation and testing of each story.
 
+**Project domain vocabulary**: For Project specs, use `Work Item` as the entity
+below `Epic`; `feature` and `bug` are type values. Use `Repository defaults` for
+the Work Item execution parent. Do not create tasks that introduce `Demand` or
+`Backlog Item` as domain names. Mark `backlog_features`, `feature_id`,
+`FeatureSchema`, `Feature*`, and `projectDefaults` as legacy compatibility when
+they are unavoidable.
+
 ## Format: `[ID] [P?] [Story] Description`
 
 - **[P]**: Can run in parallel (different files, no dependencies)
@@ -162,6 +169,7 @@ Examples of foundational tasks (adjust based on your project):
 - [ ] TXXX Run quickstart.md validation
 - [ ] TXXX Run applicable constitution gates: build, test, typecheck, and lint
 - [ ] TXXX Verify source-of-truth docs, skills, and rules are synchronized
+- [ ] TXXX Verify DB state, versioned intent, and import-seed responsibilities are not conflated
 
 ---
 

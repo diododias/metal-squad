@@ -27,6 +27,11 @@ validar contra uma **allowlist configurável** e exigir confirmação explícita
 de registrar. Não registrar “com aviso”: path inexistente, symlink para fora da
 allowlist ou diretório não autorizado é **recusado**.
 
+**Configuração da allowlist.** `MSQ_REPO_ALLOWLIST` aceita raízes separadas pelo
+separador de paths do sistema (`:` no Unix). Se omitida, apenas o `cwd` do web
+server é permitido. As raízes e o input são canonicalizados antes da comparação,
+portanto um symlink não pode escapar da allowlist.
+
 **Services de vínculo (de PRJ-03).** `linkRepo`, `moveRepo`, `unlinkRepo` já
 encapsulam as regras: `linkRepo` nunca sobrescreve vínculo existente
 (`REPO_ALREADY_LINKED`); `moveRepo` é atômico e preserva o snapshot `project_id`
