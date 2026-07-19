@@ -143,6 +143,10 @@ vi.mock('../../src/core/projectService.js', () => ({
   repoLinkService: mocks.repoLinkService,
 }));
 
+vi.mock('../../src/core/epicService.js', () => ({
+  epicService: mocks.epicService,
+}));
+
 vi.mock('../../src/core/stats.js', () => ({
   computeRunBreakdown: mocks.computeRunBreakdown,
 }));
@@ -230,6 +234,24 @@ function projectEntity(overrides: Record<string, unknown> = {}): Record<string, 
     projectId: 'project-1',
     name: 'Web Project',
     description: null,
+    position: 0,
+    archivedAt: null,
+    deletedAt: null,
+    revision: 1,
+    createdAt: '2026-07-18T12:00:00.000Z',
+    updatedAt: '2026-07-18T12:00:00.000Z',
+    ...overrides,
+  };
+}
+
+function epicEntity(overrides: Record<string, unknown> = {}): Record<string, unknown> {
+  return {
+    epicId: 'epic-1',
+    projectId: 'project-1',
+    repoId: null,
+    title: 'Web Epic',
+    description: null,
+    status: 'todo',
     position: 0,
     archivedAt: null,
     deletedAt: null,
