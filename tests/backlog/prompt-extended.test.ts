@@ -75,14 +75,15 @@ describe('buildPrompt — string literals and conditionals', () => {
     expect(result).not.toContain('--- missing.md ---');
   });
 
-  it('includes context file content with "--- file ---" header', async () => {
+  it('lists context file path only (no content inlined) for {{context}}', async () => {
     mockExistsSync.mockReturnValue(true);
     mockReadFileSync.mockReturnValue('context content');
     const { buildPrompt } = await import('../../src/core/backlog/prompt.js');
     const feature = makeFeature({ context: ['src/main.ts'] });
     const result = buildPrompt(feature as never, [makeSkill('{{context}}')], '/cwd');
-    expect(result).toContain('--- src/main.ts ---');
-    expect(result).toContain('context content');
+    expect(result).toContain('- src/main.ts');
+    expect(result).not.toContain('--- src/main.ts ---');
+    expect(result).not.toContain('context content');
   });
 
   it('skips context files that do not exist', async () => {
@@ -90,7 +91,7 @@ describe('buildPrompt — string literals and conditionals', () => {
     const { buildPrompt } = await import('../../src/core/backlog/prompt.js');
     const feature = makeFeature({ context: ['missing.ts'] });
     const result = buildPrompt(feature as never, [makeSkill('{{context}}')], '/cwd');
-    expect(result).not.toContain('--- missing.ts ---');
+    expect(result).not.toContain('missing.ts');
   });
 
   it('includes task with "## id — title" header format', async () => {
@@ -156,7 +157,7 @@ describe('buildPrompt — string literals and conditionals', () => {
     expect(result).not.toContain('Depends on:');
   });
 
-  it('includes taskFile content with "--- path ---" header', async () => {
+  it('lists taskFile path only (no content inlined) for {{tasks}}', async () => {
     mockExistsSync.mockReturnValue(true);
     mockReadFileSync.mockReturnValue('task content');
     const { buildPrompt } = await import('../../src/core/backlog/prompt.js');
@@ -164,8 +165,20 @@ describe('buildPrompt — string literals and conditionals', () => {
       tasks: [{ id: 't1', title: 'Task', status: 'todo', skills: [], dependsOn: [], taskFile: 'tasks/t1.md' }],
     });
     const result = buildPrompt(feature as never, [makeSkill('{{tasks}}')], '/cwd');
-    expect(result).toContain('--- tasks/t1.md ---');
-    expect(result).toContain('task content');
+    expect(result).toContain('Task file: tasks/t1.md');
+    expect(result).not.toContain('--- tasks/t1.md ---');
+    expect(result).not.toContain('task content');
+  });
+
+  it('omits taskFile line when the referenced file is missing', async () => {
+    mockExistsSync.mockReturnValue(false);
+    const { buildPrompt } = await import('../../src/core/backlog/prompt.js');
+    const feature = makeFeature({
+      tasks: [{ id: 't1', title: 'Task', status: 'todo', skills: [], dependsOn: [], taskFile: 'tasks/missing.md' }],
+    });
+    const result = buildPrompt(feature as never, [makeSkill('{{tasks}}')], '/cwd');
+    expect(result).not.toContain('Task file:');
+    expect(result).not.toContain('missing.md');
   });
 
   it('uses fallback IMPLEMENT skill when skills array is empty', async () => {
@@ -221,14 +234,15 @@ describe('buildPrompt — string literals and conditionals', () => {
     expect(result).toContain('file content');
   });
 
-  it('includes context regardless of skill metadata inputs', async () => {
+  it('includes context paths regardless of skill metadata inputs', async () => {
     mockExistsSync.mockReturnValue(true);
     mockReadFileSync.mockReturnValue('ctx content');
     const { buildPrompt } = await import('../../src/core/backlog/prompt.js');
     const feature = makeFeature({ context: ['ctx.ts'] });
     const skill = makeSkill('{{context}}', ['summary']); // no 'context' in inputs
     const result = buildPrompt(feature as never, [skill], '/cwd');
-    expect(result).toContain('ctx content');
+    expect(result).toContain('- ctx.ts');
+    expect(result).not.toContain('ctx content');
   });
 
   it('normalizes multiple consecutive blank lines to double newline', async () => {

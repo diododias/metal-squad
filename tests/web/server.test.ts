@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import type { RunSummary } from '../../src/db/repo.js';
 import WebSocket from 'ws';
 
 const mocks = vi.hoisted(() => ({
@@ -17,7 +18,6 @@ const mocks = vi.hoisted(() => ({
   listRunningTaskRuns: vi.fn(),
   listPendingTimeoutApprovalRequests: vi.fn(),
   listRunsForStats: vi.fn(),
-  listPendingTimeoutApprovalRequests: vi.fn(),
   getProjectStateRevision: vi.fn(),
   listProjectStateSummaries: vi.fn(),
   listRepositoryStateSummaries: vi.fn(),
@@ -139,7 +139,6 @@ vi.mock('../../src/db/repo.js', () => ({
   listRunningTaskRuns: mocks.listRunningTaskRuns,
   listPendingTimeoutApprovalRequests: mocks.listPendingTimeoutApprovalRequests,
   listRunsForStats: mocks.listRunsForStats,
-  listPendingTimeoutApprovalRequests: mocks.listPendingTimeoutApprovalRequests,
   getProjectStateRevision: mocks.getProjectStateRevision,
   listProjectStateSummaries: mocks.listProjectStateSummaries,
   listRepositoryStateSummaries: mocks.listRepositoryStateSummaries,
@@ -1524,7 +1523,7 @@ describe('web server', () => {
     execFileSync('git', ['add', 'tracked.txt'], { cwd, stdio: 'ignore', env: gitEnv });
     execFileSync('git', ['commit', '-m', 'init'], { cwd, stdio: 'ignore', env: gitEnv });
 
-    let currentRun = {
+    let currentRun: RunSummary = {
       runId: 42,
       repoId: 'repo-1',
       featureId: 'feat-1',
@@ -1548,8 +1547,8 @@ describe('web server', () => {
       pendingStageRequestPrompt: null,
       pendingStageRequestCreatedAt: null,
     };
-    let history = [
-      { runId: 42, repoId: 'repo-1', featureId: 'feat-1', tool: 'codex', stage: 'implement', status: 'blocked', startedAt: '2026-07-11T10:00:00.000Z', endedAt: null, totalTokens: 100, pipelineResumeSummary: null },
+    let history: RunSummary[] = [
+      { runId: 42, repoId: 'repo-1', featureId: 'feat-1', tool: 'codex', stage: 'implement', status: 'blocked', startedAt: '2026-07-11T10:00:00.000Z', endedAt: null, totalTokens: 100, pipelineResumeSummary: null } as RunSummary,
     ];
     mocks.listRunsForTui.mockImplementation(() => [currentRun]);
     mocks.listRunHistoryForFeature.mockImplementation(() => history);
@@ -1572,7 +1571,7 @@ describe('web server', () => {
     writeFileSync(join(cwd, 'tracked.txt'), 'base\nchanged\n');
     currentRun = { ...currentRun, status: 'running', gateId: null, pipelineStatus: 'running' };
     history = [
-      { runId: 42, repoId: 'repo-1', featureId: 'feat-1', tool: 'codex', stage: 'implement', status: 'running', startedAt: '2026-07-11T10:00:00.000Z', endedAt: null, totalTokens: 100, pipelineResumeSummary: null },
+      { runId: 42, repoId: 'repo-1', featureId: 'feat-1', tool: 'codex', stage: 'implement', status: 'running', startedAt: '2026-07-11T10:00:00.000Z', endedAt: null, totalTokens: 100, pipelineResumeSummary: null } as RunSummary,
     ];
 
     const stateMessagePromise = waitForMatchingMessage(
@@ -1599,7 +1598,7 @@ describe('web server', () => {
   it('rebroadcasts refreshed state:full after resolveGate actions', async () => {
     const { createWebServer } = await import('../../src/web/server.js');
 
-    let currentRun = {
+    let currentRun: RunSummary = {
       runId: 42,
       repoId: 'repo-1',
       featureId: 'feat-1',
@@ -1652,7 +1651,7 @@ describe('web server', () => {
   it('rebroadcasts refreshed state:full after resolveStageRequest actions', async () => {
     const { createWebServer } = await import('../../src/web/server.js');
 
-    let currentRun = {
+    let currentRun: RunSummary = {
       runId: 42,
       repoId: 'repo-1',
       featureId: 'feat-1',
@@ -1724,8 +1723,8 @@ describe('web server', () => {
     };
     let runs: Array<Record<string, unknown>> = [];
     mocks.getFeatureCatalog.mockReturnValue({ 'feat-1': featureEntry });
-    mocks.getPendingFeatures.mockImplementation((catalog: Record<string, typeof featureEntry>, doneFeatureIds: Set<string>, activeFeatureIds: Set<string>) =>
-      Object.values(catalog).filter((feature) => !doneFeatureIds.has(feature.id) && !activeFeatureIds.has(feature.id)));
+    mocks.getPendingFeatures.mockImplementation(((catalog: Record<string, typeof featureEntry>, doneFeatureIds: Set<string>, activeFeatureIds: Set<string>) =>
+      Object.values(catalog).filter((feature) => !doneFeatureIds.has(feature.id) && !activeFeatureIds.has(feature.id))) as any);
     mocks.loadBacklogFromCatalog.mockReturnValue({
       version: 2,
       repo: 'repo',
@@ -1800,10 +1799,10 @@ describe('web server', () => {
       workflow: { mode: 'staged', stages: ['specify'], approvals: { channel: 'telegram', autoAdvance: false }, syncTasksToBacklog: true, sessionPolicy: { mode: 'isolated', alwaysIsolatedStages: [] } },
     };
     mocks.getFeatureCatalog.mockReturnValue({ 'feat-1': featureEntry });
-    mocks.getPendingFeatures.mockImplementation((catalog: Record<string, typeof featureEntry>, doneFeatureIds: Set<string>, activeFeatureIds: Set<string>) =>
+    mocks.getPendingFeatures.mockImplementation(((catalog: Record<string, typeof featureEntry>, doneFeatureIds: Set<string>, activeFeatureIds: Set<string>) =>
       Object.values(catalog)
         .filter((feature) => !doneFeatureIds.has(feature.id) && !activeFeatureIds.has(feature.id))
-        .map((feature) => ({ ...feature, pendingDependencies: feature.dependsOn.filter((dependency) => !doneFeatureIds.has(dependency)) })));
+        .map((feature) => ({ ...feature, pendingDependencies: feature.dependsOn.filter((dependency) => !doneFeatureIds.has(dependency)) }))) as any);
     mocks.loadBacklogFromCatalog.mockReturnValue({
       version: 2,
       repo: 'repo',
