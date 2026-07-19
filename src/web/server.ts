@@ -25,7 +25,13 @@ import {
   resolveGate,
   resolveStageRequest,
   resumePipeline,
+  getEpicTemplateTarget,
+  getWorkItemTemplateTarget,
+  isWorkItemPristine,
+  changeWorkItemType,
+  type WorkItemTemplateSnapshot,
 } from '../db/repo.js';
+import { RevisionConflictError, WorkItemHasHistoryError } from '../db/errors.js';
 import { getAdapter } from '../core/adapters/index.js';
 import { computeRunBreakdown } from '../core/stats.js';
 import { resolveRepo, resolveRepoAllowlist } from '../core/repo.js';
@@ -41,9 +47,18 @@ import type { Feature, Task } from '../core/backlog/schema.js';
 import { epicService } from '../core/epicService.js';
 import { workItemService } from '../core/workItemService.js';
 import { projectService, repoLinkService } from '../core/projectService.js';
-import { buildMsqWebState, appendNotification, resetWebStateCaches } from './state.js';
+import { buildMsqWebState, appendNotification, resetWebStateCaches, invalidateWorkflowTemplatesCache } from './state.js';
 import { createWebAuth, isAllowedHostHeader, isAllowedOrigin, timingSafeEqualStrings } from './auth.js';
-import { EpicActionMessageSchema, ProjectActionMessageSchema, RepositoryActionMessageSchema, WorkItemActionMessageSchema } from './schemas.js';
+import { EpicActionMessageSchema, ProjectActionMessageSchema, RepositoryActionMessageSchema, WorkItemActionMessageSchema, WorkflowTemplateActionMessageSchema, WorkItemTypeChangeMessageSchema } from './schemas.js';
+import {
+  archiveWorkflowTemplate,
+  createWorkflowTemplate,
+  duplicateWorkflowTemplate,
+  mapProjectWorkItemTemplate,
+  resolveTemplate,
+  updateWorkflowTemplate,
+  type WorkflowTemplate,
+} from '../db/workflowTemplates.js';
 import type {
   AppConfigPatch,
   EpicActionError,
@@ -62,6 +77,7 @@ import type {
   UiNotification,
   WorkItemActionError,
   WorkItemActionResult,
+  MsqWorkItemType,
   WebSocketClientMessage,
   WebSocketServerMessage,
 } from './types.js';
@@ -850,6 +866,28 @@ export function createWebServer(options: {
         if (result.payload.ok) reconcileWebState(featureCwd, { forceBroadcast: true });
         break;
       }
+      case 'action:changeWorkItemType': {
+        const result = handleWorkItemTypeChange(message);
+        sendTo(client, result);
+        // A preview writes nothing, so only a confirmed change rebroadcasts.
+        if (result.type === 'action:result' && result.payload.ok && 'workItem' in result.payload) {
+          reconcileWebState(featureCwd, { forceBroadcast: true });
+        }
+        break;
+      }
+      case 'action:createWorkflowTemplate':
+      case 'action:updateWorkflowTemplate':
+      case 'action:duplicateWorkflowTemplate':
+      case 'action:archiveWorkflowTemplate':
+      case 'action:setTypeTemplate': {
+        const result = handleWorkflowTemplateAction(message);
+        sendTo(client, result);
+        if (result.type === 'action:result' && result.payload.ok) {
+          invalidateWorkflowTemplatesCache();
+          reconcileWebState(featureCwd, { forceBroadcast: true });
+        }
+        break;
+      }
       case 'action:startFeature': {
         startFeature(message.featureId, featureCwd);
         reconcileWebState(featureCwd);
@@ -1143,10 +1181,179 @@ export function createWebServer(options: {
   function workItemActionError(error: unknown): WorkItemActionError {
     const code = typeof error === 'object' && error !== null ? (error as { code?: unknown }).code : undefined;
     if (code === 'EPIC_NOT_FOUND' || code === 'REPOSITORY_NOT_IN_PROJECT' || code === 'REPOSITORY_UNAVAILABLE'
-      || code === 'DEPENDENCY_NOT_FOUND' || code === 'CROSS_REPOSITORY_DEPENDENCY' || code === 'DEPENDENCY_CYCLE') {
+      || code === 'DEPENDENCY_NOT_FOUND' || code === 'CROSS_REPOSITORY_DEPENDENCY' || code === 'DEPENDENCY_CYCLE'
+      // Type-change and template-resolution failures reuse this mapper; their
+      // messages are actionable, so they are passed through verbatim.
+      || code === 'WORK_ITEM_NOT_FOUND' || code === 'WORK_ITEM_HAS_HISTORY' || code === 'REVISION_CONFLICT'
+      || code === 'WORKFLOW_TEMPLATE_NOT_FOUND' || code === 'WORKFLOW_TEMPLATE_INVALID') {
       return { code, message: error instanceof Error ? error.message : 'Could not create Work Item.' };
     }
     return { code: 'WORK_ITEM_ACTION_FAILED', message: 'Could not create Work Item.' };
+  }
+
+  function workflowTemplateActionError(error: unknown): { code: string; message: string } {
+    const code = typeof error === 'object' && error !== null ? (error as { code?: unknown }).code : undefined;
+    if (code === 'WORKFLOW_TEMPLATE_NOT_FOUND' || code === 'WORKFLOW_TEMPLATE_INVALID'
+      || code === 'WORKFLOW_TEMPLATE_IN_USE' || code === 'WORKFLOW_TEMPLATE_ARCHIVED'
+      || code === 'WORKFLOW_TEMPLATE_IMMUTABLE' || code === 'WORKFLOW_TEMPLATE_SCOPE_MISMATCH'
+      || code === 'REVISION_CONFLICT' || code === 'PROJECT_NOT_FOUND') {
+      return { code, message: error instanceof Error ? error.message : 'Workflow template action failed.' };
+    }
+    return { code: 'WORKFLOW_TEMPLATE_ACTION_FAILED', message: 'Workflow template action failed.' };
+  }
+
+  /** Template CRUD + Project/type mapping. Every branch returns the template's
+   * current `revision` so the client can send `expectedRevision` on the next
+   * write. */
+  function handleWorkflowTemplateAction(message: unknown): WebSocketServerMessage {
+    const parsed = WorkflowTemplateActionMessageSchema.safeParse(message);
+    if (!parsed.success) {
+      return { type: 'action:result', payload: { requestId: actionResultRequestId(message), ok: false, error: { code: 'INVALID_PAYLOAD', message: 'Invalid workflow template action payload.' } } };
+    }
+    const audit = { actor: 'web', requestId: parsed.data.requestId };
+    try {
+      switch (parsed.data.type) {
+        case 'action:createWorkflowTemplate': {
+          const template = createWorkflowTemplate({
+            projectId: parsed.data.projectId,
+            name: parsed.data.name,
+            definition: parsed.data.definition,
+            audit,
+          });
+          return templateActionOk(parsed.data.requestId, template);
+        }
+        case 'action:updateWorkflowTemplate': {
+          const template = updateWorkflowTemplate(
+            parsed.data.templateId,
+            parsed.data.patch,
+            parsed.data.expectedRevision,
+            { audit },
+          );
+          return templateActionOk(parsed.data.requestId, template);
+        }
+        case 'action:duplicateWorkflowTemplate': {
+          const template = duplicateWorkflowTemplate(parsed.data.templateId, {
+            projectId: parsed.data.projectId,
+            ...(parsed.data.name === undefined ? {} : { name: parsed.data.name }),
+            audit,
+          });
+          return templateActionOk(parsed.data.requestId, template);
+        }
+        case 'action:archiveWorkflowTemplate': {
+          const template = archiveWorkflowTemplate(parsed.data.templateId, { audit });
+          return templateActionOk(parsed.data.requestId, template);
+        }
+        case 'action:setTypeTemplate': {
+          mapProjectWorkItemTemplate({
+            projectId: parsed.data.projectId,
+            workItemType: parsed.data.workItemType,
+            templateId: parsed.data.templateId,
+            audit,
+          });
+          return { type: 'action:result', payload: { requestId: parsed.data.requestId, ok: true } };
+        }
+      }
+    } catch (error) {
+      return { type: 'action:result', payload: { requestId: parsed.data.requestId, ok: false, error: workflowTemplateActionError(error) } };
+    }
+  }
+
+  function templateActionOk(requestId: string, template: WorkflowTemplate): WebSocketServerMessage {
+    return {
+      type: 'action:result',
+      payload: {
+        requestId,
+        ok: true,
+        workflowTemplate: {
+          templateId: template.templateId,
+          name: template.name,
+          version: template.version,
+          revision: template.revision,
+          builtin: template.builtin,
+          archived: template.archivedAt !== null,
+          scopeProjectId: template.scopeProjectId,
+          stageCount: template.definition.workflow.stages.length,
+        },
+        revision: template.revision,
+      },
+    };
+  }
+
+  /**
+   * Resolves the template for a Work Item about to be created.
+   *
+   * Runs before the write transaction so template/skill failures surface as a
+   * rejected action instead of an orphaned row. Skill validation is scoped to
+   * the *target repo* because repo-scoped skills differ per checkout.
+   */
+  function resolveSnapshotForWorkItem(
+    epicId: string,
+    repoId: string,
+    workItemType: MsqWorkItemType,
+  ): WorkItemTemplateSnapshot {
+    const target = getEpicTemplateTarget(epicId, repoId);
+    const resolved = resolveTemplate(target.projectId, workItemType, {
+      repoPath: target.repoPath,
+      validate: true,
+    });
+    return {
+      templateId: resolved.templateId,
+      templateVersion: resolved.version,
+      origin: resolved.origin,
+      definition: resolved.definition,
+    };
+  }
+
+  /**
+   * Two-phase type change. `preview` resolves the target template and reports
+   * the stages without writing; the confirming call re-checks `expectedRevision`
+   * and swaps the snapshot atomically. Items with run history are refused.
+   */
+  function handleWorkItemTypeChange(message: unknown): WebSocketServerMessage {
+    const parsed = WorkItemTypeChangeMessageSchema.safeParse(message);
+    if (!parsed.success) {
+      return { type: 'action:result', payload: { requestId: actionResultRequestId(message), ok: false, error: { code: 'INVALID_PAYLOAD', message: 'Invalid Work Item type change payload.' } } };
+    }
+    const { requestId, workItemId, workItemType, expectedRevision, preview } = parsed.data;
+    try {
+      const target = getWorkItemTemplateTarget(workItemId);
+      if (target.revision !== expectedRevision) {
+        throw new RevisionConflictError(workItemId, expectedRevision, target.revision, 'Work Item');
+      }
+      if (!isWorkItemPristine(workItemId)) {
+        throw new WorkItemHasHistoryError(workItemId, 1);
+      }
+      const resolved = resolveTemplate(target.projectId, workItemType, {
+        repoPath: target.repoPath,
+        validate: true,
+      });
+      if (preview) {
+        return {
+          type: 'action:result',
+          payload: {
+            requestId,
+            ok: true,
+            preview: {
+              workItemId,
+              fromType: target.type,
+              toType: workItemType,
+              templateId: resolved.templateId,
+              templateVersion: resolved.version,
+              stages: [...resolved.definition.workflow.stages],
+            },
+          },
+        };
+      }
+      const workItem = changeWorkItemType(workItemId, workItemType, {
+        templateId: resolved.templateId,
+        templateVersion: resolved.version,
+        origin: resolved.origin,
+        definition: resolved.definition,
+      }, expectedRevision);
+      return { type: 'action:result', payload: { requestId, ok: true, workItem, revision: workItem.revision } };
+    } catch (error) {
+      return { type: 'action:result', payload: { requestId, ok: false, error: workItemActionError(error) } };
+    }
   }
 
   function handleWorkItemAction(message: unknown): WorkItemActionResult {
@@ -1155,14 +1362,23 @@ export function createWebServer(options: {
       return { type: 'action:result', payload: { requestId: actionResultRequestId(message), ok: false, error: { code: 'INVALID_PAYLOAD', message: 'Invalid Work Item action payload.' } } };
     }
     try {
+      // Resolve and validate before the insert: a template that is invalid or
+      // references skills missing from the target repo must fail without
+      // leaving a half-created Work Item behind.
+      const snapshot = resolveSnapshotForWorkItem(
+        parsed.data.epicId,
+        parsed.data.repoId,
+        parsed.data.workItemType,
+      );
       const result = workItemService.create({
         epicId: parsed.data.epicId,
         repoId: parsed.data.repoId,
         title: parsed.data.title,
+        type: parsed.data.workItemType,
         description: parsed.data.description,
         dependsOn: parsed.data.dependsOn,
         audit: { actor: 'web', requestId: parsed.data.requestId },
-      });
+      }, snapshot);
       return { type: 'action:result', payload: { requestId: parsed.data.requestId, ok: true, workItem: result.entity, revision: result.revision ?? result.entity.revision } };
     } catch (error) {
       return { type: 'action:result', payload: { requestId: parsed.data.requestId, ok: false, error: workItemActionError(error) } };

@@ -148,6 +148,25 @@ export function listWorkflowTemplates(
   return rows.map(toTemplate);
 }
 
+export interface ProjectTemplateMapping {
+  projectId: string;
+  workItemType: WorkItemType;
+  templateId: string;
+}
+
+/** All `project -> type -> template` mappings, optionally for one Project. */
+export function listProjectTemplateMappings(projectId?: string): ProjectTemplateMapping[] {
+  if (!hasDbFile()) return [];
+  const where = projectId === undefined ? '' : ' WHERE project_id = ?';
+  const params = projectId === undefined ? [] : [projectId];
+  return getDb('readonly')
+    .prepare(
+      `SELECT project_id AS projectId, work_item_type AS workItemType, template_id AS templateId
+         FROM project_work_item_templates${where}`,
+    )
+    .all(...params) as ProjectTemplateMapping[];
+}
+
 export interface CreateWorkflowTemplateInput {
   projectId: string;
   name: string;

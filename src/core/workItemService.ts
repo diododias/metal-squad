@@ -2,6 +2,7 @@ import {
   createWorkItem,
   type CreateWorkItemInput,
   type WorkItemRow,
+  type WorkItemTemplateSnapshot,
 } from '../db/repo.js';
 import type { ServiceMutationResult } from './projectService.js';
 
@@ -16,8 +17,11 @@ function normalizeInput(input: CreateWorkItemInput): CreateWorkItemInput {
 }
 
 export const workItemService = {
-  create(input: CreateWorkItemInput): ServiceMutationResult<WorkItemRow> {
-    const entity = createWorkItem(normalizeInput(input));
+  create(
+    input: CreateWorkItemInput,
+    snapshot?: WorkItemTemplateSnapshot,
+  ): ServiceMutationResult<WorkItemRow> {
+    const entity = createWorkItem(normalizeInput(input), snapshot);
     return { entity, revision: entity.revision };
   },
 };

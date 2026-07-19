@@ -2,6 +2,7 @@ export type DomainErrorCode =
   | 'PROJECT_NOT_FOUND'
   | 'EPIC_NOT_FOUND'
   | 'WORK_ITEM_NOT_FOUND'
+  | 'WORK_ITEM_HAS_HISTORY'
   | 'REPOSITORY_NOT_IN_PROJECT'
   | 'REPOSITORY_UNAVAILABLE'
   | 'DEPENDENCY_NOT_FOUND'
@@ -47,6 +48,21 @@ export class WorkItemNotFoundError extends DomainError {
   public constructor(workItemId: string) {
     super('WORK_ITEM_NOT_FOUND', `Work Item not found: ${workItemId}`);
     this.name = 'WorkItemNotFoundError';
+  }
+}
+
+/** Raised when a type change is attempted on a Work Item that already ran.
+ * The existing runs are tied to the old workflow, so the snapshot is frozen. */
+export class WorkItemHasHistoryError extends DomainError {
+  public readonly runCount: number;
+
+  public constructor(workItemId: string, runCount: number) {
+    super(
+      'WORK_ITEM_HAS_HISTORY',
+      `Work Item ${workItemId} has ${String(runCount)} run(s) and can no longer change type`,
+    );
+    this.name = 'WorkItemHasHistoryError';
+    this.runCount = runCount;
   }
 }
 
