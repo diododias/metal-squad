@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { selectFeaturePlan, selectStartableFeaturePlan } from '../../src/core/orchestrator/graph.js';
+import { assertNoCrossRepositoryDependencies, selectFeaturePlan, selectStartableFeaturePlan } from '../../src/core/orchestrator/graph.js';
 import type { BacklogV2 } from '../../src/core/backlog/schema.js';
 
 const backlog: BacklogV2 = {
@@ -95,5 +95,20 @@ describe('selectStartableFeaturePlan', () => {
     expect(plan.target.id).toBe('feat-03');
     expect(plan.pendingDependencies).toEqual(['feat-02']);
     expect(plan.completedDependencies).toEqual(['feat-01']);
+  });
+});
+
+describe('assertNoCrossRepositoryDependencies', () => {
+  it('rejects a dependency owned by another repository before a pipeline can be created', () => {
+    const crossRepoBacklog: BacklogV2 = {
+      ...backlog,
+      epics: [{
+        ...backlog.epics[0]!,
+        features: [{ ...backlog.epics[0]!.features[0]!, dependsOn: ['F-OTHER'] }],
+      }],
+    };
+
+    expect(() => assertNoCrossRepositoryDependencies(crossRepoBacklog, 'repo-a', (id) => id === 'F-OTHER' ? 'repo-b' : undefined))
+      .toThrow(/cross-repository dependencies are not supported/);
   });
 });

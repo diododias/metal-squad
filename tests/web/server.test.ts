@@ -6,6 +6,7 @@ import WebSocket from 'ws';
 
 const mocks = vi.hoisted(() => ({
   resolveRepo: vi.fn(),
+  resolveWorkItemExecutionContext: vi.fn(),
   listRunsForTui: vi.fn(),
   listRunHistoryForFeature: vi.fn(),
   getRunSessionStatus: vi.fn(),
@@ -13,6 +14,7 @@ const mocks = vi.hoisted(() => ({
   openGates: vi.fn(),
   listPendingStageRequests: vi.fn(),
   listRunningTaskRuns: vi.fn(),
+  listPendingTimeoutApprovalRequests: vi.fn(),
   listRunsForStats: vi.fn(),
   getHistoricalTokenStatsForFeatureProfile: vi.fn(),
   resolveGate: vi.fn(),
@@ -34,6 +36,7 @@ const mocks = vi.hoisted(() => ({
   updateCatalogFeature: vi.fn(),
   updateCatalogTask: vi.fn(),
   updateCatalogDefaults: vi.fn(),
+  getFeatureIdOwner: vi.fn(),
   loadBacklogFromCatalog: vi.fn(),
   validateBacklogSkills: vi.fn(),
   loadConfig: vi.fn(),
@@ -46,6 +49,7 @@ const mocks = vi.hoisted(() => ({
   parseConfig: vi.fn((value) => value),
   spawn: vi.fn(),
   getPipeline: vi.fn(),
+  getRun: vi.fn(),
   getAdapter: vi.fn(),
   projectService: {
     create: vi.fn(),
@@ -64,11 +68,16 @@ vi.mock('../../src/core/repo.js', () => ({
   resolveRepo: mocks.resolveRepo,
 }));
 
+vi.mock('../../src/core/workItemExecutionContext.js', () => ({
+  resolveWorkItemExecutionContext: mocks.resolveWorkItemExecutionContext,
+}));
+
 vi.mock('../../src/db/index.js', () => ({
   assertWritableDbPath: mocks.assertWritableDbPath,
 }));
 
 vi.mock('../../src/db/backlogCatalog.js', () => ({
+  getFeatureIdOwner: mocks.getFeatureIdOwner,
   updateCatalogFeature: mocks.updateCatalogFeature,
   updateCatalogTask: mocks.updateCatalogTask,
   updateCatalogDefaults: mocks.updateCatalogDefaults,
@@ -116,6 +125,7 @@ vi.mock('../../src/db/repo.js', () => ({
   openGates: mocks.openGates,
   listPendingStageRequests: mocks.listPendingStageRequests,
   listRunningTaskRuns: mocks.listRunningTaskRuns,
+  listPendingTimeoutApprovalRequests: mocks.listPendingTimeoutApprovalRequests,
   listRunsForStats: mocks.listRunsForStats,
   getHistoricalTokenStatsForFeatureProfile: mocks.getHistoricalTokenStatsForFeatureProfile,
   listRunOutput: mocks.listRunOutput,
@@ -130,6 +140,7 @@ vi.mock('../../src/db/repo.js', () => ({
   forceResolveGate: mocks.forceResolveGate,
   listCompletedFeatureIds: mocks.listCompletedFeatureIds,
   getPipeline: mocks.getPipeline,
+  getRun: mocks.getRun,
 }));
 
 vi.mock('../../src/core/adapters/index.js', () => ({
@@ -273,10 +284,15 @@ describe('web server', () => {
     cwd = mkdtempSync(join(tmpdir(), 'msq-web-'));
     process.chdir(cwd);
     mocks.resolveRepo.mockReturnValue({ repoId: 'repo-1', path: cwd });
+    mocks.resolveWorkItemExecutionContext.mockImplementation((workItemId: string) => ({
+      repoId: 'repo-1', cwd, projectId: 'project-1', epicId: 'epic-1', repoHealth: 'ok', workItemId,
+    }));
+    mocks.getRun.mockImplementation((runId: number) => ({ id: runId, repo_id: 'repo-1', feature_id: 'feat-1' }));
     mocks.listRunsForTui.mockReturnValue([]);
     mocks.openGates.mockReturnValue([]);
     mocks.listPendingStageRequests.mockReturnValue([]);
     mocks.listRunningTaskRuns.mockReturnValue([]);
+    mocks.listPendingTimeoutApprovalRequests.mockReturnValue([]);
     mocks.listRunsForStats.mockReturnValue([]);
     mocks.listRunOutput.mockReturnValue([]);
     mocks.listTaskRunsForRun.mockReturnValue([]);

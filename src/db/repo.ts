@@ -148,6 +148,17 @@ export interface CreateWorkItemInput {
   audit?: AuditContext;
 }
 
+/** Minimal persisted ownership data needed before a Work Item can touch the
+ * filesystem. The caller deliberately owns path canonicalization and access
+ * checks so DB reads stay cheap and side-effect free. */
+export interface WorkItemExecutionTarget {
+  workItemId: string;
+  repoId: string;
+  repoPath: string;
+  projectId: string;
+  epicId: string;
+}
+
 type ProjectRepoLinkRow = Omit<ProjectRepoRow, 'path'>;
 
 const PROJECT_SELECT = `
@@ -325,6 +336,19 @@ export function createWorkItem(input: CreateWorkItemInput): WorkItemRow {
     recordAuditEvent(database, input.audit, 'work_item', workItemId, 'create', null, workItem);
     return workItem;
   });
+}
+
+/** Finds the persisted repo/project ownership for a live Work Item. */
+export function getWorkItemExecutionTarget(workItemId: string): WorkItemExecutionTarget | null {
+  if (!hasDbFile()) return null;
+  return (getDb('readonly').prepare(
+    `SELECT f.feature_id AS workItemId, f.repo_id AS repoId, r.path AS repoPath,
+            e.project_id AS projectId, f.epic_id AS epicId
+       FROM backlog_features f
+       JOIN backlog_epics e ON e.epic_id = f.epic_id
+       JOIN repos r ON r.repo_id = f.repo_id
+      WHERE f.feature_id = ? AND f.archived_at IS NULL AND f.deleted_at IS NULL`,
+  ).get(workItemId) as WorkItemExecutionTarget | undefined) ?? null;
 }
 
 export function updateProject(
