@@ -6,6 +6,7 @@ import WebSocket from 'ws';
 
 const mocks = vi.hoisted(() => ({
   resolveRepo: vi.fn(),
+  resolveRepoAllowlist: vi.fn(),
   listRunsForTui: vi.fn(),
   listRunHistoryForFeature: vi.fn(),
   getRunSessionStatus: vi.fn(),
@@ -13,6 +14,7 @@ const mocks = vi.hoisted(() => ({
   openGates: vi.fn(),
   listPendingStageRequests: vi.fn(),
   listRunningTaskRuns: vi.fn(),
+  listPendingTimeoutApprovalRequests: vi.fn(),
   listRunsForStats: vi.fn(),
   getHistoricalTokenStatsForFeatureProfile: vi.fn(),
   resolveGate: vi.fn(),
@@ -51,14 +53,16 @@ const mocks = vi.hoisted(() => ({
     create: vi.fn(),
     update: vi.fn(),
   },
-  epicService: {
-    create: vi.fn(),
-    update: vi.fn(),
+  repoLinkService: {
+    link: vi.fn(),
+    move: vi.fn(),
+    unlink: vi.fn(),
   },
 }));
 
 vi.mock('../../src/core/repo.js', () => ({
   resolveRepo: mocks.resolveRepo,
+  resolveRepoAllowlist: mocks.resolveRepoAllowlist,
 }));
 
 vi.mock('../../src/db/index.js', () => ({
@@ -113,6 +117,7 @@ vi.mock('../../src/db/repo.js', () => ({
   openGates: mocks.openGates,
   listPendingStageRequests: mocks.listPendingStageRequests,
   listRunningTaskRuns: mocks.listRunningTaskRuns,
+  listPendingTimeoutApprovalRequests: mocks.listPendingTimeoutApprovalRequests,
   listRunsForStats: mocks.listRunsForStats,
   getHistoricalTokenStatsForFeatureProfile: mocks.getHistoricalTokenStatsForFeatureProfile,
   listRunOutput: mocks.listRunOutput,
@@ -135,6 +140,7 @@ vi.mock('../../src/core/adapters/index.js', () => ({
 
 vi.mock('../../src/core/projectService.js', () => ({
   projectService: mocks.projectService,
+  repoLinkService: mocks.repoLinkService,
 }));
 
 vi.mock('../../src/core/epicService.js', () => ({
@@ -266,10 +272,12 @@ describe('web server', () => {
     cwd = mkdtempSync(join(tmpdir(), 'msq-web-'));
     process.chdir(cwd);
     mocks.resolveRepo.mockReturnValue({ repoId: 'repo-1', path: cwd });
+    mocks.resolveRepoAllowlist.mockImplementation((root: string) => [root]);
     mocks.listRunsForTui.mockReturnValue([]);
     mocks.openGates.mockReturnValue([]);
     mocks.listPendingStageRequests.mockReturnValue([]);
     mocks.listRunningTaskRuns.mockReturnValue([]);
+    mocks.listPendingTimeoutApprovalRequests.mockReturnValue([]);
     mocks.listRunsForStats.mockReturnValue([]);
     mocks.listRunOutput.mockReturnValue([]);
     mocks.listTaskRunsForRun.mockReturnValue([]);
@@ -627,12 +635,14 @@ describe('web server', () => {
     socket.close();
   });
 
-  it('returns an Epic create result only to the initiating client and publishes reconciled state', async () => {
+  it('delegates a confirmed repository link only to the application service and replies only to the originator', async () => {
     const { createWebServer } = await import('../../src/web/server.js');
-    const created = epicEntity({ description: 'Created through WebSocket' });
-    mocks.epicService.create.mockReturnValue({ entity: created, revision: 1 });
+    mocks.repoLinkService.link.mockReturnValue({
+      entity: { repoId: 'repo-2', projectId: 'project-1', path: '/safe/repo', position: 0, createdAt: 'now', updatedAt: 'now' },
+      revision: null,
+    });
 
-    server = createWebServer({ host: '127.0.0.1', port: 0, auth: 'token', token: 'secret' });
+    server = createWebServer({ host: '127.0.0.1', port: 0, auth: 'token', token: 'secret', cwd });
     await new Promise<void>((resolve) => server!.server.listen(0, '127.0.0.1', resolve));
     const address = server!.server.address() as { port: number };
     const origin = new WebSocket(`ws://127.0.0.1:${address.port}/ws`);
@@ -642,81 +652,56 @@ describe('web server', () => {
     peer.send(JSON.stringify({ type: 'auth', token: 'secret' }));
     await Promise.all([waitForSocketMessage(origin), waitForSocketMessage(peer)]);
 
-    let peerReceivedActionResult = false;
-    const onPeerMessage = (data: WebSocket.RawData): void => {
-      if ((JSON.parse(data.toString('utf8')) as { type?: string }).type === 'action:result') peerReceivedActionResult = true;
+    let peerReceivedResult = false;
+    const peerHandler = (data: WebSocket.RawData): void => {
+      if ((JSON.parse(data.toString('utf8')) as { type?: string }).type === 'action:result') peerReceivedResult = true;
     };
-    peer.on('message', onPeerMessage);
-    const resultPromise = waitForMatchingMessage(
+    peer.on('message', peerHandler);
+    const result = waitForMatchingMessage(
       origin,
-      (message) => message.type === 'action:result' && (message.payload as { requestId?: string }).requestId === 'epic-create-1',
+      (message) => message.type === 'action:result' && (message.payload as { requestId?: string }).requestId === 'link-1',
     );
-    const peerStatePromise = waitForMessageType(peer, 'state:full');
-    origin.send(JSON.stringify({
-      type: 'action:createEpic',
-      requestId: 'epic-create-1',
-      projectId: 'project-1',
-      title: '  Web Epic  ',
-      description: 'Created through WebSocket',
-    }));
+    origin.send(JSON.stringify({ type: 'action:linkRepo', requestId: 'link-1', projectId: 'project-1', path: '/safe/repo', confirm: true }));
 
-    expect(await resultPromise).toEqual({
-      type: 'action:result',
-      payload: { requestId: 'epic-create-1', ok: true, entity: created },
-    });
-    await peerStatePromise;
-    peer.off('message', onPeerMessage);
-    expect(peerReceivedActionResult).toBe(false);
-    expect(mocks.epicService.create).toHaveBeenCalledWith({
-      projectId: 'project-1',
-      title: '  Web Epic  ',
-      description: 'Created through WebSocket',
-      audit: { actor: 'web', requestId: 'epic-create-1' },
-    });
+    expect(await result).toMatchObject({ payload: { requestId: 'link-1', ok: true, entity: { repoId: 'repo-2' } } });
+    expect(mocks.repoLinkService.link).toHaveBeenCalledWith('project-1', {
+      type: 'action:linkRepo', requestId: 'link-1', projectId: 'project-1', path: '/safe/repo', confirm: true,
+    }, { allowedRoots: [cwd], audit: { actor: 'web', requestId: 'link-1' } });
+    peer.off('message', peerHandler);
+    expect(peerReceivedResult).toBe(false);
     origin.close();
     peer.close();
   });
 
-  it('rejects invalid Epic action payloads before calling the service', async () => {
+  it('returns a typed path confirmation error without registering or linking a repository', async () => {
     const { createWebServer } = await import('../../src/web/server.js');
-    server = createWebServer({ host: '127.0.0.1', port: 0, auth: 'token', token: 'secret' });
+    const error = Object.assign(new Error('Explicit confirmation is required before registering a repository path.'), {
+      code: 'REPO_PATH_CONFIRMATION_REQUIRED',
+    });
+    mocks.repoLinkService.link.mockImplementation(() => { throw error; });
+    server = createWebServer({ host: '127.0.0.1', port: 0, auth: 'token', token: 'secret', cwd });
     await new Promise<void>((resolve) => server!.server.listen(0, '127.0.0.1', resolve));
     const address = server!.server.address() as { port: number };
     const socket = new WebSocket(`ws://127.0.0.1:${address.port}/ws`);
     await waitForOpen(socket);
     socket.send(JSON.stringify({ type: 'auth', token: 'secret' }));
     await waitForSocketMessage(socket);
+    const result = waitForMatchingMessage(socket, (message) => message.type === 'action:result');
+    socket.send(JSON.stringify({ type: 'action:linkRepo', requestId: 'link-2', projectId: 'project-1', path: '/safe/repo' }));
 
-    const rejected = waitForMatchingMessage(socket, (message) => message.type === 'action:result');
-    socket.send(JSON.stringify({
-      type: 'action:updateEpic',
-      requestId: 'epic-invalid-1',
-      epicId: 'epic-1',
-      expectedRevision: 1,
-      patch: { status: 'derived-from-runs' },
-    }));
-
-    expect(await rejected).toEqual({
+    expect(await result).toEqual({
       type: 'action:result',
-      payload: {
-        requestId: 'epic-invalid-1',
-        ok: false,
-        error: { code: 'INVALID_PAYLOAD', message: 'Invalid epic action payload.' },
-      },
+      payload: { requestId: 'link-2', ok: false, error: { code: 'REPO_PATH_CONFIRMATION_REQUIRED', message: 'Explicit confirmation is required before registering a repository path.' } },
     });
-    expect(mocks.epicService.create).not.toHaveBeenCalled();
-    expect(mocks.epicService.update).not.toHaveBeenCalled();
+    expect(mocks.repoLinkService.link).toHaveBeenCalledTimes(1);
     socket.close();
   });
 
-  it('returns a stable revision conflict after a stale Epic update', async () => {
+  it('delegates move and unlink through the repository service with request audit context', async () => {
     const { createWebServer } = await import('../../src/web/server.js');
-    const updated = epicEntity({ status: 'in_progress', revision: 2 });
-    mocks.epicService.update
-      .mockReturnValueOnce({ entity: updated, revision: 2 })
-      .mockImplementationOnce(() => { throw { code: 'REVISION_CONFLICT', message: 'database revision detail' }; });
-
-    server = createWebServer({ host: '127.0.0.1', port: 0, auth: 'token', token: 'secret' });
+    mocks.repoLinkService.move.mockReturnValue({ entity: { repoId: 'repo-2', projectId: 'project-2', path: '/safe/repo', position: 0, createdAt: 'now', updatedAt: 'now' }, revision: null });
+    mocks.repoLinkService.unlink.mockReturnValue({ entity: { repoId: 'repo-2', unlinked: true }, revision: null });
+    server = createWebServer({ host: '127.0.0.1', port: 0, auth: 'token', token: 'secret', cwd });
     await new Promise<void>((resolve) => server!.server.listen(0, '127.0.0.1', resolve));
     const address = server!.server.address() as { port: number };
     const socket = new WebSocket(`ws://127.0.0.1:${address.port}/ws`);
@@ -724,47 +709,15 @@ describe('web server', () => {
     socket.send(JSON.stringify({ type: 'auth', token: 'secret' }));
     await waitForSocketMessage(socket);
 
-    const accepted = waitForMatchingMessage(
-      socket,
-      (message) => message.type === 'action:result' && (message.payload as { requestId?: string }).requestId === 'epic-update-1',
-    );
-    socket.send(JSON.stringify({
-      type: 'action:updateEpic', requestId: 'epic-update-1', epicId: 'epic-1', expectedRevision: 1, patch: { status: 'in_progress' },
-    }));
-    expect(await accepted).toEqual({
-      type: 'action:result',
-      payload: { requestId: 'epic-update-1', ok: true, entity: updated },
-    });
+    const moved = waitForMatchingMessage(socket, (message) => message.type === 'action:result' && (message.payload as { requestId?: string }).requestId === 'move-1');
+    socket.send(JSON.stringify({ type: 'action:moveRepo', requestId: 'move-1', repoId: 'repo-2', toProjectId: 'project-2', expectedRevision: 4 }));
+    expect(await moved).toMatchObject({ payload: { ok: true, entity: { projectId: 'project-2' } } });
+    expect(mocks.repoLinkService.move).toHaveBeenCalledWith('repo-2', 'project-2', { audit: { actor: 'web', requestId: 'move-1' } });
 
-    const conflict = waitForMatchingMessage(
-      socket,
-      (message) => message.type === 'action:result' && (message.payload as { requestId?: string }).requestId === 'epic-update-2',
-    );
-    socket.send(JSON.stringify({
-      type: 'action:updateEpic', requestId: 'epic-update-2', epicId: 'epic-1', expectedRevision: 1, patch: { title: 'stale' },
-    }));
-    expect(await conflict).toEqual({
-      type: 'action:result',
-      payload: {
-        requestId: 'epic-update-2',
-        ok: false,
-        error: { code: 'REVISION_CONFLICT', message: 'Epic was changed by another request. Refresh and try again.' },
-      },
-    });
-    expect(mocks.epicService.update).toHaveBeenNthCalledWith(
-      1,
-      'epic-1',
-      { status: 'in_progress' },
-      1,
-      { audit: { actor: 'web', requestId: 'epic-update-1' } },
-    );
-    expect(mocks.epicService.update).toHaveBeenNthCalledWith(
-      2,
-      'epic-1',
-      { title: 'stale' },
-      1,
-      { audit: { actor: 'web', requestId: 'epic-update-2' } },
-    );
+    const unlinked = waitForMatchingMessage(socket, (message) => message.type === 'action:result' && (message.payload as { requestId?: string }).requestId === 'unlink-1');
+    socket.send(JSON.stringify({ type: 'action:unlinkRepo', requestId: 'unlink-1', projectId: 'project-2', repoId: 'repo-2' }));
+    expect(await unlinked).toMatchObject({ payload: { ok: true, entity: { repoId: 'repo-2', unlinked: true } } });
+    expect(mocks.repoLinkService.unlink).toHaveBeenCalledWith('repo-2', { projectId: 'project-2', audit: { actor: 'web', requestId: 'unlink-1' } });
     socket.close();
   });
 

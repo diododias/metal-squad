@@ -6,8 +6,8 @@ const mockRegisterRepo = vi.fn();
 const mockLoadBacklogWithRegistration = vi.fn();
 const mockStageBacklogFile = vi.fn();
 const mockAssertWritableDbPath = vi.fn();
-const mockDiffBacklogCatalog = vi.fn();
-const mockUpsertBacklogCatalog = vi.fn();
+const mockPlanBacklogSeed = vi.fn();
+const mockApplyBacklogSeed = vi.fn();
 
 vi.mock('../../src/core/repo.js', () => ({
   resolveRepo: mockResolveRepo,
@@ -37,8 +37,8 @@ vi.mock('../../src/db/index.js', () => ({
 }));
 
 vi.mock('../../src/db/backlogCatalog.js', () => ({
-  diffBacklogCatalog: mockDiffBacklogCatalog,
-  upsertBacklogCatalog: mockUpsertBacklogCatalog,
+  planBacklogSeed: mockPlanBacklogSeed,
+  applyBacklogSeed: mockApplyBacklogSeed,
 }));
 
 describe('backlog load command', () => {
@@ -64,7 +64,7 @@ describe('backlog load command', () => {
     epics: [{ id: 'epic-1', title: 'Epic', features: [{ id: 'feat-1' }] }],
   };
   const loaded = { backlog, registrations: [] };
-  const diff = { addedFeatures: ['feat-1'], changedFeatures: [], archivedFeatures: [], unchangedFeatures: [] };
+  const plan = { mode: 'seed', repoId: 'repo-1', items: [{ kind: 'feature', id: 'feat-1', status: 'created' }] };
 
   beforeEach(() => {
     vi.clearAllMocks();
@@ -72,15 +72,14 @@ describe('backlog load command', () => {
     mockLoadBacklogWithRegistration.mockReturnValue(loaded);
     mockStageBacklogFile.mockReturnValue({ commit: vi.fn(), rollback: vi.fn() });
     mockAssertWritableDbPath.mockReturnValue(undefined);
-    mockDiffBacklogCatalog.mockReturnValue(diff);
-    mockUpsertBacklogCatalog.mockReturnValue(diff);
+    mockPlanBacklogSeed.mockReturnValue(plan);
   });
 
   afterEach(() => {
     log.mockClear();
   });
 
-  it('dry-run computes and prints the diff without writing to the db', async () => {
+  it('dry-run computes and prints the shared seed plan without writing to the db', async () => {
     const { registerBacklog } = await import('../../src/commands/backlog.js');
     const program = new Command();
     registerBacklog(program);
@@ -88,10 +87,10 @@ describe('backlog load command', () => {
     await program.parseAsync(['node', 'msq', 'backlog', 'load', '--dry-run']);
 
     expect(mockLoadBacklogWithRegistration).toHaveBeenCalledWith(undefined, process.cwd());
-    expect(mockDiffBacklogCatalog).toHaveBeenCalledWith(backlog, 'repo-1');
+    expect(mockPlanBacklogSeed).toHaveBeenCalledWith(backlog, 'repo-1');
     expect(mockAssertWritableDbPath).not.toHaveBeenCalled();
     expect(mockRegisterRepo).not.toHaveBeenCalled();
-    expect(mockUpsertBacklogCatalog).not.toHaveBeenCalled();
+    expect(mockApplyBacklogSeed).not.toHaveBeenCalled();
     expect(log).toHaveBeenCalledWith(expect.stringContaining('[dry-run]'));
   });
 
@@ -104,8 +103,9 @@ describe('backlog load command', () => {
 
     expect(mockAssertWritableDbPath).toHaveBeenCalled();
     expect(mockRegisterRepo).toHaveBeenCalledWith('repo-1', '/repo');
-    expect(mockUpsertBacklogCatalog).toHaveBeenCalledWith(backlog, 'repo-1', []);
-    expect(log).toHaveBeenCalledWith(expect.stringContaining('Catalogo atualizado'));
+    expect(mockPlanBacklogSeed).toHaveBeenCalledWith(backlog, 'repo-1');
+    expect(mockApplyBacklogSeed).toHaveBeenCalledWith(backlog, plan);
+    expect(log).toHaveBeenCalledWith(expect.stringContaining('Seed criado'));
   });
 
   it('passes --file through to the YAML loader', async () => {
@@ -131,7 +131,7 @@ describe('backlog load command', () => {
     await expect(
       program.parseAsync(['node', 'msq', 'backlog', 'load']),
     ).rejects.toThrow('Catalogo nao foi atualizado.');
-    expect(mockUpsertBacklogCatalog).not.toHaveBeenCalled();
+    expect(mockApplyBacklogSeed).not.toHaveBeenCalled();
   });
 
   it('propagates YAML validation errors as-is', async () => {
@@ -146,6 +146,17 @@ describe('backlog load command', () => {
     await expect(
       program.parseAsync(['node', 'msq', 'backlog', 'load']),
     ).rejects.toThrow('specFile not found');
-    expect(mockUpsertBacklogCatalog).not.toHaveBeenCalled();
+    expect(mockApplyBacklogSeed).not.toHaveBeenCalled();
+  });
+
+  it('prints the exact seed plan as JSON in dry-run', async () => {
+    const { registerBacklog } = await import('../../src/commands/backlog.js');
+    const program = new Command();
+    registerBacklog(program);
+
+    await program.parseAsync(['node', 'msq', 'backlog', 'load', '--dry-run', '--format', 'json']);
+
+    expect(JSON.parse(log.mock.calls.at(-1)?.[0] as string)).toEqual(plan);
+    expect(mockApplyBacklogSeed).not.toHaveBeenCalled();
   });
 });
