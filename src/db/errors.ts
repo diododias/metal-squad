@@ -52,8 +52,8 @@ export class RepositoryNotInProjectError extends DomainError {
 }
 
 export class RepositoryUnavailableError extends DomainError {
-  public constructor(repoId: string) {
-    super('REPOSITORY_UNAVAILABLE', `Repository ${repoId} is unavailable for Work Item creation`);
+  public constructor(repoId: string, detail = 'is unavailable') {
+    super('REPOSITORY_UNAVAILABLE', `Repository ${repoId} ${detail}`);
     this.name = 'RepositoryUnavailableError';
   }
 }
