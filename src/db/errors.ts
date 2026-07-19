@@ -2,6 +2,8 @@ export type DomainErrorCode =
   | 'PROJECT_NOT_FOUND'
   | 'EPIC_NOT_FOUND'
   | 'REPO_ALREADY_LINKED'
+  | 'REPO_NOT_FOUND'
+  | 'REPO_NOT_LINKED_TO_PROJECT'
   | 'REPO_IN_USE'
   | 'REVISION_CONFLICT';
 
@@ -33,6 +35,20 @@ export class RepoAlreadyLinkedError extends DomainError {
   public constructor(repoId: string, projectId: string) {
     super('REPO_ALREADY_LINKED', `Repository ${repoId} is already linked to project ${projectId}`);
     this.name = 'RepoAlreadyLinkedError';
+  }
+}
+
+export class RepoNotFoundError extends DomainError {
+  public constructor(repoId: string) {
+    super('REPO_NOT_FOUND', `Repository not found: ${repoId}`);
+    this.name = 'RepoNotFoundError';
+  }
+}
+
+export class RepoNotLinkedToProjectError extends DomainError {
+  public constructor(repoId: string, projectId: string) {
+    super('REPO_NOT_LINKED_TO_PROJECT', `Repository ${repoId} is not linked to project ${projectId}`);
+    this.name = 'RepoNotLinkedToProjectError';
   }
 }
 

@@ -27,7 +27,7 @@ import {
 } from '../db/repo.js';
 import { getAdapter } from '../core/adapters/index.js';
 import { computeRunBreakdown } from '../core/stats.js';
-import { resolveRepo } from '../core/repo.js';
+import { resolveRepo, resolveRepoAllowlist } from '../core/repo.js';
 import { loadBacklogFromCatalog } from '../core/backlog/load.js';
 import { selectStartableFeaturePlan } from '../core/orchestrator/graph.js';
 import { validateBacklogSkills } from '../core/skills/index.js';
@@ -36,10 +36,10 @@ import { assertConfiguredNotificationChannel } from '../core/notify/manager.js';
 import { clearSecret, setSecret } from '../security/secrets.js';
 import { updateCatalogFeature, updateCatalogTask, updateCatalogDefaults, type FeaturePatch, type CatalogDefaultsPatch } from '../db/backlogCatalog.js';
 import type { Feature, Task } from '../core/backlog/schema.js';
-import { projectService } from '../core/projectService.js';
+import { projectService, repoLinkService } from '../core/projectService.js';
 import { buildMsqWebState, appendNotification, resetWebStateCaches } from './state.js';
 import { createWebAuth, isAllowedHostHeader, isAllowedOrigin, timingSafeEqualStrings } from './auth.js';
-import { ProjectActionMessageSchema } from './schemas.js';
+import { ProjectActionMessageSchema, RepositoryActionMessageSchema } from './schemas.js';
 import type {
   AppConfigPatch,
   FeatureConfigPatch,
@@ -49,6 +49,7 @@ import type {
   ProjectDefaultsPatch,
   ProjectActionError,
   ProjectActionResult,
+  RepositoryActionResult,
   RunChangesPayload,
   SecretPatch,
   TaskConfigPatch,
@@ -720,6 +721,14 @@ export function createWebServer(options: {
         }
         break;
       }
+      case 'action:linkRepo':
+      case 'action:moveRepo':
+      case 'action:unlinkRepo': {
+        const result = handleRepositoryAction(message, featureCwd);
+        sendTo(client, result);
+        if (result.payload.ok) reconcileWebState(featureCwd, { forceBroadcast: true });
+        break;
+      }
       case 'action:startFeature': {
         startFeature(message.featureId, featureCwd);
         reconcileWebState(featureCwd);
@@ -928,6 +937,51 @@ export function createWebServer(options: {
           error: projectActionError(error),
         },
       };
+    }
+  }
+
+  function repositoryActionError(error: unknown): ProjectActionError {
+    const code = typeof error === 'object' && error !== null
+      ? (error as { code?: unknown }).code
+      : undefined;
+    if (code === 'PROJECT_NOT_FOUND' || code === 'REPO_NOT_FOUND' || code === 'REPO_NOT_LINKED_TO_PROJECT' || code === 'REPO_ALREADY_LINKED' || code === 'REPO_IN_USE'
+      || code === 'REPO_PATH_CONFIRMATION_REQUIRED' || code === 'REPO_PATH_NOT_FOUND' || code === 'REPO_PATH_NOT_DIRECTORY' || code === 'REPO_PATH_NOT_ALLOWED') {
+      return { code, message: error instanceof Error ? error.message : 'Repository action failed.' };
+    }
+    return { code: 'PROJECT_ACTION_FAILED', message: 'Could not change repository links.' };
+  }
+
+  function handleRepositoryAction(message: unknown, featureCwd: string): RepositoryActionResult {
+    const parsed = RepositoryActionMessageSchema.safeParse(message);
+    if (!parsed.success) {
+      return {
+        type: 'action:result',
+        payload: { requestId: actionResultRequestId(message), ok: false, error: { code: 'INVALID_PAYLOAD', message: 'Invalid repository action payload.' } },
+      };
+    }
+    const audit = { actor: 'web', requestId: parsed.data.requestId };
+    try {
+      switch (parsed.data.type) {
+        case 'action:linkRepo': {
+          const result = repoLinkService.link(parsed.data.projectId, parsed.data, {
+            allowedRoots: resolveRepoAllowlist(featureCwd), audit,
+          });
+          return { type: 'action:result', payload: { requestId: parsed.data.requestId, ok: true, entity: result.entity } };
+        }
+        case 'action:moveRepo': {
+          const result = repoLinkService.move(parsed.data.repoId, parsed.data.toProjectId, { audit });
+          return { type: 'action:result', payload: { requestId: parsed.data.requestId, ok: true, entity: result.entity } };
+        }
+        case 'action:unlinkRepo': {
+          const result = repoLinkService.unlink(parsed.data.repoId, { projectId: parsed.data.projectId, audit });
+          return { type: 'action:result', payload: { requestId: parsed.data.requestId, ok: true, entity: result.entity } };
+        }
+        default: {
+          throw new Error('Unsupported repository action.');
+        }
+      }
+    } catch (error) {
+      return { type: 'action:result', payload: { requestId: parsed.data.requestId, ok: false, error: repositoryActionError(error) } };
     }
   }
 

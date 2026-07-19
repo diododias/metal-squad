@@ -31,3 +31,36 @@ export const ProjectActionMessageSchema = z.discriminatedUnion('type', [
 ]);
 
 export type ProjectActionMessage = z.infer<typeof ProjectActionMessageSchema>;
+
+/** Runtime boundary for repository-link mutations. Path registration remains
+ * deliberately explicit: the service requires `confirm: true` before writing
+ * a new repo row. */
+export const RepositoryActionMessageSchema = z.discriminatedUnion('type', [
+  z.object({
+    type: z.literal('action:linkRepo'),
+    requestId: RequestIdSchema,
+    projectId: z.string().min(1),
+    repoId: z.string().min(1).optional(),
+    path: z.string().min(1).optional(),
+    confirm: z.boolean().optional(),
+  }).strict(),
+  z.object({
+    type: z.literal('action:moveRepo'),
+    requestId: RequestIdSchema,
+    repoId: z.string().min(1),
+    toProjectId: z.string().min(1),
+    expectedRevision: z.number().int().positive().optional(),
+  }).strict(),
+  z.object({
+    type: z.literal('action:unlinkRepo'),
+    requestId: RequestIdSchema,
+    projectId: z.string().min(1),
+    repoId: z.string().min(1),
+  }).strict(),
+]).superRefine((message, ctx) => {
+  if (message.type === 'action:linkRepo' && (message.repoId === undefined) === (message.path === undefined)) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'Provide exactly one of repoId or path.' });
+  }
+});
+
+export type RepositoryActionMessage = z.infer<typeof RepositoryActionMessageSchema>;
