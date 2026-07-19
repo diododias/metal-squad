@@ -164,7 +164,7 @@ function ProjectCard({ project, repositories, draft, onDraft, onSave }: { projec
     <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}><StatusPill status={health.status} label={health.label} spinner={false} /><StatusPill status={project.activeRuns > 0 ? 'running' : 'aborted'} label={`${String(project.activeRuns)} active runs`} spinner={false} /></div>
     <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 6, color: 'var(--text-dim)', fontSize: 'var(--text-xs)' }}><Metric label="repos" value={String(linkedRepositories.length)} /><Metric label="Epics" value={String(project.counts.epics)} /><Metric label="Work Items" value={String(project.counts.workItems)} /><Metric label="recent tokens" value={formatTokens(project.tokens.totalTokens)} /></div>
     {draft.error && <div role="alert" style={errorStyle}>{draft.error}{draft.error.includes('changed') && ' Your draft is preserved; reload the current values and reapply it.'}</div>}
-    <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, alignItems: 'center' }}><span style={{ color: 'var(--text-faint)', fontSize: 'var(--text-xs)' }}>Project details (Epics and Work Items) arrive in PRJ-12.</span><Button variant="primary" size="sm" disabled={!dirty || Boolean(draft.pendingRequestId)} onClick={onSave}>{draft.pendingRequestId ? 'saving…' : 'save'}</Button></div>
+    <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, alignItems: 'center' }}><Button size="sm" onClick={() => { window.location.hash = `/projects/${project.projectId}`; }}>open details</Button><Button variant="primary" size="sm" disabled={!dirty || Boolean(draft.pendingRequestId)} onClick={onSave}>{draft.pendingRequestId ? 'saving…' : 'save'}</Button></div>
   </Card>;
 }
 

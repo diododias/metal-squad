@@ -15,6 +15,7 @@ import { GatesPage } from './pages/GatesPage.js';
 import { AnalyticsPage } from './pages/AnalyticsPage.js';
 import { ConfigPage } from './pages/ConfigPage.js';
 import { ProjectsPage } from './pages/ProjectsPage.js';
+import { ProjectDetailPage } from './pages/ProjectDetailPage.js';
 import type { MsqWebState, WebSocketServerMessage, FeatureConfigPatch, FeatureConfigSaveResult, TaskConfigPatch } from '../types.js';
 import type { RunHistoryEntry, TaskRun } from '../../db/repo.js';
 import type { RunBreakdown } from '../../core/stats.js';
@@ -220,6 +221,8 @@ export function App(): React.JSX.Element {
     page = state && <AnalyticsPage state={state} />;
   } else if (route.page === 'projects') {
     page = state && <ProjectsPage state={state} send={send} actionResults={projectActionResults} />;
+  } else if (route.page === 'project-detail') {
+    page = state && <ProjectDetailPage state={state} projectId={route.projectId} send={send} actionResults={projectActionResults} onBack={() => { navigate('/projects'); }} />;
   } else {
     page = state && <ConfigPage state={state} isMobile={isMobile} send={send} />;
   }

@@ -18,6 +18,7 @@ const mocks = vi.hoisted(() => ({
   getProjectStateRevision: vi.fn(),
   listProjectStateSummaries: vi.fn(),
   listRepositoryStateSummaries: vi.fn(),
+  listEpics: vi.fn(),
   getHistoricalTokenStatsForFeatureProfile: vi.fn(),
   resolveGate: vi.fn(),
   listRunOutput: vi.fn(),
@@ -125,6 +126,7 @@ vi.mock('../../src/db/repo.js', () => ({
   getProjectStateRevision: mocks.getProjectStateRevision,
   listProjectStateSummaries: mocks.listProjectStateSummaries,
   listRepositoryStateSummaries: mocks.listRepositoryStateSummaries,
+  listEpics: mocks.listEpics,
   getHistoricalTokenStatsForFeatureProfile: mocks.getHistoricalTokenStatsForFeatureProfile,
   listRunOutput: mocks.listRunOutput,
   listTaskRunsForRun: mocks.listTaskRunsForRun,
@@ -290,6 +292,7 @@ describe('web server', () => {
     mocks.getProjectStateRevision.mockReturnValue(0);
     mocks.listProjectStateSummaries.mockReturnValue([]);
     mocks.listRepositoryStateSummaries.mockReturnValue([]);
+    mocks.listEpics.mockReturnValue([]);
     mocks.listRunOutput.mockReturnValue([]);
     mocks.listTaskRunsForRun.mockReturnValue([]);
     mocks.listRunEvents.mockReturnValue([]);

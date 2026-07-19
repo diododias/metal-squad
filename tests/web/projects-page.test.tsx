@@ -41,7 +41,7 @@ describe('ProjectsPage', () => {
     expect(container.textContent).toContain('recent tokens');
     expect(container.textContent).toContain('1.2k');
     expect(container.textContent).toContain('healthy');
-    expect(container.textContent).toContain('Project details (Epics and Work Items) arrive in PRJ-12.');
+    expect(container.textContent).toContain('open details');
   });
 
   it('shows an accessible empty CTA and search-empty state', () => {

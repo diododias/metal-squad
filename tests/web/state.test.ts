@@ -12,6 +12,7 @@ const mocks = vi.hoisted(() => ({
   getProjectStateRevision: vi.fn(),
   listProjectStateSummaries: vi.fn(),
   listRepositoryStateSummaries: vi.fn(),
+  listEpics: vi.fn(),
   getFeatureCatalog: vi.fn(),
   getBacklogSettings: vi.fn(),
   resolveRuntimeConfig: vi.fn(),
@@ -33,6 +34,7 @@ vi.mock('../../src/db/repo.js', () => ({
   getProjectStateRevision: mocks.getProjectStateRevision,
   listProjectStateSummaries: mocks.listProjectStateSummaries,
   listRepositoryStateSummaries: mocks.listRepositoryStateSummaries,
+  listEpics: mocks.listEpics,
 }));
 
 vi.mock('../../src/ui/catalog.js', () => ({
@@ -69,6 +71,7 @@ describe('buildMsqWebState pendingFeatures projection', () => {
     mocks.getProjectStateRevision.mockReturnValue(7);
     mocks.listProjectStateSummaries.mockReturnValue([]);
     mocks.listRepositoryStateSummaries.mockReturnValue([]);
+    mocks.listEpics.mockReturnValue([]);
     mocks.getFeatureCatalog.mockReturnValue({
       'feat-1': {
         id: 'feat-1',

@@ -6,6 +6,7 @@ import {
   listPendingStageRequests,
   listRunningTaskRuns,
   listPendingTimeoutApprovalRequests,
+  listEpics,
   getProjectStateRevision,
   listProjectStateSummaries,
   listRepositoryStateSummaries,
@@ -315,6 +316,7 @@ export function buildMsqWebState(): MsqWebState {
   const environment = collectEnvironmentInfo();
   const projects = collectProjectSummaries();
   const repositories = collectRepositorySummaries();
+  const epics = listEpics();
   const executionRuns = runs.filter((run) => getRunGroup(run.status) === 'execution');
   const doneRuns = runs.filter((run) => run.status === 'done');
   const falhaRunsList = runs.filter((run) => getRunGroup(run.status) === 'canceled');
@@ -324,6 +326,7 @@ export function buildMsqWebState(): MsqWebState {
     repoLabel,
     projects,
     repositories,
+    epics,
     runs,
     gates,
     pendingFeatures,

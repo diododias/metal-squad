@@ -103,6 +103,8 @@ export interface MsqWebState {
   repoLabel: string;
   projects: ProjectSummary[];
   repositories: RepositorySummary[];
+  /** Compact Epic rows only; Work Items remain in the catalog projection. */
+  epics: EpicRow[];
   runs: RunSummary[];
   gates: PendingApproval[];
   pendingFeatures: WorkItemCatalogEntry[];
