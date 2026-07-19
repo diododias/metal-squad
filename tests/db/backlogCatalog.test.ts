@@ -588,6 +588,32 @@ describe('backlogCatalog upsert/diff/load', () => {
       upsertBacklogCatalog(makeBacklog({ epics: [{ id: 'epic-1', title: 'Epic One', features: [] }] }), 'repo-1');
       expect(updateCatalogFeature('repo-1', 'feat-1', { effort: 'high' }).effort).toBe('high');
     });
+
+    it('projects the Work Item type into the catalog and its data_json', async () => {
+      const { db, upsertBacklogCatalog, listWorkItemsByScope } = await setup({ migrated: true });
+      upsertBacklogCatalog(makeBacklog({
+        epics: [{ id: 'epic-1', title: 'Epic One', features: [{ ...makeBacklog().epics[0]!.features[0]!, type: 'bug' }] }],
+      }), 'repo-1');
+
+      expect(listWorkItemsByScope({ repoId: 'repo-1' })).toMatchObject([{ featureId: 'feat-1', workItemType: 'bug' }]);
+      const row = db.prepare(`SELECT type, data_json FROM backlog_features WHERE feature_id = 'feat-1'`).get() as { type: string; data_json: string };
+      expect(row.type).toBe('bug');
+      expect((JSON.parse(row.data_json) as { type: string }).type).toBe('bug');
+    });
+
+    it('allows changing the type while the Work Item has no run history', async () => {
+      const { upsertBacklogCatalog, updateCatalogFeature } = await setup();
+      upsertBacklogCatalog(makeBacklog(), 'repo-1');
+      expect(updateCatalogFeature('repo-1', 'feat-1', { type: 'bug' }).type).toBe('bug');
+    });
+
+    it('refuses to change the type once the Work Item has run history', async () => {
+      const { upsertBacklogCatalog, updateCatalogFeature } = await setup({ migrated: true });
+      const { createRun } = await import('../../src/db/repo.js');
+      upsertBacklogCatalog(makeBacklog(), 'repo-1');
+      createRun('repo-1', 'feat-1', 'claude');
+      expect(() => updateCatalogFeature('repo-1', 'feat-1', { type: 'bug' })).toThrow(/immutable/);
+    });
   });
 
   describe('updateCatalogTask', () => {

@@ -647,6 +647,7 @@ function migrate(d: Database.Database): void {
   ensureBacklogFeatureColumn('description', `ALTER TABLE backlog_features ADD COLUMN description TEXT`);
   ensureBacklogFeatureColumn('deleted_at', `ALTER TABLE backlog_features ADD COLUMN deleted_at TEXT`);
   ensureBacklogFeatureColumn('revision', `ALTER TABLE backlog_features ADD COLUMN revision INTEGER NOT NULL DEFAULT 1`);
+  ensureBacklogFeatureColumn('type', `ALTER TABLE backlog_features ADD COLUMN type TEXT NOT NULL DEFAULT 'feature'`);
   d.exec(`CREATE INDEX IF NOT EXISTS idx_backlog_features_deleted_at ON backlog_features(deleted_at)`);
   d.exec(`CREATE INDEX IF NOT EXISTS idx_backlog_features_repo_epic_lifecycle ON backlog_features(repo_id, epic_id, archived_at, deleted_at, position)`);
 

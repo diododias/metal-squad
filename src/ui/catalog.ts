@@ -3,7 +3,7 @@ import type { ToolCapabilities } from '../core/adapters/types.js';
 import { loadBacklogFromCatalog } from '../core/backlog/load.js';
 import { resolveRepo } from '../core/repo.js';
 import { getCatalogMeta, listWorkItemsByScope, type WorkItemScope } from '../db/backlogCatalog.js';
-import { DefaultsSchema, type Budget, type Defaults, type Retry, type Task, type Workflow } from '../core/backlog/schema.js';
+import { DefaultsSchema, type Budget, type Defaults, type Retry, type Task, type WorkItemType, type Workflow } from '../core/backlog/schema.js';
 import { logCaughtError } from '../core/events/index.js';
 
 export interface WorkItemCatalogEntry {
@@ -19,7 +19,7 @@ export interface WorkItemCatalogEntry {
   projectId: string | null;
   repoId: string | null;
   repoLabel: string | null;
-  workItemType: 'feature';
+  workItemType: WorkItemType;
   integrityIssue?: string;
   skills: string[];
   tool: string;

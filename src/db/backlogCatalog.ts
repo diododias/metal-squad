@@ -15,6 +15,7 @@ import {
   type Feature,
   type Retry,
   type Task,
+  type WorkItemType,
   type Workflow,
 } from '../core/backlog/schema.js';
 import type { FeatureRegistrationResult } from '../core/backlog/featureId.js';
@@ -161,7 +162,7 @@ export interface WorkItemCatalogEntry {
   title: string;
   position: number;
   dataJson: string;
-  workItemType: 'feature';
+  workItemType: WorkItemType;
   integrityIssue?: string;
 }
 
@@ -206,7 +207,7 @@ export function listWorkItemsByScope(scope: WorkItemScope = {}): WorkItemCatalog
   const rows = db.prepare(
     `SELECT f.feature_id AS featureId, f.epic_id AS epicId, f.repo_id AS featureRepoId,
             e.project_id AS projectId, pr.repo_id AS linkedRepoId, pr.project_id AS linkedProjectId, r.path AS repoPath,
-            e.title AS epicTitle, f.title, f.position, f.data_json AS dataJson
+            e.title AS epicTitle, f.title, f.type AS workItemType, f.position, f.data_json AS dataJson
        FROM backlog_features f
        JOIN backlog_epics e ON e.epic_id = f.epic_id
        LEFT JOIN project_repos pr ON pr.repo_id = f.repo_id
@@ -215,7 +216,7 @@ export function listWorkItemsByScope(scope: WorkItemScope = {}): WorkItemCatalog
       ORDER BY e.position ASC, f.position ASC, f.feature_id ASC${pagination}`,
   ).all(...params) as {
     featureId: string; epicId: string; featureRepoId: string; projectId: string | null;
-    linkedRepoId: string | null; linkedProjectId: string | null; repoPath: string | null; epicTitle: string; title: string; position: number; dataJson: string;
+    linkedRepoId: string | null; linkedProjectId: string | null; repoPath: string | null; epicTitle: string; title: string; workItemType: WorkItemType; position: number; dataJson: string;
   }[];
   return rows.map((row) => {
     const issues: string[] = [];
@@ -234,7 +235,7 @@ export function listWorkItemsByScope(scope: WorkItemScope = {}): WorkItemCatalog
       title: row.title,
       position: row.position,
       dataJson: row.dataJson,
-      workItemType: 'feature' as const,
+      workItemType: row.workItemType,
       ...(issues.length > 0 ? { integrityIssue: issues.join(' ') } : {}),
     };
   });
@@ -520,6 +521,7 @@ interface StoredFeatureRow {
   epic_id: string;
   repo_id: string;
   title: string;
+  type: string;
   depends_on: string;
   spec_file: string | null;
   position: number;
@@ -602,7 +604,7 @@ function rekeyCatalogFeature(
 ): boolean {
   if (oldId === newId) return false;
   const oldRow = db.prepare(
-    `SELECT feature_id, epic_id, repo_id, title, depends_on, spec_file, position, data_json, archived_at
+    `SELECT feature_id, epic_id, repo_id, title, type, depends_on, spec_file, position, data_json, archived_at
      FROM backlog_features WHERE feature_id = ? AND repo_id = ?`,
   ).get(oldId, repoId) as StoredFeatureRow | undefined;
   if (!oldRow) return false;
@@ -614,13 +616,14 @@ function rekeyCatalogFeature(
   const rekeyedFeature = FeatureSchema.parse({ ...oldFeature, id: newId });
 
   db.prepare(
-    `INSERT INTO backlog_features (feature_id, epic_id, repo_id, title, depends_on, spec_file, position, data_json, archived_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))`,
+    `INSERT INTO backlog_features (feature_id, epic_id, repo_id, title, type, depends_on, spec_file, position, data_json, archived_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))`,
   ).run(
     newId,
     oldRow.epic_id,
     oldRow.repo_id,
     oldRow.title,
+    rekeyedFeature.type,
     JSON.stringify(rekeyedFeature.dependsOn),
     oldRow.spec_file,
     oldRow.position,
@@ -716,12 +719,13 @@ export function upsertBacklogCatalog(
   );
 
   const upsertFeature = db.prepare(
-    `INSERT INTO backlog_features (feature_id, epic_id, repo_id, title, depends_on, spec_file, position, data_json, archived_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL, datetime('now'))
+    `INSERT INTO backlog_features (feature_id, epic_id, repo_id, title, type, depends_on, spec_file, position, data_json, archived_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, datetime('now'))
      ON CONFLICT(feature_id) DO UPDATE SET
        epic_id = excluded.epic_id,
        repo_id = excluded.repo_id,
        title = excluded.title,
+       type = excluded.type,
        depends_on = excluded.depends_on,
        spec_file = excluded.spec_file,
        position = excluded.position,
@@ -783,11 +787,15 @@ export function upsertBacklogCatalog(
       }
 
       epic.features.forEach((feature, featureIndex) => {
+        // `type` is defaulted by FeatureSchema, but callers may hand us a
+        // pre-Zod object; the column is NOT NULL, so default defensively.
+        const workItemType: WorkItemType = (feature as { type?: WorkItemType }).type ?? 'feature';
         upsertFeature.run(
           feature.id,
           epic.id,
           repoId,
           feature.title,
+          workItemType,
           JSON.stringify(feature.dependsOn),
           feature.specFile ?? null,
           featureIndex,
@@ -859,8 +867,11 @@ export function updateCatalogFeature(repoId: string, featureId: string, patch: F
   const getRow = db.prepare(
     `SELECT data_json FROM backlog_features WHERE feature_id = ? AND repo_id = ? AND archived_at IS NULL`,
   );
+  const getRunCount = db.prepare(
+    `SELECT COUNT(*) AS count FROM runs WHERE feature_id = ?`,
+  );
   const updateRow = db.prepare(
-    `UPDATE backlog_features SET data_json = ?, title = ?, depends_on = ?, spec_file = ?, updated_at = datetime('now')
+    `UPDATE backlog_features SET data_json = ?, title = ?, type = ?, depends_on = ?, spec_file = ?, updated_at = datetime('now')
      WHERE feature_id = ? AND repo_id = ?`,
   );
 
@@ -872,6 +883,14 @@ export function updateCatalogFeature(repoId: string, featureId: string, patch: F
       );
     }
     const current = FeatureSchema.parse(JSON.parse(row.data_json));
+    if (patch.type !== undefined && patch.type !== current.type) {
+      const runCount = (getRunCount.get(featureId) as { count: number }).count;
+      if (runCount > 0) {
+        throw new Error(
+          `Work Item "${featureId}" already has run history; its type is immutable and cannot change from "${current.type}" to "${patch.type}".`,
+        );
+      }
+    }
     const reorderedStages = patch.workflow?.stages;
     const isStagesOnlyPatch = reorderedStages !== undefined
       && patch.workflow?.stepGuidance === undefined
@@ -885,6 +904,7 @@ export function updateCatalogFeature(repoId: string, featureId: string, patch: F
     updateRow.run(
       JSON.stringify(merged),
       merged.title,
+      merged.type,
       JSON.stringify(merged.dependsOn),
       merged.specFile ?? null,
       featureId,

@@ -3,6 +3,7 @@ import { DEFAULT_PROJECT_TEMPLATE } from '../workflow/stageSkills.js';
 export { DEFAULT_PROJECT_TEMPLATE } from '../workflow/stageSkills.js';
 
 export const AdapterSchema = z.enum(['claude', 'codex', 'opencode']);
+export const WorkItemTypeSchema = z.enum(['feature', 'bug']);
 export const ToolSchema = z.string().trim().min(1).regex(
   /^[a-z][a-z0-9-]*$/,
   'Tool id must use lowercase letters, numbers, and hyphens.',
@@ -156,6 +157,7 @@ export const DefaultsSchema = z.object({
 const FeatureSchemaShape = z.object({
   id: z.string(),
   title: z.string(),
+  type: WorkItemTypeSchema.default('feature'),
   spec: z.string().optional(),
   tool: ToolSchema.default('claude'),
   model: z.string().optional(),
@@ -198,6 +200,7 @@ export const FeatureSchema = FeatureSchemaShape.superRefine(validateDependencyTy
 const FeatureInputSchemaShape = z.object({
   id: z.string().optional(),
   title: z.string(),
+  type: WorkItemTypeSchema.optional(),
   spec: z.string().optional(),
   tool: ToolSchema.optional(),
   model: z.string().optional(),
@@ -283,6 +286,7 @@ export const BacklogSchema = z.union([BacklogV1Schema, BacklogV2Schema]);
 export const BacklogInputSchema = z.union([BacklogV1InputSchema, BacklogV2InputSchema]);
 
 export type Tool = z.infer<typeof ToolSchema>;
+export type WorkItemType = z.infer<typeof WorkItemTypeSchema>;
 export type Effort = z.infer<typeof EffortSchema>;
 export type Thinking = z.infer<typeof ThinkingSchema>;
 export type DependencyType = z.infer<typeof DependencyTypeSchema>;

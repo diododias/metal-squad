@@ -60,6 +60,74 @@ export function backfillProjects(db: Database.Database): BackfillProjectsResult 
   return result;
 }
 
+
+/**
+ * Rebuilds backlog_features via create-copy-drop-rename so `type` gains a
+ * CHECK (type IN ('feature','bug')) constraint — SQLite cannot add a CHECK
+ * via ALTER TABLE. Idempotent: skipped once the constraint is already
+ * present. Safe to run standalone; independent of backfillProjects.
+ */
+export function rebuildBacklogFeaturesTypeCheck(db: Database.Database): { rebuilt: boolean; backupPath: string | null } {
+  if (!backlogFeaturesRebuildRequired(db)) return { rebuilt: false, backupPath: null };
+
+  const backupPath = createVerifiedBackup(db);
+  const foreignKeysWereEnabled = foreignKeysEnabled(db);
+  if (foreignKeysWereEnabled) db.pragma('foreign_keys = OFF');
+
+  try {
+    db.transaction(() => {
+      rebuildBacklogFeaturesTable(db);
+      assertDatabaseIntegrity(db);
+    })();
+  } finally {
+    if (foreignKeysWereEnabled) db.pragma('foreign_keys = ON');
+  }
+  return { rebuilt: true, backupPath };
+}
+
+function backlogFeaturesRebuildRequired(db: Database.Database): boolean {
+  const tableInfo = db
+    .prepare(`SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'backlog_features'`)
+    .get() as { sql?: string } | undefined;
+  return !tableInfo?.sql?.includes(`CHECK (type IN ('feature','bug'))`);
+}
+
+function rebuildBacklogFeaturesTable(db: Database.Database): void {
+  db.exec(`
+    CREATE TABLE backlog_features_new (
+      feature_id  TEXT PRIMARY KEY,
+      epic_id     TEXT NOT NULL REFERENCES backlog_epics(epic_id),
+      repo_id     TEXT NOT NULL REFERENCES repos(repo_id),
+      title       TEXT NOT NULL,
+      type        TEXT NOT NULL DEFAULT 'feature' CHECK (type IN ('feature','bug')),
+      depends_on  TEXT NOT NULL DEFAULT '[]',
+      spec_file   TEXT,
+      position    INTEGER NOT NULL,
+      data_json   TEXT NOT NULL,
+      description TEXT,
+      archived_at TEXT,
+      deleted_at  TEXT,
+      revision    INTEGER NOT NULL DEFAULT 1,
+      updated_at  TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+
+    INSERT INTO backlog_features_new (
+      feature_id, epic_id, repo_id, title, type, depends_on, spec_file,
+      position, data_json, description, archived_at, deleted_at, revision, updated_at
+    )
+    SELECT
+      feature_id, epic_id, repo_id, title, type, depends_on, spec_file,
+      position, data_json, description, archived_at, deleted_at, revision, updated_at
+    FROM backlog_features;
+
+    DROP TABLE backlog_features;
+    ALTER TABLE backlog_features_new RENAME TO backlog_features;
+
+    CREATE INDEX IF NOT EXISTS idx_backlog_features_deleted_at ON backlog_features(deleted_at);
+    CREATE INDEX IF NOT EXISTS idx_backlog_features_repo_epic_lifecycle ON backlog_features(repo_id, epic_id, archived_at, deleted_at, position);
+  `);
+}
+
 function createVerifiedBackup(db: Database.Database): string | null {
   const dbPath = resolveDbPath();
   if (!existsSync(dbPath)) return null;
