@@ -9,6 +9,8 @@
 > `backlog.yaml` é um asset de bootstrap/import, nunca uma reconciliação destrutiva.
 > Atualizado em 2026-07-17 após validação contra o código em `develop`.
 
+**ADR normativo:** [ADR-001 — Governança, fonte de verdade e terminologia](../../adr/ADR-001-governanca-fonte-de-verdade-terminologia.md)
+
 ---
 
 ## Decisões fechadas
@@ -16,7 +18,7 @@
 | Tema | Decisão |
 |---|---|
 | Fonte de verdade | **DB = estado operacional autoritativo.** Specs/ADRs versionados = intenção e governança. `backlog.yaml` = import `seed`, com dry-run e conflitos explícitos. Backup/export deixam de ser opcionais. |
-| Terminologia | O conceito atual “Project defaults”, armazenado por `repo_id`, passa a se chamar **Repository defaults**. O novo Project é o agrupador de repos/épicos e dono do mapa tipo→template. |
+| Terminologia | Defaults de execução armazenados por `repo_id` passam a se chamar **Repository defaults**. O alias de código `projectDefaults` é legado. O novo Project é o agrupador de repos/épicos e dono do mapa tipo→template. |
 | Herança de execução | Work Item herda defaults do **repo alvo**. O Project não adiciona uma terceira camada de herança. Templates do Project são materializados como snapshot na criação. |
 | Project × Repo | Um repo pertence a no máximo um Project por vez. Transferência usa `moveRepo` transacional; nunca unlink+link parcial. |
 | Epic × Repo | Epic pertence ao Project e **não** possui repo operacional. `backlog_epics.repo_id` torna-se nullable/legado após reconstrução controlada da tabela. |
@@ -48,6 +50,7 @@ M0 → M1 → M2 → M3 → M4 ┬→ M5 ─┐
 ## M0 — Governança, publicação e vocabulário
 
 - [PRJ-00 — ADR: fonte de verdade, Project × Repository e compatibilidade](features/PRJ-00-adr-governanca-terminologia.md)
+- [ADR-001 — Governança, fonte de verdade e terminologia](../../adr/ADR-001-governanca-fonte-de-verdade-terminologia.md)
 
 **Validação M0:** material publicado no repo; constituição/regras sem contradição;
 glossário distingue Project, Repository defaults, Epic, Work Item e Task; decisões de ID,

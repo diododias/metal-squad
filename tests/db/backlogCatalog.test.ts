@@ -89,6 +89,67 @@ describe('backlogCatalog upsert/diff/load', () => {
     return { db, ...repo };
   }
 
+  describe('non-destructive seed plan', () => {
+    it('creates missing rows, then reports the same input as unchanged without overwriting', async () => {
+      const { db, planBacklogSeed, applyBacklogSeed } = await setup({ migrated: true });
+      const backlog = makeBacklog();
+
+      const first = planBacklogSeed(backlog, 'repo-1');
+      expect(first.items).toEqual(expect.arrayContaining([
+        expect.objectContaining({ kind: 'catalog', status: 'created' }),
+        expect.objectContaining({ kind: 'epic', id: 'epic-1', status: 'created' }),
+        expect.objectContaining({ kind: 'feature', id: 'feat-1', status: 'created' }),
+        expect.objectContaining({ kind: 'task', id: 'feat-1/task-1', status: 'created' }),
+      ]));
+      applyBacklogSeed(backlog, first);
+
+      const second = planBacklogSeed(backlog, 'repo-1');
+      expect(second.items.filter((item) => item.kind !== 'catalog').every((item) => item.status === 'unchanged')).toBe(true);
+      const before = db.prepare(`SELECT data_json FROM backlog_features WHERE feature_id = 'feat-1'`).get();
+      applyBacklogSeed(backlog, second);
+      expect(db.prepare(`SELECT data_json FROM backlog_features WHERE feature_id = 'feat-1'`).get()).toEqual(before);
+    });
+
+    it('reports a field-level conflict and leaves the managed feature untouched', async () => {
+      const { db, planBacklogSeed, applyBacklogSeed } = await setup({ migrated: true });
+      const original = makeBacklog();
+      applyBacklogSeed(original, planBacklogSeed(original, 'repo-1'));
+      const changed = makeBacklog({ epics: [{
+        ...original.epics[0]!,
+        features: [{ ...original.epics[0]!.features[0]!, title: 'Edited in YAML' }],
+      }] });
+
+      const plan = planBacklogSeed(changed, 'repo-1');
+      expect(plan.items).toContainEqual(expect.objectContaining({
+        kind: 'feature', id: 'feat-1', status: 'conflict',
+        conflict: expect.objectContaining({ path: '$.title', databaseValue: 'Feature One', importedValue: 'Edited in YAML' }),
+      }));
+      applyBacklogSeed(changed, plan);
+      expect(db.prepare(`SELECT title FROM backlog_features WHERE feature_id = 'feat-1'`).get()).toEqual({ title: 'Feature One' });
+    });
+
+    it('keeps DB-only rows when the seed YAML is empty and rejects cross-repo dependencies', async () => {
+      const { db, planBacklogSeed, applyBacklogSeed } = await setup({ migrated: true });
+      const original = makeBacklog();
+      applyBacklogSeed(original, planBacklogSeed(original, 'repo-1'));
+      const empty = makeBacklog({ epics: [] });
+      applyBacklogSeed(empty, planBacklogSeed(empty, 'repo-1'));
+      expect(db.prepare(`SELECT archived_at FROM backlog_features WHERE feature_id = 'feat-1'`).get()).toEqual({ archived_at: null });
+
+      const { registerRepo } = await import('../../src/db/repo.js');
+      registerRepo('repo-2', '/tmp/repo-2');
+      const crossRepo = makeBacklog({ epics: [{
+        id: 'epic-2', title: 'Epic Two', features: [{
+          ...original.epics[0]!.features[0]!, id: 'feat-2', dependsOn: ['feat-1'], tasks: [],
+        }],
+      }] });
+      const plan = planBacklogSeed(crossRepo, 'repo-2');
+      expect(plan.items).toContainEqual(expect.objectContaining({
+        kind: 'feature', id: 'feat-2', status: 'invalid', reason: expect.stringContaining('another repository'),
+      }));
+    });
+  });
+
   it('loads a fresh catalog end-to-end after upsert', async () => {
     const { db, upsertBacklogCatalog } = await setup();
     const { loadBacklogFromCatalog } = await import('../../src/core/backlog/load.js');
@@ -235,6 +296,43 @@ describe('backlogCatalog upsert/diff/load', () => {
     await setup();
     const { loadBacklogFromCatalog } = await import('../../src/core/backlog/load.js');
     expect(() => loadBacklogFromCatalog('repo-1')).toThrow('msq backlog load');
+  });
+
+  it('aggregates Work Items by Project with pagination and exposes orphan ownership explicitly', async () => {
+    const { db, upsertBacklogCatalog, listWorkItemsByScope, resolveScopeRepos, countByScope } = await setup({ migrated: true });
+    const { registerRepo, createProject, linkRepo, createRun } = await import('../../src/db/repo.js');
+    registerRepo('repo-2', '/tmp/repo-2');
+    const firstProject = { projectId: (db.prepare(`SELECT project_id FROM project_repos WHERE repo_id = 'repo-1'`).get() as { project_id: string }).project_id };
+    const secondProject = createProject({ name: 'Second' });
+    linkRepo(secondProject.projectId, 'repo-2');
+
+    upsertBacklogCatalog(makeBacklog(), 'repo-1');
+    upsertBacklogCatalog(makeBacklog({
+      repo: 'demo-two',
+      epics: [{ ...makeBacklog().epics[0]!, id: 'epic-2', features: [{ ...makeBacklog().epics[0]!.features[0]!, id: 'feat-2' }] }],
+    }), 'repo-2');
+    createRun('repo-1', 'feat-1', 'claude');
+
+    expect(resolveScopeRepos(firstProject.projectId)).toEqual(['repo-1']);
+    expect(listWorkItemsByScope({ projectId: firstProject.projectId, limit: 1, offset: 0 }))
+      .toMatchObject([{ featureId: 'feat-1', projectId: firstProject.projectId, repoId: 'repo-1', workItemType: 'feature' }]);
+    expect(listWorkItemsByScope({ projectId: secondProject.projectId })).toMatchObject([{ featureId: 'feat-2', projectId: secondProject.projectId }]);
+    expect(countByScope({ projectId: firstProject.projectId })).toEqual({ epics: 1, workItems: 1, activeRuns: 1 });
+
+    db.prepare(`DELETE FROM project_repos WHERE repo_id = 'repo-1'`).run();
+    expect(listWorkItemsByScope({ repoId: 'repo-1' })[0]?.integrityIssue).toContain('not linked');
+  });
+
+  it('keeps historical runs in their Project snapshot after a repository moves', async () => {
+    const { db } = await setup({ migrated: true });
+    const { createProject, moveRepo, createRun, listRunsForStats } = await import('../../src/db/repo.js');
+    const source = { projectId: (db.prepare(`SELECT project_id FROM project_repos WHERE repo_id = 'repo-1'`).get() as { project_id: string }).project_id };
+    const destination = createProject({ name: 'Destination' });
+    createRun('repo-1', 'historical-empty-repo', 'claude');
+
+    moveRepo('repo-1', destination.projectId);
+    expect(listRunsForStats({ projectId: source.projectId })).toHaveLength(1);
+    expect(listRunsForStats({ projectId: destination.projectId })).toHaveLength(0);
   });
 
   describe('updateCatalogFeature', () => {

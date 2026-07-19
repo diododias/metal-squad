@@ -1,6 +1,7 @@
-import { resolveRepo } from './repo.js';
+import { resolveRepoAllowlist, sanitizeRepoPath } from './repo.js';
 import {
   createProject,
+  getRegisteredRepo,
   getProject,
   linkRepo,
   listProjectRepos,
@@ -15,6 +16,7 @@ import {
   type ProjectRow,
   type UpdateProjectPatch,
 } from '../db/repo.js';
+import { RepoNotFoundError } from '../db/errors.js';
 
 export interface ServiceMutationResult<TEntity> {
   entity: TEntity;
@@ -55,26 +57,36 @@ export const repoLinkService = {
     return listProjectRepos(projectId);
   },
 
-  link(projectId: string, input: { repoId?: string; path?: string }): ServiceMutationResult<ProjectRepoRow> {
+  link(
+    projectId: string,
+    input: { repoId?: string; path?: string; confirm?: boolean },
+    options: { allowedRoots?: string[]; audit?: { actor?: string; requestId?: string } } = {},
+  ): ServiceMutationResult<ProjectRepoRow> {
     if ((input.repoId === undefined) === (input.path === undefined)) {
       throw new Error('Provide exactly one of repoId or path when linking a repository.');
     }
     if (input.path !== undefined) {
-      const repo = resolveRepo(input.path);
+      if (input.confirm !== true) {
+        const error = new Error('Explicit confirmation is required before registering a repository path.');
+        Object.assign(error, { code: 'REPO_PATH_CONFIRMATION_REQUIRED' });
+        throw error;
+      }
+      const repo = sanitizeRepoPath(input.path, options.allowedRoots ?? resolveRepoAllowlist());
       registerRepo(repo.repoId, repo.path);
-      const entity = linkRepo(projectId, repo.repoId);
+      const entity = linkRepo(projectId, repo.repoId, { audit: options.audit });
       return { entity, revision: null };
     }
     if (input.repoId === undefined) throw new Error('Repository id is required.');
-    const entity = linkRepo(projectId, input.repoId);
+    if (!getRegisteredRepo(input.repoId)) throw new RepoNotFoundError(input.repoId);
+    const entity = linkRepo(projectId, input.repoId, { audit: options.audit });
     return { entity, revision: null };
   },
 
-  move(repoId: string, toProjectId: string): ServiceMutationResult<ProjectRepoRow | null> {
-    return { entity: moveRepo(repoId, toProjectId), revision: null };
+  move(repoId: string, toProjectId: string, options: { audit?: { actor?: string; requestId?: string } } = {}): ServiceMutationResult<ProjectRepoRow | null> {
+    return { entity: moveRepo(repoId, toProjectId, { audit: options.audit }), revision: null };
   },
 
-  unlink(repoId: string): ServiceMutationResult<{ repoId: string; unlinked: boolean }> {
-    return { entity: { repoId, unlinked: unlinkRepo(repoId) }, revision: null };
+  unlink(repoId: string, options: { projectId?: string; audit?: { actor?: string; requestId?: string } } = {}): ServiceMutationResult<{ repoId: string; unlinked: boolean }> {
+    return { entity: { repoId, unlinked: unlinkRepo(repoId, options) }, revision: null };
   },
 };

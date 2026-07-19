@@ -32,49 +32,45 @@ export const ProjectActionMessageSchema = z.discriminatedUnion('type', [
 
 export type ProjectActionMessage = z.infer<typeof ProjectActionMessageSchema>;
 
-/** Repository links intentionally accept registered repo IDs only. Path
- * registration stays behind PRJ-15B's canonicalization/allowlist boundary. */
+/** Runtime boundary for repository-link mutations. Path registration remains
+ * deliberately explicit: the service requires `confirm: true` before writing
+ * a new repo row. */
 export const RepositoryActionMessageSchema = z.discriminatedUnion('type', [
   z.object({
     type: z.literal('action:linkRepo'),
     requestId: RequestIdSchema,
     projectId: z.string().min(1),
-    repoId: z.string().min(1),
+    repoId: z.string().min(1).optional(),
+    path: z.string().min(1).optional(),
+    confirm: z.boolean().optional(),
   }).strict(),
   z.object({
     type: z.literal('action:moveRepo'),
     requestId: RequestIdSchema,
     repoId: z.string().min(1),
     toProjectId: z.string().min(1),
+    expectedRevision: z.number().int().positive().optional(),
   }).strict(),
   z.object({
     type: z.literal('action:unlinkRepo'),
     requestId: RequestIdSchema,
+    projectId: z.string().min(1),
     repoId: z.string().min(1),
   }).strict(),
-]);
+]).superRefine((message, ctx) => {
+  if (message.type === 'action:linkRepo' && (message.repoId === undefined) === (message.path === undefined)) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'Provide exactly one of repoId or path.' });
+  }
+});
 
 export type RepositoryActionMessage = z.infer<typeof RepositoryActionMessageSchema>;
 
-const EpicPatchSchema = z.object({
-  title: z.string().optional(),
-  description: z.string().nullable().optional(),
-  status: z.enum(['todo', 'in_progress', 'done']).optional(),
-  position: z.number().int().nonnegative().optional(),
-}).strict().refine(
-  (patch) => Object.keys(patch).length > 0,
-  { message: 'Epic update requires at least one allowed patch field.' },
-);
-
-/** Runtime boundary for project-level Epic mutations. The patch remains
- * allowlisted so WebSocket clients cannot alter repo ownership or lifecycle
- * fields outside the dedicated archive/delete flows. */
 export const EpicActionMessageSchema = z.discriminatedUnion('type', [
   z.object({
     type: z.literal('action:createEpic'),
     requestId: RequestIdSchema,
     projectId: z.string().min(1),
-    title: z.string(),
+    title: z.string().min(1),
     description: z.string().nullable().optional(),
   }).strict(),
   z.object({
@@ -82,8 +78,28 @@ export const EpicActionMessageSchema = z.discriminatedUnion('type', [
     requestId: RequestIdSchema,
     epicId: z.string().min(1),
     expectedRevision: z.number().int().positive(),
-    patch: EpicPatchSchema,
+    patch: z.object({
+      title: z.string().optional(),
+      description: z.string().nullable().optional(),
+      status: z.enum(['todo', 'in_progress', 'done']).optional(),
+      position: z.number().int().nonnegative().optional(),
+    }).strict().refine(
+      (patch) => Object.keys(patch).length > 0,
+      { message: 'Epic update requires at least one allowed patch field.' },
+    ),
   }).strict(),
 ]);
 
 export type EpicActionMessage = z.infer<typeof EpicActionMessageSchema>;
+
+export const WorkItemActionMessageSchema = z.object({
+  type: z.literal('action:createWorkItem'),
+  requestId: RequestIdSchema,
+  epicId: z.string().min(1),
+  repoId: z.string().min(1),
+  title: z.string().min(1),
+  description: z.string().nullable().optional(),
+  dependsOn: z.array(z.string().min(1)).optional(),
+}).strict();
+
+export type WorkItemActionMessage = z.infer<typeof WorkItemActionMessageSchema>;

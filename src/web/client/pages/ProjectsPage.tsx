@@ -76,12 +76,9 @@ export function ProjectsPage({ state, send, actionResults }: ProjectsPageProps):
       } else {
         setDrafts((current) => Object.fromEntries(Object.entries(current).map(([projectId, draft]) => {
           if (draft.pendingRequestId !== requestId) return [projectId, draft];
-          const payload = result.payload;
-          if (payload.ok) {
-            if (payload.entity !== null && 'revision' in payload.entity) return [projectId, { ...draft, expectedRevision: payload.entity.revision, pendingRequestId: undefined, error: undefined }];
-            return [projectId, draft];
-          }
-          return [projectId, { ...draft, pendingRequestId: undefined, error: payload.error.message }];
+          if (result.payload.ok && 'entity' in result.payload) return [projectId, { ...draft, expectedRevision: (result.payload as { entity: { revision: number } }).entity.revision, pendingRequestId: undefined, error: undefined }];
+          if (!result.payload.ok && 'error' in result.payload) return [projectId, { ...draft, pendingRequestId: undefined, error: (result.payload as { error: { message: string } }).error.message }];
+          return [projectId, draft];
         })));
       }
     }

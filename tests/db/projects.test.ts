@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, symlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -112,6 +112,25 @@ describe('Project and repository domain queries', () => {
     expect(db.prepare(`SELECT project_id FROM project_repos WHERE repo_id = 'repo-1'`).get()).toEqual({ project_id: first.projectId });
   });
 
+  it('refuses an unsafe path before registering it through the repository link service', async () => {
+    const { db, createProject } = await setup();
+    const project = createProject({ name: 'Safe links only' });
+    const allowedRoot = mkdtempSync(join(tmpdir(), 'msq-allowed-repos-'));
+    const outside = mkdtempSync(join(tmpdir(), 'msq-outside-repos-'));
+    const escapingLink = join(allowedRoot, 'outside-link');
+    symlinkSync(outside, escapingLink);
+    const { repoLinkService } = await import('../../src/core/projectService.js');
+
+    expect(() => repoLinkService.link(project.projectId, {
+      path: escapingLink,
+      confirm: true,
+    }, { allowedRoots: [allowedRoot] })).toThrow(expect.objectContaining({ code: 'REPO_PATH_NOT_ALLOWED' }));
+    expect(db.prepare(`SELECT COUNT(*) AS count FROM repos`).get()).toEqual({ count: 0 });
+
+    rmSync(allowedRoot, { recursive: true, force: true });
+    rmSync(outside, { recursive: true, force: true });
+  });
+
   it('moves a repo atomically without reclassifying historical run snapshots', async () => {
     const { db, createProject, linkRepo, moveRepo, registerRepo } = await setup();
     const source = createProject({ name: 'Source' });
@@ -145,6 +164,16 @@ describe('Project and repository domain queries', () => {
     expect(() => moveRepo('repo-1', target.projectId)).toThrowError(RepoInUseError);
     expect(() => unlinkRepo('repo-1')).toThrowError(RepoInUseError);
     expect(db.prepare(`SELECT project_id FROM project_repos WHERE repo_id = 'repo-1'`).get()).toEqual({ project_id: source.projectId });
+  });
+
+  it('does not unlink a repo when the request names a different Project', async () => {
+    const { createProject, linkRepo, unlinkRepo, registerRepo, RepoNotLinkedToProjectError } = await setup();
+    const owner = createProject({ name: 'Owner' });
+    const other = createProject({ name: 'Other' });
+    registerRepo('repo-1', '/tmp/repo-1');
+    linkRepo(owner.projectId, 'repo-1');
+
+    expect(() => unlinkRepo('repo-1', { projectId: other.projectId })).toThrowError(RepoNotLinkedToProjectError);
   });
 
   it('rolls the mutation back when audit insertion fails in the same transaction', async () => {
@@ -244,5 +273,86 @@ describe('Project and repository domain queries', () => {
       { request_id: 'epic-update-1', actor: 'web', entity_kind: 'epic', action: 'update' },
     ]);
     expect(() => updateEpic(epic.epicId, { title: 'stale' }, 1)).toThrowError(RevisionConflictError);
+  });
+
+  it('creates a Work Item in its Epic Project with materialized defaults and a public workItemId', async () => {
+    const { db, createEpic, createProject, createWorkItem, linkRepo, registerRepo } = await setup();
+    const { backfillProjects } = await import('../../src/db/backfill.js');
+    backfillProjects(db);
+    const repoPath = join(directory, 'repo-a');
+    mkdirSync(repoPath);
+    const project = createProject({ name: 'Work Items' });
+    registerRepo('repo-a', repoPath);
+    linkRepo(project.projectId, 'repo-a');
+    db.prepare(`INSERT INTO backlog_catalog_meta (repo_id, repo, version, defaults_json) VALUES (?, ?, ?, ?)`).run(
+      'repo-a', 'repo-a', 2, JSON.stringify({ tool: 'codex', effort: 'high', skills: ['review'], workflow: { stages: ['plan', 'implement'] } }),
+    );
+    const epic = createEpic({ projectId: project.projectId, title: 'Target epic' });
+
+    const created = createWorkItem({
+      epicId: epic.epicId,
+      repoId: 'repo-a',
+      title: '  Create from repository  ',
+      description: 'Created directly',
+      audit: { actor: 'test', requestId: 'work-item-create-1' },
+    });
+
+    expect(created).toMatchObject({
+      workItemId: expect.stringMatching(/^F-[23456789ABCDEFGHJKMNPQRSTVWXYZ]{8}$/),
+      epicId: epic.epicId,
+      repoId: 'repo-a',
+      title: '  Create from repository  ',
+      description: 'Created directly',
+      type: 'feature',
+      tool: 'codex', effort: 'high', skills: ['review'],
+      workflow: expect.objectContaining({ stages: ['plan', 'implement'] }), revision: 1,
+    });
+    const stored = db.prepare(`SELECT feature_id, description, depends_on, data_json FROM backlog_features WHERE feature_id = ?`).get(created.workItemId) as {
+      feature_id: string; description: string; depends_on: string; data_json: string;
+    };
+    expect(stored.feature_id).toBe(created.workItemId);
+    expect(stored.description).toBe('Created directly');
+    expect(JSON.parse(stored.depends_on)).toEqual([]);
+    expect(JSON.parse(stored.data_json)).toMatchObject({ id: created.workItemId, type: 'feature', description: 'Created directly' });
+    expect(db.prepare(`SELECT entity_kind, entity_id, action FROM audit_events WHERE request_id = ?`).get('work-item-create-1')).toEqual({
+      entity_kind: 'work_item', entity_id: created.workItemId, action: 'create',
+    });
+  });
+
+  it('rejects a Work Item dependency from another repository before inserting', async () => {
+    const { db, createEpic, createProject, createWorkItem, linkRepo, registerRepo, CrossRepositoryDependencyError } = await setup();
+    const { backfillProjects } = await import('../../src/db/backfill.js');
+    backfillProjects(db);
+    const repoAPath = join(directory, 'repo-a');
+    const repoBPath = join(directory, 'repo-b');
+    mkdirSync(repoAPath);
+    mkdirSync(repoBPath);
+    const project = createProject({ name: 'Shared project' });
+    registerRepo('repo-a', repoAPath);
+    registerRepo('repo-b', repoBPath);
+    linkRepo(project.projectId, 'repo-a');
+    linkRepo(project.projectId, 'repo-b');
+    const epic = createEpic({ projectId: project.projectId, title: 'Epic' });
+    const dependency = createWorkItem({ epicId: epic.epicId, repoId: 'repo-b', title: 'Dependency' });
+
+    expect(() => createWorkItem({
+      epicId: epic.epicId, repoId: 'repo-a', title: 'Invalid', dependsOn: [dependency.workItemId],
+    })).toThrowError(CrossRepositoryDependencyError);
+  });
+
+  it('rolls back Work Item insertion when its audit event fails', async () => {
+    const { db, createEpic, createProject, createWorkItem, linkRepo, registerRepo } = await setup();
+    const { backfillProjects } = await import('../../src/db/backfill.js');
+    backfillProjects(db);
+    const repoPath = join(directory, 'repo-a');
+    mkdirSync(repoPath);
+    const project = createProject({ name: 'Atomic' });
+    registerRepo('repo-a', repoPath);
+    linkRepo(project.projectId, 'repo-a');
+    const epic = createEpic({ projectId: project.projectId, title: 'Epic' });
+    db.exec(`CREATE TRIGGER fail_work_item_audit BEFORE INSERT ON audit_events WHEN NEW.entity_kind = 'work_item' BEGIN SELECT RAISE(ABORT, 'audit failed'); END;`);
+
+    expect(() => createWorkItem({ epicId: epic.epicId, repoId: 'repo-a', title: 'Atomic item' })).toThrow('audit failed');
+    expect(db.prepare(`SELECT COUNT(*) AS count FROM backlog_features`).get()).toEqual({ count: 0 });
   });
 });
