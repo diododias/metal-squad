@@ -33,9 +33,9 @@ export function BacklogItemDetail({
   const [specDraft, setSpecDraft] = useState('');
   const doneFeatureIds = new Set(state.doneFeatureIds);
   const failedFeatureIds = new Set<string>();
-  for (const [fid, history] of Object.entries(runHistories)) {
-    if (history.some(run => run.status === 'failed')) {
-      failedFeatureIds.add(fid);
+  for (const run of state.runs) {
+    if (run.status === 'failed') {
+      failedFeatureIds.add(run.featureId);
     }
   }
   const blockedByDependencies = feature?.dependsOn.filter((dep) => !doneFeatureIds.has(dep)) ?? [];
