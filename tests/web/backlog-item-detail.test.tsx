@@ -47,6 +47,7 @@ function baseState(overrides: Partial<MsqWebState> = {}): MsqWebState {
       },
     },
     runtimeConfig: { notifications: { channels: [] }, tools: [{ id: 'claude' }] },
+    runs: [],
     ...overrides,
   } as unknown as MsqWebState;
 }
