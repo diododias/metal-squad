@@ -1616,6 +1616,151 @@ describe('executeBacklog failure persistence', () => {
     });
   });
 
+  it('routes a single-stage needs_input through createStageRequest so Telegram receives the question+options, and resumes the adapter with the answer', async () => {
+    const backlog: Backlog = {
+      version: 2,
+      repo: 'repo',
+      defaults: { tool: 'codex', effort: 'medium', skills: ['implement'], stageSkills: {} },
+      epics: [
+        {
+          id: 'epic-1',
+          title: 'Epic',
+          features: [
+            {
+              id: 'feat-single',
+              title: 'Single-stage feature',
+              spec: 'spec',
+              tasks: [],
+              tool: 'codex',
+              effort: 'medium',
+              dependsOn: [],
+              workflow: {
+                mode: 'single',
+                stages: ['implement'],
+                approvals: { channel: 'telegram', autoAdvance: false },
+                syncTasksToBacklog: false,
+                sessionPolicy: { mode: 'isolated', alwaysIsolatedStages: [] },
+                stagePublishes: { implement: false },
+              },
+            },
+          ],
+        },
+      ],
+    };
+
+    mockRunFeature
+      .mockResolvedValueOnce({
+        ok: true,
+        summary: 'MSQ_INPUT_REQUIRED: Qual branch devo usar?',
+        control: { type: 'needs_input', prompt: 'Qual branch devo usar?' },
+        session: { tool: 'codex', sessionId: 'sess-single', capturedFromRunId: 7, capturedAt: '2026-07-19T00:00:00Z' },
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        summary: 'done after answer',
+        control: {
+          type: 'done',
+          summary: 'done after answer',
+          publication: { prUrl: 'https://example/pr/2', prNumber: 2, base: 'develop', head: 'feat/single' },
+        },
+      });
+    mockGetStageRequest.mockReturnValue({ status: 'resolved', response: 'usar feat/single' });
+
+    const { executeBacklog } = await import('../../src/core/runner/execute.js');
+
+    await expect(executeBacklog(backlog, { cwd: '/repo', concurrency: 1, featureId: 'feat-single' }))
+      .resolves.toBeUndefined();
+
+    // Single-stage path used to only fall through to a generic run:blocked
+    // event ("needs human intervention" — no question, no option buttons).
+    // It must now create an input stage request so the stage:input
+    // notification delivers the actual prompt + buttons.
+    expect(mockCreateStageRequest).toHaveBeenCalledWith(
+      9,
+      'feat-single',
+      'implement',
+      'input',
+      'Qual branch devo usar?',
+      { runId: 7, options: undefined },
+    );
+
+    // The single-stage prompt must now be born with the communication
+    // protocol inline (previously only staged prompts had it).
+    const { COMMUNICATION_PROTOCOL } = await import('../../src/core/runner/communicationProtocol.js');
+    const firstCallPrompt = mockRunFeature.mock.calls[0]?.[1] ?? '';
+    expect(firstCallPrompt).toContain(COMMUNICATION_PROTOCOL);
+
+    // The retry prompt includes the admin's answer as an "Admin inputs"
+    // section so the resumed session knows the human's response.
+    const retryPrompt = mockRunFeature.mock.calls[1]?.[1] ?? '';
+    expect(retryPrompt).toContain('usar feat/single');
+  });
+
+  it('propagates discrete options from the adapter to createStageRequest in single-stage mode', async () => {
+    const backlog: Backlog = {
+      version: 2,
+      repo: 'repo',
+      defaults: { tool: 'codex', effort: 'medium', skills: ['implement'], stageSkills: {} },
+      epics: [{
+        id: 'epic-1',
+        title: 'Epic',
+        features: [{
+          id: 'feat-single-opt',
+          title: 'Single-stage with options',
+          spec: 'spec',
+          tasks: [],
+          tool: 'codex',
+          effort: 'medium',
+          dependsOn: [],
+          workflow: {
+            mode: 'single',
+            stages: ['implement'],
+            approvals: { channel: 'telegram', autoAdvance: false },
+            syncTasksToBacklog: false,
+            sessionPolicy: { mode: 'isolated', alwaysIsolatedStages: [] },
+            stagePublishes: { implement: false },
+          },
+        }],
+      }],
+    };
+
+    mockRunFeature
+      .mockResolvedValueOnce({
+        ok: true,
+        summary: 'MSQ_INPUT_REQUIRED: Qual estrategia de cache?',
+        control: {
+          type: 'needs_input',
+          prompt: 'Qual estrategia de cache?',
+          options: ['Cache em memoria', 'Cache em SQLite'],
+        },
+        session: { tool: 'codex', sessionId: 'sess-opt', capturedFromRunId: 7, capturedAt: '2026-07-19T00:00:00Z' },
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        summary: 'done',
+        control: {
+          type: 'done',
+          summary: 'done',
+          publication: { prUrl: 'https://example/pr/3', prNumber: 3, base: 'develop', head: 'feat/single-opt' },
+        },
+      });
+    mockGetStageRequest.mockReturnValue({ status: 'resolved', response: 'Cache em memoria' });
+
+    const { executeBacklog } = await import('../../src/core/runner/execute.js');
+
+    await expect(executeBacklog(backlog, { cwd: '/repo', concurrency: 1, featureId: 'feat-single-opt' }))
+      .resolves.toBeUndefined();
+
+    expect(mockCreateStageRequest).toHaveBeenCalledWith(
+      9,
+      'feat-single-opt',
+      'implement',
+      'input',
+      'Qual estrategia de cache?',
+      { runId: 7, options: ['Cache em memoria', 'Cache em SQLite'] },
+    );
+  });
+
   it('resumes a staged workflow from the next stage after an approved checkpoint', async () => {
     const backlog: Backlog = {
       version: 2,
