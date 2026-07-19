@@ -32,23 +32,25 @@ const DASHBOARD_PERIODS: { label: string; days: number | null }[] = [
   { label: 'all time', days: null },
 ];
 
-function gateToPendingApproval(gate: GateRow): { kind: 'gate'; id: number; featureId: string; repoId: string; prompt: string; createdAt: string } {
+function gateToPendingApproval(gate: GateRow): { kind: 'gate'; id: number; featureId: string; repoId: string; integrityIssue?: string; prompt: string; createdAt: string } {
   return {
     kind: 'gate' as const,
     id: gate.id,
     featureId: gate.featureId,
     repoId: gate.repoId,
+    integrityIssue: gate.integrityIssue,
     prompt: '',
     createdAt: gate.createdAt,
   };
 }
 
-function stageRequestToPendingApproval(sr: StageRequestRow): { kind: 'stage'; id: number; featureId: string; repoId: string; prompt: string; createdAt: string; requestKind: 'approval' | 'input'; options?: string[] } {
+function stageRequestToPendingApproval(sr: StageRequestRow): { kind: 'stage'; id: number; featureId: string; repoId: string; integrityIssue?: string; prompt: string; createdAt: string; requestKind: 'approval' | 'input'; options?: string[] } {
   return {
     kind: 'stage' as const,
     id: sr.id,
     featureId: sr.featureId,
-    repoId: '',
+    repoId: sr.repoId ?? '',
+    integrityIssue: sr.integrityIssue,
     prompt: sr.prompt,
     createdAt: sr.createdAt,
     requestKind: sr.kind,
@@ -105,10 +107,10 @@ function collectTimeoutApprovals(): TimeoutApprovalState[] {
   }
 }
 
-function collectPendingFeatures(runs: RunSummary[], repoId: string): FeatureCatalogEntry[] {
+function collectPendingFeatures(runs: RunSummary[]): FeatureCatalogEntry[] {
   try {
     const catalog = getFeatureCatalog();
-    const doneFeatureIds = listCompletedFeatureIds(repoId);
+    const doneFeatureIds = listCompletedFeatureIds();
     const activeFeatureIds = new Set(
       runs
         .filter((run) => run.status === 'running' || run.status === 'blocked' || run.status === 'done')
@@ -263,7 +265,7 @@ export function buildMsqWebState(): MsqWebState {
   const repoLabel = basename(repo.path);
   const runs = collectRuns();
   const gates = collectGates();
-  const pendingFeatures = collectPendingFeatures(runs, repo.repoId);
+  const pendingFeatures = collectPendingFeatures(runs);
   const runningTasks = collectRunningTasks();
   const timeoutApprovals = collectTimeoutApprovals();
   const featureCatalog = normalizeFeatureCatalog(getFeatureCatalog());

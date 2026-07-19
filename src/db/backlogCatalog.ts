@@ -135,6 +135,130 @@ interface CatalogMetaRow {
   budget_json: string | null;
 }
 
+/** Lifecycle projections intentionally remain separate so the active read path
+ * never has to mix archive/delete flags with its hot query. */
+export type CatalogLifecycle = 'active' | 'archived' | 'deleted';
+
+export interface WorkItemScope {
+  projectId?: string;
+  epicId?: string;
+  repoId?: string;
+  lifecycle?: CatalogLifecycle;
+  limit?: number;
+  offset?: number;
+}
+
+/** One SQL row per Work Item, including its complete hierarchy.  Relations
+ * that cannot be resolved are deliberately returned with an integrity issue
+ * rather than being silently assigned to a previous/current project. */
+export interface WorkItemCatalogEntry {
+  featureId: string;
+  epicId: string;
+  repoId: string | null;
+  projectId: string | null;
+  repoLabel: string | null;
+  epicTitle: string;
+  title: string;
+  position: number;
+  dataJson: string;
+  workItemType: 'feature';
+  integrityIssue?: string;
+}
+
+export interface ScopeCounts {
+  epics: number;
+  workItems: number;
+  activeRuns: number;
+}
+
+export function resolveScopeRepos(projectId: string): string[] {
+  const db = getReadonlyDbOrNull();
+  if (!db) return [];
+  return (db.prepare(
+    `SELECT repo_id FROM project_repos WHERE project_id = ? ORDER BY position ASC, repo_id ASC`,
+  ).all(projectId) as { repo_id: string }[]).map((row) => row.repo_id);
+}
+
+function lifecycleWhere(lifecycle: CatalogLifecycle): string {
+  switch (lifecycle) {
+    case 'archived': return `(f.archived_at IS NOT NULL OR e.archived_at IS NOT NULL)`;
+    case 'deleted': return `(f.deleted_at IS NOT NULL OR e.deleted_at IS NOT NULL)`;
+    case 'active': return `(f.archived_at IS NULL AND f.deleted_at IS NULL AND e.archived_at IS NULL AND e.deleted_at IS NULL)`;
+  }
+}
+
+/** Aggregate catalog query.  It uses joins rather than per-item lookups and
+ * asserts both ownership edges: Work Item -> repo and Work Item -> Epic ->
+ * Project. */
+export function listWorkItemsByScope(scope: WorkItemScope = {}): WorkItemCatalogEntry[] {
+  const db = getReadonlyDbOrNull();
+  if (!db) return [];
+  const lifecycle = scope.lifecycle ?? 'active';
+  const clauses = [lifecycleWhere(lifecycle)];
+  const params: (string | number)[] = [];
+  if (scope.projectId) { clauses.push('e.project_id = ?'); params.push(scope.projectId); }
+  if (scope.epicId) { clauses.push('f.epic_id = ?'); params.push(scope.epicId); }
+  if (scope.repoId) { clauses.push('f.repo_id = ?'); params.push(scope.repoId); }
+  const pagination = scope.limit === undefined ? '' : ' LIMIT ? OFFSET ?';
+  if (scope.limit !== undefined) {
+    params.push(scope.limit, scope.offset ?? 0);
+  }
+  const rows = db.prepare(
+    `SELECT f.feature_id AS featureId, f.epic_id AS epicId, f.repo_id AS featureRepoId,
+            e.project_id AS projectId, pr.repo_id AS linkedRepoId, pr.project_id AS linkedProjectId, r.path AS repoPath,
+            e.title AS epicTitle, f.title, f.position, f.data_json AS dataJson
+       FROM backlog_features f
+       JOIN backlog_epics e ON e.epic_id = f.epic_id
+       LEFT JOIN project_repos pr ON pr.repo_id = f.repo_id
+       LEFT JOIN repos r ON r.repo_id = f.repo_id
+      WHERE ${clauses.join(' AND ')}
+      ORDER BY e.position ASC, f.position ASC, f.feature_id ASC${pagination}`,
+  ).all(...params) as {
+    featureId: string; epicId: string; featureRepoId: string; projectId: string | null;
+    linkedRepoId: string | null; linkedProjectId: string | null; repoPath: string | null; epicTitle: string; title: string; position: number; dataJson: string;
+  }[];
+  return rows.map((row) => {
+    const issues: string[] = [];
+    if (!row.projectId) issues.push('Work Item epic has no Project.');
+    if (!row.linkedRepoId) issues.push('Work Item repository is not linked to a Project.');
+    if (row.projectId && row.linkedProjectId && row.projectId !== row.linkedProjectId) {
+      issues.push('Work Item repository Project differs from its Epic Project.');
+    }
+    return {
+      featureId: row.featureId,
+      epicId: row.epicId,
+      repoId: row.featureRepoId,
+      projectId: row.projectId,
+      repoLabel: row.repoPath ? row.repoPath.split(/[\\/]/).filter(Boolean).at(-1) ?? row.repoPath : null,
+      epicTitle: row.epicTitle,
+      title: row.title,
+      position: row.position,
+      dataJson: row.dataJson,
+      workItemType: 'feature' as const,
+      ...(issues.length > 0 ? { integrityIssue: issues.join(' ') } : {}),
+    };
+  });
+}
+
+export function countByScope(scope: Pick<WorkItemScope, 'projectId'> = {}): ScopeCounts {
+  const db = getReadonlyDbOrNull();
+  if (!db) return { epics: 0, workItems: 0, activeRuns: 0 };
+  const projectWhere = scope.projectId ? ' AND e.project_id = ?' : '';
+  const runWhere = scope.projectId ? ' WHERE project_id = ?' : '';
+  const projectParam = scope.projectId ? [scope.projectId] : [];
+  const epics = (db.prepare(
+    `SELECT COUNT(*) AS count FROM backlog_epics e WHERE e.archived_at IS NULL AND e.deleted_at IS NULL${projectWhere}`,
+  ).get(...projectParam) as { count: number }).count;
+  const workItems = (db.prepare(
+    `SELECT COUNT(*) AS count FROM backlog_features f JOIN backlog_epics e ON e.epic_id = f.epic_id
+      WHERE f.archived_at IS NULL AND f.deleted_at IS NULL AND e.archived_at IS NULL AND e.deleted_at IS NULL${projectWhere}`,
+  ).get(...projectParam) as { count: number }).count;
+  const activeRuns = (db.prepare(
+    `SELECT COUNT(*) AS count FROM runs${runWhere}${runWhere ? ' AND' : ' WHERE'} status = 'running'`,
+  ).get(...projectParam) as { count: number }).count;
+  return { epics, workItems, activeRuns };
+}
+
 export function getCatalogMeta(repoId: string): CatalogMetaRow | undefined {
   const db = getReadonlyDbOrNull();
   if (!db) return undefined;

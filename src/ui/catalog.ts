@@ -1,16 +1,12 @@
-import { existsSync, readFileSync } from 'node:fs';
-import { resolve } from 'node:path';
 import { mergeExecutionDefaults, resolveConfigSnapshot, type ResolvedConfigSources, type ResolvedExecutionDefaults } from '../config/index.js';
 import type { ToolCapabilities } from '../core/adapters/types.js';
 import { loadBacklogFromCatalog } from '../core/backlog/load.js';
 import { resolveRepo } from '../core/repo.js';
-import { getCatalogMeta } from '../db/backlogCatalog.js';
+import { getCatalogMeta, listWorkItemsByScope, type WorkItemScope } from '../db/backlogCatalog.js';
 import { DefaultsSchema, type Budget, type Defaults, type Retry, type Task, type Workflow } from '../core/backlog/schema.js';
 import { logCaughtError } from '../core/events/index.js';
 
-const DESCRIPTION_CHAR_LIMIT = 4000;
-
-export interface FeatureCatalogEntry {
+export interface WorkItemCatalogEntry {
   id: string;
   /** Persistent catalog identity; kept separate from display-only fallbacks. */
   persistedId?: string;
@@ -18,6 +14,13 @@ export interface FeatureCatalogEntry {
   /** Parent epic identity — surfaced muted on web kanban cards. */
   epicId?: string;
   epicTitle?: string;
+  /** Resolved by the aggregate catalog query; missing ownership is always
+   * represented explicitly instead of guessed from the web server cwd. */
+  projectId: string | null;
+  repoId: string | null;
+  repoLabel: string | null;
+  workItemType: 'feature';
+  integrityIssue?: string;
   skills: string[];
   tool: string;
   model?: string;
@@ -50,6 +53,9 @@ export interface FeatureCatalogEntry {
   pendingDependencies?: string[];
 }
 
+/** Compatibility alias while older UI call sites migrate to Work Item naming. */
+export type FeatureCatalogEntry = WorkItemCatalogEntry;
+
 /** F31 section 5b: project-level settings shown alongside per-feature config. */
 export interface BacklogSettings {
   budget?: Budget;
@@ -78,70 +84,16 @@ const DEFAULT_BACKLOG_SETTINGS: BacklogSettings = {
   projectDefaults: DefaultsSchema.parse({}),
 };
 
-function truncateDescription(text: string): string {
-  if (text.length <= DESCRIPTION_CHAR_LIMIT) return text;
-  return `${text.slice(0, DESCRIPTION_CHAR_LIMIT)}\n... (truncated, ${String(text.length)} chars total)`;
-}
-
-function readFeatureDescription(
-  spec: string | undefined,
-  specFile: string | undefined,
-  cwd: string,
-): string | null {
-  if (spec?.trim()) return truncateDescription(spec.trim());
-  if (!specFile) return null;
-  try {
-    const abs = resolve(cwd, specFile);
-    if (!existsSync(abs)) return null;
-    const content = readFileSync(abs, 'utf8').trim();
-    return content ? truncateDescription(content) : null;
-  } catch (error) {
-    logCaughtError('ui/catalog.readFeatureDescription', error);
-    return null;
-  }
-}
-
-let cachedCatalog: Record<string, FeatureCatalogEntry> = {};
 let cachedSettings: BacklogSettings = DEFAULT_BACKLOG_SETTINGS;
 
-/** Catalog now lives in the DB (populated by `msq backlog load`) rather than
- * backlog.yaml — see docs/features/F35-backlog-catalog-import.md. Queried
- * fresh on every call (cheap local SQLite read, same pattern as the rest of
- * the TUI's DB-backed state). */
-function loadCatalogAndSettings(cwd: string): void {
+/** Settings retain their legacy per-repository/defaults behavior.  The
+ * Work-Item projection below is deliberately separate and filesystem-free. */
+function loadSettings(cwd: string): void {
   try {
     const snapshot = resolveConfigSnapshot(cwd);
     const { repoId } = resolveRepo(cwd);
     const backlog = loadBacklogFromCatalog(repoId, cwd);
     const resolvedDefaults = mergeExecutionDefaults(DefaultsSchema.parse({}), backlog.defaults);
-    cachedCatalog = Object.fromEntries(
-      backlog.epics.flatMap((epic) =>
-        epic.features.map((feature) => [
-          feature.id,
-          {
-            id: feature.id,
-            persistedId: feature.id,
-            title: feature.title,
-            epicId: epic.id,
-            epicTitle: epic.title,
-            skills: feature.skills ?? [],
-            tool: feature.tool,
-            model: feature.model,
-            effort: feature.effort,
-            thinking: feature.thinking,
-            description: readFeatureDescription(feature.spec, feature.specFile, cwd),
-            tasks: feature.tasks,
-            dependsOn: feature.dependsOn,
-            workflow: feature.workflow,
-            retry: feature.retry,
-            specFile: feature.specFile,
-            context: feature.context,
-            maxTokens: feature.maxTokens,
-            autoStart: feature.autoStart,
-          } satisfies FeatureCatalogEntry,
-        ]),
-      ),
-    );
     const catalogMeta = getCatalogMeta(repoId);
     const projectDefaults = catalogMeta
       ? DefaultsSchema.parse(JSON.parse(catalogMeta.defaults_json))
@@ -156,19 +108,56 @@ function loadCatalogAndSettings(cwd: string): void {
       projectDefaults,
     };
   } catch (error) {
-    logCaughtError('ui/catalog.loadCatalogAndSettings', error);
-    cachedCatalog = {};
+    logCaughtError('ui/catalog.loadSettings', error);
     cachedSettings = DEFAULT_BACKLOG_SETTINGS;
   }
 }
 
-export function getFeatureCatalog(cwd = process.cwd()): Record<string, FeatureCatalogEntry> {
-  loadCatalogAndSettings(cwd);
-  return cachedCatalog;
+/** DB-only aggregate catalog.  No cwd, config, or spec-file reads occur per
+ * Work Item, so a Project scope remains a single indexed SQLite query. */
+export function getFeatureCatalog(scope: WorkItemScope = {}): Record<string, WorkItemCatalogEntry> {
+  try {
+    return Object.fromEntries(listWorkItemsByScope(scope).map((row) => {
+      const feature = JSON.parse(row.dataJson) as {
+        id: string; title: string; skills?: string[]; tool: string; model?: string; effort: string;
+        thinking?: string; spec?: string; tasks?: Task[]; dependsOn: string[]; workflow: Workflow;
+        retry?: Retry; specFile?: string; context?: string[]; maxTokens?: number; autoStart?: boolean;
+      };
+      return [row.featureId, {
+        id: feature.id,
+        persistedId: row.featureId,
+        title: feature.title,
+        epicId: row.epicId,
+        epicTitle: row.epicTitle,
+        projectId: row.projectId,
+        repoId: row.repoId,
+        repoLabel: row.repoLabel,
+        workItemType: row.workItemType,
+        integrityIssue: row.integrityIssue,
+        skills: feature.skills ?? [],
+        tool: feature.tool,
+        model: feature.model,
+        effort: feature.effort,
+        thinking: feature.thinking,
+        description: feature.spec ?? null,
+        tasks: feature.tasks,
+        dependsOn: feature.dependsOn,
+        workflow: feature.workflow,
+        retry: feature.retry,
+        specFile: feature.specFile,
+        context: feature.context,
+        maxTokens: feature.maxTokens,
+        autoStart: feature.autoStart,
+      } satisfies WorkItemCatalogEntry];
+    }));
+  } catch (error) {
+    logCaughtError('ui/catalog.getFeatureCatalog', error);
+    return {};
+  }
 }
 
 export function getBacklogSettings(cwd = process.cwd()): BacklogSettings {
-  loadCatalogAndSettings(cwd);
+  loadSettings(cwd);
   return cachedSettings;
 }
 

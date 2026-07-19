@@ -17,6 +17,7 @@ export interface PendingApproval {
   id: number;
   featureId: string;
   repoId: string;
+  integrityIssue?: string;
   prompt: string;
   createdAt: string;
   // Only set when `kind === 'stage'`: the underlying stage_requests row kind
@@ -37,6 +38,7 @@ function gateToApproval(gate: GateRow): PendingApproval {
     id: gate.id,
     featureId: gate.featureId,
     repoId: gate.repoId,
+    integrityIssue: gate.integrityIssue,
     prompt: '',
     createdAt: gate.createdAt,
   };
@@ -48,7 +50,8 @@ function collectApprovals(): PendingApproval[] {
     kind: 'stage',
     id: sr.id,
     featureId: sr.featureId,
-    repoId: '',
+    repoId: sr.repoId ?? '',
+    integrityIssue: sr.integrityIssue,
     prompt: sr.prompt,
     createdAt: sr.createdAt,
   }));
