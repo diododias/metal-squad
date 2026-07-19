@@ -4,6 +4,7 @@ import { Card } from '../components/core/Card.js';
 import { EditableTextField } from '../components/core/EditableTextField.js';
 import { StatusPill } from '../components/core/StatusPill.js';
 import { PageHeader } from '../PageHeader.js';
+import { RepositoriesSection } from '../components/project/RepositoriesSection.js';
 import { formatTokens } from '../lib/format.js';
 import type { MsqWebState, ProjectSummary, WebSocketClientMessage, WebSocketServerMessage } from '../../types.js';
 
@@ -144,7 +145,7 @@ export function ProjectsPage({ state, send, actionResults }: ProjectsPageProps):
           <p>{query ? 'Try a different name.' : 'Create your first Project to organize repositories, Epics, and Work Items.'}</p>
           {!query && <Button variant="primary" onClick={() => { setShowCreate(true); }}>create your first Project</Button>}
         </section> : <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(290px, 1fr))', gap: 12 }}>
-          {visibleProjects.map((project) => <ProjectCard key={project.projectId} project={project} repositories={state.repositories} draft={drafts[project.projectId] ?? projectDraft(project)} onDraft={(draft) => { setDrafts((current) => ({ ...current, [project.projectId]: draft })); }} onSave={() => { saveProject(project); }} />)}
+          {visibleProjects.map((project) => <ProjectCard key={project.projectId} project={project} repositories={state.repositories} actionResults={actionResults} send={send} draft={drafts[project.projectId] ?? projectDraft(project)} onDraft={(draft) => { setDrafts((current) => ({ ...current, [project.projectId]: draft })); }} onSave={() => { saveProject(project); }} />)}
         </div>}
         {projects.length > PAGE_SIZE && <div aria-label="Project pagination" style={{ display: 'flex', gap: 8, alignItems: 'center', justifyContent: 'center', marginTop: 16 }}>
           <Button size="sm" disabled={page === 0} onClick={() => { setPage((current) => current - 1); }}>previous</Button><span style={{ color: 'var(--text-dim)', fontSize: 'var(--text-xs)' }}>page {page + 1} of {pageCount}</span><Button size="sm" disabled={page + 1 >= pageCount} onClick={() => { setPage((current) => current + 1); }}>next</Button>
@@ -154,7 +155,7 @@ export function ProjectsPage({ state, send, actionResults }: ProjectsPageProps):
   );
 }
 
-function ProjectCard({ project, repositories, draft, onDraft, onSave }: { project: ProjectSummary; repositories: MsqWebState['repositories']; draft: ProjectDraft; onDraft: (draft: ProjectDraft) => void; onSave: () => void }): React.JSX.Element {
+function ProjectCard({ project, repositories, actionResults, send, draft, onDraft, onSave }: { project: ProjectSummary; repositories: MsqWebState['repositories']; actionResults: ProjectsPageProps['actionResults']; send: ProjectsPageProps['send']; draft: ProjectDraft; onDraft: (draft: ProjectDraft) => void; onSave: () => void }): React.JSX.Element {
   const linkedRepositories = repositories.filter((repository) => repository.projectId === project.projectId);
   const health = healthStatus(healthFor(project.projectId, repositories));
   const dirty = draft.name !== project.name || draft.description !== (project.description ?? '');
@@ -164,6 +165,7 @@ function ProjectCard({ project, repositories, draft, onDraft, onSave }: { projec
     <textarea id={`project-${project.projectId}-description`} value={draft.description} disabled={Boolean(draft.pendingRequestId)} onChange={(event) => { onDraft({ ...draft, description: event.target.value, error: undefined }); }} placeholder="No description" style={{ ...controlStyle, minHeight: 64, resize: 'vertical', width: '100%', boxSizing: 'border-box', marginTop: -6 }} />
     <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}><StatusPill status={health.status} label={health.label} spinner={false} /><StatusPill status={project.activeRuns > 0 ? 'running' : 'aborted'} label={`${String(project.activeRuns)} active runs`} spinner={false} /></div>
     <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 6, color: 'var(--text-dim)', fontSize: 'var(--text-xs)' }}><Metric label="repos" value={String(linkedRepositories.length)} /><Metric label="Epics" value={String(project.counts.epics)} /><Metric label="Work Items" value={String(project.counts.workItems)} /><Metric label="recent tokens" value={formatTokens(project.tokens.totalTokens)} /></div>
+    <RepositoriesSection project={project} repositories={repositories} actionResults={actionResults} send={send} />
     {draft.error && <div role="alert" style={errorStyle}>{draft.error}{draft.error.includes('changed') && ' Your draft is preserved; reload the current values and reapply it.'}</div>}
     <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, alignItems: 'center' }}><span style={{ color: 'var(--text-faint)', fontSize: 'var(--text-xs)' }}>Project details (Epics and Work Items) arrive in PRJ-12.</span><Button variant="primary" size="sm" disabled={!dirty || Boolean(draft.pendingRequestId)} onClick={onSave}>{draft.pendingRequestId ? 'saving…' : 'save'}</Button></div>
   </Card>;

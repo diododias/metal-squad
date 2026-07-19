@@ -80,4 +80,27 @@ describe('ProjectsPage', () => {
     expect((container.querySelector('#project-project-1-name') as HTMLInputElement).value).toBe('Draft name');
     expect(container.textContent).toContain('Your draft is preserved');
   });
+
+  it('links an unassigned registered repository and requires confirmation before transfer', () => {
+    const send = vi.fn<(message: WebSocketClientMessage) => void>();
+    const linked = state([project(), project({ projectId: 'project-2', name: 'Other', position: 1 })]);
+    linked.repositories = [
+      { repoId: 'repo-free', projectId: null, label: 'free', health: 'unchecked', lastCheckedAt: null },
+      { repoId: 'repo-other', projectId: 'project-2', label: 'other', health: 'ok', lastCheckedAt: null },
+    ];
+    const container = render({ state: linked, send });
+
+    act(() => { Array.from(container.querySelectorAll('button')).find((button) => button.textContent === 'transfer here')?.click(); });
+    expect(container.textContent).toContain('confirm transfer');
+
+    act(() => { Array.from(container.querySelectorAll('button')).find((button) => button.textContent === 'cancel')?.click(); });
+    act(() => { Array.from(container.querySelectorAll('button')).find((button) => button.textContent === 'link')?.click(); });
+    expect(send.mock.calls[0]?.[0]).toMatchObject({ type: 'action:linkRepo', projectId: 'project-1', repoId: 'repo-free' });
+  });
+
+  it('keeps unauthorized paths out of the repository section while explaining the PRJ-15B boundary', () => {
+    const container = render({ state: state() });
+    expect(container.textContent).toContain('New paths and authorized path diagnostics require PRJ-15B validation');
+    expect(container.textContent).not.toContain('/private/secret');
+  });
 });
