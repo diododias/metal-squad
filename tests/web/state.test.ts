@@ -9,6 +9,9 @@ const mocks = vi.hoisted(() => ({
   listRunningTaskRuns: vi.fn(),
   listRunsForStats: vi.fn(),
   listPendingTimeoutApprovalRequests: vi.fn(),
+  getProjectStateRevision: vi.fn(),
+  listProjectStateSummaries: vi.fn(),
+  listRepositoryStateSummaries: vi.fn(),
   getFeatureCatalog: vi.fn(),
   getBacklogSettings: vi.fn(),
   resolveRuntimeConfig: vi.fn(),
@@ -27,6 +30,9 @@ vi.mock('../../src/db/repo.js', () => ({
   listRunningTaskRuns: mocks.listRunningTaskRuns,
   listRunsForStats: mocks.listRunsForStats,
   listPendingTimeoutApprovalRequests: mocks.listPendingTimeoutApprovalRequests,
+  getProjectStateRevision: mocks.getProjectStateRevision,
+  listProjectStateSummaries: mocks.listProjectStateSummaries,
+  listRepositoryStateSummaries: mocks.listRepositoryStateSummaries,
 }));
 
 vi.mock('../../src/ui/catalog.js', () => ({
@@ -60,6 +66,9 @@ describe('buildMsqWebState pendingFeatures projection', () => {
     mocks.listRunningTaskRuns.mockReturnValue([]);
     mocks.listRunsForStats.mockReturnValue([]);
     mocks.listPendingTimeoutApprovalRequests.mockReturnValue([]);
+    mocks.getProjectStateRevision.mockReturnValue(7);
+    mocks.listProjectStateSummaries.mockReturnValue([]);
+    mocks.listRepositoryStateSummaries.mockReturnValue([]);
     mocks.getFeatureCatalog.mockReturnValue({
       'feat-1': {
         id: 'feat-1',
@@ -388,6 +397,49 @@ describe('buildMsqWebState pendingFeatures projection', () => {
       repoId: 'repo-1',
       version: '0.0.1',
     });
+  });
+
+  it('projects global Projects and Repositories without leaking repository paths', async () => {
+    const { buildMsqWebState } = await import('../../src/web/state.js');
+    mocks.listProjectStateSummaries.mockReturnValue([{
+      projectId: 'project-1', name: 'Platform', description: 'Global state', revision: 3,
+      archivedAt: null, epicCount: 2, workItemCount: 4, archivedCount: 1,
+      activeRuns: 2, totalTokens: 987,
+    }]);
+    mocks.listRepositoryStateSummaries.mockReturnValue([{
+      repoId: 'repo-1', projectId: 'project-1', path: '/private/secret/platform',
+    }]);
+
+    const state = buildMsqWebState();
+
+    expect(state.revision).toBe(7);
+    expect(state.projects).toEqual([{
+      projectId: 'project-1', name: 'Platform', description: 'Global state', revision: 3,
+      archivedAt: null, counts: { epics: 2, workItems: 4, archived: 1 }, activeRuns: 2,
+      tokens: { status: 'ready', totalTokens: 987, error: null },
+    }]);
+    expect(state.repositories).toEqual([{
+      repoId: 'repo-1', projectId: 'project-1', label: 'platform',
+      health: 'unchecked', lastCheckedAt: null,
+    }]);
+    expect(JSON.stringify(state)).not.toContain('/private/secret/platform');
+    expect(state).not.toHaveProperty('activeProjectId');
+  });
+
+  it('broadcasts the same global catalog to separate clients without a server-side selection', async () => {
+    const { buildMsqWebState } = await import('../../src/web/state.js');
+    mocks.listProjectStateSummaries.mockReturnValue([{
+      projectId: 'project-1', name: 'Shared', description: null, revision: 1,
+      archivedAt: null, epicCount: 0, workItemCount: 0, archivedCount: 0,
+      activeRuns: 0, totalTokens: 0,
+    }]);
+
+    const firstClientPayload = buildMsqWebState();
+    const secondClientPayload = buildMsqWebState();
+
+    expect(secondClientPayload.projects).toEqual(firstClientPayload.projects);
+    expect(secondClientPayload.repositories).toEqual(firstClientPayload.repositories);
+    expect(firstClientPayload).not.toHaveProperty('activeProjectId');
   });
 
   it('strips notification credentials from runtimeConfig before broadcast', async () => {

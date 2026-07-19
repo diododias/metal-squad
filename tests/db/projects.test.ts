@@ -185,6 +185,25 @@ describe('Project and repository domain queries', () => {
     }]);
   });
 
+  it('returns global state summaries from SQLite without inspecting repository paths', async () => {
+    const { db, createProject, getProjectStateRevision, linkRepo, listProjectStateSummaries, listRepositoryStateSummaries, registerRepo } = await setup();
+    const project = createProject({ name: 'State' });
+    registerRepo('repo-1', '/private/repos/state');
+    linkRepo(project.projectId, 'repo-1');
+    db.prepare(`INSERT INTO backlog_epics (epic_id, project_id, repo_id, title, position, data_json) VALUES ('epic-1', ?, 'repo-1', 'Epic', 0, '{}')`).run(project.projectId);
+    db.prepare(`INSERT INTO backlog_features (feature_id, epic_id, repo_id, title, position, data_json, archived_at) VALUES ('work-old', 'epic-1', 'repo-1', 'Old', 0, '{}', datetime('now'))`).run();
+    db.prepare(`INSERT INTO runs (repo_id, project_id, feature_id, tool, status, total_tokens) VALUES ('repo-1', ?, 'work-live', 'codex', 'running', 55)`).run(project.projectId);
+
+    expect(listProjectStateSummaries()).toEqual([expect.objectContaining({
+      projectId: project.projectId, epicCount: 1, workItemCount: 0, archivedCount: 1,
+      activeRuns: 1, totalTokens: 55,
+    })]);
+    expect(listRepositoryStateSummaries()).toEqual([{
+      repoId: 'repo-1', projectId: project.projectId, path: '/private/repos/state',
+    }]);
+    expect(getProjectStateRevision()).toBeGreaterThan(0);
+  });
+
   it('creates and updates project-level Epics without assigning an arbitrary repo or changing runs', async () => {
     const { db, createEpic, createProject, registerRepo, updateEpic, RevisionConflictError } = await setup();
     const { backfillProjects } = await import('../../src/db/backfill.js');

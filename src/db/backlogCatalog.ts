@@ -111,6 +111,34 @@ interface CatalogMetaRow {
   budget_json: string | null;
 }
 
+export interface CatalogWorkItemRelation {
+  featureId: string;
+  projectId: string | null;
+  repoId: string;
+  repoLabel: string;
+}
+
+/** Relationship-only projection for catalog clients displaying the global
+ * Project/Repository hierarchy. */
+export function listCatalogWorkItemRelations(repoId: string): CatalogWorkItemRelation[] {
+  const db = getReadonlyDbOrNull();
+  if (!db) return [];
+  return (db.prepare(`
+    SELECT f.feature_id AS featureId, e.project_id AS projectId,
+           f.repo_id AS repoId, r.path AS repoPath
+      FROM backlog_features f
+      JOIN backlog_epics e ON e.epic_id = f.epic_id
+      JOIN repos r ON r.repo_id = f.repo_id
+     WHERE f.repo_id = ? AND f.archived_at IS NULL AND f.deleted_at IS NULL
+  `).all(repoId) as { featureId: string; projectId: string | null; repoId: string; repoPath: string }[])
+    .map((row) => ({
+      featureId: row.featureId,
+      projectId: row.projectId,
+      repoId: row.repoId,
+      repoLabel: row.repoPath.split(/[\\/]/).filter(Boolean).at(-1) ?? row.repoId,
+    }));
+}
+
 export function getCatalogMeta(repoId: string): CatalogMetaRow | undefined {
   const db = getReadonlyDbOrNull();
   if (!db) return undefined;
