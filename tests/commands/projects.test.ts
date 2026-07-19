@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { Command } from 'commander';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -78,5 +78,27 @@ describe('Projects and Epics commands', () => {
       'node', 'msq', 'projects', 'update', project.projectId, '--name', 'Stale', '--expected-revision', '1', '--format', 'json',
     ])).rejects.toMatchObject({ code: 'REVISION_CONFLICT' });
     expect(JSON.parse(String(error.mock.calls.at(-1)?.[0]))).toMatchObject({ error: { code: 'REVISION_CONFLICT' } });
+  });
+
+  it('creates a Work Item through the CLI without exposing legacy feature_id names', async () => {
+    const { registerWorkItems } = await import('../../src/commands/workItems.js');
+    const { projectService, repoLinkService } = await import('../../src/core/projectService.js');
+    const { epicService } = await import('../../src/core/epicService.js');
+    const repoPath = join(directory, 'repo-a');
+    mkdirSync(repoPath);
+    const project = projectService.create({ name: 'CLI Work Items' }).entity;
+    const { registerRepo } = await import('../../src/db/repo.js');
+    registerRepo('repo-a', repoPath);
+    const repo = repoLinkService.link(project.projectId, { repoId: 'repo-a' }).entity;
+    const epic = epicService.create({ projectId: project.projectId, title: 'CLI epic' }).entity;
+    const command = program();
+    registerWorkItems(command);
+
+    await command.parseAsync(['node', 'msq', 'work-items', 'create', '--epic', epic.epicId, '--repo', repo.repoId, '--title', 'CLI item', '--format', 'json']);
+
+    const payload = JSON.parse(String(log.mock.calls.at(-1)?.[0])) as { entity: Record<string, unknown>; revision: number };
+    expect(payload.entity.workItemId).toMatch(/^F-/);
+    expect(payload.entity).not.toHaveProperty('featureId');
+    expect(payload.revision).toBe(1);
   });
 });

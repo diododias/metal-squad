@@ -63,3 +63,15 @@ export const EpicActionMessageSchema = z.discriminatedUnion('type', [
 ]);
 
 export type EpicActionMessage = z.infer<typeof EpicActionMessageSchema>;
+
+export const WorkItemActionMessageSchema = z.object({
+  type: z.literal('action:createWorkItem'),
+  requestId: RequestIdSchema,
+  epicId: z.string().min(1),
+  repoId: z.string().min(1),
+  title: z.string().min(1),
+  description: z.string().nullable().optional(),
+  dependsOn: z.array(z.string().min(1)).optional(),
+}).strict();
+
+export type WorkItemActionMessage = z.infer<typeof WorkItemActionMessageSchema>;
