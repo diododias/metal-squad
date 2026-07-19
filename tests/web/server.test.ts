@@ -51,6 +51,10 @@ const mocks = vi.hoisted(() => ({
     create: vi.fn(),
     update: vi.fn(),
   },
+  epicService: {
+    create: vi.fn(),
+    update: vi.fn(),
+  },
 }));
 
 vi.mock('../../src/core/repo.js', () => ({
@@ -131,6 +135,10 @@ vi.mock('../../src/core/adapters/index.js', () => ({
 
 vi.mock('../../src/core/projectService.js', () => ({
   projectService: mocks.projectService,
+}));
+
+vi.mock('../../src/core/epicService.js', () => ({
+  epicService: mocks.epicService,
 }));
 
 vi.mock('../../src/core/stats.js', () => ({
@@ -220,6 +228,24 @@ function projectEntity(overrides: Record<string, unknown> = {}): Record<string, 
     projectId: 'project-1',
     name: 'Web Project',
     description: null,
+    position: 0,
+    archivedAt: null,
+    deletedAt: null,
+    revision: 1,
+    createdAt: '2026-07-18T12:00:00.000Z',
+    updatedAt: '2026-07-18T12:00:00.000Z',
+    ...overrides,
+  };
+}
+
+function epicEntity(overrides: Record<string, unknown> = {}): Record<string, unknown> {
+  return {
+    epicId: 'epic-1',
+    projectId: 'project-1',
+    repoId: null,
+    title: 'Web Epic',
+    description: null,
+    status: 'todo',
     position: 0,
     archivedAt: null,
     deletedAt: null,
@@ -598,6 +624,147 @@ describe('web server', () => {
     });
     expect(mocks.projectService.update).toHaveBeenNthCalledWith(1, 'project-1', { name: 'Current' }, 1);
     expect(mocks.projectService.update).toHaveBeenNthCalledWith(2, 'project-1', { description: 'stale' }, 1);
+    socket.close();
+  });
+
+  it('returns an Epic create result only to the initiating client and publishes reconciled state', async () => {
+    const { createWebServer } = await import('../../src/web/server.js');
+    const created = epicEntity({ description: 'Created through WebSocket' });
+    mocks.epicService.create.mockReturnValue({ entity: created, revision: 1 });
+
+    server = createWebServer({ host: '127.0.0.1', port: 0, auth: 'token', token: 'secret' });
+    await new Promise<void>((resolve) => server!.server.listen(0, '127.0.0.1', resolve));
+    const address = server!.server.address() as { port: number };
+    const origin = new WebSocket(`ws://127.0.0.1:${address.port}/ws`);
+    const peer = new WebSocket(`ws://127.0.0.1:${address.port}/ws`);
+    await Promise.all([waitForOpen(origin), waitForOpen(peer)]);
+    origin.send(JSON.stringify({ type: 'auth', token: 'secret' }));
+    peer.send(JSON.stringify({ type: 'auth', token: 'secret' }));
+    await Promise.all([waitForSocketMessage(origin), waitForSocketMessage(peer)]);
+
+    let peerReceivedActionResult = false;
+    const onPeerMessage = (data: WebSocket.RawData): void => {
+      if ((JSON.parse(data.toString('utf8')) as { type?: string }).type === 'action:result') peerReceivedActionResult = true;
+    };
+    peer.on('message', onPeerMessage);
+    const resultPromise = waitForMatchingMessage(
+      origin,
+      (message) => message.type === 'action:result' && (message.payload as { requestId?: string }).requestId === 'epic-create-1',
+    );
+    const peerStatePromise = waitForMessageType(peer, 'state:full');
+    origin.send(JSON.stringify({
+      type: 'action:createEpic',
+      requestId: 'epic-create-1',
+      projectId: 'project-1',
+      title: '  Web Epic  ',
+      description: 'Created through WebSocket',
+    }));
+
+    expect(await resultPromise).toEqual({
+      type: 'action:result',
+      payload: { requestId: 'epic-create-1', ok: true, entity: created },
+    });
+    await peerStatePromise;
+    peer.off('message', onPeerMessage);
+    expect(peerReceivedActionResult).toBe(false);
+    expect(mocks.epicService.create).toHaveBeenCalledWith({
+      projectId: 'project-1',
+      title: '  Web Epic  ',
+      description: 'Created through WebSocket',
+      audit: { actor: 'web', requestId: 'epic-create-1' },
+    });
+    origin.close();
+    peer.close();
+  });
+
+  it('rejects invalid Epic action payloads before calling the service', async () => {
+    const { createWebServer } = await import('../../src/web/server.js');
+    server = createWebServer({ host: '127.0.0.1', port: 0, auth: 'token', token: 'secret' });
+    await new Promise<void>((resolve) => server!.server.listen(0, '127.0.0.1', resolve));
+    const address = server!.server.address() as { port: number };
+    const socket = new WebSocket(`ws://127.0.0.1:${address.port}/ws`);
+    await waitForOpen(socket);
+    socket.send(JSON.stringify({ type: 'auth', token: 'secret' }));
+    await waitForSocketMessage(socket);
+
+    const rejected = waitForMatchingMessage(socket, (message) => message.type === 'action:result');
+    socket.send(JSON.stringify({
+      type: 'action:updateEpic',
+      requestId: 'epic-invalid-1',
+      epicId: 'epic-1',
+      expectedRevision: 1,
+      patch: { status: 'derived-from-runs' },
+    }));
+
+    expect(await rejected).toEqual({
+      type: 'action:result',
+      payload: {
+        requestId: 'epic-invalid-1',
+        ok: false,
+        error: { code: 'INVALID_PAYLOAD', message: 'Invalid epic action payload.' },
+      },
+    });
+    expect(mocks.epicService.create).not.toHaveBeenCalled();
+    expect(mocks.epicService.update).not.toHaveBeenCalled();
+    socket.close();
+  });
+
+  it('returns a stable revision conflict after a stale Epic update', async () => {
+    const { createWebServer } = await import('../../src/web/server.js');
+    const updated = epicEntity({ status: 'in_progress', revision: 2 });
+    mocks.epicService.update
+      .mockReturnValueOnce({ entity: updated, revision: 2 })
+      .mockImplementationOnce(() => { throw { code: 'REVISION_CONFLICT', message: 'database revision detail' }; });
+
+    server = createWebServer({ host: '127.0.0.1', port: 0, auth: 'token', token: 'secret' });
+    await new Promise<void>((resolve) => server!.server.listen(0, '127.0.0.1', resolve));
+    const address = server!.server.address() as { port: number };
+    const socket = new WebSocket(`ws://127.0.0.1:${address.port}/ws`);
+    await waitForOpen(socket);
+    socket.send(JSON.stringify({ type: 'auth', token: 'secret' }));
+    await waitForSocketMessage(socket);
+
+    const accepted = waitForMatchingMessage(
+      socket,
+      (message) => message.type === 'action:result' && (message.payload as { requestId?: string }).requestId === 'epic-update-1',
+    );
+    socket.send(JSON.stringify({
+      type: 'action:updateEpic', requestId: 'epic-update-1', epicId: 'epic-1', expectedRevision: 1, patch: { status: 'in_progress' },
+    }));
+    expect(await accepted).toEqual({
+      type: 'action:result',
+      payload: { requestId: 'epic-update-1', ok: true, entity: updated },
+    });
+
+    const conflict = waitForMatchingMessage(
+      socket,
+      (message) => message.type === 'action:result' && (message.payload as { requestId?: string }).requestId === 'epic-update-2',
+    );
+    socket.send(JSON.stringify({
+      type: 'action:updateEpic', requestId: 'epic-update-2', epicId: 'epic-1', expectedRevision: 1, patch: { title: 'stale' },
+    }));
+    expect(await conflict).toEqual({
+      type: 'action:result',
+      payload: {
+        requestId: 'epic-update-2',
+        ok: false,
+        error: { code: 'REVISION_CONFLICT', message: 'Epic was changed by another request. Refresh and try again.' },
+      },
+    });
+    expect(mocks.epicService.update).toHaveBeenNthCalledWith(
+      1,
+      'epic-1',
+      { status: 'in_progress' },
+      1,
+      { audit: { actor: 'web', requestId: 'epic-update-1' } },
+    );
+    expect(mocks.epicService.update).toHaveBeenNthCalledWith(
+      2,
+      'epic-1',
+      { title: 'stale' },
+      1,
+      { audit: { actor: 'web', requestId: 'epic-update-2' } },
+    );
     socket.close();
   });
 

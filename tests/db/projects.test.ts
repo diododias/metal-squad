@@ -185,22 +185,45 @@ describe('Project and repository domain queries', () => {
     }]);
   });
 
-  it('creates and updates project-level Epics without assigning an arbitrary repo', async () => {
-    const { db, createEpic, createProject, updateEpic, RevisionConflictError } = await setup();
+  it('creates and updates project-level Epics without assigning an arbitrary repo or changing runs', async () => {
+    const { db, createEpic, createProject, registerRepo, updateEpic, RevisionConflictError } = await setup();
     const { backfillProjects } = await import('../../src/db/backfill.js');
     backfillProjects(db);
     const project = createProject({ name: 'Epics' });
+    registerRepo('run-repo', '/tmp/run-repo');
+    db.prepare(`INSERT INTO runs (repo_id, feature_id, tool, status) VALUES ('run-repo', 'run-feature', 'codex', 'running')`).run();
 
-    const epic = createEpic({ projectId: project.projectId, title: 'First Epic', description: 'Initial scope' });
+    const epic = createEpic({
+      projectId: project.projectId,
+      title: 'First Epic',
+      description: 'Initial scope',
+      audit: { actor: 'web', requestId: 'epic-create-1' },
+    });
     expect(epic).toMatchObject({ projectId: project.projectId, repoId: null, title: 'First Epic', status: 'todo', revision: 1 });
-    expect(db.prepare(`SELECT repo_id, status, revision, data_json FROM backlog_epics WHERE epic_id = ?`).get(epic.epicId)).toMatchObject({
+    const createdRow = db.prepare(`SELECT repo_id, status, revision, data_json FROM backlog_epics WHERE epic_id = ?`).get(epic.epicId) as {
+      repo_id: string | null; status: string; revision: number; data_json: string;
+    };
+    expect(createdRow).toMatchObject({
       repo_id: null,
       status: 'todo',
       revision: 1,
     });
+    expect(JSON.parse(createdRow.data_json)).toEqual({
+      id: epic.epicId, title: 'First Epic', description: 'Initial scope', status: 'todo', features: [],
+    });
 
-    const updated = updateEpic(epic.epicId, { status: 'in_progress', description: null }, 1);
+    const updated = updateEpic(epic.epicId, { status: 'in_progress', description: null }, 1, {
+      audit: { actor: 'web', requestId: 'epic-update-1' },
+    });
     expect(updated).toMatchObject({ status: 'in_progress', description: null, revision: 2 });
+    expect(db.prepare(`SELECT status FROM runs WHERE feature_id = 'run-feature'`).get()).toEqual({ status: 'running' });
+    expect(JSON.parse((db.prepare(`SELECT data_json FROM backlog_epics WHERE epic_id = ?`).get(epic.epicId) as { data_json: string }).data_json)).toEqual({
+      id: epic.epicId, title: 'First Epic', status: 'in_progress', features: [],
+    });
+    expect(db.prepare(`SELECT request_id, actor, entity_kind, action FROM audit_events WHERE entity_id = ? ORDER BY id`).all(epic.epicId)).toEqual([
+      { request_id: 'epic-create-1', actor: 'web', entity_kind: 'epic', action: 'create' },
+      { request_id: 'epic-update-1', actor: 'web', entity_kind: 'epic', action: 'update' },
+    ]);
     expect(() => updateEpic(epic.epicId, { title: 'stale' }, 1)).toThrowError(RevisionConflictError);
   });
 });

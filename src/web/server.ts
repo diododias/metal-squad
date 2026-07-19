@@ -36,16 +36,19 @@ import { assertConfiguredNotificationChannel } from '../core/notify/manager.js';
 import { clearSecret, setSecret } from '../security/secrets.js';
 import { updateCatalogFeature, updateCatalogTask, updateCatalogDefaults, type FeaturePatch, type CatalogDefaultsPatch } from '../db/backlogCatalog.js';
 import type { Feature, Task } from '../core/backlog/schema.js';
+import { epicService } from '../core/epicService.js';
 import { projectService } from '../core/projectService.js';
 import { buildMsqWebState, appendNotification, resetWebStateCaches } from './state.js';
 import { createWebAuth, isAllowedHostHeader, isAllowedOrigin, timingSafeEqualStrings } from './auth.js';
-import { ProjectActionMessageSchema } from './schemas.js';
+import { EpicActionMessageSchema, ProjectActionMessageSchema } from './schemas.js';
 import type {
   AppConfigPatch,
   FeatureConfigPatch,
   FeatureConfigSaveIssue,
   FeatureConfigSaveResult,
   BudgetConfigPatch,
+  EpicActionError,
+  EpicActionResult,
   ProjectDefaultsPatch,
   ProjectActionError,
   ProjectActionResult,
@@ -720,6 +723,18 @@ export function createWebServer(options: {
         }
         break;
       }
+      case 'action:createEpic':
+      case 'action:updateEpic': {
+        const result = handleEpicAction(message);
+        sendTo(client, result);
+        if (result.payload.ok) {
+          // Epics are not projected into MsqWebState until PRJ-07. Still
+          // publish reconciliation so every connected client observes the
+          // completed mutation through the established WebSocket contract.
+          reconcileWebState(featureCwd, { forceBroadcast: true });
+        }
+        break;
+      }
       case 'action:startFeature': {
         startFeature(message.featureId, featureCwd);
         reconcileWebState(featureCwd);
@@ -926,6 +941,61 @@ export function createWebServer(options: {
           requestId: parsed.data.requestId,
           ok: false,
           error: projectActionError(error),
+        },
+      };
+    }
+  }
+
+  function epicActionError(error: unknown): EpicActionError {
+    const code = typeof error === 'object' && error !== null
+      ? (error as { code?: unknown }).code
+      : undefined;
+    if (code === 'PROJECT_NOT_FOUND') {
+      return { code, message: 'Project was not found.' };
+    }
+    if (code === 'EPIC_NOT_FOUND') {
+      return { code, message: 'Epic was not found.' };
+    }
+    if (code === 'REVISION_CONFLICT') {
+      return { code, message: 'Epic was changed by another request. Refresh and try again.' };
+    }
+    return { code: 'EPIC_ACTION_FAILED', message: 'Could not save epic.' };
+  }
+
+  function handleEpicAction(message: unknown): EpicActionResult {
+    const parsed = EpicActionMessageSchema.safeParse(message);
+    if (!parsed.success) {
+      return {
+        type: 'action:result',
+        payload: {
+          requestId: actionResultRequestId(message),
+          ok: false,
+          error: { code: 'INVALID_PAYLOAD', message: 'Invalid epic action payload.' },
+        },
+      };
+    }
+
+    const audit = { actor: 'web', requestId: parsed.data.requestId };
+    try {
+      const serviceResult = parsed.data.type === 'action:createEpic'
+        ? epicService.create({
+            projectId: parsed.data.projectId,
+            title: parsed.data.title,
+            description: parsed.data.description,
+            audit,
+          })
+        : epicService.update(parsed.data.epicId, parsed.data.patch, parsed.data.expectedRevision, { audit });
+      return {
+        type: 'action:result',
+        payload: { requestId: parsed.data.requestId, ok: true, entity: serviceResult.entity },
+      };
+    } catch (error) {
+      return {
+        type: 'action:result',
+        payload: {
+          requestId: parsed.data.requestId,
+          ok: false,
+          error: epicActionError(error),
         },
       };
     }

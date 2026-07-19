@@ -1,6 +1,6 @@
 import type { MsqEvents } from '../core/events/types.js';
 import type { SessionStatusSnapshot, ToolCallRecord } from '../core/adapters/types.js';
-import type { ProjectRow, RunHistoryEntry, RunSummary, RunningTaskSummary, StatsRunRow, TaskRun } from '../db/repo.js';
+import type { EpicRow, ProjectRow, RunHistoryEntry, RunSummary, RunningTaskSummary, StatsRunRow, TaskRun } from '../db/repo.js';
 import type { PendingApproval } from '../ui/hooks/useGates.js';
 import type { FeatureCatalogEntry, BacklogSettings } from '../ui/catalog.js';
 import type { RunBreakdown } from '../core/stats.js';
@@ -232,6 +232,32 @@ export type ProjectActionResult =
       };
     };
 
+export type EpicActionErrorCode =
+  | 'INVALID_PAYLOAD'
+  | 'PROJECT_NOT_FOUND'
+  | 'EPIC_NOT_FOUND'
+  | 'REVISION_CONFLICT'
+  | 'EPIC_ACTION_FAILED';
+
+export interface EpicActionError {
+  code: EpicActionErrorCode;
+  message: string;
+}
+
+export type EpicActionResult =
+  | {
+      type: 'action:result';
+      payload: { requestId: string; ok: true; entity: EpicRow };
+    }
+  | {
+      type: 'action:result';
+      payload: {
+        requestId: string;
+        ok: false;
+        error: EpicActionError;
+      };
+    };
+
 export type WebSocketClientMessage =
   | { type: 'auth'; token: string }
   | {
@@ -248,6 +274,14 @@ export type WebSocketClientMessage =
       projectId: string;
       expectedRevision: number;
       patch: { name?: string; description?: string | null; position?: number };
+    }
+  | { type: 'action:createEpic'; requestId: string; projectId: string; title: string; description?: string | null }
+  | {
+      type: 'action:updateEpic';
+      requestId: string;
+      epicId: string;
+      expectedRevision: number;
+      patch: { title?: string; description?: string | null; status?: 'todo' | 'in_progress' | 'done'; position?: number };
     }
   | { type: 'action:updateBudgetConfig'; patch: BudgetConfigPatch }
   | { type: 'action:updateNotifications'; patch: NotificationsPatch }
@@ -283,6 +317,7 @@ export type WebSocketServerMessage =
   | { type: 'state:full'; payload: MsqWebState }
   | FeatureConfigSaveResult
   | ProjectActionResult
+  | EpicActionResult
   | { type: 'run:detail'; payload: { runId: number; taskRuns: TaskRun[]; breakdown: RunBreakdown | null; sessionStatus: SessionStatusSnapshot | null; statusHistory: SessionStatusSnapshot[]; toolCalls: ToolCallRecord[] } }
   | { type: 'run:history'; payload: { featureId: string; runs: RunHistoryEntry[] } }
   | { type: 'run:changes'; payload: RunChangesPayload }

@@ -3,6 +3,7 @@ import {
   getEpic,
   listEpics,
   updateEpic,
+  type AuditContext,
   type CreateEpicInput,
   type EpicRow,
   type UpdateEpicPatch,
@@ -25,8 +26,13 @@ export const epicService = {
     return { entity, revision: entity.revision };
   },
 
-  update(epicId: string, patch: UpdateEpicPatch, expectedRevision: number): ServiceMutationResult<EpicRow> {
-    const entity = updateEpic(epicId, normalizedEpicPatch(patch), expectedRevision);
+  update(
+    epicId: string,
+    patch: UpdateEpicPatch,
+    expectedRevision: number,
+    options: { audit?: AuditContext } = {},
+  ): ServiceMutationResult<EpicRow> {
+    const entity = updateEpic(epicId, normalizedEpicPatch(patch), expectedRevision, options);
     return { entity, revision: entity.revision };
   },
 
