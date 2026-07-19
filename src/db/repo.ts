@@ -1,5 +1,12 @@
+import { randomUUID } from 'node:crypto';
 import { existsSync } from 'node:fs';
 import { getDb, withTransaction } from './index.js';
+import {
+  ProjectNotFoundError,
+  RepoAlreadyLinkedError,
+  RepoInUseError,
+  RevisionConflictError,
+} from './errors.js';
 import { sanitizeToolCallRecord, type PublishEvidence, type SessionStatusSnapshot, type TokenUsage, type ToolCallRecord } from '../core/adapters/types.js';
 import { resolveDbPath } from '../config/index.js';
 import { msqEventBus, logCaughtError } from '../core/events/index.js';
@@ -27,6 +34,302 @@ export function registerRepo(repoId: string, path: string): void {
        ON CONFLICT(repo_id) DO UPDATE SET path = excluded.path`,
     )
     .run(repoId, path);
+}
+
+export interface AuditContext {
+  actor?: string;
+  requestId?: string;
+}
+
+export interface ProjectRow {
+  projectId: string;
+  name: string;
+  description: string | null;
+  position: number;
+  archivedAt: string | null;
+  deletedAt: string | null;
+  revision: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface CreateProjectInput {
+  name: string;
+  description?: string | null;
+  position?: number;
+  audit?: AuditContext;
+}
+
+export interface UpdateProjectPatch {
+  name?: string;
+  description?: string | null;
+  position?: number;
+}
+
+export interface ProjectQueryOptions {
+  includeArchived?: boolean;
+  includeDeleted?: boolean;
+}
+
+export interface ProjectRepoRow {
+  repoId: string;
+  projectId: string;
+  path: string;
+  position: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ProjectCounts {
+  projectId: string;
+  repoCount: number;
+  epicCount: number;
+  workItemCount: number;
+}
+
+type ProjectRepoLinkRow = Omit<ProjectRepoRow, 'path'>;
+
+const PROJECT_SELECT = `
+  SELECT project_id AS projectId, name, description, position,
+         archived_at AS archivedAt, deleted_at AS deletedAt,
+         revision, created_at AS createdAt, updated_at AS updatedAt
+    FROM projects`;
+
+const PROJECT_REPO_SELECT = `
+  SELECT pr.repo_id AS repoId, pr.project_id AS projectId, r.path,
+         pr.position, pr.created_at AS createdAt, pr.updated_at AS updatedAt
+    FROM project_repos pr
+    JOIN repos r ON r.repo_id = pr.repo_id`;
+
+const PROJECT_REPO_LINK_SELECT = `
+  SELECT repo_id AS repoId, project_id AS projectId, position,
+         created_at AS createdAt, updated_at AS updatedAt
+    FROM project_repos`;
+
+export function createProject(input: CreateProjectInput): ProjectRow {
+  return withTransaction((database) => {
+    const projectId = randomUUID();
+    const position = input.position ?? nextProjectPosition(database);
+    database.prepare(
+      `INSERT INTO projects (project_id, name, description, position, revision)
+       VALUES (?, ?, ?, ?, 1)`,
+    ).run(projectId, input.name, input.description ?? null, position);
+    const project = getProjectFromDatabase(database, projectId);
+    if (!project) throw new ProjectNotFoundError(projectId);
+    recordAuditEvent(database, input.audit, 'project', projectId, 'create', null, project);
+    return project;
+  });
+}
+
+export function getProject(projectId: string, options: ProjectQueryOptions = {}): ProjectRow | null {
+  if (!hasDbFile()) return null;
+  const where = projectVisibilityWhere(options);
+  return (getDb('readonly').prepare(`${PROJECT_SELECT} WHERE project_id = ?${where}`).get(projectId) as ProjectRow | undefined) ?? null;
+}
+
+export function listProjects(options: ProjectQueryOptions = {}): ProjectRow[] {
+  if (!hasDbFile()) return [];
+  return getDb('readonly')
+    .prepare(`${PROJECT_SELECT} WHERE 1 = 1${projectVisibilityWhere(options)} ORDER BY position ASC, created_at ASC`)
+    .all() as ProjectRow[];
+}
+
+export function updateProject(
+  projectId: string,
+  patch: UpdateProjectPatch,
+  expectedRevision: number,
+  options: { audit?: AuditContext } = {},
+): ProjectRow {
+  return withTransaction((database) => {
+    const before = getProjectFromDatabase(database, projectId);
+    if (!before) throw new ProjectNotFoundError(projectId);
+    if (before.revision !== expectedRevision) {
+      throw new RevisionConflictError(projectId, expectedRevision, before.revision);
+    }
+
+    const name = patch.name ?? before.name;
+    const description = patch.description === undefined ? before.description : patch.description;
+    const position = patch.position ?? before.position;
+    const result = database.prepare(
+      `UPDATE projects
+          SET name = ?, description = ?, position = ?, revision = revision + 1,
+              updated_at = datetime('now')
+        WHERE project_id = ? AND revision = ?`,
+    ).run(name, description, position, projectId, expectedRevision);
+    if (result.changes !== 1) {
+      const current = getProjectFromDatabase(database, projectId);
+      throw new RevisionConflictError(projectId, expectedRevision, current?.revision ?? before.revision);
+    }
+    const after = getProjectFromDatabase(database, projectId);
+    if (!after) throw new ProjectNotFoundError(projectId);
+    recordAuditEvent(database, options.audit, 'project', projectId, 'update', before, after);
+    return after;
+  });
+}
+
+export function listProjectRepos(projectId: string): ProjectRepoRow[] {
+  if (!hasDbFile()) return [];
+  return getDb('readonly')
+    .prepare(`${PROJECT_REPO_SELECT} WHERE pr.project_id = ? ORDER BY pr.position ASC, pr.created_at ASC`)
+    .all(projectId) as ProjectRepoRow[];
+}
+
+export function linkRepo(
+  projectId: string,
+  repoId: string,
+  options: { audit?: AuditContext; position?: number } = {},
+): ProjectRepoRow {
+  return withTransaction((database) => {
+    assertProjectExists(database, projectId);
+    const existing = getProjectRepoLink(database, repoId);
+    if (existing) throw new RepoAlreadyLinkedError(repoId, existing.projectId);
+    const position = options.position ?? nextProjectRepoPosition(database, projectId);
+    try {
+      database.prepare(
+        `INSERT INTO project_repos (repo_id, project_id, position) VALUES (?, ?, ?)`,
+      ).run(repoId, projectId, position);
+    } catch (error) {
+      // The preflight above gives a useful error in the common case. This
+      // second check closes the race when another connection links the repo
+      // between that read and the unique-key insert.
+      const concurrentLink = getProjectRepoLink(database, repoId);
+      if (concurrentLink) throw new RepoAlreadyLinkedError(repoId, concurrentLink.projectId);
+      throw error;
+    }
+    const after = getProjectRepo(database, repoId);
+    if (!after) throw new Error(`Repository link was not created for ${repoId}`);
+    recordAuditEvent(database, options.audit, 'project_repo', repoId, 'link', null, after);
+    return after;
+  });
+}
+
+export function moveRepo(
+  repoId: string,
+  toProjectId: string,
+  options: { audit?: AuditContext; position?: number } = {},
+): ProjectRepoRow | null {
+  return withTransaction((database) => {
+    assertProjectExists(database, toProjectId);
+    const before = getProjectRepoLink(database, repoId);
+    if (!before) return null;
+    if (before.projectId === toProjectId) return getProjectRepo(database, repoId);
+    assertRepoHasNoWorkItems(database, repoId, before.projectId);
+    const position = options.position ?? nextProjectRepoPosition(database, toProjectId);
+    database.prepare(
+      `UPDATE project_repos
+          SET project_id = ?, position = ?, updated_at = datetime('now')
+        WHERE repo_id = ?`,
+    ).run(toProjectId, position, repoId);
+    const after = getProjectRepo(database, repoId);
+    if (!after) throw new Error(`Repository link was not moved for ${repoId}`);
+    recordAuditEvent(database, options.audit, 'project_repo', repoId, 'move', before, after);
+    return after;
+  });
+}
+
+export function unlinkRepo(
+  repoId: string,
+  options: { audit?: AuditContext } = {},
+): boolean {
+  return withTransaction((database) => {
+    const before = getProjectRepoLink(database, repoId);
+    if (!before) return false;
+    assertRepoHasNoWorkItems(database, repoId, before.projectId);
+    database.prepare(`DELETE FROM project_repos WHERE repo_id = ?`).run(repoId);
+    recordAuditEvent(database, options.audit, 'project_repo', repoId, 'unlink', before, null);
+    return true;
+  });
+}
+
+export function getProjectCounts(projectId: string): ProjectCounts | null {
+  if (!hasDbFile()) return null;
+  return (getDb('readonly').prepare(projectCountsSql('WHERE p.project_id = ?')).get(projectId) as ProjectCounts | undefined) ?? null;
+}
+
+export function listProjectCounts(options: ProjectQueryOptions = {}): ProjectCounts[] {
+  if (!hasDbFile()) return [];
+  return getDb('readonly')
+    .prepare(`${projectCountsSql(`WHERE 1 = 1${projectVisibilityWhere(options)}`)} ORDER BY p.position ASC, p.created_at ASC`)
+    .all() as ProjectCounts[];
+}
+
+function projectCountsSql(where: string): string {
+  return `
+    SELECT p.project_id AS projectId,
+           (SELECT COUNT(*) FROM project_repos pr WHERE pr.project_id = p.project_id) AS repoCount,
+           (SELECT COUNT(*) FROM backlog_epics e WHERE e.project_id = p.project_id) AS epicCount,
+           (SELECT COUNT(*)
+              FROM backlog_features f
+              JOIN backlog_epics e ON e.epic_id = f.epic_id
+             WHERE e.project_id = p.project_id AND f.deleted_at IS NULL) AS workItemCount
+      FROM projects p
+      ${where}`;
+}
+
+function projectVisibilityWhere(options: ProjectQueryOptions): string {
+  return `${options.includeArchived ? '' : ' AND archived_at IS NULL'}${options.includeDeleted ? '' : ' AND deleted_at IS NULL'}`;
+}
+
+function getProjectFromDatabase(database: ReturnType<typeof getDb>, projectId: string): ProjectRow | null {
+  return (database.prepare(`${PROJECT_SELECT} WHERE project_id = ?`).get(projectId) as ProjectRow | undefined) ?? null;
+}
+
+function getProjectRepoLink(database: ReturnType<typeof getDb>, repoId: string): ProjectRepoLinkRow | null {
+  return (database.prepare(`${PROJECT_REPO_LINK_SELECT} WHERE repo_id = ?`).get(repoId) as ProjectRepoLinkRow | undefined) ?? null;
+}
+
+function getProjectRepo(database: ReturnType<typeof getDb>, repoId: string): ProjectRepoRow | null {
+  return (database.prepare(`${PROJECT_REPO_SELECT} WHERE pr.repo_id = ?`).get(repoId) as ProjectRepoRow | undefined) ?? null;
+}
+
+function assertProjectExists(database: ReturnType<typeof getDb>, projectId: string): void {
+  if (!getProjectFromDatabase(database, projectId)) throw new ProjectNotFoundError(projectId);
+}
+
+function assertRepoHasNoWorkItems(database: ReturnType<typeof getDb>, repoId: string, projectId: string): void {
+  const row = database.prepare(
+    `SELECT 1
+       FROM backlog_features f
+       JOIN backlog_epics e ON e.epic_id = f.epic_id
+      WHERE f.repo_id = ? AND e.project_id = ? AND f.deleted_at IS NULL
+      LIMIT 1`,
+  ).get(repoId, projectId) as { 1: number } | undefined;
+  if (row) throw new RepoInUseError(repoId);
+}
+
+function nextProjectPosition(database: ReturnType<typeof getDb>): number {
+  const row = database.prepare(`SELECT COALESCE(MAX(position), -1) + 1 AS position FROM projects`).get() as { position: number };
+  return row.position;
+}
+
+function nextProjectRepoPosition(database: ReturnType<typeof getDb>, projectId: string): number {
+  const row = database.prepare(
+    `SELECT COALESCE(MAX(position), -1) + 1 AS position FROM project_repos WHERE project_id = ?`,
+  ).get(projectId) as { position: number };
+  return row.position;
+}
+
+function recordAuditEvent(
+  database: ReturnType<typeof getDb>,
+  context: AuditContext | undefined,
+  entityKind: string,
+  entityId: string,
+  action: string,
+  before: unknown,
+  after: unknown,
+): void {
+  database.prepare(
+    `INSERT INTO audit_events (request_id, actor, entity_kind, entity_id, action, before_json, after_json)
+     VALUES (?, ?, ?, ?, ?, ?, ?)`,
+  ).run(
+    context?.requestId ?? randomUUID(),
+    context?.actor ?? 'system',
+    entityKind,
+    entityId,
+    action,
+    before === null ? null : JSON.stringify(before),
+    after === null ? null : JSON.stringify(after),
+  );
 }
 
 export type FeatureTopicAssociationState = 'creating' | 'active' | 'invalid' | 'error';
