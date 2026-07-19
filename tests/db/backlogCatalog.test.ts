@@ -237,6 +237,43 @@ describe('backlogCatalog upsert/diff/load', () => {
     expect(() => loadBacklogFromCatalog('repo-1')).toThrow('msq backlog load');
   });
 
+  it('aggregates Work Items by Project with pagination and exposes orphan ownership explicitly', async () => {
+    const { db, upsertBacklogCatalog, listWorkItemsByScope, resolveScopeRepos, countByScope } = await setup({ migrated: true });
+    const { registerRepo, createProject, linkRepo, createRun } = await import('../../src/db/repo.js');
+    registerRepo('repo-2', '/tmp/repo-2');
+    const firstProject = { projectId: (db.prepare(`SELECT project_id FROM project_repos WHERE repo_id = 'repo-1'`).get() as { project_id: string }).project_id };
+    const secondProject = createProject({ name: 'Second' });
+    linkRepo(secondProject.projectId, 'repo-2');
+
+    upsertBacklogCatalog(makeBacklog(), 'repo-1');
+    upsertBacklogCatalog(makeBacklog({
+      repo: 'demo-two',
+      epics: [{ ...makeBacklog().epics[0]!, id: 'epic-2', features: [{ ...makeBacklog().epics[0]!.features[0]!, id: 'feat-2' }] }],
+    }), 'repo-2');
+    createRun('repo-1', 'feat-1', 'claude');
+
+    expect(resolveScopeRepos(firstProject.projectId)).toEqual(['repo-1']);
+    expect(listWorkItemsByScope({ projectId: firstProject.projectId, limit: 1, offset: 0 }))
+      .toMatchObject([{ featureId: 'feat-1', projectId: firstProject.projectId, repoId: 'repo-1', workItemType: 'feature' }]);
+    expect(listWorkItemsByScope({ projectId: secondProject.projectId })).toMatchObject([{ featureId: 'feat-2', projectId: secondProject.projectId }]);
+    expect(countByScope({ projectId: firstProject.projectId })).toEqual({ epics: 1, workItems: 1, activeRuns: 1 });
+
+    db.prepare(`DELETE FROM project_repos WHERE repo_id = 'repo-1'`).run();
+    expect(listWorkItemsByScope({ repoId: 'repo-1' })[0]?.integrityIssue).toContain('not linked');
+  });
+
+  it('keeps historical runs in their Project snapshot after a repository moves', async () => {
+    const { db } = await setup({ migrated: true });
+    const { createProject, moveRepo, createRun, listRunsForStats } = await import('../../src/db/repo.js');
+    const source = { projectId: (db.prepare(`SELECT project_id FROM project_repos WHERE repo_id = 'repo-1'`).get() as { project_id: string }).project_id };
+    const destination = createProject({ name: 'Destination' });
+    createRun('repo-1', 'historical-empty-repo', 'claude');
+
+    moveRepo('repo-1', destination.projectId);
+    expect(listRunsForStats({ projectId: source.projectId })).toHaveLength(1);
+    expect(listRunsForStats({ projectId: destination.projectId })).toHaveLength(0);
+  });
+
   describe('updateCatalogFeature', () => {
     it('persists a patch to data_json and denormalized columns', async () => {
       const { db, upsertBacklogCatalog, updateCatalogFeature } = await setup();
