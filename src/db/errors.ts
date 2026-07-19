@@ -8,6 +8,8 @@ export type DomainErrorCode =
   | 'CROSS_REPOSITORY_DEPENDENCY'
   | 'DEPENDENCY_CYCLE'
   | 'REPO_ALREADY_LINKED'
+  | 'REPO_NOT_FOUND'
+  | 'REPO_NOT_LINKED_TO_PROJECT'
   | 'REPO_IN_USE'
   | 'REVISION_CONFLICT';
 
@@ -50,8 +52,8 @@ export class RepositoryNotInProjectError extends DomainError {
 }
 
 export class RepositoryUnavailableError extends DomainError {
-  public constructor(repoId: string) {
-    super('REPOSITORY_UNAVAILABLE', `Repository ${repoId} is unavailable for Work Item creation`);
+  public constructor(repoId: string, detail = 'is unavailable') {
+    super('REPOSITORY_UNAVAILABLE', `Repository ${repoId} ${detail}`);
     this.name = 'RepositoryUnavailableError';
   }
 }
@@ -81,6 +83,20 @@ export class RepoAlreadyLinkedError extends DomainError {
   public constructor(repoId: string, projectId: string) {
     super('REPO_ALREADY_LINKED', `Repository ${repoId} is already linked to project ${projectId}`);
     this.name = 'RepoAlreadyLinkedError';
+  }
+}
+
+export class RepoNotFoundError extends DomainError {
+  public constructor(repoId: string) {
+    super('REPO_NOT_FOUND', `Repository not found: ${repoId}`);
+    this.name = 'RepoNotFoundError';
+  }
+}
+
+export class RepoNotLinkedToProjectError extends DomainError {
+  public constructor(repoId: string, projectId: string) {
+    super('REPO_NOT_LINKED_TO_PROJECT', `Repository ${repoId} is not linked to project ${projectId}`);
+    this.name = 'RepoNotLinkedToProjectError';
   }
 }
 

@@ -153,7 +153,11 @@ export function loadBacklogWithRegistration(path = BACKLOG_FILE, cwd = process.c
   }
 
   const resolved = BacklogV2InputSchema.parse(applyProjectDefaults(v2Input, settings.defaults, settings.budget));
-  const registration = registerBacklogFeatures(resolved, occupiedFeatureIds());
+  // Seed imports retain canonical IDs already materialized into backlog.yaml.
+  // Legacy/omitted IDs are allocated once and staged back into that file.
+  const registration = registerBacklogFeatures(resolved, occupiedFeatureIds(), undefined, 'backlog-yaml', {
+    preserveCanonicalIds: true,
+  });
   const { backlog: v2 } = registration;
   const normalized = BacklogV2Schema.parse(v2);
   validateToolReferences(normalized, cwd);
@@ -171,9 +175,9 @@ export interface StagedBacklogFile {
 }
 
 /**
- * Stages removal of successfully parsed features from the source YAML. The
- * original file remains recoverable until the caller commits its catalog
- * transaction.
+ * Stages generated canonical IDs into the source YAML. The original file
+ * remains recoverable until the caller commits its catalog transaction, so a
+ * failed catalog transaction cannot leave a source identity behind.
  */
 export function stageBacklogFile(path = BACKLOG_FILE, cwd = process.cwd(), backlog: BacklogV2): StagedBacklogFile {
   const absPath = isAbsolute(path) ? path : resolve(cwd, path);
@@ -181,18 +185,20 @@ export function stageBacklogFile(path = BACKLOG_FILE, cwd = process.cwd(), backl
   if (!isRecord(parsedRaw)) throw new Error(`Backlog YAML must contain a mapping: ${absPath}`);
   const raw = parsedRaw;
   const rawEpics: unknown[] = Array.isArray(raw.epics) ? raw.epics as unknown[] : [];
-  let removedFeatures = 0;
+  let assignedIds = 0;
   backlog.epics.forEach((epic, epicIndex) => {
     const rawEpic = rawEpics[epicIndex];
     if (!isRecord(rawEpic)) return;
     const rawFeatures: unknown[] = Array.isArray(rawEpic.features) ? rawEpic.features as unknown[] : [];
-    const consumedIndexes = new Set(epic.features.map((_feature, featureIndex) => featureIndex));
-    const remainingFeatures = rawFeatures.filter((_feature, featureIndex) => !consumedIndexes.has(featureIndex));
-    removedFeatures += rawFeatures.length - remainingFeatures.length;
-    rawEpic.features = remainingFeatures;
+    rawFeatures.forEach((rawFeature, featureIndex) => {
+      const feature = epic.features[featureIndex];
+      if (!feature || !isRecord(rawFeature) || rawFeature.id === feature.id) return;
+      rawFeature.id = feature.id;
+      assignedIds += 1;
+    });
   });
 
-  if (removedFeatures === 0) {
+  if (assignedIds === 0) {
     return {
       commit: (): void => undefined,
       rollback: (): void => undefined,

@@ -3,7 +3,7 @@ import { resolve, dirname, join } from 'node:path';
 import { spawn } from 'node:child_process';
 import type { Backlog, Effort, Feature, OnFail, Tool } from '../backlog/schema.js';
 import type { DeclaredPublication, PublishEvidence, RunFeatureOptions, RunResult } from '../adapters/types.js';
-import { topoOrder, selectStartableFeaturePlan } from '../orchestrator/graph.js';
+import { assertNoCrossRepositoryDependencies, topoOrder, selectStartableFeaturePlan } from '../orchestrator/graph.js';
 import { schedule } from '../orchestrator/scheduler.js';
 import {
   classifyBlockedOutcome,
@@ -49,7 +49,7 @@ import {
   type PipelineWorkflowRevisions,
   type StageRequestRow,
 } from '../../db/repo.js';
-import { getCatalogFeature } from '../../db/backlogCatalog.js';
+import { getCatalogFeature, getFeatureIdOwner } from '../../db/backlogCatalog.js';
 import { dispatch } from '../notify/manager.js';
 import { startTelegramPoller, stopTelegramPoller } from '../notify/telegram-poller.js';
 import { resolveRuntimeConfig } from '../../config/index.js';
@@ -188,6 +188,7 @@ export async function executeBacklog(
   const repoStageSkills = backlog.version === 2 ? backlog.defaults.stageSkills : {};
   const effectiveStageSkills = collectEffectiveStageSkills(repoStageSkills);
   const completedFeatureIds = listCompletedFeatureIds(repoId);
+  assertNoCrossRepositoryDependencies(backlog, repoId, getFeatureIdOwner);
 
   const resolvedPlan = opts.featureId
     ? ((): Feature[] => {

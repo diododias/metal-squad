@@ -41,7 +41,7 @@ describe('backlog feature registration', () => {
     return path;
   }
 
-  it('assigns a generated ID and consumes the feature from YAML', () => {
+  it('assigns a generated ID and persists it in the YAML for repeatable seed imports', () => {
     const path = setup();
     const first = loadBacklog(path, root);
     const id = first.epics[0]?.features[0]?.id;
@@ -50,10 +50,12 @@ describe('backlog feature registration', () => {
     const staged = stageBacklogFile(path, root, first);
     staged.commit();
     const materialized = parse(readFileSync(path, 'utf8')) as { epics: Array<{ features: Array<{ id?: string; customValue?: string }> }> };
-    expect(materialized.epics[0]?.features).toEqual([]);
+    expect(materialized.epics[0]?.features).toEqual([
+      expect.objectContaining({ id, customValue: 'keep-me' }),
+    ]);
 
     const second = loadBacklog(path, root);
-    expect(second.epics[0]?.features).toEqual([]);
+    expect(second.epics[0]?.features[0]?.id).toBe(id);
     expect(stageBacklogFile(path, root, second)).toBeDefined();
   });
 

@@ -8,6 +8,15 @@
 
 **Input**: User description: "$ARGUMENTS"
 
+## Domain terminology
+
+For `metal-squad` Project specs, use `Project`, `Epic`, `Work Item`, and `Task`
+as the domain hierarchy. `feature` and `bug` are `WorkItemType` values. Use
+`Repository defaults` for execution defaults inherited by a Work Item. Do not
+use `Demand` or `Backlog Item` as entity names. Legacy symbols such as
+`backlog_features`, `feature_id`, `FeatureSchema`, `Feature*`, or
+`projectDefaults` must be explicitly labeled as compatibility details.
+
 ## User Scenarios & Testing *(mandatory)*
 
 <!--

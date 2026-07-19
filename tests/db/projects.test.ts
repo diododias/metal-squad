@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { mkdirSync, mkdtempSync, rmSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, symlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -112,6 +112,25 @@ describe('Project and repository domain queries', () => {
     expect(db.prepare(`SELECT project_id FROM project_repos WHERE repo_id = 'repo-1'`).get()).toEqual({ project_id: first.projectId });
   });
 
+  it('refuses an unsafe path before registering it through the repository link service', async () => {
+    const { db, createProject } = await setup();
+    const project = createProject({ name: 'Safe links only' });
+    const allowedRoot = mkdtempSync(join(tmpdir(), 'msq-allowed-repos-'));
+    const outside = mkdtempSync(join(tmpdir(), 'msq-outside-repos-'));
+    const escapingLink = join(allowedRoot, 'outside-link');
+    symlinkSync(outside, escapingLink);
+    const { repoLinkService } = await import('../../src/core/projectService.js');
+
+    expect(() => repoLinkService.link(project.projectId, {
+      path: escapingLink,
+      confirm: true,
+    }, { allowedRoots: [allowedRoot] })).toThrow(expect.objectContaining({ code: 'REPO_PATH_NOT_ALLOWED' }));
+    expect(db.prepare(`SELECT COUNT(*) AS count FROM repos`).get()).toEqual({ count: 0 });
+
+    rmSync(allowedRoot, { recursive: true, force: true });
+    rmSync(outside, { recursive: true, force: true });
+  });
+
   it('moves a repo atomically without reclassifying historical run snapshots', async () => {
     const { db, createProject, linkRepo, moveRepo, registerRepo } = await setup();
     const source = createProject({ name: 'Source' });
@@ -145,6 +164,16 @@ describe('Project and repository domain queries', () => {
     expect(() => moveRepo('repo-1', target.projectId)).toThrowError(RepoInUseError);
     expect(() => unlinkRepo('repo-1')).toThrowError(RepoInUseError);
     expect(db.prepare(`SELECT project_id FROM project_repos WHERE repo_id = 'repo-1'`).get()).toEqual({ project_id: source.projectId });
+  });
+
+  it('does not unlink a repo when the request names a different Project', async () => {
+    const { createProject, linkRepo, unlinkRepo, registerRepo, RepoNotLinkedToProjectError } = await setup();
+    const owner = createProject({ name: 'Owner' });
+    const other = createProject({ name: 'Other' });
+    registerRepo('repo-1', '/tmp/repo-1');
+    linkRepo(owner.projectId, 'repo-1');
+
+    expect(() => unlinkRepo('repo-1', { projectId: other.projectId })).toThrowError(RepoNotLinkedToProjectError);
   });
 
   it('rolls the mutation back when audit insertion fails in the same transaction', async () => {
