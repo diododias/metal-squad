@@ -1,6 +1,6 @@
 import type { MsqEvents } from '../core/events/types.js';
 import type { SessionStatusSnapshot, ToolCallRecord } from '../core/adapters/types.js';
-import type { ProjectRow, RunHistoryEntry, RunSummary, RunningTaskSummary, StatsRunRow, TaskRun } from '../db/repo.js';
+import type { ProjectRepoRow, ProjectRow, RunHistoryEntry, RunSummary, RunningTaskSummary, StatsRunRow, TaskRun } from '../db/repo.js';
 import type { PendingApproval } from '../ui/hooks/useGates.js';
 import type { FeatureCatalogEntry, BacklogSettings } from '../ui/catalog.js';
 import type { RunBreakdown } from '../core/stats.js';
@@ -210,6 +210,14 @@ export interface FeatureConfigSaveResult {
 export type ProjectActionErrorCode =
   | 'INVALID_PAYLOAD'
   | 'PROJECT_NOT_FOUND'
+  | 'REPO_NOT_FOUND'
+  | 'REPO_NOT_LINKED_TO_PROJECT'
+  | 'REPO_ALREADY_LINKED'
+  | 'REPO_IN_USE'
+  | 'REPO_PATH_CONFIRMATION_REQUIRED'
+  | 'REPO_PATH_NOT_FOUND'
+  | 'REPO_PATH_NOT_DIRECTORY'
+  | 'REPO_PATH_NOT_ALLOWED'
   | 'REVISION_CONFLICT'
   | 'PROJECT_ACTION_FAILED';
 
@@ -232,6 +240,16 @@ export type ProjectActionResult =
       };
     };
 
+export type RepositoryActionResult =
+  | {
+      type: 'action:result';
+      payload: { requestId: string; ok: true; entity: ProjectRepoRow | { repoId: string; unlinked: boolean } | null };
+    }
+  | {
+      type: 'action:result';
+      payload: { requestId: string; ok: false; error: ProjectActionError };
+    };
+
 export type WebSocketClientMessage =
   | { type: 'auth'; token: string }
   | {
@@ -249,6 +267,9 @@ export type WebSocketClientMessage =
       expectedRevision: number;
       patch: { name?: string; description?: string | null; position?: number };
     }
+  | { type: 'action:linkRepo'; requestId: string; projectId: string; repoId?: string; path?: string; confirm?: boolean }
+  | { type: 'action:moveRepo'; requestId: string; repoId: string; toProjectId: string; expectedRevision?: number }
+  | { type: 'action:unlinkRepo'; requestId: string; projectId: string; repoId: string }
   | { type: 'action:updateBudgetConfig'; patch: BudgetConfigPatch }
   | { type: 'action:updateNotifications'; patch: NotificationsPatch }
   | { type: 'action:updateAppConfig'; patch: AppConfigPatch }
@@ -283,6 +304,7 @@ export type WebSocketServerMessage =
   | { type: 'state:full'; payload: MsqWebState }
   | FeatureConfigSaveResult
   | ProjectActionResult
+  | RepositoryActionResult
   | { type: 'run:detail'; payload: { runId: number; taskRuns: TaskRun[]; breakdown: RunBreakdown | null; sessionStatus: SessionStatusSnapshot | null; statusHistory: SessionStatusSnapshot[]; toolCalls: ToolCallRecord[] } }
   | { type: 'run:history'; payload: { featureId: string; runs: RunHistoryEntry[] } }
   | { type: 'run:changes'; payload: RunChangesPayload }

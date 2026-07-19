@@ -6,6 +6,7 @@ import WebSocket from 'ws';
 
 const mocks = vi.hoisted(() => ({
   resolveRepo: vi.fn(),
+  resolveRepoAllowlist: vi.fn(),
   listRunsForTui: vi.fn(),
   listRunHistoryForFeature: vi.fn(),
   getRunSessionStatus: vi.fn(),
@@ -13,6 +14,7 @@ const mocks = vi.hoisted(() => ({
   openGates: vi.fn(),
   listPendingStageRequests: vi.fn(),
   listRunningTaskRuns: vi.fn(),
+  listPendingTimeoutApprovalRequests: vi.fn(),
   listRunsForStats: vi.fn(),
   getHistoricalTokenStatsForFeatureProfile: vi.fn(),
   resolveGate: vi.fn(),
@@ -51,10 +53,16 @@ const mocks = vi.hoisted(() => ({
     create: vi.fn(),
     update: vi.fn(),
   },
+  repoLinkService: {
+    link: vi.fn(),
+    move: vi.fn(),
+    unlink: vi.fn(),
+  },
 }));
 
 vi.mock('../../src/core/repo.js', () => ({
   resolveRepo: mocks.resolveRepo,
+  resolveRepoAllowlist: mocks.resolveRepoAllowlist,
 }));
 
 vi.mock('../../src/db/index.js', () => ({
@@ -109,6 +117,7 @@ vi.mock('../../src/db/repo.js', () => ({
   openGates: mocks.openGates,
   listPendingStageRequests: mocks.listPendingStageRequests,
   listRunningTaskRuns: mocks.listRunningTaskRuns,
+  listPendingTimeoutApprovalRequests: mocks.listPendingTimeoutApprovalRequests,
   listRunsForStats: mocks.listRunsForStats,
   getHistoricalTokenStatsForFeatureProfile: mocks.getHistoricalTokenStatsForFeatureProfile,
   listRunOutput: mocks.listRunOutput,
@@ -131,6 +140,7 @@ vi.mock('../../src/core/adapters/index.js', () => ({
 
 vi.mock('../../src/core/projectService.js', () => ({
   projectService: mocks.projectService,
+  repoLinkService: mocks.repoLinkService,
 }));
 
 vi.mock('../../src/core/stats.js', () => ({
@@ -240,10 +250,12 @@ describe('web server', () => {
     cwd = mkdtempSync(join(tmpdir(), 'msq-web-'));
     process.chdir(cwd);
     mocks.resolveRepo.mockReturnValue({ repoId: 'repo-1', path: cwd });
+    mocks.resolveRepoAllowlist.mockImplementation((root: string) => [root]);
     mocks.listRunsForTui.mockReturnValue([]);
     mocks.openGates.mockReturnValue([]);
     mocks.listPendingStageRequests.mockReturnValue([]);
     mocks.listRunningTaskRuns.mockReturnValue([]);
+    mocks.listPendingTimeoutApprovalRequests.mockReturnValue([]);
     mocks.listRunsForStats.mockReturnValue([]);
     mocks.listRunOutput.mockReturnValue([]);
     mocks.listTaskRunsForRun.mockReturnValue([]);
@@ -598,6 +610,92 @@ describe('web server', () => {
     });
     expect(mocks.projectService.update).toHaveBeenNthCalledWith(1, 'project-1', { name: 'Current' }, 1);
     expect(mocks.projectService.update).toHaveBeenNthCalledWith(2, 'project-1', { description: 'stale' }, 1);
+    socket.close();
+  });
+
+  it('delegates a confirmed repository link only to the application service and replies only to the originator', async () => {
+    const { createWebServer } = await import('../../src/web/server.js');
+    mocks.repoLinkService.link.mockReturnValue({
+      entity: { repoId: 'repo-2', projectId: 'project-1', path: '/safe/repo', position: 0, createdAt: 'now', updatedAt: 'now' },
+      revision: null,
+    });
+
+    server = createWebServer({ host: '127.0.0.1', port: 0, auth: 'token', token: 'secret', cwd });
+    await new Promise<void>((resolve) => server!.server.listen(0, '127.0.0.1', resolve));
+    const address = server!.server.address() as { port: number };
+    const origin = new WebSocket(`ws://127.0.0.1:${address.port}/ws`);
+    const peer = new WebSocket(`ws://127.0.0.1:${address.port}/ws`);
+    await Promise.all([waitForOpen(origin), waitForOpen(peer)]);
+    origin.send(JSON.stringify({ type: 'auth', token: 'secret' }));
+    peer.send(JSON.stringify({ type: 'auth', token: 'secret' }));
+    await Promise.all([waitForSocketMessage(origin), waitForSocketMessage(peer)]);
+
+    let peerReceivedResult = false;
+    const peerHandler = (data: WebSocket.RawData): void => {
+      if ((JSON.parse(data.toString('utf8')) as { type?: string }).type === 'action:result') peerReceivedResult = true;
+    };
+    peer.on('message', peerHandler);
+    const result = waitForMatchingMessage(
+      origin,
+      (message) => message.type === 'action:result' && (message.payload as { requestId?: string }).requestId === 'link-1',
+    );
+    origin.send(JSON.stringify({ type: 'action:linkRepo', requestId: 'link-1', projectId: 'project-1', path: '/safe/repo', confirm: true }));
+
+    expect(await result).toMatchObject({ payload: { requestId: 'link-1', ok: true, entity: { repoId: 'repo-2' } } });
+    expect(mocks.repoLinkService.link).toHaveBeenCalledWith('project-1', {
+      type: 'action:linkRepo', requestId: 'link-1', projectId: 'project-1', path: '/safe/repo', confirm: true,
+    }, { allowedRoots: [cwd], audit: { actor: 'web', requestId: 'link-1' } });
+    peer.off('message', peerHandler);
+    expect(peerReceivedResult).toBe(false);
+    origin.close();
+    peer.close();
+  });
+
+  it('returns a typed path confirmation error without registering or linking a repository', async () => {
+    const { createWebServer } = await import('../../src/web/server.js');
+    const error = Object.assign(new Error('Explicit confirmation is required before registering a repository path.'), {
+      code: 'REPO_PATH_CONFIRMATION_REQUIRED',
+    });
+    mocks.repoLinkService.link.mockImplementation(() => { throw error; });
+    server = createWebServer({ host: '127.0.0.1', port: 0, auth: 'token', token: 'secret', cwd });
+    await new Promise<void>((resolve) => server!.server.listen(0, '127.0.0.1', resolve));
+    const address = server!.server.address() as { port: number };
+    const socket = new WebSocket(`ws://127.0.0.1:${address.port}/ws`);
+    await waitForOpen(socket);
+    socket.send(JSON.stringify({ type: 'auth', token: 'secret' }));
+    await waitForSocketMessage(socket);
+    const result = waitForMatchingMessage(socket, (message) => message.type === 'action:result');
+    socket.send(JSON.stringify({ type: 'action:linkRepo', requestId: 'link-2', projectId: 'project-1', path: '/safe/repo' }));
+
+    expect(await result).toEqual({
+      type: 'action:result',
+      payload: { requestId: 'link-2', ok: false, error: { code: 'REPO_PATH_CONFIRMATION_REQUIRED', message: 'Explicit confirmation is required before registering a repository path.' } },
+    });
+    expect(mocks.repoLinkService.link).toHaveBeenCalledTimes(1);
+    socket.close();
+  });
+
+  it('delegates move and unlink through the repository service with request audit context', async () => {
+    const { createWebServer } = await import('../../src/web/server.js');
+    mocks.repoLinkService.move.mockReturnValue({ entity: { repoId: 'repo-2', projectId: 'project-2', path: '/safe/repo', position: 0, createdAt: 'now', updatedAt: 'now' }, revision: null });
+    mocks.repoLinkService.unlink.mockReturnValue({ entity: { repoId: 'repo-2', unlinked: true }, revision: null });
+    server = createWebServer({ host: '127.0.0.1', port: 0, auth: 'token', token: 'secret', cwd });
+    await new Promise<void>((resolve) => server!.server.listen(0, '127.0.0.1', resolve));
+    const address = server!.server.address() as { port: number };
+    const socket = new WebSocket(`ws://127.0.0.1:${address.port}/ws`);
+    await waitForOpen(socket);
+    socket.send(JSON.stringify({ type: 'auth', token: 'secret' }));
+    await waitForSocketMessage(socket);
+
+    const moved = waitForMatchingMessage(socket, (message) => message.type === 'action:result' && (message.payload as { requestId?: string }).requestId === 'move-1');
+    socket.send(JSON.stringify({ type: 'action:moveRepo', requestId: 'move-1', repoId: 'repo-2', toProjectId: 'project-2', expectedRevision: 4 }));
+    expect(await moved).toMatchObject({ payload: { ok: true, entity: { projectId: 'project-2' } } });
+    expect(mocks.repoLinkService.move).toHaveBeenCalledWith('repo-2', 'project-2', { audit: { actor: 'web', requestId: 'move-1' } });
+
+    const unlinked = waitForMatchingMessage(socket, (message) => message.type === 'action:result' && (message.payload as { requestId?: string }).requestId === 'unlink-1');
+    socket.send(JSON.stringify({ type: 'action:unlinkRepo', requestId: 'unlink-1', projectId: 'project-2', repoId: 'repo-2' }));
+    expect(await unlinked).toMatchObject({ payload: { ok: true, entity: { repoId: 'repo-2', unlinked: true } } });
+    expect(mocks.repoLinkService.unlink).toHaveBeenCalledWith('repo-2', { projectId: 'project-2', audit: { actor: 'web', requestId: 'unlink-1' } });
     socket.close();
   });
 
