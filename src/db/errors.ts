@@ -11,7 +11,13 @@ export type DomainErrorCode =
   | 'REPO_NOT_FOUND'
   | 'REPO_NOT_LINKED_TO_PROJECT'
   | 'REPO_IN_USE'
-  | 'REVISION_CONFLICT';
+  | 'REVISION_CONFLICT'
+  | 'WORKFLOW_TEMPLATE_NOT_FOUND'
+  | 'WORKFLOW_TEMPLATE_IMMUTABLE'
+  | 'WORKFLOW_TEMPLATE_INVALID'
+  | 'WORKFLOW_TEMPLATE_IN_USE'
+  | 'WORKFLOW_TEMPLATE_ARCHIVED'
+  | 'WORKFLOW_TEMPLATE_SCOPE_MISMATCH';
 
 export class DomainError extends Error {
   public constructor(
@@ -119,5 +125,65 @@ export class RevisionConflictError extends DomainError {
       `${entityName} ${projectId} has revision ${String(actualRevision)}; expected ${String(expectedRevision)}`,
     );
     this.name = 'RevisionConflictError';
+  }
+}
+
+export class WorkflowTemplateNotFoundError extends DomainError {
+  public constructor(templateId: string) {
+    super('WORKFLOW_TEMPLATE_NOT_FOUND', `Workflow template not found: ${templateId}`);
+    this.name = 'WorkflowTemplateNotFoundError';
+  }
+}
+
+export class WorkflowTemplateImmutableError extends DomainError {
+  public constructor(templateId: string) {
+    super(
+      'WORKFLOW_TEMPLATE_IMMUTABLE',
+      `Workflow template ${templateId} is builtin and immutable; duplicate it to customise`,
+    );
+    this.name = 'WorkflowTemplateImmutableError';
+  }
+}
+
+export class WorkflowTemplateInvalidError extends DomainError {
+  public constructor(
+    public readonly issues: string[],
+    templateName?: string,
+  ) {
+    super(
+      'WORKFLOW_TEMPLATE_INVALID',
+      `Workflow template${templateName ? ` ${templateName}` : ''} is invalid: ${issues.join('; ')}`,
+    );
+    this.name = 'WorkflowTemplateInvalidError';
+  }
+}
+
+export class WorkflowTemplateInUseError extends DomainError {
+  public constructor(
+    templateId: string,
+    public readonly mappings: { projectId: string; workItemType: string }[],
+  ) {
+    super(
+      'WORKFLOW_TEMPLATE_IN_USE',
+      `Workflow template ${templateId} is mapped by ${String(mappings.length)} Work Item type(s) and must be reassociated before archiving`,
+    );
+    this.name = 'WorkflowTemplateInUseError';
+  }
+}
+
+export class WorkflowTemplateArchivedError extends DomainError {
+  public constructor(templateId: string) {
+    super('WORKFLOW_TEMPLATE_ARCHIVED', `Workflow template ${templateId} is archived and cannot be mapped`);
+    this.name = 'WorkflowTemplateArchivedError';
+  }
+}
+
+export class WorkflowTemplateScopeMismatchError extends DomainError {
+  public constructor(templateId: string, projectId: string) {
+    super(
+      'WORKFLOW_TEMPLATE_SCOPE_MISMATCH',
+      `Workflow template ${templateId} does not belong to project ${projectId}`,
+    );
+    this.name = 'WorkflowTemplateScopeMismatchError';
   }
 }
