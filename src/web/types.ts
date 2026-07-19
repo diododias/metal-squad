@@ -2,7 +2,7 @@ import type { MsqEvents } from '../core/events/types.js';
 import type { SessionStatusSnapshot, ToolCallRecord } from '../core/adapters/types.js';
 import type { EpicRow, ProjectRepoRow, ProjectRow, RunHistoryEntry, RunSummary, RunningTaskSummary, StatsRunRow, TaskRun, WorkItemRow } from '../db/repo.js';
 import type { PendingApproval } from '../ui/hooks/useGates.js';
-import type { FeatureCatalogEntry, BacklogSettings } from '../ui/catalog.js';
+import type { WorkItemCatalogEntry, BacklogSettings } from '../ui/catalog.js';
 import type { RunBreakdown } from '../core/stats.js';
 import type { ThemeRoleName } from '../ui/theme/types.js';
 import type { AppConfigPatch as ConfigAppConfigPatch, Config, NotificationChannelConfig, NotificationsPatch, ToolRegistryEntry } from '../config/index.js';
@@ -105,10 +105,10 @@ export interface MsqWebState {
   repositories: RepositorySummary[];
   runs: RunSummary[];
   gates: PendingApproval[];
-  pendingFeatures: FeatureCatalogEntry[];
+  pendingFeatures: WorkItemCatalogEntry[];
   runningTasks: RunningTaskSummary[];
   timeoutApprovals: TimeoutApprovalState[];
-  featureCatalog: Record<string, FeatureCatalogEntry>;
+  featureCatalog: Record<string, WorkItemCatalogEntry>;
   backlogSettings: BacklogSettings;
   environment: EnvironmentInfo;
   stats: {
