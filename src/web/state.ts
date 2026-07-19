@@ -160,6 +160,7 @@ function collectProjectSummaries(): ProjectSummary[] {
     return listProjectStateSummaries().map((project) => ({
       projectId: project.projectId,
       name: project.name,
+      position: project.position,
       description: project.description,
       revision: project.revision,
       counts: {

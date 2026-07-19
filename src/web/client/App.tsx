@@ -5,6 +5,7 @@ import { NotificationList, type NotificationListItem } from './components/feedba
 import { useIsMobile, MobileTopBar, MobileTabBar } from './Responsive.js';
 import { useWebSocket } from './hooks/useWebSocket.js';
 import { useLocalOutput, type OutputLine } from './hooks/useLocalOutput.js';
+import { ActiveProjectProvider, useActiveProject } from './hooks/useActiveProject.js';
 import { parseHash, type Route } from './lib/routes.js';
 import { BoardPage } from './pages/BoardPage.js';
 import { RunDetailPage } from './pages/RunDetailPage.js';
@@ -217,6 +218,40 @@ export function App(): React.JSX.Element {
   }
 
   return (
+    <ActiveProjectProvider projects={state?.projects ?? []}>
+      <AppLayout
+        isMobile={isMobile}
+        navItems={navItems}
+        activePathPrefix={activePathPrefix}
+        runningCount={runningCount}
+        totalTokens={totalTokens}
+        unread={unread}
+        notificationsOpen={notificationsOpen}
+        notifications={notifications}
+        projects={state?.projects ?? []}
+        sidebarCollapsed={sidebarCollapsed}
+        page={page}
+        connectionError={connectionError}
+        navigate={navigate}
+        logout={logout}
+        onToggleSidebar={() => { setSidebarCollapsed((collapsed) => !collapsed); }}
+        onOpenNotifications={() => { setNotificationsOpen(true); setUnread(0); }}
+        onCloseNotifications={() => { setNotificationsOpen(false); }}
+      />
+    </ActiveProjectProvider>
+  );
+}
+
+interface AppLayoutProps {
+  isMobile: boolean; navItems: SidebarNavItem[]; activePathPrefix: string; runningCount: number; totalTokens: number; unread: number;
+  notificationsOpen: boolean; notifications: NotificationListItem[]; projects: MsqWebState['projects']; sidebarCollapsed: boolean; page: React.ReactNode; connectionError: string | null;
+  navigate: (path: string) => void; logout: () => void; onToggleSidebar: () => void; onOpenNotifications: () => void; onCloseNotifications: () => void;
+}
+
+function AppLayout(props: AppLayoutProps): React.JSX.Element {
+  const { activeProjectId, setActiveProject, selectionInvalidated } = useActiveProject();
+  const { isMobile, navItems, activePathPrefix, runningCount, totalTokens, unread, notificationsOpen, notifications, projects, sidebarCollapsed, page, connectionError, navigate, logout, onToggleSidebar, onOpenNotifications, onCloseNotifications } = props;
+  return (
     <div
       className="app-root"
       style={{ display: 'flex', flexDirection: isMobile ? 'column' : 'row', width: '100vw', overflow: 'hidden', background: 'var(--bg-base)' }}
@@ -230,23 +265,26 @@ export function App(): React.JSX.Element {
           notificationCount={unread}
           onNavigate={navigate}
           collapsed={sidebarCollapsed}
-          onToggleCollapsed={() => { setSidebarCollapsed((collapsed) => !collapsed); }}
-          onNotifications={() => {
-            setNotificationsOpen(true);
-            setUnread(0);
-          }}
+          onToggleCollapsed={onToggleSidebar}
+          onNotifications={onOpenNotifications}
           onLogout={logout}
+          projects={projects}
+          activeProjectId={activeProjectId}
+          selectionInvalidated={selectionInvalidated}
+          onSelectProject={setActiveProject}
         />
       )}
       {isMobile && (
         <MobileTopBar
           live={runningCount > 0}
           notificationCount={unread}
-          onNotifications={() => {
-            setNotificationsOpen(true);
-            setUnread(0);
-          }}
+          onNotifications={onOpenNotifications}
           onLogout={logout}
+          projects={projects}
+          activeProjectId={activeProjectId}
+          selectionInvalidated={selectionInvalidated}
+          onSelectProject={setActiveProject}
+          onNavigate={navigate}
         />
       )}
       <div style={{ flex: 1, minWidth: 0, minHeight: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
@@ -257,7 +295,7 @@ export function App(): React.JSX.Element {
         )}
       </div>
       {isMobile && <MobileTabBar items={navItems} activePath={activePathPrefix} onNavigate={navigate} />}
-      <Modal open={notificationsOpen} onClose={() => { setNotificationsOpen(false); }} width={isMobile ? 320 : 440}>
+      <Modal open={notificationsOpen} onClose={onCloseNotifications} width={isMobile ? 320 : 440}>
         <div style={{ padding: 18 }}>
           <h2 style={{ margin: '0 0 4px', fontSize: '26px', fontFamily: 'var(--font-display)', fontWeight: 400, letterSpacing: '0.02em' }}>Notifications</h2>
           <div style={{ fontSize: 'var(--text-xs)', color: 'var(--text-dim)', marginBottom: 14 }}>Last {notifications.length} events across all features</div>

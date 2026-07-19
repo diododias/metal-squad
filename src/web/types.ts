@@ -64,6 +64,8 @@ export type WebRuntimeConfig = Omit<Config, 'notifications'> & {
 export interface ProjectSummary {
   projectId: string;
   name: string;
+  /** Stable ordering for client-only active-project fallback. */
+  position: number;
   description: string | null;
   revision: number;
   counts: { epics: number; workItems: number; archived: number };

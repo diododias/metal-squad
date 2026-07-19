@@ -402,7 +402,7 @@ describe('buildMsqWebState pendingFeatures projection', () => {
   it('projects global Projects and Repositories without leaking repository paths', async () => {
     const { buildMsqWebState } = await import('../../src/web/state.js');
     mocks.listProjectStateSummaries.mockReturnValue([{
-      projectId: 'project-1', name: 'Platform', description: 'Global state', revision: 3,
+      projectId: 'project-1', name: 'Platform', position: 4, description: 'Global state', revision: 3,
       archivedAt: null, epicCount: 2, workItemCount: 4, archivedCount: 1,
       activeRuns: 2, totalTokens: 987,
     }]);
@@ -414,7 +414,7 @@ describe('buildMsqWebState pendingFeatures projection', () => {
 
     expect(state.revision).toBe(7);
     expect(state.projects).toEqual([{
-      projectId: 'project-1', name: 'Platform', description: 'Global state', revision: 3,
+      projectId: 'project-1', name: 'Platform', position: 4, description: 'Global state', revision: 3,
       archivedAt: null, counts: { epics: 2, workItems: 4, archived: 1 }, activeRuns: 2,
       tokens: { status: 'ready', totalTokens: 987, error: null },
     }]);
@@ -429,7 +429,7 @@ describe('buildMsqWebState pendingFeatures projection', () => {
   it('broadcasts the same global catalog to separate clients without a server-side selection', async () => {
     const { buildMsqWebState } = await import('../../src/web/state.js');
     mocks.listProjectStateSummaries.mockReturnValue([{
-      projectId: 'project-1', name: 'Shared', description: null, revision: 1,
+      projectId: 'project-1', name: 'Shared', position: 0, description: null, revision: 1,
       archivedAt: null, epicCount: 0, workItemCount: 0, archivedCount: 0,
       activeRuns: 0, totalTokens: 0,
     }]);

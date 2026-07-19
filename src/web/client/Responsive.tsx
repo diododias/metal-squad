@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import type { SidebarNavItem } from './components/navigation/Sidebar.js';
+import type { ProjectSummary } from '../types.js';
 
 export function useIsMobile(breakpoint = 860): boolean {
   const query = `(max-width: ${String(breakpoint)}px)`;
@@ -119,6 +120,11 @@ export interface MobileTopBarProps {
   notificationCount: number;
   onNotifications: () => void;
   onLogout?: () => void;
+  projects?: ProjectSummary[];
+  activeProjectId?: string | null;
+  selectionInvalidated?: boolean;
+  onSelectProject?: (projectId: string | null) => void;
+  onNavigate?: (path: string) => void;
 }
 
 const ICON_BTN_STYLE: React.CSSProperties = {
@@ -141,6 +147,11 @@ export function MobileTopBar({
   notificationCount,
   onNotifications,
   onLogout,
+  projects = [],
+  activeProjectId = null,
+  selectionInvalidated = false,
+  onSelectProject,
+  onNavigate,
 }: MobileTopBarProps): React.JSX.Element {
   return (
     <div
@@ -170,6 +181,13 @@ export function MobileTopBar({
             boxShadow: live ? '0 0 0 2px var(--accent-ok-10)' : 'none',
           }}
         />
+        {projects.length > 0 ? (
+          <select aria-label="Active project" value={activeProjectId ?? ''} onChange={(event) => { onSelectProject?.(event.target.value || null); }} style={{ minWidth: 0, maxWidth: 130, padding: '4px', color: 'var(--text-primary)', background: 'var(--bg-panel-alt)', border: '1px solid var(--border-strong)', borderRadius: 'var(--radius-sm)', fontFamily: 'var(--font-mono)', fontSize: 11 }}>
+            {projects.map((project) => <option key={project.projectId} value={project.projectId}>{project.name}</option>)}
+          </select>
+        ) : (
+          <button type="button" onClick={() => { onNavigate?.('/projects'); }} style={{ border: 0, background: 'transparent', color: 'var(--accent-info)', fontFamily: 'var(--font-mono)', fontSize: 11, padding: 0 }}>Create Project</button>
+        )}
       </div>
       <div style={{ display: 'flex', gap: 6, flexShrink: 0 }}>
         <button onClick={onNotifications} title="Notifications" style={ICON_BTN_STYLE}>
@@ -211,6 +229,7 @@ export function MobileTopBar({
           </button>
         )}
       </div>
+      {selectionInvalidated && <div role="status" style={{ position: 'absolute', top: '100%', left: 14, color: 'var(--accent-warn)', fontSize: 10, background: 'var(--bg-panel)', padding: '4px 0' }}>Previous Project is unavailable.</div>}
     </div>
   );
 }
