@@ -8,6 +8,7 @@ import { AgentTranscript, type TranscriptEntry } from '../components/transcript/
 import { RunStatusStrip } from '../components/status/RunStatusStrip.js';
 import { FeatureConfigDetail } from '../components/FeatureConfigDetail.js';
 import { PageHeader } from '../PageHeader.js';
+import { useActiveProject } from '../hooks/useActiveProject.js';
 import { useIsMobile } from '../Responsive.js';
 import { formatClockTime, formatElapsed, formatPercent, formatPublishTarget, formatTokens, getPublishStatusLabel, getRunStatusLabel, parseTimestampMs } from '../lib/format.js';
 import { summarizeTaskRuns } from '../lib/workflow.js';
@@ -105,6 +106,13 @@ export function RunDetailPage({
   const run = state.runs.find((r) => r.featureId === featureId);
   const feature = state.featureCatalog[featureId];
   const runId = run?.runId;
+  const { activeProjectId, setActiveProject } = useActiveProject();
+  const itemProjectId = feature?.projectId ?? null;
+  const projects = 'projects' in state ? state.projects : [];
+  const projectName = projects.find((project) => project.projectId === itemProjectId)?.name;
+  function returnToItemContext(): void {
+    if (itemProjectId && itemProjectId !== activeProjectId) setActiveProject(itemProjectId);
+  }
   const scrollRef = useRef<HTMLDivElement>(null);
   const stickToBottomRef = useRef(true);
 
@@ -141,7 +149,7 @@ export function RunDetailPage({
         <PageHeader
           title={featureId}
           breadcrumb={
-            <a href="#/runs" style={{ color: 'var(--text-dim)' }}>
+            <a href="#/runs" onClick={returnToItemContext} style={{ color: 'var(--text-dim)' }}>
               Runs
             </a>
           }
@@ -298,10 +306,10 @@ export function RunDetailPage({
         title={feature?.title ?? featureId}
         breadcrumb={
           <span>
-            <a href="#/runs" style={{ color: 'var(--text-dim)' }}>
+            <a href="#/runs" onClick={returnToItemContext} style={{ color: 'var(--text-dim)' }}>
               Runs
             </a>{' '}
-            / {featureId}
+            / {projectName ? `${projectName} · ` : ''}{feature?.repoLabel ? `${feature.repoLabel} · ` : ''}{featureId}
           </span>
         }
         actions={
@@ -340,7 +348,7 @@ export function RunDetailPage({
               </Button>
             )}
             {!isMobile && (
-              <Button variant="neutral" size="sm" onClick={onBack}>
+              <Button variant="neutral" size="sm" onClick={() => { returnToItemContext(); onBack(); }}>
                 close
               </Button>
             )}
@@ -351,7 +359,7 @@ export function RunDetailPage({
         <button
           aria-label="Close run detail"
           title="Close"
-          onClick={onBack}
+          onClick={() => { returnToItemContext(); onBack(); }}
           style={{
             position: 'absolute',
             top: 'calc(12px + env(safe-area-inset-top, 0px))',

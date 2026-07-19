@@ -178,3 +178,36 @@ describe('KanbanCard done state', () => {
     expect(html).not.toContain('▱');
   });
 });
+
+describe('KanbanCard Project scope (repo, type, health)', () => {
+  it('renders the type badge when workItemType is present', () => {
+    const html = renderToStaticMarkup(<KanbanCard run={{ ...run, workItemType: 'bug' }} />);
+    expect(html).toContain('title="type: bug"');
+    expect(html).toContain('bug');
+  });
+
+  it('omits the type badge when workItemType is absent', () => {
+    const html = renderToStaticMarkup(<KanbanCard run={run} />);
+    expect(html).not.toContain('title="type:');
+  });
+
+  it('shows the repo cell in the tool rail only when repoLabel is provided', () => {
+    const withRepo = renderToStaticMarkup(<KanbanCard run={{ ...run, repoLabel: 'repo-one' }} />);
+    expect(withRepo).toContain('title="repository: repo-one"');
+    expect(withRepo).toContain('repo-one');
+
+    const withoutRepo = renderToStaticMarkup(<KanbanCard run={run} />);
+    expect(withoutRepo).not.toContain('title="repository:');
+  });
+
+  it('warns that an unhealthy repository blocks starting the item', () => {
+    const html = renderToStaticMarkup(<KanbanCard run={{ ...run, repoUnhealthy: true }} />);
+    expect(html).toContain('title="Repository unavailable"');
+    expect(html).toContain('repository unavailable — cannot start');
+  });
+
+  it('omits the health warning when the repository is healthy or unchecked', () => {
+    const html = renderToStaticMarkup(<KanbanCard run={{ ...run, repoUnhealthy: false }} />);
+    expect(html).not.toContain('repository unavailable');
+  });
+});
