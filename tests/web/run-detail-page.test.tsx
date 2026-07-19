@@ -7,6 +7,7 @@ import { RunDetailPage } from '../../src/web/client/pages/RunDetailPage.js';
 import { ActiveProjectContext } from '../../src/web/client/hooks/useActiveProject.js';
 import type { MsqWebState, WebSocketClientMessage } from '../../src/web/types.js';
 import type { RunSummary } from '../../src/db/repo.js';
+import type { OutputLine } from '../../src/web/client/hooks/useLocalOutput.js';
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -49,6 +50,14 @@ function makeState(run: RunSummary): MsqWebState {
 }
 
 function renderPage(run: RunSummary, send: (message: WebSocketClientMessage) => void): HTMLElement {
+  return renderPageWithLines(run, {}, send);
+}
+
+function renderPageWithLines(
+  run: RunSummary,
+  linesByRun: Record<number, OutputLine[]>,
+  send: (message: WebSocketClientMessage) => void,
+): HTMLElement {
   const container = document.createElement('div');
   document.body.append(container);
   const root = createRoot(container);
@@ -59,7 +68,7 @@ function renderPage(run: RunSummary, send: (message: WebSocketClientMessage) => 
         state={makeState(run)}
         featureId="feat-1"
         runDetails={{}}
-        linesByRun={{}}
+        linesByRun={linesByRun}
         onSubscribeRun={() => () => undefined}
         onBack={() => undefined}
         send={send}
@@ -576,5 +585,62 @@ describe('RunDetailPage Project/repo context', () => {
     act(() => { closeButton?.click(); });
 
     expect(setActiveProject).not.toHaveBeenCalled();
+  });
+});
+
+describe('RunDetailPage heartbeat display', () => {
+  const heartbeatLine = '[msq] opencode running for 47s (stdout 1500B stderr 0B idle 12s) polishing the README';
+
+  function openLiveOutput(container: HTMLElement): void {
+    const tab = Array.from(container.querySelectorAll('button, [role="tab"]')).find((el) => el.textContent === 'Live Output');
+    act(() => { (tab as HTMLElement)?.click(); });
+  }
+
+  it('renders heartbeats as a thinking… style system line while the run is active', () => {
+    const container = renderPageWithLines(
+      makeRun({ status: 'running', rawStatus: 'running', pipelineStatus: 'running' as never }),
+      { 1: [{ runId: 1, source: 'heartbeat', line: heartbeatLine, createdAt: '2026-07-16T13:50:21.000Z' }] },
+      vi.fn(),
+    );
+
+    openLiveOutput(container);
+    // The verbose diagnostic payload should be hidden; the readable suffix surfaces instead.
+    expect(container.textContent ?? '').not.toContain('running for 47s');
+    expect(container.textContent ?? '').toContain('polishing the README');
+  });
+
+  it('collapses a heartbeat with no activity suffix to a thinking… placeholder while running', () => {
+    const container = renderPageWithLines(
+      makeRun({ status: 'running', rawStatus: 'running', pipelineStatus: 'running' as never }),
+      { 1: [{ runId: 1, source: 'heartbeat', line: '[msq] opencode running for 1s (stdout 0B stderr 0B idle 0s)', createdAt: '2026-07-16T13:50:22.000Z' }] },
+      vi.fn(),
+    );
+
+    openLiveOutput(container);
+    expect(container.textContent ?? '').toContain('thinking');
+  });
+
+  it('drops heartbeat lines once the run is terminal so they don\'t linger on the Live Output tab', () => {
+    for (const terminal of ['done', 'failed', 'aborted', 'blocked'] as const) {
+      const container = renderPageWithLines(
+        makeRun({ status: terminal, rawStatus: terminal as never, pipelineStatus: 'done' as never }),
+        { 1: [
+          { runId: 1, source: 'agent', line: 'real agent output', createdAt: '2026-07-16T13:50:21.000Z' },
+          { runId: 1, source: 'heartbeat', line: heartbeatLine, createdAt: '2026-07-16T13:50:30.000Z' },
+        ] },
+        vi.fn(),
+      );
+
+      openLiveOutput(container);
+      expect(container.textContent ?? '').toContain('real agent output');
+      expect(container.textContent ?? '').not.toContain('polishing the README');
+      expect(container.textContent ?? '').not.toContain('running for 47s');
+
+      act(() => {
+        for (const root of roots) root.unmount();
+      });
+      roots.length = 0;
+      document.body.replaceChildren();
+    }
   });
 });

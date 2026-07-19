@@ -14,7 +14,7 @@ import { formatClockTime, formatElapsed, formatPercent, formatPublishTarget, for
 import { summarizeTaskRuns } from '../lib/workflow.js';
 import { STAGE_ORDER } from '../../../core/workflow/stageOrder.js';
 import type { MsqWebState, FeatureConfigPatch, WebSocketClientMessage } from '../../types.js';
-import type { TaskRun } from '../../../db/repo.js';
+import type { RunSummary, TaskRun } from '../../../db/repo.js';
 import type { RunBreakdown } from '../../../core/stats.js';
 import type { OutputLine } from '../hooks/useLocalOutput.js';
 import type { SessionStatusSnapshot, ToolCallRecord } from '../../../core/adapters/types.js';
@@ -52,28 +52,59 @@ const inputStyle: React.CSSProperties = {
 
 type TimedEntry = TranscriptEntry & { sortKey: number };
 
-function outputToTranscript(lines: OutputLine[]): TimedEntry[] {
-  return lines.map((line, i) => {
-    const source = line.source ?? 'stdout';
-    // Historical rows (and any adapter path that doesn't tag `level` itself) still
-    // carry the raw stderr log line, so re-detect error/warn from the text as a
-    // fallback rather than trusting only the persisted `level` column.
-    const level = line.level ?? detectStderrLevel(line.line);
-    const isError = level === 'error';
-    const type: TranscriptEntry['type'] = source === 'tool' || isError ? 'tool' : source === 'agent' ? 'agent' : 'system';
-    const text = level === 'warn' ? `[warn] ${line.line}` : line.line;
-    return {
-      id: line.id ?? i,
-      type,
-      status: isError ? 'error' : undefined,
-      tool: line.toolName ?? line.tool,
-      text,
-      command: type === 'tool' && !isError && source === 'tool' ? text : undefined,
-      output: type === 'tool' && isError ? text : undefined,
-      time: formatClockTime(line.createdAt),
-      sortKey: parseTimestampMs(line.createdAt) ?? i,
-    };
-  });
+const HEARTBEAT_DIAGNOSTIC_PATTERN = /^\[msq\]\s+.+?\s+running for\s+\d+s\s+\(stdout\s+\d+B\s+stderr\s+\d+B\s+idle\s+\d+s\)\s*(.*)$/;
+
+/** Heartbeat lines carry a verbose diagnostic payload
+ * (`[msq] <label> running for Ns (stdout XB stderr YB idle Zs) <suffix>`).
+ * Surface only the agent activity suffix (or "thinking…" when no suffix exists),
+ * mirroring the TUI formatHeartbeat behavior, so the Live Output tab doesn't get
+ * flooded by metrics that mean nothing to the user. */
+function formatHeartbeat(line: string): string {
+  const match = HEARTBEAT_DIAGNOSTIC_PATTERN.exec(line.trim());
+  if (!match) return line;
+  const suffix = (match[1] ?? '').trim();
+  return suffix || 'thinking…';
+}
+
+function isTerminalRunStatus(status: RunSummary['status']): boolean {
+  return status === 'done' || status === 'failed' || status === 'aborted' || status === 'blocked';
+}
+
+function outputToTranscript(lines: OutputLine[], runStatus: RunSummary['status']): TimedEntry[] {
+  const isTerminal = isTerminalRunStatus(runStatus);
+  return lines
+    .filter((line) => {
+      // After a run finishes, stale heartbeat rows persisted before completion would
+      // otherwise linger in the Live Output tab as "running for Ns" diagnostics —
+      // they no longer describe reality once the adapter exited, so drop them. While
+      // the run is still active, keep heartbeats as the live "thinking…" indicator.
+      if (line.source === 'heartbeat' && isTerminal) return false;
+      return true;
+    })
+    .map((line, i) => {
+      const source = line.source ?? 'stdout';
+      // Historical rows (and any adapter path that doesn't tag `level` itself) still
+      // carry the raw stderr log line, so re-detect error/warn from the text as a
+      // fallback rather than trusting only the persisted `level` column.
+      const level = line.level ?? detectStderrLevel(line.line);
+      const isError = level === 'error';
+      const type: TranscriptEntry['type'] = source === 'tool' || isError ? 'tool' : source === 'agent' ? 'agent' : 'system';
+      const raw = line.line;
+      const text = source === 'heartbeat'
+        ? formatHeartbeat(raw)
+        : level === 'warn' ? `[warn] ${raw}` : raw;
+      return {
+        id: line.id ?? i,
+        type,
+        status: isError ? 'error' : undefined,
+        tool: line.toolName ?? line.tool,
+        text,
+        command: type === 'tool' && !isError && source === 'tool' ? text : undefined,
+        output: type === 'tool' && isError ? text : undefined,
+        time: formatClockTime(line.createdAt),
+        sortKey: parseTimestampMs(line.createdAt) ?? i,
+      };
+    });
 }
 
 function toolCallsToTranscript(calls: ToolCallRecord[]): TimedEntry[] {
@@ -125,7 +156,7 @@ export function RunDetailPage({
   const stageGroups = useMemo(() => summarizeTaskRuns(detail?.taskRuns ?? [], feature?.workflow.stages), [detail, feature]);
   const toolCalls = useMemo(() => detail?.toolCalls ?? [], [detail]);
   const combinedOutput = useMemo(() => {
-    const lineEntries = outputToTranscript(run ? (linesByRun[run.runId] ?? []) : []).filter(
+    const lineEntries = outputToTranscript(run ? (linesByRun[run.runId] ?? []) : [], run?.status ?? 'running').filter(
       // Duplicate tool-echo lines are dropped once structured tool calls cover them, but
       // error lines (e.g. raw stderr router failures) have no structured counterpart and
       // must always surface, even when the run has other successful tool calls.

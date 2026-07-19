@@ -2,6 +2,8 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Sidebar, type SidebarNavItem } from './components/navigation/Sidebar.js';
 import { Modal } from './components/feedback/Modal.js';
 import { NotificationList, type NotificationListItem } from './components/feedback/NotificationList.js';
+import { ToastStack, type ToastStackItem } from './components/feedback/ToastStack.js';
+import type { ToastTone } from './components/feedback/Toast.js';
 import { useIsMobile, MobileTopBar, MobileTabBar } from './Responsive.js';
 import { useWebSocket } from './hooks/useWebSocket.js';
 import { useLocalOutput, type OutputLine } from './hooks/useLocalOutput.js';
@@ -33,6 +35,17 @@ function notificationTone(type: 'info' | 'notice'): NotificationListItem['tone']
   return type === 'notice' ? 'warn' : 'info';
 }
 
+/**
+ * Maps a UiNotification to a toast tone. Returns `null` when the notification
+ * shouldn't toast at all (e.g. low-priority info events that already surface in
+ * the bell feed). Prefers an explicit `tone` set by the server (so `run:failed`
+ * toasts as danger even though it's persisted as `type: 'notice'`).
+ */
+function notificationToneForToast(notification: { tone?: 'info' | 'ok' | 'warn' | 'danger'; type: 'info' | 'notice' }): ToastTone | null {
+  if (notification.tone) return notification.tone;
+  return notification.type === 'notice' ? 'warn' : null;
+}
+
 export function App(): React.JSX.Element {
   const isMobile = useIsMobile(860);
   const [route, setRoute] = useState<Route>(parseHash(window.location.hash));
@@ -40,12 +53,68 @@ export function App(): React.JSX.Element {
   const [notificationsOpen, setNotificationsOpen] = useState(false);
   const [state, setState] = useState<MsqWebState | null>(null);
   const [unread, setUnread] = useState(0);
+  const [toasts, setToasts] = useState<ToastStackItem[]>([]);
+  const seenNotificationIdsRef = useRef<Set<string>>(new Set());
   const [runDetails, setRunDetails] = useState<Record<number, RunDetailData>>({});
   const [runHistories, setRunHistories] = useState<Record<string, RunHistoryEntry[]>>({});
   const [workflowSaveResults, setWorkflowSaveResults] = useState<Record<string, FeatureConfigSaveResult>>({});
   const [projectActionResults, setProjectActionResults] = useState<Record<string, Extract<WebSocketServerMessage, { type: 'action:result' }>>>({});
   const { linesByRun, append, clear } = useLocalOutput();
   const hasReceivedStateRef = useRef(false);
+
+  const dismissToast = useCallback((id: string): void => {
+    setToasts((current) => current.filter((item) => item.id !== id));
+  }, []);
+
+  const pushToast = useCallback((item: ToastStackItem): void => {
+    setToasts((current) => {
+      // Replace a toast with the same id/source/message rather than stack
+      // duplicates — guards against noisy event bursts.
+      const filtered = current.filter((existing) => existing.id !== item.id);
+      return [...filtered, item].slice(-6);
+    });
+  }, []);
+
+  // Browser-side unhandled surface. A throw inside a React event handler or
+  // an async callback that no `.catch` owns becomes an unhandledrejection
+  // here; the user wouldn't otherwise see a thing. We surface it as a toast
+  // (and console.error) so the operator can react.
+  useEffect(() => {
+    function onError(event: ErrorEvent): void {
+      // The DOM lib types `ErrorEvent.error` as `any`, so we narrow it
+      // explicitly before doing anything with it — passing the raw value
+      // around would propagate the `any` and trigger unsafe-assignment.
+      const error: unknown = event.error;
+      const errorInstance = error instanceof Error ? error : null;
+      const message = errorInstance?.message ?? (event.message || 'Unknown runtime error');
+      console.error('[unhandled] error', message, errorInstance?.stack ?? error);
+      pushToast({
+        id: `error-${String(Date.now())}-${String(Math.random()).slice(2, 6)}`,
+        tone: 'danger',
+        source: 'Runtime error',
+        message,
+        ttlMs: 8000,
+      });
+    }
+    function onUnhandledRejection(event: PromiseRejectionEvent): void {
+      const reason: unknown = event.reason;
+      const message = reason instanceof Error ? reason.message : String(reason);
+      console.error('[unhandled] rejection', message);
+      pushToast({
+        id: `rejection-${String(Date.now())}-${String(Math.random()).slice(2, 6)}`,
+        tone: 'danger',
+        source: 'Unhandled promise',
+        message,
+        ttlMs: 8000,
+      });
+    }
+    window.addEventListener('error', onError);
+    window.addEventListener('unhandledrejection', onUnhandledRejection);
+    return (): void => {
+      window.removeEventListener('error', onError);
+      window.removeEventListener('unhandledrejection', onUnhandledRejection);
+    };
+  }, [pushToast]);
 
   useEffect(() => {
     function onHashChange(): void {
@@ -60,9 +129,30 @@ export function App(): React.JSX.Element {
   const onMessage = useCallback(
     (message: WebSocketServerMessage) => {
       if (message.type === 'state:full') {
+        const arrivedNotifications = message.payload.notifications;
         if (!hasReceivedStateRef.current) {
           hasReceivedStateRef.current = true;
-          setUnread(message.payload.notifications.length);
+          setUnread(arrivedNotifications.length);
+          // Seed the seen set with whatever was already queued on the server
+          // so the initial render doesn't fire a toast storm of historical
+          // events. From here on, only *new* notifications toast.
+          for (const notification of arrivedNotifications) {
+            seenNotificationIdsRef.current.add(notification.id);
+          }
+        } else {
+          for (const notification of arrivedNotifications) {
+            if (seenNotificationIdsRef.current.has(notification.id)) continue;
+            seenNotificationIdsRef.current.add(notification.id);
+            const tone = notificationToneForToast(notification);
+            if (!tone) continue;
+            pushToast({
+              id: notification.id,
+              tone,
+              source: notification.event ?? notification.type,
+              message: notification.message,
+              ttlMs: tone === 'danger' ? 8000 : 5200,
+            });
+          }
         }
         setState(message.payload);
       } else if (message.type === 'run:output') {
@@ -100,7 +190,7 @@ export function App(): React.JSX.Element {
         setProjectActionResults((current) => ({ ...current, [message.payload.requestId]: message }));
       }
     },
-    [append],
+    [append, pushToast],
   );
 
   const { send, error: connectionError } = useWebSocket(onMessage);
@@ -248,6 +338,7 @@ export function App(): React.JSX.Element {
         onOpenNotifications={() => { setNotificationsOpen(true); setUnread(0); }}
         onCloseNotifications={() => { setNotificationsOpen(false); }}
       />
+      <ToastStack items={toasts} onDismiss={dismissToast} />
     </ActiveProjectProvider>
   );
 }
