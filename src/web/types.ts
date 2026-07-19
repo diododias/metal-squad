@@ -115,6 +115,7 @@ export interface MsqWebState {
   runs: RunSummary[];
   gates: PendingApproval[];
   pendingFeatures: WorkItemCatalogEntry[];
+  doneFeatureIds: string[];
   runningTasks: RunningTaskSummary[];
   timeoutApprovals: TimeoutApprovalState[];
   featureCatalog: Record<string, WorkItemCatalogEntry>;

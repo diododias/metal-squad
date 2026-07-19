@@ -317,6 +317,7 @@ export function buildMsqWebState(): MsqWebState {
   const runs = collectRuns();
   const gates = collectGates();
   const pendingFeatures = collectPendingFeatures(runs, repo.repoId);
+  const doneFeatureIds = [...listCompletedFeatureIds(repo.repoId)];
   const runningTasks = collectRunningTasks();
   const timeoutApprovals = collectTimeoutApprovals();
   const featureCatalog = normalizeFeatureCatalog(getFeatureCatalog());
@@ -338,6 +339,7 @@ export function buildMsqWebState(): MsqWebState {
     runs,
     gates,
     pendingFeatures,
+    doneFeatureIds,
     runningTasks,
     timeoutApprovals,
     featureCatalog,
