@@ -1070,6 +1070,9 @@ export function createWebServer(options: {
       console.log(`[startFeature] featureId=${featureId}`);
       assertWritableDbPath();
       context = resolveWorkItemExecutionContext(featureId);
+      if (context.repoHealth === 'unavailable') {
+        throw new Error(`repository "${context.repoId}" is unavailable. Cannot start ${featureId}.`);
+      }
       resolveRuntimeConfig(context.cwd);
       const backlog = loadBacklogFromCatalog(context.repoId, context.cwd);
       validateBacklogSkills(backlog, context.cwd);

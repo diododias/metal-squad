@@ -1832,6 +1832,34 @@ describe('web server', () => {
     socket.close();
   });
 
+  it('does not spawn startFeature when the repository is unavailable, and explains why', async () => {
+    const { createWebServer } = await import('../../src/web/server.js');
+
+    mocks.resolveWorkItemExecutionContext.mockImplementation((workItemId: string) => ({
+      repoId: 'repo-1', cwd, projectId: 'project-1', epicId: 'epic-1', repoHealth: 'unavailable', workItemId,
+    }));
+
+    server = createWebServer({ host: '127.0.0.1', port: 0, auth: 'token', token: 'secret' });
+    await new Promise<void>((resolve) => server!.server.listen(0, '127.0.0.1', resolve));
+    const address = server!.server.address() as { port: number };
+    const socket = new WebSocket(`ws://127.0.0.1:${address.port}/ws`);
+    await waitForOpen(socket);
+    socket.send(JSON.stringify({ type: 'auth', token: 'secret' }));
+    await waitForSocketMessage(socket);
+
+    const noticePromise = waitForMatchingMessage(
+      socket,
+      (message) => message.type === 'ui:notice' && JSON.stringify(message).includes('unavailable'),
+    );
+    socket.send(JSON.stringify({ type: 'action:startFeature', featureId: 'feat-1' }));
+
+    await noticePromise;
+    expect(mocks.spawn).not.toHaveBeenCalled();
+    expect(mocks.loadBacklogFromCatalog).not.toHaveBeenCalled();
+
+    socket.close();
+  });
+
   it('spawns resume with override args when the override tool is available', async () => {
     const { createWebServer } = await import('../../src/web/server.js');
 
