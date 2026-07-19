@@ -55,6 +55,11 @@ const mocks = vi.hoisted(() => ({
     create: vi.fn(),
     update: vi.fn(),
   },
+  repoLinkService: {
+    link: vi.fn(),
+    move: vi.fn(),
+    unlink: vi.fn(),
+  },
   epicService: {
     create: vi.fn(),
     update: vi.fn(),
@@ -143,6 +148,7 @@ vi.mock('../../src/core/adapters/index.js', () => ({
 
 vi.mock('../../src/core/projectService.js', () => ({
   projectService: mocks.projectService,
+  repoLinkService: mocks.repoLinkService,
 }));
 
 vi.mock('../../src/core/epicService.js', () => ({
@@ -790,6 +796,71 @@ describe('web server', () => {
     socket.send(JSON.stringify({ type: 'action:createProject', requestId: 'unauthorized-1', name: 'Nope' }));
     await waitForClose(socket);
     expect(mocks.projectService.create).not.toHaveBeenCalled();
+  });
+
+  it('links a registered repository through a correlated WebSocket action and broadcasts state', async () => {
+    const { createWebServer } = await import('../../src/web/server.js');
+    mocks.repoLinkService.link.mockReturnValue({ entity: { repoId: 'repo-2', projectId: 'project-1', path: '/private/repo-2', position: 0 }, revision: null });
+    server = createWebServer({ host: '127.0.0.1', port: 0, auth: 'token', token: 'secret' });
+    await new Promise<void>((resolve) => server!.server.listen(0, '127.0.0.1', resolve));
+    const address = server!.server.address() as { port: number };
+    const socket = new WebSocket(`ws://127.0.0.1:${address.port}/ws`);
+    await waitForOpen(socket);
+    socket.send(JSON.stringify({ type: 'auth', token: 'secret' }));
+    await waitForSocketMessage(socket);
+
+    const result = waitForMatchingMessage(socket, (message) => message.type === 'action:result' && (message.payload as { requestId?: string }).requestId === 'repo-link-1');
+    const state = waitForMessageType(socket, 'state:full');
+    socket.send(JSON.stringify({ type: 'action:linkRepo', requestId: 'repo-link-1', projectId: 'project-1', repoId: 'repo-2' }));
+
+    const received = await result;
+    expect(received).toMatchObject({ payload: { requestId: 'repo-link-1', ok: true, entity: { repoId: 'repo-2', projectId: 'project-1' } } });
+    expect(JSON.stringify(received)).not.toContain('/private/repo-2');
+    await state;
+    expect(mocks.repoLinkService.link).toHaveBeenCalledWith('project-1', { repoId: 'repo-2' });
+    socket.close();
+  });
+
+  it('maps REPO_IN_USE to an actionable move/unlink error without leaking repository paths', async () => {
+    const { createWebServer } = await import('../../src/web/server.js');
+    mocks.repoLinkService.move.mockImplementation(() => { throw { code: 'REPO_IN_USE', message: '/private/repo has work items' }; });
+    server = createWebServer({ host: '127.0.0.1', port: 0, auth: 'token', token: 'secret' });
+    await new Promise<void>((resolve) => server!.server.listen(0, '127.0.0.1', resolve));
+    const address = server!.server.address() as { port: number };
+    const socket = new WebSocket(`ws://127.0.0.1:${address.port}/ws`);
+    await waitForOpen(socket);
+    socket.send(JSON.stringify({ type: 'auth', token: 'secret' }));
+    await waitForSocketMessage(socket);
+
+    const result = waitForMatchingMessage(socket, (message) => message.type === 'action:result' && (message.payload as { requestId?: string }).requestId === 'repo-move-1');
+    socket.send(JSON.stringify({ type: 'action:moveRepo', requestId: 'repo-move-1', repoId: 'repo-2', toProjectId: 'project-2' }));
+
+    expect(await result).toEqual({ type: 'action:result', payload: { requestId: 'repo-move-1', ok: false, error: { code: 'REPO_IN_USE', message: 'This repository has Work Items, so it cannot be moved or unlinked.' } } });
+    socket.close();
+  });
+
+  it('moves and unlinks repositories through their dedicated WebSocket actions', async () => {
+    const { createWebServer } = await import('../../src/web/server.js');
+    mocks.repoLinkService.move.mockReturnValue({ entity: { repoId: 'repo-2', projectId: 'project-2', path: '/private/repo-2', position: 0 }, revision: null });
+    mocks.repoLinkService.unlink.mockReturnValue({ entity: { repoId: 'repo-2', unlinked: true }, revision: null });
+    server = createWebServer({ host: '127.0.0.1', port: 0, auth: 'token', token: 'secret' });
+    await new Promise<void>((resolve) => server!.server.listen(0, '127.0.0.1', resolve));
+    const address = server!.server.address() as { port: number };
+    const socket = new WebSocket(`ws://127.0.0.1:${address.port}/ws`);
+    await waitForOpen(socket);
+    socket.send(JSON.stringify({ type: 'auth', token: 'secret' }));
+    await waitForSocketMessage(socket);
+
+    const moved = waitForMatchingMessage(socket, (message) => message.type === 'action:result' && (message.payload as { requestId?: string }).requestId === 'repo-move-2');
+    socket.send(JSON.stringify({ type: 'action:moveRepo', requestId: 'repo-move-2', repoId: 'repo-2', toProjectId: 'project-2' }));
+    expect(await moved).toMatchObject({ payload: { ok: true, entity: { repoId: 'repo-2', projectId: 'project-2' } } });
+    expect(mocks.repoLinkService.move).toHaveBeenCalledWith('repo-2', 'project-2');
+
+    const unlinked = waitForMatchingMessage(socket, (message) => message.type === 'action:result' && (message.payload as { requestId?: string }).requestId === 'repo-unlink-1');
+    socket.send(JSON.stringify({ type: 'action:unlinkRepo', requestId: 'repo-unlink-1', repoId: 'repo-2' }));
+    expect(await unlinked).toMatchObject({ payload: { ok: true, entity: { repoId: 'repo-2', unlinked: true } } });
+    expect(mocks.repoLinkService.unlink).toHaveBeenCalledWith('repo-2');
+    socket.close();
   });
 
   it('includes featureCatalog and backlogSettings in full state', async () => {

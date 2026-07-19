@@ -259,6 +259,34 @@ export type ProjectActionResult =
       };
     };
 
+export type RepositoryActionErrorCode =
+  | 'INVALID_PAYLOAD'
+  | 'PROJECT_NOT_FOUND'
+  | 'REPO_ALREADY_LINKED'
+  | 'REPO_IN_USE'
+  | 'REPOSITORY_ACTION_FAILED';
+
+export interface RepositoryActionError {
+  code: RepositoryActionErrorCode;
+  message: string;
+}
+
+/** Minimal mutation acknowledgement; repository paths stay server-side. */
+export type RepositoryActionEntity =
+  | { repoId: string; projectId: string; position: number }
+  | { repoId: string; unlinked: boolean }
+  | null;
+
+export type RepositoryActionResult =
+  | {
+      type: 'action:result';
+      payload: { requestId: string; ok: true; entity: RepositoryActionEntity };
+    }
+  | {
+      type: 'action:result';
+      payload: { requestId: string; ok: false; error: RepositoryActionError };
+    };
+
 export type EpicActionErrorCode =
   | 'INVALID_PAYLOAD'
   | 'PROJECT_NOT_FOUND'
@@ -302,6 +330,9 @@ export type WebSocketClientMessage =
       expectedRevision: number;
       patch: { name?: string; description?: string | null; position?: number };
     }
+  | { type: 'action:linkRepo'; requestId: string; projectId: string; repoId: string }
+  | { type: 'action:moveRepo'; requestId: string; repoId: string; toProjectId: string }
+  | { type: 'action:unlinkRepo'; requestId: string; repoId: string }
   | { type: 'action:createEpic'; requestId: string; projectId: string; title: string; description?: string | null }
   | {
       type: 'action:updateEpic';
@@ -344,6 +375,7 @@ export type WebSocketServerMessage =
   | { type: 'state:full'; payload: MsqWebState }
   | FeatureConfigSaveResult
   | ProjectActionResult
+  | RepositoryActionResult
   | EpicActionResult
   | { type: 'run:detail'; payload: { runId: number; taskRuns: TaskRun[]; breakdown: RunBreakdown | null; sessionStatus: SessionStatusSnapshot | null; statusHistory: SessionStatusSnapshot[]; toolCalls: ToolCallRecord[] } }
   | { type: 'run:history'; payload: { featureId: string; runs: RunHistoryEntry[] } }

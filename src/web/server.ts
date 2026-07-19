@@ -37,10 +37,10 @@ import { clearSecret, setSecret } from '../security/secrets.js';
 import { updateCatalogFeature, updateCatalogTask, updateCatalogDefaults, type FeaturePatch, type CatalogDefaultsPatch } from '../db/backlogCatalog.js';
 import type { Feature, Task } from '../core/backlog/schema.js';
 import { epicService } from '../core/epicService.js';
-import { projectService } from '../core/projectService.js';
+import { projectService, repoLinkService } from '../core/projectService.js';
 import { buildMsqWebState, appendNotification, resetWebStateCaches } from './state.js';
 import { createWebAuth, isAllowedHostHeader, isAllowedOrigin, timingSafeEqualStrings } from './auth.js';
-import { EpicActionMessageSchema, ProjectActionMessageSchema } from './schemas.js';
+import { EpicActionMessageSchema, ProjectActionMessageSchema, RepositoryActionMessageSchema } from './schemas.js';
 import type {
   AppConfigPatch,
   FeatureConfigPatch,
@@ -52,6 +52,9 @@ import type {
   ProjectDefaultsPatch,
   ProjectActionError,
   ProjectActionResult,
+  RepositoryActionError,
+  RepositoryActionEntity,
+  RepositoryActionResult,
   RunChangesPayload,
   SecretPatch,
   TaskConfigPatch,
@@ -723,6 +726,14 @@ export function createWebServer(options: {
         }
         break;
       }
+      case 'action:linkRepo':
+      case 'action:moveRepo':
+      case 'action:unlinkRepo': {
+        const result = handleRepositoryAction(message);
+        sendTo(client, result);
+        if (result.payload.ok) reconcileWebState(featureCwd, { forceBroadcast: true });
+        break;
+      }
       case 'action:createEpic':
       case 'action:updateEpic': {
         const result = handleEpicAction(message);
@@ -943,6 +954,36 @@ export function createWebServer(options: {
           error: projectActionError(error),
         },
       };
+    }
+  }
+
+  function repositoryActionError(error: unknown): RepositoryActionError {
+    const code = typeof error === 'object' && error !== null ? (error as { code?: unknown }).code : undefined;
+    if (code === 'PROJECT_NOT_FOUND') return { code, message: 'Project was not found.' };
+    if (code === 'REPO_ALREADY_LINKED') return { code, message: 'This repository is already linked to another Project.' };
+    if (code === 'REPO_IN_USE') return { code, message: 'This repository has Work Items, so it cannot be moved or unlinked.' };
+    return { code: 'REPOSITORY_ACTION_FAILED', message: 'Could not update repository links.' };
+  }
+
+  function handleRepositoryAction(message: unknown): RepositoryActionResult {
+    const parsed = RepositoryActionMessageSchema.safeParse(message);
+    if (!parsed.success) {
+      return { type: 'action:result', payload: { requestId: actionResultRequestId(message), ok: false, error: { code: 'INVALID_PAYLOAD', message: 'Invalid repository action payload.' } } };
+    }
+    try {
+      const entity = parsed.data.type === 'action:linkRepo'
+        ? repoLinkService.link(parsed.data.projectId, { repoId: parsed.data.repoId }).entity
+        : parsed.data.type === 'action:moveRepo'
+          ? repoLinkService.move(parsed.data.repoId, parsed.data.toProjectId).entity
+          : repoLinkService.unlink(parsed.data.repoId).entity;
+      const safeEntity: RepositoryActionEntity = entity === null
+        ? null
+        : 'unlinked' in entity
+          ? entity
+          : { repoId: entity.repoId, projectId: entity.projectId, position: entity.position };
+      return { type: 'action:result', payload: { requestId: parsed.data.requestId, ok: true, entity: safeEntity } };
+    } catch (error) {
+      return { type: 'action:result', payload: { requestId: parsed.data.requestId, ok: false, error: repositoryActionError(error) } };
     }
   }
 

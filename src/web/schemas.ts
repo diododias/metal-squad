@@ -32,6 +32,30 @@ export const ProjectActionMessageSchema = z.discriminatedUnion('type', [
 
 export type ProjectActionMessage = z.infer<typeof ProjectActionMessageSchema>;
 
+/** Repository links intentionally accept registered repo IDs only. Path
+ * registration stays behind PRJ-15B's canonicalization/allowlist boundary. */
+export const RepositoryActionMessageSchema = z.discriminatedUnion('type', [
+  z.object({
+    type: z.literal('action:linkRepo'),
+    requestId: RequestIdSchema,
+    projectId: z.string().min(1),
+    repoId: z.string().min(1),
+  }).strict(),
+  z.object({
+    type: z.literal('action:moveRepo'),
+    requestId: RequestIdSchema,
+    repoId: z.string().min(1),
+    toProjectId: z.string().min(1),
+  }).strict(),
+  z.object({
+    type: z.literal('action:unlinkRepo'),
+    requestId: RequestIdSchema,
+    repoId: z.string().min(1),
+  }).strict(),
+]);
+
+export type RepositoryActionMessage = z.infer<typeof RepositoryActionMessageSchema>;
+
 const EpicPatchSchema = z.object({
   title: z.string().optional(),
   description: z.string().nullable().optional(),
