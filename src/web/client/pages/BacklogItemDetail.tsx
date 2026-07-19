@@ -22,6 +22,7 @@ export interface BacklogItemDetailProps {
 export function BacklogItemDetail({
   state,
   featureId,
+  runHistories,
   onSubscribeHistory,
   onBack,
   onStart,
@@ -31,6 +32,12 @@ export function BacklogItemDetail({
   const feature = state.featureCatalog[featureId];
   const [specDraft, setSpecDraft] = useState('');
   const doneFeatureIds = new Set(state.doneFeatureIds);
+  const failedFeatureIds = new Set<string>();
+  for (const [fid, history] of Object.entries(runHistories)) {
+    if (history.some(run => run.status === 'failed')) {
+      failedFeatureIds.add(fid);
+    }
+  }
   const blockedByDependencies = feature?.dependsOn.filter((dep) => !doneFeatureIds.has(dep)) ?? [];
   const repositories = 'repositories' in state ? state.repositories : [];
   const repoUnhealthy = repositories.find((repo) => repo.repoId === feature?.repoId)?.health === 'unavailable';
@@ -124,6 +131,7 @@ export function BacklogItemDetail({
           onSaveConfig={(patch) => { onSaveConfig(featureId, patch); }}
           workflowSaveResult={workflowSaveResult}
           doneFeatureIds={doneFeatureIds}
+          failedFeatureIds={failedFeatureIds}
         />
       </div>
     </div>
