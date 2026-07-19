@@ -2,7 +2,7 @@ import type { MsqEvents } from '../core/events/types.js';
 import type { SessionStatusSnapshot, ToolCallRecord } from '../core/adapters/types.js';
 import type { ProjectRepoRow, ProjectRow, RunHistoryEntry, RunSummary, RunningTaskSummary, StatsRunRow, TaskRun } from '../db/repo.js';
 import type { PendingApproval } from '../ui/hooks/useGates.js';
-import type { FeatureCatalogEntry, BacklogSettings } from '../ui/catalog.js';
+import type { WorkItemCatalogEntry, BacklogSettings } from '../ui/catalog.js';
 import type { RunBreakdown } from '../core/stats.js';
 import type { ThemeRoleName } from '../ui/theme/types.js';
 import type { AppConfigPatch as ConfigAppConfigPatch, Config, NotificationChannelConfig, NotificationsPatch, ToolRegistryEntry } from '../config/index.js';
@@ -61,6 +61,28 @@ export type WebRuntimeConfig = Omit<Config, 'notifications'> & {
   };
 };
 
+export interface ProjectSummary {
+  projectId: string;
+  name: string;
+  description: string | null;
+  revision: number;
+  counts: { epics: number; workItems: number; archived: number };
+  activeRuns: number;
+  tokens: TokenStats;
+  archivedAt: string | null;
+}
+
+export interface RepositorySummary {
+  repoId: string;
+  label: string;
+  projectId: string | null;
+  health: 'ok' | 'unavailable' | 'unchecked';
+  lastCheckedAt: string | null;
+  /** Omitted from the default broadcast; a future authenticated,
+   * route-specific response may expose it. */
+  path?: string;
+}
+
 /** Read-only diagnostics collected by the backend for the Settings page. */
 export interface EnvironmentInfo {
   databasePath: string;
@@ -75,13 +97,16 @@ export interface EnvironmentInfo {
 }
 
 export interface MsqWebState {
+  revision: number;
   repoLabel: string;
+  projects: ProjectSummary[];
+  repositories: RepositorySummary[];
   runs: RunSummary[];
   gates: PendingApproval[];
-  pendingFeatures: FeatureCatalogEntry[];
+  pendingFeatures: WorkItemCatalogEntry[];
   runningTasks: RunningTaskSummary[];
   timeoutApprovals: TimeoutApprovalState[];
-  featureCatalog: Record<string, FeatureCatalogEntry>;
+  featureCatalog: Record<string, WorkItemCatalogEntry>;
   backlogSettings: BacklogSettings;
   environment: EnvironmentInfo;
   stats: {

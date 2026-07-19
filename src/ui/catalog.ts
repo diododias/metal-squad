@@ -4,13 +4,13 @@ import { mergeExecutionDefaults, resolveConfigSnapshot, type ResolvedConfigSourc
 import type { ToolCapabilities } from '../core/adapters/types.js';
 import { loadBacklogFromCatalog } from '../core/backlog/load.js';
 import { resolveRepo } from '../core/repo.js';
-import { getCatalogMeta } from '../db/backlogCatalog.js';
+import { getCatalogMeta, listCatalogWorkItemRelations } from '../db/backlogCatalog.js';
 import { DefaultsSchema, type Budget, type Defaults, type Retry, type Task, type Workflow } from '../core/backlog/schema.js';
 import { logCaughtError } from '../core/events/index.js';
 
 const DESCRIPTION_CHAR_LIMIT = 4000;
 
-export interface FeatureCatalogEntry {
+export interface WorkItemCatalogEntry {
   id: string;
   /** Persistent catalog identity; kept separate from display-only fallbacks. */
   persistedId?: string;
@@ -18,6 +18,11 @@ export interface FeatureCatalogEntry {
   /** Parent epic identity — surfaced muted on web kanban cards. */
   epicId?: string;
   epicTitle?: string;
+  /** Global hierarchy relation. Never inferred from a client-side selection. */
+  projectId?: string | null;
+  repoId?: string | null;
+  repoLabel?: string | null;
+  workItemType: 'feature';
   skills: string[];
   tool: string;
   model?: string;
@@ -49,6 +54,9 @@ export interface FeatureCatalogEntry {
   /** Dynamic projection for manual start guardrails. */
   pendingDependencies?: string[];
 }
+
+/** Compatibility alias while existing UI call sites migrate to the domain name. */
+export type FeatureCatalogEntry = WorkItemCatalogEntry;
 
 /** F31 section 5b: project-level settings shown alongside per-feature config. */
 export interface BacklogSettings {
@@ -101,7 +109,7 @@ function readFeatureDescription(
   }
 }
 
-let cachedCatalog: Record<string, FeatureCatalogEntry> = {};
+let cachedCatalog: Record<string, WorkItemCatalogEntry> = {};
 let cachedSettings: BacklogSettings = DEFAULT_BACKLOG_SETTINGS;
 
 /** Catalog now lives in the DB (populated by `msq backlog load`) rather than
@@ -113,33 +121,43 @@ function loadCatalogAndSettings(cwd: string): void {
     const snapshot = resolveConfigSnapshot(cwd);
     const { repoId } = resolveRepo(cwd);
     const backlog = loadBacklogFromCatalog(repoId, cwd);
+    const relations = new Map(
+      listCatalogWorkItemRelations(repoId).map((relation) => [relation.featureId, relation]),
+    );
     const resolvedDefaults = mergeExecutionDefaults(DefaultsSchema.parse({}), backlog.defaults);
     cachedCatalog = Object.fromEntries(
       backlog.epics.flatMap((epic) =>
-        epic.features.map((feature) => [
-          feature.id,
-          {
-            id: feature.id,
-            persistedId: feature.id,
-            title: feature.title,
-            epicId: epic.id,
-            epicTitle: epic.title,
-            skills: feature.skills ?? [],
-            tool: feature.tool,
-            model: feature.model,
-            effort: feature.effort,
-            thinking: feature.thinking,
-            description: readFeatureDescription(feature.spec, feature.specFile, cwd),
-            tasks: feature.tasks,
-            dependsOn: feature.dependsOn,
-            workflow: feature.workflow,
-            retry: feature.retry,
-            specFile: feature.specFile,
-            context: feature.context,
-            maxTokens: feature.maxTokens,
-            autoStart: feature.autoStart,
-          } satisfies FeatureCatalogEntry,
-        ]),
+        epic.features.map((feature) => {
+          const relation = relations.get(feature.id);
+          return [
+            feature.id,
+            {
+              id: feature.id,
+              persistedId: feature.id,
+              title: feature.title,
+              epicId: epic.id,
+              epicTitle: epic.title,
+              projectId: relation?.projectId ?? null,
+              repoId: relation?.repoId ?? repoId,
+              repoLabel: relation?.repoLabel ?? null,
+              workItemType: 'feature' as const,
+              skills: feature.skills ?? [],
+              tool: feature.tool,
+              model: feature.model,
+              effort: feature.effort,
+              thinking: feature.thinking,
+              description: readFeatureDescription(feature.spec, feature.specFile, cwd),
+              tasks: feature.tasks,
+              dependsOn: feature.dependsOn,
+              workflow: feature.workflow,
+              retry: feature.retry,
+              specFile: feature.specFile,
+              context: feature.context,
+              maxTokens: feature.maxTokens,
+              autoStart: feature.autoStart,
+            } satisfies WorkItemCatalogEntry,
+          ];
+        }),
       ),
     );
     const catalogMeta = getCatalogMeta(repoId);
@@ -162,7 +180,7 @@ function loadCatalogAndSettings(cwd: string): void {
   }
 }
 
-export function getFeatureCatalog(cwd = process.cwd()): Record<string, FeatureCatalogEntry> {
+export function getFeatureCatalog(cwd = process.cwd()): Record<string, WorkItemCatalogEntry> {
   loadCatalogAndSettings(cwd);
   return cachedCatalog;
 }
@@ -173,10 +191,10 @@ export function getBacklogSettings(cwd = process.cwd()): BacklogSettings {
 }
 
 export function getPendingFeatures(
-  catalog: Record<string, FeatureCatalogEntry>,
+  catalog: Record<string, WorkItemCatalogEntry>,
   doneFeatureIds: Set<string>,
   activeFeatureIds: Set<string>,
-): FeatureCatalogEntry[] {
+): WorkItemCatalogEntry[] {
   return Object.values(catalog)
     .filter((f) => !doneFeatureIds.has(f.id) && !activeFeatureIds.has(f.id))
     .map((feature) => ({
