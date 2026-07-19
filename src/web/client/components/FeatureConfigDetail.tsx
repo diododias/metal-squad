@@ -92,9 +92,10 @@ export interface FeatureConfigDetailProps {
   onSaveTaskConfig?: (taskId: string, patch: TaskConfigPatch) => void;
   workflowSaveResult?: FeatureConfigSaveResult;
   toolIds?: string[];
+  doneFeatureIds?: Set<string>;
 }
 
-export function FeatureConfigDetail({ feature, backlogSettings, approvalChannels = ['telegram'], onSaveConfig, workflowSaveResult, toolIds = ['claude', 'codex', 'opencode'] }: FeatureConfigDetailProps): React.JSX.Element {
+export function FeatureConfigDetail({ feature, backlogSettings, approvalChannels = ['telegram'], onSaveConfig, workflowSaveResult, toolIds = ['claude', 'codex', 'opencode'], doneFeatureIds }: FeatureConfigDetailProps): React.JSX.Element {
   const stages = feature.workflow.stages;
   const [selectedStage, setSelectedStage] = useState(stages[0] ?? 'specify');
   const [draftPrompt, setDraftPrompt] = useState('');
@@ -439,9 +440,15 @@ export function FeatureConfigDetail({ feature, backlogSettings, approvalChannels
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '6px 0' }}>
           <span style={{ color: 'var(--text-dim)' }}>pendingDependencies</span>
           <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
-            {(feature.pendingDependencies?.length ?? 0) > 0
-              ? feature.pendingDependencies?.map((d) => <Tag key={d}>{d}</Tag>)
-              : <span style={{ fontSize: 'var(--text-xs)', color: 'var(--accent-ok)' }}>ready</span>}
+            {feature.dependsOn.length === 0
+              ? <span style={{ fontSize: 'var(--text-xs)', color: 'var(--text-faint)' }}>none</span>
+              : doneFeatureIds
+                ? feature.dependsOn.some((dep) => !doneFeatureIds.has(dep))
+                  ? feature.dependsOn.filter((dep) => !doneFeatureIds.has(dep)).map((d) => <Tag key={d}>{d}</Tag>)
+                  : <span style={{ fontSize: 'var(--text-xs)', color: 'var(--accent-ok)' }}>ready</span>
+                : (feature.pendingDependencies?.length ?? 0) > 0
+                  ? feature.pendingDependencies?.map((d) => <Tag key={d}>{d}</Tag>)
+                  : <span style={{ fontSize: 'var(--text-xs)', color: 'var(--accent-ok)' }}>ready</span>}
           </div>
         </div>
       </ConfigCard>

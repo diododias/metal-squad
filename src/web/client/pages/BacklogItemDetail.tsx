@@ -30,7 +30,8 @@ export function BacklogItemDetail({
 }: BacklogItemDetailProps): React.JSX.Element {
   const feature = state.featureCatalog[featureId];
   const [specDraft, setSpecDraft] = useState('');
-  const blockedByDependencies = feature?.pendingDependencies ?? [];
+  const doneFeatureIds = new Set(state.doneFeatureIds);
+  const blockedByDependencies = feature?.dependsOn.filter((dep) => !doneFeatureIds.has(dep)) ?? [];
   const repositories = 'repositories' in state ? state.repositories : [];
   const repoUnhealthy = repositories.find((repo) => repo.repoId === feature?.repoId)?.health === 'unavailable';
   const canStart = blockedByDependencies.length === 0 && !repoUnhealthy;
@@ -122,6 +123,7 @@ export function BacklogItemDetail({
           toolIds={state.runtimeConfig.tools.map((tool) => tool.id)}
           onSaveConfig={(patch) => { onSaveConfig(featureId, patch); }}
           workflowSaveResult={workflowSaveResult}
+          doneFeatureIds={doneFeatureIds}
         />
       </div>
     </div>

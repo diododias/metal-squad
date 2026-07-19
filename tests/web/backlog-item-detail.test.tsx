@@ -94,6 +94,83 @@ describe('BacklogItemDetail repo health guard', () => {
   });
 });
 
+describe('BacklogItemDetail dependency guard', () => {
+  it('disables start when dependencies are not done', () => {
+    const state = baseState({
+      featureCatalog: {
+        'feat-1': {
+          id: 'feat-1',
+          title: 'Feature One',
+          repoId: 'repo-1',
+          projectId: null,
+          repoLabel: null,
+          tool: 'claude',
+          effort: 'medium',
+          skills: [],
+          dependsOn: ['dep-a', 'dep-b'],
+          pendingDependencies: ['dep-a', 'dep-b'],
+          workflow: { mode: 'staged', stages: ['specify'], approvals: { channel: 'telegram', autoAdvance: false }, autoAdvance: false, syncTasksToBacklog: true, sessionPolicy: { mode: 'isolated', alwaysIsolatedStages: [] } },
+        },
+      },
+      doneFeatureIds: [],
+    } as unknown as Partial<MsqWebState>);
+    const html = render(state);
+    const button = startButtonMarkup(html);
+    expect(button).toContain('disabled=""');
+    expect(button).toContain('title="Pending dependencies: dep-a, dep-b"');
+  });
+
+  it('enables start when all dependencies are done', () => {
+    const state = baseState({
+      featureCatalog: {
+        'feat-1': {
+          id: 'feat-1',
+          title: 'Feature One',
+          repoId: 'repo-1',
+          projectId: null,
+          repoLabel: null,
+          tool: 'claude',
+          effort: 'medium',
+          skills: [],
+          dependsOn: ['dep-a'],
+          pendingDependencies: [],
+          workflow: { mode: 'staged', stages: ['specify'], approvals: { channel: 'telegram', autoAdvance: false }, autoAdvance: false, syncTasksToBacklog: true, sessionPolicy: { mode: 'isolated', alwaysIsolatedStages: [] } },
+        },
+      },
+      doneFeatureIds: ['dep-a'],
+    } as unknown as Partial<MsqWebState>);
+    const html = render(state);
+    const button = startButtonMarkup(html);
+    expect(button).toContain('title="Start feature"');
+    expect(button).not.toContain('disabled');
+  });
+
+  it('disables start when only some dependencies are done', () => {
+    const state = baseState({
+      featureCatalog: {
+        'feat-1': {
+          id: 'feat-1',
+          title: 'Feature One',
+          repoId: 'repo-1',
+          projectId: null,
+          repoLabel: null,
+          tool: 'claude',
+          effort: 'medium',
+          skills: [],
+          dependsOn: ['dep-a', 'dep-b'],
+          pendingDependencies: ['dep-b'],
+          workflow: { mode: 'staged', stages: ['specify'], approvals: { channel: 'telegram', autoAdvance: false }, autoAdvance: false, syncTasksToBacklog: true, sessionPolicy: { mode: 'isolated', alwaysIsolatedStages: [] } },
+        },
+      },
+      doneFeatureIds: ['dep-a'],
+    } as unknown as Partial<MsqWebState>);
+    const html = render(state);
+    const button = startButtonMarkup(html);
+    expect(button).toContain('disabled=""');
+    expect(button).toContain('title="Pending dependencies: dep-b"');
+  });
+});
+
 describe('BacklogItemDetail Project/repo context', () => {
   function stateWithItemContext(): MsqWebState {
     return baseState({
