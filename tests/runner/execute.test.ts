@@ -33,6 +33,7 @@ const mockAttachEventNotifications = vi.fn();
 const mockAttachRunPersistence = vi.fn();
 const mockCreateSkillRegistry = vi.fn();
 const mockGetCatalogFeature = vi.fn();
+const mockGetFeatureIdOwner = vi.fn();
 const mockListCompletedFeatureIds = vi.fn();
 const mockListRunsForTui = vi.fn();
 const mockGetLatestPublishedRunForFeature = vi.fn();
@@ -69,6 +70,7 @@ vi.mock('../../src/core/repo.js', () => ({
 
 vi.mock('../../src/db/backlogCatalog.js', () => ({
   getCatalogFeature: mockGetCatalogFeature,
+  getFeatureIdOwner: mockGetFeatureIdOwner,
 }));
 
 vi.mock('../../src/db/repo.js', () => ({

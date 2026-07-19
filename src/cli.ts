@@ -13,6 +13,7 @@ import { registerWeb } from './commands/web.js';
 import { registerDaemon } from './commands/daemon.js';
 import { registerProjects } from './commands/projects.js';
 import { registerEpics } from './commands/epics.js';
+import { registerWorkItems } from './commands/workItems.js';
 import { initConfig } from './config/index.js';
 
 export async function run(argv: string[]): Promise<void> {
@@ -39,6 +40,7 @@ export async function run(argv: string[]): Promise<void> {
   registerDaemon(program);
   registerProjects(program);
   registerEpics(program);
+  registerWorkItems(program);
 
   await program.parseAsync(argv);
 }

@@ -633,6 +633,7 @@ function migrate(d: Database.Database): void {
   ensureEpicColumn('revision', `ALTER TABLE backlog_epics ADD COLUMN revision INTEGER NOT NULL DEFAULT 1`);
   d.exec(`CREATE INDEX IF NOT EXISTS idx_backlog_epics_project ON backlog_epics(project_id)`);
   d.exec(`CREATE INDEX IF NOT EXISTS idx_backlog_epics_deleted_at ON backlog_epics(deleted_at)`);
+  d.exec(`CREATE INDEX IF NOT EXISTS idx_backlog_epics_project_lifecycle ON backlog_epics(project_id, archived_at, deleted_at, position)`);
 
   const backlogFeatureColumns = d
     .prepare(`PRAGMA table_info(backlog_features)`)
@@ -647,12 +648,15 @@ function migrate(d: Database.Database): void {
   ensureBacklogFeatureColumn('deleted_at', `ALTER TABLE backlog_features ADD COLUMN deleted_at TEXT`);
   ensureBacklogFeatureColumn('revision', `ALTER TABLE backlog_features ADD COLUMN revision INTEGER NOT NULL DEFAULT 1`);
   d.exec(`CREATE INDEX IF NOT EXISTS idx_backlog_features_deleted_at ON backlog_features(deleted_at)`);
+  d.exec(`CREATE INDEX IF NOT EXISTS idx_backlog_features_repo_epic_lifecycle ON backlog_features(repo_id, epic_id, archived_at, deleted_at, position)`);
 
   ensureRunColumn('project_id', `ALTER TABLE runs ADD COLUMN project_id TEXT REFERENCES projects(project_id)`);
   d.exec(`CREATE INDEX IF NOT EXISTS idx_runs_project ON runs(project_id)`);
+  d.exec(`CREATE INDEX IF NOT EXISTS idx_runs_project_status ON runs(project_id, status, id DESC)`);
 
   ensurePipelineColumn('project_id', `ALTER TABLE pipelines ADD COLUMN project_id TEXT REFERENCES projects(project_id)`);
   d.exec(`CREATE INDEX IF NOT EXISTS idx_pipelines_project ON pipelines(project_id)`);
+  d.exec(`CREATE INDEX IF NOT EXISTS idx_pipelines_project_feature ON pipelines(project_id, feature_id)`);
 }
 
 function toDbAccessError(error: unknown, dbPath: string): Error {

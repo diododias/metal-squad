@@ -23,14 +23,14 @@ O README atual descreve o produto **single-repo** e o modelo antigo. Sua estrutu
 Inheritance" (`:421`). Precisa refletir: novo `msq projects`/`epics`/`work-items`
 (PRJ-03B), `db backup`/`backlog export` (PRJ-20), seleção local por cliente
 (PRJ-10), roteamento de cwd por repo (PRJ-15B), archive/delete/restore (PRJ-17–19)
-e rename "Project defaults" → "Repository defaults" (ROADMAP §Terminologia; hoje o
-termo "Projeto" aparece em `:353`).
+e a troca do rótulo legado de defaults por Repository para **Repository defaults**
+(ROADMAP §Terminologia; hoje o termo "Projeto" aparece em `:353`).
 
 Guarda de validação já existe e é o ponto de extensão: `verify:doc-refs`
 (`scripts/verify-doc-references.mjs`, `package.json:28`), agregado em
 `verify:repo` = `doc-refs && skill-shims && backlog` (`package.json:31`). Esta
 feature amplia `verify-doc-references.mjs` para validar os links do épico e
-**recusar termos proibidos/obsoletos** (ex.: "Project defaults" fora de nota de
+**recusar termos proibidos/obsoletos** (ex.: o rótulo legado de defaults fora de nota de
 compatibilidade, símbolos `Demand*`/`BacklogItem*`, paths absolutos/referências ao
 vault em docs canônicos do repo).
 
@@ -55,7 +55,7 @@ persistência legada (ROADMAP §Compatibilidade), não removidos.
 
 - Atualizar README, constituição, `.claude/rules`, exemplos e help do CLI.
 - Documentar DB como estado operacional; specs/ADRs como intenção; YAML v2/v3 como import/export.
-- Substituir "Project defaults" legado por "Repository defaults" em UX/docs e registrar aliases temporários de código.
+- Substituir o rótulo legado de defaults por "Repository defaults" em UX/docs e registrar aliases temporários de código.
 - Documentar Project→Epic→Work Item→Task, repo alvo, type, templates, archive/delete e restore.
 - Documentar `Work Item` como termo canônico e `feature|bug` como Work Item types; `backlog_features`/`feature_id` ficam identificados como persistência legada.
 - Documentar daemon global, seleção local por cliente, roteamento de cwd e health de repos.

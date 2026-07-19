@@ -63,9 +63,33 @@ export interface BacklogCatalogDiff {
   unchangedFeatures: string[];
 }
 
+export type SeedItemKind = 'catalog' | 'epic' | 'feature' | 'task';
+export type SeedItemStatus = 'created' | 'unchanged' | 'conflict' | 'invalid' | 'skipped';
+
+export interface SeedConflictDetail {
+  path: string;
+  databaseValue: unknown;
+  importedValue: unknown;
+  suggestedAction: string;
+}
+
+export interface SeedPlanItem {
+  kind: SeedItemKind;
+  id: string;
+  status: SeedItemStatus;
+  conflict?: SeedConflictDetail;
+  reason?: string;
+}
+
+export interface BacklogSeedPlan {
+  mode: 'seed';
+  repoId: string;
+  items: SeedPlanItem[];
+}
+
 /** Returns every feature ID, including archived rows, because IDs are never reused. */
-export function listOccupiedFeatureIds(): Set<string> {
-  const db = getReadonlyDbOrNull();
+export function listOccupiedFeatureIds(database?: Database.Database): Set<string> {
+  const db = database ?? getReadonlyDbOrNull();
   if (!db) return new Set();
   const rows = db.prepare(`SELECT feature_id FROM backlog_features`).all() as { feature_id: string }[];
   return new Set(rows.map((row) => row.feature_id));
@@ -111,32 +135,128 @@ interface CatalogMetaRow {
   budget_json: string | null;
 }
 
-export interface CatalogWorkItemRelation {
-  featureId: string;
-  projectId: string | null;
-  repoId: string;
-  repoLabel: string;
+/** Lifecycle projections intentionally remain separate so the active read path
+ * never has to mix archive/delete flags with its hot query. */
+export type CatalogLifecycle = 'active' | 'archived' | 'deleted';
+
+export interface WorkItemScope {
+  projectId?: string;
+  epicId?: string;
+  repoId?: string;
+  lifecycle?: CatalogLifecycle;
+  limit?: number;
+  offset?: number;
 }
 
-/** Relationship-only projection for catalog clients displaying the global
- * Project/Repository hierarchy. */
-export function listCatalogWorkItemRelations(repoId: string): CatalogWorkItemRelation[] {
+/** One SQL row per Work Item, including its complete hierarchy.  Relations
+ * that cannot be resolved are deliberately returned with an integrity issue
+ * rather than being silently assigned to a previous/current project. */
+export interface WorkItemCatalogEntry {
+  featureId: string;
+  epicId: string;
+  repoId: string | null;
+  projectId: string | null;
+  repoLabel: string | null;
+  epicTitle: string;
+  title: string;
+  position: number;
+  dataJson: string;
+  workItemType: 'feature';
+  integrityIssue?: string;
+}
+
+export interface ScopeCounts {
+  epics: number;
+  workItems: number;
+  activeRuns: number;
+}
+
+export function resolveScopeRepos(projectId: string): string[] {
   const db = getReadonlyDbOrNull();
   if (!db) return [];
-  return (db.prepare(`
-    SELECT f.feature_id AS featureId, e.project_id AS projectId,
-           f.repo_id AS repoId, r.path AS repoPath
-      FROM backlog_features f
-      JOIN backlog_epics e ON e.epic_id = f.epic_id
-      JOIN repos r ON r.repo_id = f.repo_id
-     WHERE f.repo_id = ? AND f.archived_at IS NULL AND f.deleted_at IS NULL
-  `).all(repoId) as { featureId: string; projectId: string | null; repoId: string; repoPath: string }[])
-    .map((row) => ({
+  return (db.prepare(
+    `SELECT repo_id FROM project_repos WHERE project_id = ? ORDER BY position ASC, repo_id ASC`,
+  ).all(projectId) as { repo_id: string }[]).map((row) => row.repo_id);
+}
+
+function lifecycleWhere(lifecycle: CatalogLifecycle): string {
+  switch (lifecycle) {
+    case 'archived': return `(f.archived_at IS NOT NULL OR e.archived_at IS NOT NULL)`;
+    case 'deleted': return `(f.deleted_at IS NOT NULL OR e.deleted_at IS NOT NULL)`;
+    case 'active': return `(f.archived_at IS NULL AND f.deleted_at IS NULL AND e.archived_at IS NULL AND e.deleted_at IS NULL)`;
+  }
+}
+
+/** Aggregate catalog query.  It uses joins rather than per-item lookups and
+ * asserts both ownership edges: Work Item -> repo and Work Item -> Epic ->
+ * Project. */
+export function listWorkItemsByScope(scope: WorkItemScope = {}): WorkItemCatalogEntry[] {
+  const db = getReadonlyDbOrNull();
+  if (!db) return [];
+  const lifecycle = scope.lifecycle ?? 'active';
+  const clauses = [lifecycleWhere(lifecycle)];
+  const params: (string | number)[] = [];
+  if (scope.projectId) { clauses.push('e.project_id = ?'); params.push(scope.projectId); }
+  if (scope.epicId) { clauses.push('f.epic_id = ?'); params.push(scope.epicId); }
+  if (scope.repoId) { clauses.push('f.repo_id = ?'); params.push(scope.repoId); }
+  const pagination = scope.limit === undefined ? '' : ' LIMIT ? OFFSET ?';
+  if (scope.limit !== undefined) {
+    params.push(scope.limit, scope.offset ?? 0);
+  }
+  const rows = db.prepare(
+    `SELECT f.feature_id AS featureId, f.epic_id AS epicId, f.repo_id AS featureRepoId,
+            e.project_id AS projectId, pr.repo_id AS linkedRepoId, pr.project_id AS linkedProjectId, r.path AS repoPath,
+            e.title AS epicTitle, f.title, f.position, f.data_json AS dataJson
+       FROM backlog_features f
+       JOIN backlog_epics e ON e.epic_id = f.epic_id
+       LEFT JOIN project_repos pr ON pr.repo_id = f.repo_id
+       LEFT JOIN repos r ON r.repo_id = f.repo_id
+      WHERE ${clauses.join(' AND ')}
+      ORDER BY e.position ASC, f.position ASC, f.feature_id ASC${pagination}`,
+  ).all(...params) as {
+    featureId: string; epicId: string; featureRepoId: string; projectId: string | null;
+    linkedRepoId: string | null; linkedProjectId: string | null; repoPath: string | null; epicTitle: string; title: string; position: number; dataJson: string;
+  }[];
+  return rows.map((row) => {
+    const issues: string[] = [];
+    if (!row.projectId) issues.push('Work Item epic has no Project.');
+    if (!row.linkedRepoId) issues.push('Work Item repository is not linked to a Project.');
+    if (row.projectId && row.linkedProjectId && row.projectId !== row.linkedProjectId) {
+      issues.push('Work Item repository Project differs from its Epic Project.');
+    }
+    return {
       featureId: row.featureId,
+      epicId: row.epicId,
+      repoId: row.featureRepoId,
       projectId: row.projectId,
-      repoId: row.repoId,
-      repoLabel: row.repoPath.split(/[\\/]/).filter(Boolean).at(-1) ?? row.repoId,
-    }));
+      repoLabel: row.repoPath ? row.repoPath.split(/[\\/]/).filter(Boolean).at(-1) ?? row.repoPath : null,
+      epicTitle: row.epicTitle,
+      title: row.title,
+      position: row.position,
+      dataJson: row.dataJson,
+      workItemType: 'feature' as const,
+      ...(issues.length > 0 ? { integrityIssue: issues.join(' ') } : {}),
+    };
+  });
+}
+
+export function countByScope(scope: Pick<WorkItemScope, 'projectId'> = {}): ScopeCounts {
+  const db = getReadonlyDbOrNull();
+  if (!db) return { epics: 0, workItems: 0, activeRuns: 0 };
+  const projectWhere = scope.projectId ? ' AND e.project_id = ?' : '';
+  const runWhere = scope.projectId ? ' WHERE project_id = ?' : '';
+  const projectParam = scope.projectId ? [scope.projectId] : [];
+  const epics = (db.prepare(
+    `SELECT COUNT(*) AS count FROM backlog_epics e WHERE e.archived_at IS NULL AND e.deleted_at IS NULL${projectWhere}`,
+  ).get(...projectParam) as { count: number }).count;
+  const workItems = (db.prepare(
+    `SELECT COUNT(*) AS count FROM backlog_features f JOIN backlog_epics e ON e.epic_id = f.epic_id
+      WHERE f.archived_at IS NULL AND f.deleted_at IS NULL AND e.archived_at IS NULL AND e.deleted_at IS NULL${projectWhere}`,
+  ).get(...projectParam) as { count: number }).count;
+  const activeRuns = (db.prepare(
+    `SELECT COUNT(*) AS count FROM runs${runWhere}${runWhere ? ' AND' : ' WHERE'} status = 'running'`,
+  ).get(...projectParam) as { count: number }).count;
+  return { epics, workItems, activeRuns };
 }
 
 export function getCatalogMeta(repoId: string): CatalogMetaRow | undefined {
@@ -153,10 +273,11 @@ export function listCatalogEpics(repoId: string): CatalogEpicRow[] {
   return db
     .prepare(
       `SELECT epic_id, title, position, data_json FROM backlog_epics
-       WHERE repo_id = ? AND archived_at IS NULL
+       WHERE (repo_id = ? OR project_id = (SELECT project_id FROM project_repos WHERE repo_id = ?))
+         AND archived_at IS NULL
        ORDER BY position ASC`,
     )
-    .all(repoId) as CatalogEpicRow[];
+    .all(repoId, repoId) as CatalogEpicRow[];
 }
 
 export function listCatalogFeatures(repoId: string, epicId?: string): CatalogFeatureRow[] {
@@ -219,6 +340,154 @@ export function listCatalogTasks(repoId: string, featureId?: string): CatalogTas
 
 function flattenFeatures(backlog: BacklogV2): { epic: Epic; feature: Feature }[] {
   return backlog.epics.flatMap((epic) => epic.features.map((feature) => ({ epic, feature })));
+}
+
+function stableJson(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map(stableJson).join(',')}]`;
+  if (value && typeof value === 'object') {
+    const record = value as Record<string, unknown>;
+    return `{${Object.keys(record).sort().map((key) => `${JSON.stringify(key)}:${stableJson(record[key])}`).join(',')}}`;
+  }
+  return JSON.stringify(value);
+}
+
+function firstJsonDifference(databaseValue: unknown, importedValue: unknown, path = '$'): SeedConflictDetail | undefined {
+  if (stableJson(databaseValue) === stableJson(importedValue)) return undefined;
+  if (Array.isArray(databaseValue) && Array.isArray(importedValue)) {
+    const length = Math.max(databaseValue.length, importedValue.length);
+    for (let index = 0; index < length; index += 1) {
+      const difference = firstJsonDifference(databaseValue[index], importedValue[index], `${path}[${String(index)}]`);
+      if (difference) return difference;
+    }
+  }
+  if (databaseValue && importedValue && typeof databaseValue === 'object' && typeof importedValue === 'object'
+    && !Array.isArray(databaseValue) && !Array.isArray(importedValue)) {
+    const keys = new Set([...Object.keys(databaseValue), ...Object.keys(importedValue)]);
+    for (const key of [...keys].sort()) {
+      const difference = firstJsonDifference(
+        Reflect.get(databaseValue, key),
+        Reflect.get(importedValue, key),
+        `${path}.${key}`,
+      );
+      if (difference) return difference;
+    }
+  }
+  return {
+    path,
+    databaseValue,
+    importedValue,
+    suggestedAction: 'Mantenha o valor gerenciado no DB ou crie um novo item com outro ID.',
+  };
+}
+
+function epicComparable(epic: Epic): unknown {
+  const { features: _features, ...metadata } = epic;
+  return metadata;
+}
+
+/**
+ * Produces the one authoritative non-destructive import plan used by both
+ * `backlog load --dry-run` and its write path. Existing catalog rows are
+ * never candidates for update or archival.
+ */
+export function planBacklogSeed(backlog: BacklogV2, repoId: string): BacklogSeedPlan {
+  const db = getReadonlyDbOrNull();
+  const items: SeedPlanItem[] = [];
+  const existingEpics = new Map(listCatalogEpics(repoId).map((row) => [row.epic_id, JSON.parse(row.data_json) as Epic]));
+  const existingFeatures = new Map(listCatalogFeatures(repoId).map((row) => [row.feature_id, FeatureSchema.parse(JSON.parse(row.data_json))]));
+  const owners = new Map<string, string>();
+  if (db) {
+    for (const row of db.prepare(`SELECT feature_id, repo_id FROM backlog_features`).all() as { feature_id: string; repo_id: string }[]) {
+      owners.set(row.feature_id, row.repo_id);
+    }
+  }
+
+  items.push({
+    kind: 'catalog',
+    id: repoId,
+    status: getCatalogMeta(repoId) ? 'skipped' : 'created',
+    ...(getCatalogMeta(repoId) ? { reason: 'Project defaults are managed outside seed import.' } : {}),
+  });
+
+  for (const epic of backlog.epics) {
+    const storedEpic = existingEpics.get(epic.id);
+    const conflict = storedEpic && firstJsonDifference(epicComparable(storedEpic), epicComparable(epic));
+    items.push({
+      kind: 'epic', id: epic.id,
+      status: !storedEpic ? 'created' : conflict ? 'conflict' : 'unchanged',
+      ...(conflict ? { conflict } : {}),
+    });
+
+    for (const feature of epic.features) {
+      const owner = owners.get(feature.id);
+      const crossRepoDependency = feature.dependsOn.find((dependency) => {
+        const dependencyOwner = owners.get(dependency);
+        return dependencyOwner !== undefined && dependencyOwner !== repoId;
+      });
+      if ((owner && owner !== repoId) || crossRepoDependency) {
+        items.push({
+          kind: 'feature', id: feature.id, status: 'invalid',
+          reason: owner && owner !== repoId
+            ? `Feature ID belongs to repository "${owner}".`
+            : `Dependency "${crossRepoDependency ?? 'unknown'}" belongs to another repository.`,
+        });
+        continue;
+      }
+      const storedFeature = existingFeatures.get(feature.id);
+      const normalizedFeature = FeatureSchema.parse(feature);
+      const featureConflict = storedFeature && firstJsonDifference(storedFeature, normalizedFeature);
+      const status: SeedItemStatus = !storedFeature ? 'created' : featureConflict ? 'conflict' : 'unchanged';
+      items.push({ kind: 'feature', id: feature.id, status, ...(featureConflict ? { conflict: featureConflict } : {}) });
+      for (const task of feature.tasks) {
+        items.push({
+          kind: 'task', id: `${feature.id}/${task.id}`,
+          status: status === 'created' ? 'created' : status === 'unchanged' ? 'unchanged' : 'skipped',
+          ...(status === 'conflict' ? { reason: `Feature "${feature.id}" has a conflict and its tasks are not mutable by seed.` } : {}),
+        });
+      }
+    }
+  }
+  return { mode: 'seed', repoId, items };
+}
+
+/** Applies only the `created` entries of a seed plan in one SQLite transaction. */
+export function applyBacklogSeed(backlog: BacklogV2, plan: BacklogSeedPlan): void {
+  const db = getDb('readwrite');
+  const created = new Set(plan.items.filter((item) => item.status === 'created').map((item) => `${item.kind}:${item.id}`));
+  const epicRepoIdNullable = isNullableColumn(db, 'backlog_epics', 'repo_id');
+  db.transaction(() => {
+    if (created.has(`catalog:${plan.repoId}`)) {
+      db.prepare(
+        `INSERT INTO backlog_catalog_meta (repo_id, repo, version, defaults_json, budget_json, updated_at)
+         VALUES (?, ?, ?, ?, ?, datetime('now'))`,
+      ).run(plan.repoId, backlog.repo, backlog.version, JSON.stringify(backlog.defaults), backlog.budget ? JSON.stringify(backlog.budget) : null);
+    }
+    const insertEpic = db.prepare(
+      `INSERT INTO backlog_epics (epic_id, project_id, repo_id, title, position, data_json, archived_at, updated_at)
+       VALUES (?, (SELECT project_id FROM project_repos WHERE repo_id = ?), ${epicRepoIdNullable ? 'NULL' : '?'}, ?, ?, ?, NULL, datetime('now'))`,
+    );
+    const insertFeature = db.prepare(
+      `INSERT INTO backlog_features (feature_id, epic_id, repo_id, title, depends_on, spec_file, position, data_json, archived_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL, datetime('now'))`,
+    );
+    const insertTask = db.prepare(
+      `INSERT INTO backlog_tasks (task_id, feature_id, title, status, position, data_json, archived_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, NULL, datetime('now'))`,
+    );
+    backlog.epics.forEach((epic, epicIndex) => {
+      if (created.has(`epic:${epic.id}`)) {
+        if (epicRepoIdNullable) insertEpic.run(epic.id, plan.repoId, epic.title, epicIndex, JSON.stringify(epic));
+        else insertEpic.run(epic.id, plan.repoId, plan.repoId, epic.title, epicIndex, JSON.stringify(epic));
+      }
+      epic.features.forEach((feature, featureIndex) => {
+        if (!created.has(`feature:${feature.id}`)) return;
+        insertFeature.run(feature.id, epic.id, plan.repoId, feature.title, JSON.stringify(feature.dependsOn), feature.specFile ?? null, featureIndex, JSON.stringify(feature));
+        feature.tasks.forEach((task, taskIndex) => {
+          insertTask.run(task.id, feature.id, task.title, task.status, taskIndex, JSON.stringify(task));
+        });
+      });
+    });
+  })();
 }
 
 /** Read-only comparison against the currently stored catalog for `repoId`; writes nothing. */
