@@ -1,5 +1,6 @@
 export type DomainErrorCode =
   | 'PROJECT_NOT_FOUND'
+  | 'EPIC_NOT_FOUND'
   | 'REPO_ALREADY_LINKED'
   | 'REPO_IN_USE'
   | 'REVISION_CONFLICT';
@@ -18,6 +19,13 @@ export class ProjectNotFoundError extends DomainError {
   public constructor(projectId: string) {
     super('PROJECT_NOT_FOUND', `Project not found: ${projectId}`);
     this.name = 'ProjectNotFoundError';
+  }
+}
+
+export class EpicNotFoundError extends DomainError {
+  public constructor(epicId: string) {
+    super('EPIC_NOT_FOUND', `Epic not found: ${epicId}`);
+    this.name = 'EpicNotFoundError';
   }
 }
 
@@ -40,10 +48,11 @@ export class RevisionConflictError extends DomainError {
     public readonly projectId: string,
     public readonly expectedRevision: number,
     public readonly actualRevision: number,
+    entityName = 'Project',
   ) {
     super(
       'REVISION_CONFLICT',
-      `Project ${projectId} has revision ${String(actualRevision)}; expected ${String(expectedRevision)}`,
+      `${entityName} ${projectId} has revision ${String(actualRevision)}; expected ${String(expectedRevision)}`,
     );
     this.name = 'RevisionConflictError';
   }

@@ -11,6 +11,8 @@ import { registerConfig } from './commands/config.js';
 import { registerUi } from './commands/ui.js';
 import { registerWeb } from './commands/web.js';
 import { registerDaemon } from './commands/daemon.js';
+import { registerProjects } from './commands/projects.js';
+import { registerEpics } from './commands/epics.js';
 import { initConfig } from './config/index.js';
 
 export async function run(argv: string[]): Promise<void> {
@@ -35,6 +37,8 @@ export async function run(argv: string[]): Promise<void> {
   registerUi(program);
   registerWeb(program);
   registerDaemon(program);
+  registerProjects(program);
+  registerEpics(program);
 
   await program.parseAsync(argv);
 }
