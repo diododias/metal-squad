@@ -74,8 +74,8 @@ export function EpicEditor({ epic, completedWorkItems, totalWorkItems, send, act
     handledResults.current.add(draft.pendingRequestId);
     setDraft((current) => {
       if (current.pendingRequestId !== result.payload.requestId) return current;
-      if (result.payload.ok && 'entity' in result.payload) {
-        return { ...current, expectedRevision: result.payload.entity.revision, pendingRequestId: undefined, error: undefined };
+      if (result.payload.ok && 'entity' in result.payload && result.payload.entity !== null && 'revision' in result.payload.entity) {
+        return { ...current, expectedRevision: (result.payload.entity as { revision: number }).revision, pendingRequestId: undefined, error: undefined };
       }
       return {
         ...current,

@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { Button } from '../components/core/Button.js';
 import { FeatureConfigDetail } from '../components/FeatureConfigDetail.js';
 import { PageHeader } from '../PageHeader.js';
+import { useActiveProject } from '../hooks/useActiveProject.js';
 import type { MsqWebState, FeatureConfigPatch, FeatureConfigSaveResult, TaskConfigPatch } from '../../types.js';
 import type { RunHistoryEntry } from '../../../db/repo.js';
 
@@ -30,7 +31,16 @@ export function BacklogItemDetail({
   const feature = state.featureCatalog[featureId];
   const [specDraft, setSpecDraft] = useState('');
   const blockedByDependencies = feature?.pendingDependencies ?? [];
-  const canStart = blockedByDependencies.length === 0;
+  const repositories = 'repositories' in state ? state.repositories : [];
+  const repoUnhealthy = repositories.find((repo) => repo.repoId === feature?.repoId)?.health === 'unavailable';
+  const canStart = blockedByDependencies.length === 0 && !repoUnhealthy;
+  const { activeProjectId, setActiveProject } = useActiveProject();
+  const itemProjectId = feature?.projectId ?? null;
+  const projects = 'projects' in state ? state.projects : [];
+  const projectName = projects.find((project) => project.projectId === itemProjectId)?.name;
+  function returnToItemContext(): void {
+    if (itemProjectId && itemProjectId !== activeProjectId) setActiveProject(itemProjectId);
+  }
 
   useEffect(() => onSubscribeHistory(featureId), [featureId, onSubscribeHistory]);
   useEffect(() => { setSpecDraft(feature?.description ?? ''); }, [feature?.description]);
@@ -57,10 +67,10 @@ export function BacklogItemDetail({
         title={feature.title}
         breadcrumb={
           <span>
-            <a href="#/board" style={{ color: 'var(--text-dim)' }}>
+            <a href="#/board" onClick={returnToItemContext} style={{ color: 'var(--text-dim)' }}>
               Board
             </a>{' '}
-            / {featureId} · not started yet
+            / {projectName ? `${projectName} · ` : ''}{feature.repoLabel ? `${feature.repoLabel} · ` : ''}{featureId} · not started yet
           </span>
         }
         actions={
@@ -69,12 +79,18 @@ export function BacklogItemDetail({
               variant="primary"
               size="sm"
               disabled={!canStart}
-              title={!canStart ? `Pending dependencies: ${blockedByDependencies.join(', ')}` : 'Start feature'}
+              title={
+                repoUnhealthy
+                  ? 'Repository unavailable — cannot start.'
+                  : blockedByDependencies.length > 0
+                    ? `Pending dependencies: ${blockedByDependencies.join(', ')}`
+                    : 'Start feature'
+              }
               onClick={() => { onStart(featureId); }}
             >
               start feature
             </Button>
-            <Button variant="neutral" size="sm" onClick={onBack}>
+            <Button variant="neutral" size="sm" onClick={() => { returnToItemContext(); onBack(); }}>
               close
             </Button>
           </>

@@ -7,6 +7,8 @@ import { PageHeader } from '../PageHeader.js';
 import { formatElapsed, formatPublishTarget, formatTokens, getPublishStatusLabel } from '../lib/format.js';
 import type { MsqWebState } from '../../types.js';
 import type { RunSummary } from '../../../db/repo.js';
+import { useActiveProject } from '../hooks/useActiveProject.js';
+import { scopedRuns } from '../lib/scope.js';
 
 export interface RunsPageProps {
   state: MsqWebState;
@@ -16,10 +18,11 @@ export interface RunsPageProps {
 type SortKey = 'startedAt' | 'totalTokens' | 'status';
 
 export function RunsPage({ state, onOpenRun }: RunsPageProps): React.JSX.Element {
+  const { activeProjectId } = useActiveProject();
   const [sortKey, setSortKey] = useState<SortKey>('startedAt');
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc');
 
-  const rows = [...state.runs].sort((a, b) => {
+  const rows = [...scopedRuns(state, activeProjectId)].sort((a, b) => {
     const dir = sortDir === 'asc' ? 1 : -1;
     if (sortKey === 'totalTokens') return ((a.totalTokens ?? 0) - (b.totalTokens ?? 0)) * dir;
     return (a[sortKey] > b[sortKey] ? 1 : -1) * dir;

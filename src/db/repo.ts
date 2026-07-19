@@ -11,6 +11,7 @@ import {
   RepositoryUnavailableError,
   RepoAlreadyLinkedError,
   RepoInUseError,
+  RepoNotLinkedToProjectError,
   RevisionConflictError,
 } from './errors.js';
 import { listOccupiedFeatureIds } from './backlogCatalog.js';
@@ -45,6 +46,18 @@ export function registerRepo(repoId: string, path: string): void {
        ON CONFLICT(repo_id) DO UPDATE SET path = excluded.path`,
     )
     .run(repoId, path);
+}
+
+export interface RegisteredRepoRow {
+  repoId: string;
+  path: string;
+}
+
+export function getRegisteredRepo(repoId: string): RegisteredRepoRow | null {
+  if (!hasDbFile()) return null;
+  return (getDb('readonly').prepare(
+    `SELECT repo_id AS repoId, path FROM repos WHERE repo_id = ?`,
+  ).get(repoId) as RegisteredRepoRow | undefined) ?? null;
 }
 
 export interface AuditContext {
@@ -169,6 +182,17 @@ export interface CreateWorkItemInput {
   description?: string | null;
   dependsOn?: string[];
   audit?: AuditContext;
+}
+
+/** Minimal persisted ownership data needed before a Work Item can touch the
+ * filesystem. The caller deliberately owns path canonicalization and access
+ * checks so DB reads stay cheap and side-effect free. */
+export interface WorkItemExecutionTarget {
+  workItemId: string;
+  repoId: string;
+  repoPath: string;
+  projectId: string;
+  epicId: string;
 }
 
 type ProjectRepoLinkRow = Omit<ProjectRepoRow, 'path'>;
@@ -350,6 +374,19 @@ export function createWorkItem(input: CreateWorkItemInput): WorkItemRow {
   });
 }
 
+/** Finds the persisted repo/project ownership for a live Work Item. */
+export function getWorkItemExecutionTarget(workItemId: string): WorkItemExecutionTarget | null {
+  if (!hasDbFile()) return null;
+  return (getDb('readonly').prepare(
+    `SELECT f.feature_id AS workItemId, f.repo_id AS repoId, r.path AS repoPath,
+            e.project_id AS projectId, f.epic_id AS epicId
+       FROM backlog_features f
+       JOIN backlog_epics e ON e.epic_id = f.epic_id
+       JOIN repos r ON r.repo_id = f.repo_id
+      WHERE f.feature_id = ? AND f.archived_at IS NULL AND f.deleted_at IS NULL`,
+  ).get(workItemId) as WorkItemExecutionTarget | undefined) ?? null;
+}
+
 export function updateProject(
   projectId: string,
   patch: UpdateProjectPatch,
@@ -445,11 +482,14 @@ export function moveRepo(
 
 export function unlinkRepo(
   repoId: string,
-  options: { audit?: AuditContext } = {},
+  options: { audit?: AuditContext; projectId?: string } = {},
 ): boolean {
   return withTransaction((database) => {
     const before = getProjectRepoLink(database, repoId);
     if (!before) return false;
+    if (options.projectId !== undefined && before.projectId !== options.projectId) {
+      throw new RepoNotLinkedToProjectError(repoId, options.projectId);
+    }
     assertRepoHasNoWorkItems(database, repoId, before.projectId);
     database.prepare(`DELETE FROM project_repos WHERE repo_id = ?`).run(repoId);
     recordAuditEvent(database, options.audit, 'project_repo', repoId, 'unlink', before, null);

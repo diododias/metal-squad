@@ -6,6 +6,8 @@ import { TrendBars, type TrendPoint } from '../components/data/TrendBars.js';
 import { PageHeader } from '../PageHeader.js';
 import { formatTokens } from '../lib/format.js';
 import type { MsqWebState } from '../../types.js';
+import { useActiveProject } from '../hooks/useActiveProject.js';
+import { scopedRuns, scopedStatsRows } from '../lib/scope.js';
 
 export interface AnalyticsPageProps {
   state: MsqWebState;
@@ -28,13 +30,14 @@ function dayKey(iso: string): string {
 }
 
 export function AnalyticsPage({ state }: AnalyticsPageProps): React.JSX.Element {
+  const { activeProjectId } = useActiveProject();
   const [period, setPeriod] = useState<Period>('week');
 
   const filteredRows = useMemo(() => {
     const since = new Date();
     since.setDate(since.getDate() - PERIOD_DAYS[period]);
-    return state.dashboard.rows.filter((row) => new Date(row.startedAt) >= since);
-  }, [state.dashboard.rows, period]);
+    return scopedStatsRows(state, activeProjectId, state.dashboard.rows).filter((row) => new Date(row.startedAt) >= since);
+  }, [state, activeProjectId, period]);
 
   const totalTokens = filteredRows.reduce((sum, r) => sum + (r.totalTokens ?? 0), 0);
   const sessionCount = filteredRows.length;
@@ -73,7 +76,7 @@ export function AnalyticsPage({ state }: AnalyticsPageProps): React.JSX.Element 
       .map(([featureId, value]) => ({ id: featureId, label: <FeatureIdentity title={state.featureCatalog[featureId]?.title} id={featureId} />, value }));
   }, [filteredRows, state.featureCatalog]);
 
-  const activeFeatures = state.runs.filter((r) => r.status === 'running' || r.status === 'blocked').length;
+  const activeFeatures = scopedRuns(state, activeProjectId).filter((r) => r.status === 'running' || r.status === 'blocked').length;
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>

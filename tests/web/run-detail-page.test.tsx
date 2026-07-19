@@ -4,6 +4,7 @@ import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { RunDetailPage } from '../../src/web/client/pages/RunDetailPage.js';
+import { ActiveProjectContext } from '../../src/web/client/hooks/useActiveProject.js';
 import type { MsqWebState, WebSocketClientMessage } from '../../src/web/types.js';
 import type { RunSummary } from '../../src/db/repo.js';
 
@@ -473,5 +474,107 @@ describe('RunDetailPage mobile close control', () => {
 
     expect(Array.from(container.querySelectorAll('button')).some((b) => b.textContent === 'close')).toBe(true);
     expect(container.querySelector('[aria-label="Close run detail"]')).toBeNull();
+  });
+});
+
+describe('RunDetailPage Project/repo context', () => {
+  function stateWithItemContext(run: RunSummary): MsqWebState {
+    return {
+      runs: [run],
+      projects: [{ projectId: 'project-a', name: 'Project A', position: 0, description: null, revision: 1, counts: { epics: 0, workItems: 0, archived: 0 }, activeRuns: 0, tokens: { status: 'ready', totalTokens: 0, error: null }, archivedAt: null }],
+      featureCatalog: {
+        'feat-1': {
+          id: 'feat-1',
+          title: 'Feature One',
+          projectId: 'project-a',
+          repoLabel: 'repo-one',
+          workflow: { stages: ['implement'], stepGuidance: {} },
+        },
+      },
+      backlogSettings: { stageSkills: {} },
+      runtimeConfig: { web: { statusSpinner: false }, tools: [{ id: 'claude' }, { id: 'codex' }, { id: 'opencode' }], notifications: { channels: [] } },
+    } as unknown as MsqWebState;
+  }
+
+  it('shows the item Project name and repo label in the breadcrumb', () => {
+    const container = document.createElement('div');
+    document.body.append(container);
+    const root = createRoot(container);
+    roots.push(root);
+    act(() => {
+      root.render(
+        <RunDetailPage
+          state={stateWithItemContext(makeRun())}
+          featureId="feat-1"
+          runDetails={{}}
+          linesByRun={{}}
+          onSubscribeRun={() => () => undefined}
+          onBack={() => undefined}
+          send={vi.fn()}
+        />,
+      );
+    });
+
+    expect(container.textContent).toContain('Project A · repo-one · feat-1');
+  });
+
+  it('switches the active project context to the item Project before returning from a mismatched selection', () => {
+    const setActiveProject = vi.fn();
+    const onBack = vi.fn();
+    const container = document.createElement('div');
+    document.body.append(container);
+    const root = createRoot(container);
+    roots.push(root);
+
+    act(() => {
+      root.render(
+        <ActiveProjectContext.Provider value={{ activeProjectId: 'project-other', activeProject: null, setActiveProject, selectionInvalidated: false }}>
+          <RunDetailPage
+            state={stateWithItemContext(makeRun())}
+            featureId="feat-1"
+            runDetails={{}}
+            linesByRun={{}}
+            onSubscribeRun={() => () => undefined}
+            onBack={onBack}
+            send={vi.fn()}
+          />
+        </ActiveProjectContext.Provider>,
+      );
+    });
+
+    const closeButton = Array.from(container.querySelectorAll('button')).find((button) => button.textContent === 'close');
+    act(() => { closeButton?.click(); });
+
+    expect(setActiveProject).toHaveBeenCalledWith('project-a');
+    expect(onBack).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not switch context when the item already belongs to the active Project', () => {
+    const setActiveProject = vi.fn();
+    const container = document.createElement('div');
+    document.body.append(container);
+    const root = createRoot(container);
+    roots.push(root);
+
+    act(() => {
+      root.render(
+        <ActiveProjectContext.Provider value={{ activeProjectId: 'project-a', activeProject: null, setActiveProject, selectionInvalidated: false }}>
+          <RunDetailPage
+            state={stateWithItemContext(makeRun())}
+            featureId="feat-1"
+            runDetails={{}}
+            linesByRun={{}}
+            onSubscribeRun={() => () => undefined}
+            onBack={() => undefined}
+            send={vi.fn()}
+          />
+        </ActiveProjectContext.Provider>,
+      );
+    });
+
+    const closeButton = Array.from(container.querySelectorAll('button')).find((button) => button.textContent === 'close');
+    act(() => { closeButton?.click(); });
+
+    expect(setActiveProject).not.toHaveBeenCalled();
   });
 });
