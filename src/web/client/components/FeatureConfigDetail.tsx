@@ -56,7 +56,7 @@ function sameStageOrder(left: readonly string[], right: readonly string[]): bool
   return left.length === right.length && left.every((stage, index) => stage === right[index]);
 }
 
-function DependencyTag({ depId, doneFeatureIds, failedFeatureIds }: { 
+export function DependencyTag({ depId, doneFeatureIds, failedFeatureIds }: { 
   depId: string; 
   doneFeatureIds?: Set<string>; 
   failedFeatureIds?: Set<string>;
