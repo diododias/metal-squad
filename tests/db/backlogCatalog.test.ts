@@ -89,6 +89,67 @@ describe('backlogCatalog upsert/diff/load', () => {
     return { db, ...repo };
   }
 
+  describe('non-destructive seed plan', () => {
+    it('creates missing rows, then reports the same input as unchanged without overwriting', async () => {
+      const { db, planBacklogSeed, applyBacklogSeed } = await setup({ migrated: true });
+      const backlog = makeBacklog();
+
+      const first = planBacklogSeed(backlog, 'repo-1');
+      expect(first.items).toEqual(expect.arrayContaining([
+        expect.objectContaining({ kind: 'catalog', status: 'created' }),
+        expect.objectContaining({ kind: 'epic', id: 'epic-1', status: 'created' }),
+        expect.objectContaining({ kind: 'feature', id: 'feat-1', status: 'created' }),
+        expect.objectContaining({ kind: 'task', id: 'feat-1/task-1', status: 'created' }),
+      ]));
+      applyBacklogSeed(backlog, first);
+
+      const second = planBacklogSeed(backlog, 'repo-1');
+      expect(second.items.filter((item) => item.kind !== 'catalog').every((item) => item.status === 'unchanged')).toBe(true);
+      const before = db.prepare(`SELECT data_json FROM backlog_features WHERE feature_id = 'feat-1'`).get();
+      applyBacklogSeed(backlog, second);
+      expect(db.prepare(`SELECT data_json FROM backlog_features WHERE feature_id = 'feat-1'`).get()).toEqual(before);
+    });
+
+    it('reports a field-level conflict and leaves the managed feature untouched', async () => {
+      const { db, planBacklogSeed, applyBacklogSeed } = await setup({ migrated: true });
+      const original = makeBacklog();
+      applyBacklogSeed(original, planBacklogSeed(original, 'repo-1'));
+      const changed = makeBacklog({ epics: [{
+        ...original.epics[0]!,
+        features: [{ ...original.epics[0]!.features[0]!, title: 'Edited in YAML' }],
+      }] });
+
+      const plan = planBacklogSeed(changed, 'repo-1');
+      expect(plan.items).toContainEqual(expect.objectContaining({
+        kind: 'feature', id: 'feat-1', status: 'conflict',
+        conflict: expect.objectContaining({ path: '$.title', databaseValue: 'Feature One', importedValue: 'Edited in YAML' }),
+      }));
+      applyBacklogSeed(changed, plan);
+      expect(db.prepare(`SELECT title FROM backlog_features WHERE feature_id = 'feat-1'`).get()).toEqual({ title: 'Feature One' });
+    });
+
+    it('keeps DB-only rows when the seed YAML is empty and rejects cross-repo dependencies', async () => {
+      const { db, planBacklogSeed, applyBacklogSeed } = await setup({ migrated: true });
+      const original = makeBacklog();
+      applyBacklogSeed(original, planBacklogSeed(original, 'repo-1'));
+      const empty = makeBacklog({ epics: [] });
+      applyBacklogSeed(empty, planBacklogSeed(empty, 'repo-1'));
+      expect(db.prepare(`SELECT archived_at FROM backlog_features WHERE feature_id = 'feat-1'`).get()).toEqual({ archived_at: null });
+
+      const { registerRepo } = await import('../../src/db/repo.js');
+      registerRepo('repo-2', '/tmp/repo-2');
+      const crossRepo = makeBacklog({ epics: [{
+        id: 'epic-2', title: 'Epic Two', features: [{
+          ...original.epics[0]!.features[0]!, id: 'feat-2', dependsOn: ['feat-1'], tasks: [],
+        }],
+      }] });
+      const plan = planBacklogSeed(crossRepo, 'repo-2');
+      expect(plan.items).toContainEqual(expect.objectContaining({
+        kind: 'feature', id: 'feat-2', status: 'invalid', reason: expect.stringContaining('another repository'),
+      }));
+    });
+  });
+
   it('loads a fresh catalog end-to-end after upsert', async () => {
     const { db, upsertBacklogCatalog } = await setup();
     const { loadBacklogFromCatalog } = await import('../../src/core/backlog/load.js');

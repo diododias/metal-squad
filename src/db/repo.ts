@@ -11,6 +11,7 @@ import {
   RepositoryUnavailableError,
   RepoAlreadyLinkedError,
   RepoInUseError,
+  RepoNotLinkedToProjectError,
   RevisionConflictError,
 } from './errors.js';
 import { listOccupiedFeatureIds } from './backlogCatalog.js';
@@ -45,6 +46,18 @@ export function registerRepo(repoId: string, path: string): void {
        ON CONFLICT(repo_id) DO UPDATE SET path = excluded.path`,
     )
     .run(repoId, path);
+}
+
+export interface RegisteredRepoRow {
+  repoId: string;
+  path: string;
+}
+
+export function getRegisteredRepo(repoId: string): RegisteredRepoRow | null {
+  if (!hasDbFile()) return null;
+  return (getDb('readonly').prepare(
+    `SELECT repo_id AS repoId, path FROM repos WHERE repo_id = ?`,
+  ).get(repoId) as RegisteredRepoRow | undefined) ?? null;
 }
 
 export interface AuditContext {
@@ -98,7 +111,8 @@ export interface ProjectCounts {
   workItemCount: number;
 }
 
-/** Read-model row for the global web state. */
+/** Read-model row for the global web state. Keep aggregation SQL in the DB
+ * layer instead of letting the WebSocket projection own persistence details. */
 export interface ProjectStateSummaryRow {
   projectId: string;
   name: string;
@@ -468,11 +482,14 @@ export function moveRepo(
 
 export function unlinkRepo(
   repoId: string,
-  options: { audit?: AuditContext } = {},
+  options: { audit?: AuditContext; projectId?: string } = {},
 ): boolean {
   return withTransaction((database) => {
     const before = getProjectRepoLink(database, repoId);
     if (!before) return false;
+    if (options.projectId !== undefined && before.projectId !== options.projectId) {
+      throw new RepoNotLinkedToProjectError(repoId, options.projectId);
+    }
     assertRepoHasNoWorkItems(database, repoId, before.projectId);
     database.prepare(`DELETE FROM project_repos WHERE repo_id = ?`).run(repoId);
     recordAuditEvent(database, options.audit, 'project_repo', repoId, 'unlink', before, null);
@@ -502,18 +519,21 @@ export function listProjectStateSummaries(): ProjectStateSummaryRow[] {
              WHERE e.project_id = p.project_id AND e.archived_at IS NULL AND e.deleted_at IS NULL) AS epicCount,
            (SELECT COUNT(*) FROM backlog_features f JOIN backlog_epics e ON e.epic_id = f.epic_id
              WHERE e.project_id = p.project_id AND f.archived_at IS NULL AND f.deleted_at IS NULL) AS workItemCount,
-           ((SELECT COUNT(*) FROM backlog_epics e WHERE e.project_id = p.project_id AND e.archived_at IS NOT NULL)
+           ((SELECT COUNT(*) FROM backlog_epics e
+              WHERE e.project_id = p.project_id AND e.archived_at IS NOT NULL)
             + (SELECT COUNT(*) FROM backlog_features f JOIN backlog_epics e ON e.epic_id = f.epic_id
               WHERE e.project_id = p.project_id AND f.archived_at IS NOT NULL)) AS archivedCount,
            (SELECT COUNT(*) FROM runs r WHERE r.project_id = p.project_id AND r.status = 'running') AS activeRuns,
-           (SELECT COALESCE(SUM(COALESCE(r.total_tokens, 0)), 0) FROM runs r WHERE r.project_id = p.project_id) AS totalTokens
+           (SELECT COALESCE(SUM(COALESCE(r.total_tokens, 0)), 0) FROM runs r
+             WHERE r.project_id = p.project_id) AS totalTokens
       FROM projects p
      WHERE p.archived_at IS NULL AND p.deleted_at IS NULL
      ORDER BY p.position ASC, p.created_at ASC
   `).all() as ProjectStateSummaryRow[];
 }
 
-/** Every registered repository, including unlinked rows. */
+/** Every registered repository, including unlinked rows. No filesystem health
+ * check is performed in this hot query. */
 export function listRepositoryStateSummaries(): RepositoryStateSummaryRow[] {
   if (!hasDbFile()) return [];
   return getDb('readonly').prepare(`
@@ -526,7 +546,8 @@ export function listRepositoryStateSummaries(): RepositoryStateSummaryRow[] {
   `).all() as RepositoryStateSummaryRow[];
 }
 
-/** Monotonic revision for Project/repository mutations. */
+/** Monotonic state revision: Project/repository mutations record audit events
+ * in the same transaction, so consumers can detect concurrent mutations. */
 export function getProjectStateRevision(): number {
   if (!hasDbFile()) return 0;
   return (getDb('readonly').prepare(`SELECT COALESCE(MAX(id), 0) AS revision FROM audit_events`).get() as { revision: number }).revision;

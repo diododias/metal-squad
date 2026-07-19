@@ -14,6 +14,7 @@ import { RunsPage } from './pages/RunsPage.js';
 import { GatesPage } from './pages/GatesPage.js';
 import { AnalyticsPage } from './pages/AnalyticsPage.js';
 import { ConfigPage } from './pages/ConfigPage.js';
+import { ProjectsPage } from './pages/ProjectsPage.js';
 import type { MsqWebState, WebSocketServerMessage, FeatureConfigPatch, FeatureConfigSaveResult, TaskConfigPatch } from '../types.js';
 import type { RunHistoryEntry, TaskRun } from '../../db/repo.js';
 import type { RunBreakdown } from '../../core/stats.js';
@@ -41,6 +42,7 @@ export function App(): React.JSX.Element {
   const [runDetails, setRunDetails] = useState<Record<number, RunDetailData>>({});
   const [runHistories, setRunHistories] = useState<Record<string, RunHistoryEntry[]>>({});
   const [workflowSaveResults, setWorkflowSaveResults] = useState<Record<string, FeatureConfigSaveResult>>({});
+  const [projectActionResults, setProjectActionResults] = useState<Record<string, Extract<WebSocketServerMessage, { type: 'action:result' }>>>({});
   const { linesByRun, append, clear } = useLocalOutput();
   const hasReceivedStateRef = useRef(false);
 
@@ -93,6 +95,8 @@ export function App(): React.JSX.Element {
         setRunHistories((current) => ({ ...current, [message.payload.featureId]: message.payload.runs }));
       } else if (message.type === 'featureConfig:saveResult') {
         setWorkflowSaveResults((current) => ({ ...current, [message.payload.featureId]: message }));
+      } else if (message.type === 'action:result') {
+        setProjectActionResults((current) => ({ ...current, [message.payload.requestId]: message }));
       }
     },
     [append],
@@ -122,6 +126,7 @@ export function App(): React.JSX.Element {
 
   const navItems: SidebarNavItem[] = [
     { path: '/board', label: 'Board' },
+    { path: '/projects', label: 'Projects', count: state?.projects.filter((project) => project.archivedAt === null).length },
     { path: '/runs', label: 'Runs' },
     { path: '/gates', label: 'Gates', count: state?.gates.length },
     { path: '/analytics', label: 'Analytics' },
@@ -213,6 +218,8 @@ export function App(): React.JSX.Element {
     page = state && <GatesPage state={state} send={send} />;
   } else if (route.page === 'analytics') {
     page = state && <AnalyticsPage state={state} />;
+  } else if (route.page === 'projects') {
+    page = state && <ProjectsPage state={state} send={send} actionResults={projectActionResults} />;
   } else {
     page = state && <ConfigPage state={state} isMobile={isMobile} send={send} />;
   }

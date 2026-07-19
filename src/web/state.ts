@@ -17,7 +17,7 @@ import {
   type StatsRunRow,
 } from '../db/repo.js';
 import { resolveRepo } from '../core/repo.js';
-import { getFeatureCatalog, getBacklogSettings, getPendingFeatures, type FeatureCatalogEntry } from '../ui/catalog.js';
+import { getFeatureCatalog, getBacklogSettings, getPendingFeatures, type WorkItemCatalogEntry } from '../ui/catalog.js';
 import { getRunGroup, sortRunsByGroup } from '../ui/dashboardGroups.js';
 import { resolveRuntimeConfig, ConfigSchema, type Config } from '../config/index.js';
 import { resolveThemePreference } from '../ui/theme/resolve.js';
@@ -35,25 +35,23 @@ const DASHBOARD_PERIODS: { label: string; days: number | null }[] = [
   { label: 'all time', days: null },
 ];
 
-function gateToPendingApproval(gate: GateRow): { kind: 'gate'; id: number; featureId: string; repoId: string; integrityIssue?: string; prompt: string; createdAt: string } {
+function gateToPendingApproval(gate: GateRow): { kind: 'gate'; id: number; featureId: string; repoId: string; prompt: string; createdAt: string } {
   return {
     kind: 'gate' as const,
     id: gate.id,
     featureId: gate.featureId,
     repoId: gate.repoId,
-    integrityIssue: gate.integrityIssue,
     prompt: '',
     createdAt: gate.createdAt,
   };
 }
 
-function stageRequestToPendingApproval(sr: StageRequestRow): { kind: 'stage'; id: number; featureId: string; repoId: string; integrityIssue?: string; prompt: string; createdAt: string; requestKind: 'approval' | 'input'; options?: string[] } {
+function stageRequestToPendingApproval(sr: StageRequestRow): { kind: 'stage'; id: number; featureId: string; repoId: string; prompt: string; createdAt: string; requestKind: 'approval' | 'input'; options?: string[] } {
   return {
     kind: 'stage' as const,
     id: sr.id,
     featureId: sr.featureId,
-    repoId: sr.repoId ?? '',
-    integrityIssue: sr.integrityIssue,
+    repoId: '',
     prompt: sr.prompt,
     createdAt: sr.createdAt,
     requestKind: sr.kind,
@@ -110,10 +108,10 @@ function collectTimeoutApprovals(): TimeoutApprovalState[] {
   }
 }
 
-function collectPendingFeatures(runs: RunSummary[]): FeatureCatalogEntry[] {
+function collectPendingFeatures(runs: RunSummary[], repoId: string): WorkItemCatalogEntry[] {
   try {
     const catalog = getFeatureCatalog();
-    const doneFeatureIds = listCompletedFeatureIds();
+    const doneFeatureIds = listCompletedFeatureIds(repoId);
     const activeFeatureIds = new Set(
       runs
         .filter((run) => run.status === 'running' || run.status === 'blocked' || run.status === 'done')
@@ -148,7 +146,7 @@ function collectDashboardRows(): StatsRunRow[] {
 
 const FALLBACK_ROLE_COLOR = '#e5e7eb';
 
-function normalizeFeatureCatalog(catalog: Record<string, FeatureCatalogEntry>): Record<string, FeatureCatalogEntry> {
+function normalizeFeatureCatalog(catalog: Record<string, WorkItemCatalogEntry>): Record<string, WorkItemCatalogEntry> {
   return Object.fromEntries(
     Object.entries(catalog).map(([key, feature]) => [
       key,
@@ -165,7 +163,11 @@ function collectProjectSummaries(): ProjectSummary[] {
       position: project.position,
       description: project.description,
       revision: project.revision,
-      counts: { epics: project.epicCount, workItems: project.workItemCount, archived: project.archivedCount },
+      counts: {
+        epics: project.epicCount,
+        workItems: project.workItemCount,
+        archived: project.archivedCount,
+      },
       activeRuns: project.activeRuns,
       tokens: { status: 'ready', totalTokens: project.totalTokens, error: null },
       archivedAt: project.archivedAt,
@@ -176,6 +178,8 @@ function collectProjectSummaries(): ProjectSummary[] {
   }
 }
 
+/** The state hot path performs no path/Git/tool checks. Those are future lazy,
+ * per-repository enrichments and must never turn into N filesystem walks. */
 function collectRepositorySummaries(): RepositorySummary[] {
   try {
     return listRepositoryStateSummaries().map((repository) => ({
@@ -311,7 +315,7 @@ export function buildMsqWebState(): MsqWebState {
   const repoLabel = basename(repo.path);
   const runs = collectRuns();
   const gates = collectGates();
-  const pendingFeatures = collectPendingFeatures(runs);
+  const pendingFeatures = collectPendingFeatures(runs, repo.repoId);
   const runningTasks = collectRunningTasks();
   const timeoutApprovals = collectTimeoutApprovals();
   const featureCatalog = normalizeFeatureCatalog(getFeatureCatalog());
