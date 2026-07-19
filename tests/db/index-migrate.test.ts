@@ -9,6 +9,8 @@ let pragmaPipelinesColumns: Array<{ name: string }> = [];
 let pragmaRetryHistoryColumns: Array<{ name: string }> = [];
 let pragmaStageRequestColumns: Array<{ name: string }> = [];
 let pragmaRunOutputColumns: Array<{ name: string }> = [];
+let pragmaBacklogEpicsColumns: Array<{ name: string }> = [];
+let pragmaBacklogFeaturesColumns: Array<{ name: string }> = [];
 const mockExecCalls: string[] = [];
 
 const mockExec = vi.fn((sql: string) => { mockExecCalls.push(sql); });
@@ -40,6 +42,12 @@ const mockPrepare = vi.fn((sql: string) => {
   }
   if (sql.includes('PRAGMA table_info(run_output)')) {
     return { all: makeMockAll(pragmaRunOutputColumns), run: vi.fn(), get: vi.fn() };
+  }
+  if (sql.includes('PRAGMA table_info(backlog_epics)')) {
+    return { all: makeMockAll(pragmaBacklogEpicsColumns), run: vi.fn(), get: vi.fn() };
+  }
+  if (sql.includes('PRAGMA table_info(backlog_features)')) {
+    return { all: makeMockAll(pragmaBacklogFeaturesColumns), run: vi.fn(), get: vi.fn() };
   }
   return { all: vi.fn(() => []), run: vi.fn(), get: vi.fn() };
 });
@@ -78,6 +86,8 @@ function resetAll() {
   pragmaRetryHistoryColumns = [{ name: 'tool' }, { name: 'model' }];
   pragmaStageRequestColumns = [{ name: 'options' }];
   pragmaRunOutputColumns = [];
+  pragmaBacklogEpicsColumns = [];
+  pragmaBacklogFeaturesColumns = [];
   mockExecCalls.length = 0;
   mockDatabase.mockReset();
   mockDatabase.mockReturnValue(mockDb);
@@ -109,7 +119,7 @@ describe('getDb migration — column checks', () => {
       { name: 'pr_number' }, { name: 'pr_url' },
       { name: 'session_status' }, { name: 'session_started_at' }, { name: 'session_updated_at' },
       { name: 'session_elapsed_ms' }, { name: 'session_last_output_at' }, { name: 'session_idle_ms' },
-      { name: 'session_reason' }, { name: 'session_terminal' },
+      { name: 'session_reason' }, { name: 'session_terminal' }, { name: 'project_id' },
     ];
     pragmaRunsColumns = ALL_RUN_COLS;
     pragmaTokenUsageColumns = [{ name: 'cached_input' }];
@@ -118,8 +128,16 @@ describe('getDb migration — column checks', () => {
       { name: 'pending_json' }, { name: 'active_json' }, { name: 'aborted_json' },
       { name: 'workflow_snapshot_json' },
       { name: 'requested_abort_feature_id' }, { name: 'resume_count' }, { name: 'resume_summary' },
+      { name: 'project_id' },
     ];
     pragmaRunOutputColumns = [{ name: 'tool_name' }, { name: 'level' }];
+    pragmaBacklogEpicsColumns = [
+      { name: 'project_id' }, { name: 'description' }, { name: 'status' },
+      { name: 'deleted_at' }, { name: 'revision' },
+    ];
+    pragmaBacklogFeaturesColumns = [
+      { name: 'description' }, { name: 'deleted_at' }, { name: 'revision' },
+    ];
 
     const { getDb } = await import('../../src/db/index.js');
     getDb('readwrite');
