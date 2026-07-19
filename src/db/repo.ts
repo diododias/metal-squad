@@ -1,13 +1,22 @@
 import { randomUUID } from 'node:crypto';
-import { existsSync } from 'node:fs';
+import { existsSync, statSync } from 'node:fs';
 import { getDb, withTransaction } from './index.js';
 import {
   EpicNotFoundError,
+  CrossRepositoryDependencyError,
+  DependencyCycleError,
+  DependencyNotFoundError,
   ProjectNotFoundError,
+  RepositoryNotInProjectError,
+  RepositoryUnavailableError,
   RepoAlreadyLinkedError,
   RepoInUseError,
   RevisionConflictError,
 } from './errors.js';
+import { listOccupiedFeatureIds } from './backlogCatalog.js';
+import { allocateFeatureId } from '../core/backlog/featureId.js';
+import { DefaultsSchema, FeatureSchema, type Defaults, type Feature, type WorkItem } from '../core/backlog/schema.js';
+import { topoOrder } from '../core/orchestrator/graph.js';
 import { sanitizeToolCallRecord, type PublishEvidence, type SessionStatusSnapshot, type TokenUsage, type ToolCallRecord } from '../core/adapters/types.js';
 import { resolveDbPath } from '../config/index.js';
 import { msqEventBus, logCaughtError } from '../core/events/index.js';
@@ -89,8 +98,7 @@ export interface ProjectCounts {
   workItemCount: number;
 }
 
-/** Read-model row for the global web state. Keep aggregation SQL in the DB
- * layer instead of letting the WebSocket projection own persistence details. */
+/** Read-model row for the global web state. */
 export interface ProjectStateSummaryRow {
   projectId: string;
   name: string;
@@ -139,6 +147,38 @@ export interface UpdateEpicPatch {
   description?: string | null;
   status?: EpicStatus;
   position?: number;
+}
+
+/** Public Work Item contract. `workItemId` deliberately hides the legacy
+ * `backlog_features.feature_id` storage name at every new boundary. */
+export interface WorkItemRow extends Omit<WorkItem, 'id'> {
+  workItemId: string;
+  epicId: string;
+  repoId: string;
+  type: 'feature';
+  revision: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface CreateWorkItemInput {
+  epicId: string;
+  repoId: string;
+  title: string;
+  description?: string | null;
+  dependsOn?: string[];
+  audit?: AuditContext;
+}
+
+/** Minimal persisted ownership data needed before a Work Item can touch the
+ * filesystem. The caller deliberately owns path canonicalization and access
+ * checks so DB reads stay cheap and side-effect free. */
+export interface WorkItemExecutionTarget {
+  workItemId: string;
+  repoId: string;
+  repoPath: string;
+  projectId: string;
+  epicId: string;
 }
 
 type ProjectRepoLinkRow = Omit<ProjectRepoRow, 'path'>;
@@ -253,6 +293,84 @@ export function updateEpic(epicId: string, patch: UpdateEpicPatch, expectedRevis
     recordAuditEvent(database, options.audit, 'epic', epicId, 'update', before, after);
     return after;
   });
+}
+
+/** Compatibility adapter for the legacy catalog table. It snapshots the
+ * repository defaults at creation time and writes both normalized columns and
+ * `data_json` inside the same transaction as the audit event. */
+export function createWorkItem(input: CreateWorkItemInput): WorkItemRow {
+  return withTransaction((database) => {
+    const epic = getEpicFromDatabase(database, input.epicId);
+    if (!epic) throw new EpicNotFoundError(input.epicId);
+
+    const repository = database.prepare(
+      `SELECT r.path, pr.project_id AS projectId
+         FROM repos r LEFT JOIN project_repos pr ON pr.repo_id = r.repo_id
+        WHERE r.repo_id = ?`,
+    ).get(input.repoId) as { path: string; projectId: string | null } | undefined;
+    if (repository?.projectId !== epic.projectId) {
+      throw new RepositoryNotInProjectError(input.repoId, epic.projectId);
+    }
+    if (!isRepositoryUsable(repository.path)) throw new RepositoryUnavailableError(input.repoId);
+
+    const dependsOn = [...new Set(input.dependsOn ?? [])];
+    const dependencyRows = dependsOn.map((workItemId) => {
+      const row = database.prepare(
+        `SELECT feature_id AS featureId, repo_id AS repoId FROM backlog_features WHERE feature_id = ?`,
+      ).get(workItemId) as { featureId: string; repoId: string } | undefined;
+      if (!row) throw new DependencyNotFoundError(workItemId);
+      if (row.repoId !== input.repoId) throw new CrossRepositoryDependencyError(workItemId, row.repoId);
+      return row;
+    });
+    void dependencyRows;
+
+    const defaults = getRepositoryDefaults(database, input.repoId);
+    const reserved = listOccupiedFeatureIds(database);
+    const workItemId = allocateFeatureId(reserved);
+    const feature = FeatureSchema.parse({
+      id: workItemId,
+      title: input.title,
+      dependsOn,
+      tasks: [],
+      tool: defaults.tool,
+      ...(defaults.model === undefined ? {} : { model: defaults.model }),
+      effort: defaults.effort,
+      thinking: defaults.thinking,
+      skills: defaults.skills,
+      workflow: defaults.workflow,
+      ...(defaults.maxTokens === undefined ? {} : { maxTokens: defaults.maxTokens }),
+      autoStart: false,
+    });
+    assertNoWorkItemCycle(database, input.repoId, input.epicId, feature);
+
+    const description = input.description ?? null;
+    const data = { ...feature, type: 'feature' as const, ...(description === null ? {} : { description }) };
+    const position = (database.prepare(
+      `SELECT COALESCE(MAX(position), -1) + 1 AS position FROM backlog_features WHERE epic_id = ?`,
+    ).get(input.epicId) as { position: number }).position;
+    database.prepare(
+      `INSERT INTO backlog_features
+         (feature_id, epic_id, repo_id, title, description, depends_on, spec_file, position, data_json, revision, archived_at, deleted_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, NULL, ?, ?, 1, NULL, NULL, datetime('now'))`,
+    ).run(workItemId, input.epicId, input.repoId, feature.title, description, JSON.stringify(dependsOn), position, JSON.stringify(data));
+    const workItem = getWorkItemFromDatabase(database, workItemId);
+    if (!workItem) throw new Error(`Work Item was not created: ${workItemId}`);
+    recordAuditEvent(database, input.audit, 'work_item', workItemId, 'create', null, workItem);
+    return workItem;
+  });
+}
+
+/** Finds the persisted repo/project ownership for a live Work Item. */
+export function getWorkItemExecutionTarget(workItemId: string): WorkItemExecutionTarget | null {
+  if (!hasDbFile()) return null;
+  return (getDb('readonly').prepare(
+    `SELECT f.feature_id AS workItemId, f.repo_id AS repoId, r.path AS repoPath,
+            e.project_id AS projectId, f.epic_id AS epicId
+       FROM backlog_features f
+       JOIN backlog_epics e ON e.epic_id = f.epic_id
+       JOIN repos r ON r.repo_id = f.repo_id
+      WHERE f.feature_id = ? AND f.archived_at IS NULL AND f.deleted_at IS NULL`,
+  ).get(workItemId) as WorkItemExecutionTarget | undefined) ?? null;
 }
 
 export function updateProject(
@@ -384,21 +502,18 @@ export function listProjectStateSummaries(): ProjectStateSummaryRow[] {
              WHERE e.project_id = p.project_id AND e.archived_at IS NULL AND e.deleted_at IS NULL) AS epicCount,
            (SELECT COUNT(*) FROM backlog_features f JOIN backlog_epics e ON e.epic_id = f.epic_id
              WHERE e.project_id = p.project_id AND f.archived_at IS NULL AND f.deleted_at IS NULL) AS workItemCount,
-           ((SELECT COUNT(*) FROM backlog_epics e
-              WHERE e.project_id = p.project_id AND e.archived_at IS NOT NULL)
+           ((SELECT COUNT(*) FROM backlog_epics e WHERE e.project_id = p.project_id AND e.archived_at IS NOT NULL)
             + (SELECT COUNT(*) FROM backlog_features f JOIN backlog_epics e ON e.epic_id = f.epic_id
               WHERE e.project_id = p.project_id AND f.archived_at IS NOT NULL)) AS archivedCount,
            (SELECT COUNT(*) FROM runs r WHERE r.project_id = p.project_id AND r.status = 'running') AS activeRuns,
-           (SELECT COALESCE(SUM(COALESCE(r.total_tokens, 0)), 0) FROM runs r
-             WHERE r.project_id = p.project_id) AS totalTokens
+           (SELECT COALESCE(SUM(COALESCE(r.total_tokens, 0)), 0) FROM runs r WHERE r.project_id = p.project_id) AS totalTokens
       FROM projects p
      WHERE p.archived_at IS NULL AND p.deleted_at IS NULL
      ORDER BY p.position ASC, p.created_at ASC
   `).all() as ProjectStateSummaryRow[];
 }
 
-/** Every registered repository, including unlinked rows. No filesystem health
- * check is performed in this hot query. */
+/** Every registered repository, including unlinked rows. */
 export function listRepositoryStateSummaries(): RepositoryStateSummaryRow[] {
   if (!hasDbFile()) return [];
   return getDb('readonly').prepare(`
@@ -411,8 +526,7 @@ export function listRepositoryStateSummaries(): RepositoryStateSummaryRow[] {
   `).all() as RepositoryStateSummaryRow[];
 }
 
-/** Monotonic state revision: Project/repository mutations record audit events
- * in the same transaction, so consumers can detect concurrent mutations. */
+/** Monotonic revision for Project/repository mutations. */
 export function getProjectStateRevision(): number {
   if (!hasDbFile()) return 0;
   return (getDb('readonly').prepare(`SELECT COALESCE(MAX(id), 0) AS revision FROM audit_events`).get() as { revision: number }).revision;
@@ -441,6 +555,88 @@ function getProjectFromDatabase(database: ReturnType<typeof getDb>, projectId: s
 
 function getEpicFromDatabase(database: ReturnType<typeof getDb>, epicId: string): EpicRow | null {
   return (database.prepare(`${EPIC_SELECT} WHERE epic_id = ?`).get(epicId) as EpicRow | undefined) ?? null;
+}
+
+function getWorkItemFromDatabase(database: ReturnType<typeof getDb>, workItemId: string): WorkItemRow | null {
+  const row = database.prepare(
+    `SELECT feature_id AS workItemId, epic_id AS epicId, repo_id AS repoId, title,
+            description, depends_on AS dependsOn, data_json AS dataJson, revision,
+            updated_at AS updatedAt
+       FROM backlog_features
+      WHERE feature_id = ? AND archived_at IS NULL AND deleted_at IS NULL`,
+  ).get(workItemId) as {
+    workItemId: string;
+    epicId: string;
+    repoId: string;
+    title: string;
+    description: string | null;
+    dependsOn: string;
+    dataJson: string;
+    revision: number;
+    updatedAt: string;
+  } | undefined;
+  if (!row) return null;
+  const stored = JSON.parse(row.dataJson) as Record<string, unknown>;
+  const feature = FeatureSchema.parse(stored);
+  return {
+    ...feature,
+    workItemId: row.workItemId,
+    epicId: row.epicId,
+    repoId: row.repoId,
+    type: 'feature',
+    description: row.description ?? (typeof stored.description === 'string' ? stored.description : undefined),
+    revision: row.revision,
+    createdAt: row.updatedAt,
+    updatedAt: row.updatedAt,
+  };
+}
+
+function getRepositoryDefaults(database: ReturnType<typeof getDb>, repoId: string): Defaults {
+  const row = database.prepare(
+    `SELECT defaults_json AS defaultsJson FROM backlog_catalog_meta WHERE repo_id = ?`,
+  ).get(repoId) as { defaultsJson: string } | undefined;
+  return DefaultsSchema.parse(row ? JSON.parse(row.defaultsJson) : {});
+}
+
+function isRepositoryUsable(path: string): boolean {
+  try {
+    return existsSync(path) && statSync(path).isDirectory();
+  } catch {
+    return false;
+  }
+}
+
+function assertNoWorkItemCycle(
+  database: ReturnType<typeof getDb>,
+  repoId: string,
+  epicId: string,
+  candidate: Feature,
+): void {
+  const rows = database.prepare(
+    `SELECT epic_id AS epicId, data_json AS dataJson
+       FROM backlog_features
+      WHERE repo_id = ? AND archived_at IS NULL AND deleted_at IS NULL`,
+  ).all(repoId) as { epicId: string; dataJson: string }[];
+  const byEpic = new Map<string, Feature[]>();
+  for (const row of rows) {
+    const features = byEpic.get(row.epicId) ?? [];
+    features.push(FeatureSchema.parse(JSON.parse(row.dataJson)));
+    byEpic.set(row.epicId, features);
+  }
+  const candidateEpic = byEpic.get(epicId) ?? [];
+  candidateEpic.push(candidate);
+  byEpic.set(epicId, candidateEpic);
+  try {
+    topoOrder({
+      version: 2,
+      repo: repoId,
+      defaults: DefaultsSchema.parse({}),
+      epics: [...byEpic.entries()].map(([id, features]) => ({ id, title: id, status: 'todo' as const, features })),
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    throw new DependencyCycleError(message);
+  }
 }
 
 function epicEntity(input: { epicId: string; title: string; description: string | null; status: EpicStatus }): Record<string, unknown> {

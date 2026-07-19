@@ -11,6 +11,7 @@ import {
   abortPipeline,
   forceResolveGate,
   getPipeline,
+  getRun,
   listCompletedFeatureIds,
   listRunEvents,
   listRunHistoryForFeature,
@@ -28,13 +29,14 @@ import {
 import { getAdapter } from '../core/adapters/index.js';
 import { computeRunBreakdown } from '../core/stats.js';
 import { resolveRepo } from '../core/repo.js';
+import { resolveWorkItemExecutionContext } from '../core/workItemExecutionContext.js';
 import { loadBacklogFromCatalog } from '../core/backlog/load.js';
-import { selectStartableFeaturePlan } from '../core/orchestrator/graph.js';
+import { assertNoCrossRepositoryDependencies, selectStartableFeaturePlan } from '../core/orchestrator/graph.js';
 import { validateBacklogSkills } from '../core/skills/index.js';
 import { ConfigSchema, loadConfig, resolveRuntimeConfig, saveAppConfigPatch, saveConfig, saveNotificationsPatch, type NotificationsPatch, type ToolRegistryEntry } from '../config/index.js';
 import { assertConfiguredNotificationChannel } from '../core/notify/manager.js';
 import { clearSecret, setSecret } from '../security/secrets.js';
-import { updateCatalogFeature, updateCatalogTask, updateCatalogDefaults, type FeaturePatch, type CatalogDefaultsPatch } from '../db/backlogCatalog.js';
+import { getFeatureIdOwner, updateCatalogFeature, updateCatalogTask, updateCatalogDefaults, type FeaturePatch, type CatalogDefaultsPatch } from '../db/backlogCatalog.js';
 import type { Feature, Task } from '../core/backlog/schema.js';
 import { epicService } from '../core/epicService.js';
 import { projectService } from '../core/projectService.js';
@@ -229,6 +231,30 @@ function computeRunChanges(runId: number, cwd: string): RunChangesPayload {
   return { runId, branch, remoteUrl, files, notApplicableReason: null };
 }
 
+function computeRunChangesForWorkItem(runId: number): RunChangesPayload {
+  const run = getRun(runId);
+  if (!run) {
+    return { runId, branch: null, remoteUrl: null, files: [], notApplicableReason: 'Run was not found.' };
+  }
+  try {
+    const context = resolveWorkItemExecutionContext(run.feature_id);
+    if (context.repoId !== run.repo_id) {
+      return {
+        runId,
+        branch: null,
+        remoteUrl: null,
+        files: [],
+        notApplicableReason: 'Run repository no longer matches its Work Item repository.',
+      };
+    }
+    return computeRunChanges(runId, context.cwd);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    logCaughtError('web/server.computeRunChangesForWorkItem', error);
+    return { runId, branch: null, remoteUrl: null, files: [], notApplicableReason: message };
+  }
+}
+
 const BROADCAST_EVENTS: (keyof MsqEvents)[] = [
   'run:start',
   'run:status',
@@ -337,8 +363,8 @@ export function createWebServer(options: {
 
   function sendRunHistory(client: Client, featureId: string, force = false): void {
     try {
-      const { repoId } = resolveRepo(cwd);
-      const payload = { featureId, runs: listRunHistoryForFeature(repoId, featureId) };
+      const context = resolveWorkItemExecutionContext(featureId);
+      const payload = { featureId, runs: listRunHistoryForFeature(context.repoId, featureId) };
       const signature = JSON.stringify(payload);
       if (!force && client.historyPayloadSignatures.get(featureId) === signature) return;
       client.historyPayloadSignatures.set(featureId, signature);
@@ -349,20 +375,20 @@ export function createWebServer(options: {
     }
   }
 
-  function sendRunChanges(client: Client, runId: number, featureCwd: string, force = false): void {
-    const payload = computeRunChanges(runId, featureCwd);
+  function sendRunChanges(client: Client, runId: number, force = false): void {
+    const payload = computeRunChangesForWorkItem(runId);
     const signature = JSON.stringify(payload);
     if (!force && client.changesPayloadSignatures.get(runId) === signature) return;
     client.changesPayloadSignatures.set(runId, signature);
     sendTo(client, { type: 'run:changes', payload });
   }
 
-  function refreshSubscribedViews(featureCwd: string): void {
+  function refreshSubscribedViews(_featureCwd: string): void {
     for (const client of clients.values()) {
       if (!client.authenticated || client.socket.readyState !== 1 /* OPEN */) continue;
       for (const runId of client.detailSubscriptions) sendRunDetail(client, runId);
       for (const featureId of client.historySubscriptions) sendRunHistory(client, featureId);
-      for (const runId of client.changesSubscriptions) sendRunChanges(client, runId, featureCwd);
+      for (const runId of client.changesSubscriptions) sendRunChanges(client, runId);
     }
   }
 
@@ -563,7 +589,7 @@ export function createWebServer(options: {
         }
         const runId = Number(changesMatch[1]);
         res.writeHead(200, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify(computeRunChanges(runId, cwd)));
+        res.end(JSON.stringify(computeRunChangesForWorkItem(runId)));
         return;
       }
 
@@ -880,7 +906,7 @@ export function createWebServer(options: {
       }
       case 'subscribe:runChanges': {
         client.changesSubscriptions.add(message.runId);
-        sendRunChanges(client, message.runId, featureCwd, true);
+        sendRunChanges(client, message.runId, true);
         break;
       }
       case 'unsubscribe:runChanges': {
@@ -1037,16 +1063,18 @@ export function createWebServer(options: {
 
   function startFeature(
     featureId: string,
-    featureCwd: string,
+    _featureCwd: string,
   ): void {
+    let context: ReturnType<typeof resolveWorkItemExecutionContext>;
     try {
       console.log(`[startFeature] featureId=${featureId}`);
       assertWritableDbPath();
-      resolveRuntimeConfig(featureCwd);
-      const repo = resolveRepo(featureCwd);
-      const backlog = loadBacklogFromCatalog(repo.repoId, featureCwd);
-      validateBacklogSkills(backlog, featureCwd);
-      const plan = selectStartableFeaturePlan(backlog, featureId, listCompletedFeatureIds(repo.repoId));
+      context = resolveWorkItemExecutionContext(featureId);
+      resolveRuntimeConfig(context.cwd);
+      const backlog = loadBacklogFromCatalog(context.repoId, context.cwd);
+      validateBacklogSkills(backlog, context.cwd);
+      assertNoCrossRepositoryDependencies(backlog, context.repoId, getFeatureIdOwner);
+      const plan = selectStartableFeaturePlan(backlog, featureId, listCompletedFeatureIds(context.repoId));
       if (plan.pendingDependencies.length > 0) {
         throw new Error(`pending dependencies: ${plan.pendingDependencies.join(', ')}. Complete them before starting ${featureId}.`);
       }
@@ -1071,7 +1099,7 @@ export function createWebServer(options: {
       {
         detached: true,
         stdio: 'ignore',
-        cwd: featureCwd,
+        cwd: context.cwd,
       },
     );
     child.once('error', (error) => {
@@ -1169,15 +1197,15 @@ export function createWebServer(options: {
     return [{ message: error instanceof Error ? error.message : String(error) }];
   }
 
-  function updateFeatureConfig(featureId: string, patch: FeatureConfigPatch, featureCwd: string): FeatureConfigSaveResult {
+  function updateFeatureConfig(featureId: string, patch: FeatureConfigPatch, _featureCwd: string): FeatureConfigSaveResult {
     try {
       console.log(`[updateFeatureConfig] featureId=${featureId}, patch=`, patch);
       assertWritableDbPath();
       if (patch.workflow?.approvals?.channel !== undefined) {
         assertConfiguredNotificationChannel(patch.workflow.approvals.channel);
       }
-      const { repoId } = resolveRepo(featureCwd);
-      updateCatalogFeature(repoId, featureId, toFeaturePatch(patch));
+      const context = resolveWorkItemExecutionContext(featureId);
+      updateCatalogFeature(context.repoId, featureId, toFeaturePatch(patch));
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       const stack = error instanceof Error ? error.stack : undefined;
@@ -1192,7 +1220,7 @@ export function createWebServer(options: {
     try {
       console.log(`[updateTaskConfig] featureId=${featureId}, taskId=${taskId}, patch=`, patch);
       assertWritableDbPath();
-      resolveRepo(featureCwd);
+      resolveWorkItemExecutionContext(featureId);
       updateCatalogTask(featureId, taskId, patch as Partial<Task>);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
@@ -1213,6 +1241,9 @@ export function createWebServer(options: {
       if (patch.workflow?.approvals?.channel !== undefined) {
         assertConfiguredNotificationChannel(patch.workflow.approvals.channel);
       }
+      // The legacy Settings wire message has no Work Item selector. Runtime
+      // execution itself never uses this ambient compatibility path; starts
+      // and item-level changes resolve their persisted Work Item context.
       const { repoId } = resolveRepo(featureCwd);
       updateCatalogDefaults(repoId, patch as CatalogDefaultsPatch);
     } catch (error) {

@@ -1,6 +1,12 @@
 export type DomainErrorCode =
   | 'PROJECT_NOT_FOUND'
   | 'EPIC_NOT_FOUND'
+  | 'WORK_ITEM_NOT_FOUND'
+  | 'REPOSITORY_NOT_IN_PROJECT'
+  | 'REPOSITORY_UNAVAILABLE'
+  | 'DEPENDENCY_NOT_FOUND'
+  | 'CROSS_REPOSITORY_DEPENDENCY'
+  | 'DEPENDENCY_CYCLE'
   | 'REPO_ALREADY_LINKED'
   | 'REPO_IN_USE'
   | 'REVISION_CONFLICT';
@@ -26,6 +32,48 @@ export class EpicNotFoundError extends DomainError {
   public constructor(epicId: string) {
     super('EPIC_NOT_FOUND', `Epic not found: ${epicId}`);
     this.name = 'EpicNotFoundError';
+  }
+}
+
+export class WorkItemNotFoundError extends DomainError {
+  public constructor(workItemId: string) {
+    super('WORK_ITEM_NOT_FOUND', `Work Item not found: ${workItemId}`);
+    this.name = 'WorkItemNotFoundError';
+  }
+}
+
+export class RepositoryNotInProjectError extends DomainError {
+  public constructor(repoId: string, projectId: string) {
+    super('REPOSITORY_NOT_IN_PROJECT', `Repository ${repoId} is not linked to project ${projectId}`);
+    this.name = 'RepositoryNotInProjectError';
+  }
+}
+
+export class RepositoryUnavailableError extends DomainError {
+  public constructor(repoId: string, detail = 'is unavailable') {
+    super('REPOSITORY_UNAVAILABLE', `Repository ${repoId} ${detail}`);
+    this.name = 'RepositoryUnavailableError';
+  }
+}
+
+export class DependencyNotFoundError extends DomainError {
+  public constructor(workItemId: string) {
+    super('DEPENDENCY_NOT_FOUND', `Dependency Work Item not found: ${workItemId}`);
+    this.name = 'DependencyNotFoundError';
+  }
+}
+
+export class CrossRepositoryDependencyError extends DomainError {
+  public constructor(workItemId: string, repoId: string) {
+    super('CROSS_REPOSITORY_DEPENDENCY', `Dependency Work Item ${workItemId} belongs to another repository (${repoId})`);
+    this.name = 'CrossRepositoryDependencyError';
+  }
+}
+
+export class DependencyCycleError extends DomainError {
+  public constructor(message: string) {
+    super('DEPENDENCY_CYCLE', message);
+    this.name = 'DependencyCycleError';
   }
 }
 

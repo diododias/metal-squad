@@ -55,6 +55,26 @@ export interface StartableFeaturePlan {
   completedDependencies: string[];
 }
 
+/** The catalog is repo-scoped, so a dependency missing from this backlog may
+ * otherwise look like a generic stale-catalog error. Make cross-repo edges
+ * explicit before a pipeline is persisted. */
+export function assertNoCrossRepositoryDependencies(
+  backlog: Backlog,
+  repoId: string,
+  findFeatureRepo: (featureId: string) => string | undefined,
+): void {
+  const localIds = new Set(backlog.epics.flatMap((epic) => epic.features.map((feature) => feature.id)));
+  for (const feature of backlog.epics.flatMap((epic) => epic.features)) {
+    for (const dependency of feature.dependsOn) {
+      if (localIds.has(dependency)) continue;
+      const dependencyRepoId = findFeatureRepo(dependency);
+      if (dependencyRepoId && dependencyRepoId !== repoId) {
+        throw new Error(`Feature ${feature.id} depends on Work Item ${dependency} from repository ${dependencyRepoId}; cross-repository dependencies are not supported.`);
+      }
+    }
+  }
+}
+
 /**
  * Manual start should never re-run parent features automatically.
  * If dependencies are already done in SQLite history, run only the target.
