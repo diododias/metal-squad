@@ -46,8 +46,6 @@ import type {
   FeatureConfigSaveIssue,
   FeatureConfigSaveResult,
   BudgetConfigPatch,
-  EpicActionError,
-  EpicActionResult,
   ProjectDefaultsPatch,
   ProjectActionError,
   ProjectActionResult,
