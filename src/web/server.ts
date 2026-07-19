@@ -37,10 +37,11 @@ import { clearSecret, setSecret } from '../security/secrets.js';
 import { updateCatalogFeature, updateCatalogTask, updateCatalogDefaults, type FeaturePatch, type CatalogDefaultsPatch } from '../db/backlogCatalog.js';
 import type { Feature, Task } from '../core/backlog/schema.js';
 import { epicService } from '../core/epicService.js';
+import { workItemService } from '../core/workItemService.js';
 import { projectService } from '../core/projectService.js';
 import { buildMsqWebState, appendNotification, resetWebStateCaches } from './state.js';
 import { createWebAuth, isAllowedHostHeader, isAllowedOrigin, timingSafeEqualStrings } from './auth.js';
-import { EpicActionMessageSchema, ProjectActionMessageSchema } from './schemas.js';
+import { EpicActionMessageSchema, ProjectActionMessageSchema, WorkItemActionMessageSchema } from './schemas.js';
 import type {
   AppConfigPatch,
   FeatureConfigPatch,
@@ -55,6 +56,8 @@ import type {
   RunChangesPayload,
   SecretPatch,
   TaskConfigPatch,
+  WorkItemActionError,
+  WorkItemActionResult,
   WebSocketClientMessage,
   WebSocketServerMessage,
 } from './types.js';
@@ -735,6 +738,12 @@ export function createWebServer(options: {
         }
         break;
       }
+      case 'action:createWorkItem': {
+        const result = handleWorkItemAction(message);
+        sendTo(client, result);
+        if (result.payload.ok) reconcileWebState(featureCwd, { forceBroadcast: true });
+        break;
+      }
       case 'action:startFeature': {
         startFeature(message.featureId, featureCwd);
         reconcileWebState(featureCwd);
@@ -998,6 +1007,35 @@ export function createWebServer(options: {
           error: epicActionError(error),
         },
       };
+    }
+  }
+
+  function workItemActionError(error: unknown): WorkItemActionError {
+    const code = typeof error === 'object' && error !== null ? (error as { code?: unknown }).code : undefined;
+    if (code === 'EPIC_NOT_FOUND' || code === 'REPOSITORY_NOT_IN_PROJECT' || code === 'REPOSITORY_UNAVAILABLE'
+      || code === 'DEPENDENCY_NOT_FOUND' || code === 'CROSS_REPOSITORY_DEPENDENCY' || code === 'DEPENDENCY_CYCLE') {
+      return { code, message: error instanceof Error ? error.message : 'Could not create Work Item.' };
+    }
+    return { code: 'WORK_ITEM_ACTION_FAILED', message: 'Could not create Work Item.' };
+  }
+
+  function handleWorkItemAction(message: unknown): WorkItemActionResult {
+    const parsed = WorkItemActionMessageSchema.safeParse(message);
+    if (!parsed.success) {
+      return { type: 'action:result', payload: { requestId: actionResultRequestId(message), ok: false, error: { code: 'INVALID_PAYLOAD', message: 'Invalid Work Item action payload.' } } };
+    }
+    try {
+      const result = workItemService.create({
+        epicId: parsed.data.epicId,
+        repoId: parsed.data.repoId,
+        title: parsed.data.title,
+        description: parsed.data.description,
+        dependsOn: parsed.data.dependsOn,
+        audit: { actor: 'web', requestId: parsed.data.requestId },
+      });
+      return { type: 'action:result', payload: { requestId: parsed.data.requestId, ok: true, workItem: result.entity, revision: result.revision ?? result.entity.revision } };
+    } catch (error) {
+      return { type: 'action:result', payload: { requestId: parsed.data.requestId, ok: false, error: workItemActionError(error) } };
     }
   }
 

@@ -75,8 +75,8 @@ export function ProjectsPage({ state, send, actionResults }: ProjectsPageProps):
       } else {
         setDrafts((current) => Object.fromEntries(Object.entries(current).map(([projectId, draft]) => {
           if (draft.pendingRequestId !== requestId) return [projectId, draft];
-          if (result.payload.ok) return [projectId, { ...draft, expectedRevision: result.payload.entity.revision, pendingRequestId: undefined, error: undefined }];
-          return [projectId, { ...draft, pendingRequestId: undefined, error: result.payload.error.message }];
+          if (result.payload.ok && 'entity' in result.payload) return [projectId, { ...draft, expectedRevision: result.payload.entity.revision, pendingRequestId: undefined, error: undefined }];
+          return [projectId, { ...draft, pendingRequestId: undefined, error: 'error' in result.payload ? result.payload.error.message : 'Project update was not acknowledged.' }];
         })));
       }
     }
