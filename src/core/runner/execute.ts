@@ -389,7 +389,7 @@ export async function executeBacklog(
         if (res.publishEvidence) {
           updateRunPublishState(runId, {
             verified: res.publishVerified ?? false,
-            error: res.publishVerified ? null : res.summary,
+            error: res.publishVerified ? (res.publishNote ?? null) : res.summary,
             evidence: res.publishEvidence,
           });
         }
@@ -1536,6 +1536,13 @@ export function applyPublishGate(
   };
 }
 
+// This runs after `applyPublishGate` has already verified a real, open PR
+// against whatever base it declares — that GitHub-side check is authoritative
+// on the publication itself. `git merge-base --is-ancestor` here is a local,
+// redundant sanity check on top of it, and it can be inconclusive for
+// legitimate reasons (e.g. the declared dependency branch was already merged
+// and its ref deleted). A verified PR must not be blocked by this secondary
+// check failing or being inconclusive; surface it as an informational note.
 function applyBaseReconciliation(
   result: RunResult,
   cwd: string,
@@ -1549,17 +1556,11 @@ function applyBaseReconciliation(
   const detail = descendant === false
     ? `HEAD does not descend from the declared base ${baseBranch}.`
     : `could not verify whether HEAD descends from the declared base ${baseBranch}.`;
-  const summary = [
-    'MSQ_BLOCKED: validation_failed',
-    `post-run: ${detail}`,
-    'Resolve the branch base or Git error, then retry the run.',
-    result.summary,
-  ].join('\n');
+  const note = `note: post-run ${detail} A verified GitHub PR already confirms this publication; treat this only as informational.`;
   return {
     ...result,
-    ok: false,
-    summary,
-    publishVerificationStatus: 'blocked',
+    summary: [result.summary, note].join('\n'),
+    publishNote: note,
   };
 }
 

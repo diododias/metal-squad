@@ -288,8 +288,18 @@ export function RunDetailPage({
           </div>
           {run.publishError && (
             <div style={{ gridColumn: '1 / -1' }}>
-              <div style={{ color: 'var(--text-faint)', fontSize: 'var(--text-2xs)', textTransform: 'uppercase' }}>Publish check</div>
-              <div style={{ color: 'var(--accent-danger)', fontSize: 'var(--text-sm)', whiteSpace: 'pre-wrap' }}>{run.publishError}</div>
+              <div style={{ color: 'var(--text-faint)', fontSize: 'var(--text-2xs)', textTransform: 'uppercase' }}>
+                {run.publishVerified ? 'Publish warning' : 'Publish check'}
+              </div>
+              <div
+                style={{
+                  color: run.publishVerified ? 'var(--accent-warn)' : 'var(--accent-danger)',
+                  fontSize: 'var(--text-sm)',
+                  whiteSpace: 'pre-wrap',
+                }}
+              >
+                {run.publishError}
+              </div>
             </div>
           )}
         </div>
