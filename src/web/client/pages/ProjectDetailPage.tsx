@@ -105,7 +105,7 @@ export function ProjectDetailPage({ state, projectId, send, actionResults, onBac
           {epicId && repoId && (
             <div style={{ padding: 10, border: '1px solid var(--border-dim)', borderRadius: 'var(--radius-sm)', background: 'var(--bg-sunken)' }}>
               <div style={{ fontSize: 'var(--text-2xs)', color: 'var(--text-faint)', marginBottom: 4 }}>workflow preview</div>
-              {!previewReady && <p style={{ ...muted, margin: 0 }}>resolving template…</p>}
+              {(!previewReady || !previewResult) && <p style={{ ...muted, margin: 0 }}>resolving template…</p>}
               {previewReady && previewResult && 'error' in previewResult && <p role="alert" style={{ margin: 0, color: 'var(--accent-danger)', fontSize: 'var(--text-xs)' }}>{previewResult.error}</p>}
               {previewReady && previewResult && 'stages' in previewResult && <div style={{ display: 'grid', gap: 6 }}>
                 <div style={{ fontSize: 'var(--text-xs)', color: 'var(--text-dim)' }}>template: {previewResult.templateId} v{previewResult.templateVersion} ({previewResult.origin})</div>
