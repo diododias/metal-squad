@@ -2,6 +2,8 @@ import React, { useEffect, useState } from 'react';
 import { Button } from '../components/core/Button.js';
 import { FeatureConfigDetail } from '../components/FeatureConfigDetail.js';
 import { WorkflowStepper } from '../components/navigation/WorkflowStepper.js';
+import { Tabs } from '../components/navigation/Tabs.js';
+import { MarkdownView } from '../components/MarkdownView.js';
 import { PageHeader } from '../PageHeader.js';
 import { useActiveProject } from '../hooks/useActiveProject.js';
 import type { MsqWebState, FeatureConfigPatch, FeatureConfigSaveResult, TaskConfigPatch, WebSocketClientMessage, WebSocketServerMessage, MsqWorkItemType } from '../../types.js';
@@ -39,6 +41,7 @@ export function BacklogItemDetail({
 }: BacklogItemDetailProps): React.JSX.Element {
   const feature = state.featureCatalog[featureId];
   const [specDraft, setSpecDraft] = useState('');
+  const [specView, setSpecView] = useState<'edit' | 'preview'>('edit');
   const [typeChange, setTypeChange] = useState<{
     pendingRequestId?: string;
     proposedType?: MsqWorkItemType;
@@ -68,6 +71,9 @@ export function BacklogItemDetail({
 
   useEffect(() => onSubscribeHistory(featureId), [featureId, onSubscribeHistory]);
   useEffect(() => { setSpecDraft(feature?.description ?? ''); }, [feature?.description]);
+
+  const specDirty = specDraft !== (feature?.description ?? '');
+  const specPreviewSource = specDirty ? specDraft : (feature?.description ?? '');
 
   useEffect(() => {
     if (!typeChange.pendingRequestId) return;
@@ -223,17 +229,44 @@ export function BacklogItemDetail({
               <div style={{ color: 'var(--text-primary)', fontWeight: 600 }}>Specification</div>
               <div style={{ color: 'var(--text-dim)', fontSize: 'var(--text-xs)' }}>{feature.specFile ?? 'Stored in the backlog catalog'}</div>
             </div>
-            <Button variant="primary" size="sm" disabled={specDraft === (feature.description ?? '')} onClick={() => { onSaveConfig(featureId, { spec: specDraft }); }}>
+            <Button variant="primary" size="sm" disabled={!specDirty} onClick={() => { onSaveConfig(featureId, { spec: specDraft }); }}>
               save spec
             </Button>
           </div>
-          <textarea
-            aria-label="Feature specification"
-            value={specDraft}
-            onChange={(event) => { setSpecDraft(event.target.value); }}
-            placeholder="Write the feature specification…"
-            style={{ width: '100%', minHeight: 280, boxSizing: 'border-box', resize: 'vertical', background: 'var(--bg-sunken)', border: '1px solid var(--border-dim)', borderRadius: 'var(--radius-sm)', color: 'var(--text-primary)', fontFamily: 'var(--font-mono)', fontSize: 'var(--text-sm)', lineHeight: 1.5, padding: 12 }}
-          />
+          <div style={{ marginBottom: 8 }}>
+            <Tabs
+              tabs={[
+                { id: 'edit', label: 'Edit' },
+                { id: 'preview', label: 'Preview' },
+              ]}
+              activeId={specView}
+              onSelect={(id) => { setSpecView(id as 'edit' | 'preview'); }}
+            />
+          </div>
+          {specView === 'edit' ? (
+            <textarea
+              aria-label="Feature specification"
+              value={specDraft}
+              onChange={(event) => { setSpecDraft(event.target.value); }}
+              placeholder="Write the feature specification in markdown…"
+              style={{ width: '100%', minHeight: 280, boxSizing: 'border-box', resize: 'vertical', background: 'var(--bg-sunken)', border: '1px solid var(--border-dim)', borderRadius: 'var(--radius-sm)', color: 'var(--text-primary)', fontFamily: 'var(--font-mono)', fontSize: 'var(--text-sm)', lineHeight: 1.5, padding: 12 }}
+            />
+          ) : (
+            <div
+              data-testid="spec-preview"
+              style={{ width: '100%', minHeight: 280, boxSizing: 'border-box', background: 'var(--bg-sunken)', border: '1px solid var(--border-dim)', borderRadius: 'var(--radius-sm)', padding: 14, overflow: 'auto' }}
+            >
+              <MarkdownView
+                source={specPreviewSource}
+                emptyFallback="Nothing to preview yet — switch to Edit to draft the spec."
+              />
+              {specDirty && (
+                <div style={{ marginTop: 12, paddingTop: 10, borderTop: '1px dashed var(--border-dim)', color: 'var(--text-warn, var(--accent-warn))', fontSize: 'var(--text-2xs)', textTransform: 'uppercase', letterSpacing: 'var(--tracking-wide)' }}>
+                  previewing unsaved changes
+                </div>
+              )}
+            </div>
+          )}
         </section>
         <FeatureConfigDetail
           feature={feature}
