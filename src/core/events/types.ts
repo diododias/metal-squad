@@ -50,6 +50,8 @@ export interface RunFailedEvent {
   error: string;
   kind: RunFailedKind;
   featureName?: string;
+  pipelineId?: number | null;
+  blocked?: boolean;
 }
 
 export type RunBlockedReason = 'needs_input' | 'gate' | 'budget' | 'token' | 'precondition_failed';

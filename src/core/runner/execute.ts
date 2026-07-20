@@ -490,6 +490,7 @@ export async function executeBacklog(
             tool: feature.tool,
             error: res.summary,
             kind: 'aborted',
+            pipelineId,
           });
           activeRunIds.delete(runId);
           return { runId, res };
@@ -580,6 +581,8 @@ export async function executeBacklog(
           tool: feature.tool,
           error: res.summary,
           kind: 'execution',
+          pipelineId,
+          blocked: res.blocked,
         });
       }
       activeRunIds.delete(runId);
@@ -603,6 +606,7 @@ export async function executeBacklog(
         tool: feature.tool,
         error: message,
         kind: 'execution',
+        pipelineId,
       });
       activeRunIds.delete(runId);
       throw err;

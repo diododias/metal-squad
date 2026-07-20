@@ -6,6 +6,7 @@ import { spawn, execFileSync } from 'node:child_process';
 import { WebSocketServer, type WebSocket } from 'ws';
 import type { MsqEvents } from '../core/events/types.js';
 import { msqEventBus, logCaughtError } from '../core/events/index.js';
+import { startTelegramPoller, stopTelegramPoller } from '../core/notify/telegram-poller.js';
 import { assertWritableDbPath } from '../db/index.js';
 import {
   abortPipeline,
@@ -574,6 +575,8 @@ export function createWebServer(options: {
     res.writeHead(200, { 'Content-Type': file.contentType });
     res.end(file.body);
   }
+
+  startTelegramPoller();
 
   const httpServer = createServer((req, res) => {
     void handleRequest(req, res);
@@ -1507,6 +1510,7 @@ export function createWebServer(options: {
       clearInterval(outputPollInterval);
       clearInterval(reconcilePollInterval);
       outputUnsubscribe();
+      stopTelegramPoller();
       for (const unsubscribe of eventUnsubscribers) unsubscribe();
       for (const client of clients.values()) {
         client.socket.terminate();

@@ -469,6 +469,16 @@ function migrate(d: Database.Database): void {
 
     CREATE INDEX IF NOT EXISTS idx_recovery_decisions_occurrence
       ON recovery_decisions(timeout_occurrence_id);
+
+    CREATE TABLE IF NOT EXISTS processed_callback_queries (
+      callback_id TEXT PRIMARY KEY,
+      action TEXT NOT NULL,
+      payload TEXT,
+      processed_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_processed_callback_queries_at
+      ON processed_callback_queries(processed_at);
   `);
 
   const runColumns = d

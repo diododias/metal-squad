@@ -22,6 +22,8 @@ vi.mock('../../src/db/repo.js', () => ({
   resolveGate: mockResolveGate,
   resolveStageRequest: mockResolveStageRequest,
   resumePipeline: vi.fn(),
+  isCallbackProcessed: vi.fn(() => false),
+  recordCallbackProcessed: vi.fn(() => true),
 }));
 vi.stubGlobal('fetch', mockFetch);
 

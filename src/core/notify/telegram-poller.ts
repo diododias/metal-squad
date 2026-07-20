@@ -3,6 +3,8 @@ import { resolveRuntimeConfig } from '../../config/index.js';
 import { msqEventBus } from '../events/bus.js';
 import { logCaughtError } from '../events/logging.js';
 import { resumeBlockedRun } from '../runner/resume-blocked-run.js';
+import { resumePipelineWithOverride } from './resume-override.js';
+import type { Tool } from '../backlog/schema.js';
 import {
   getFeatureTopicAssociation,
   getGate,
@@ -12,6 +14,8 @@ import {
   resolveGate,
   resolveStageRequest,
   resumePipeline,
+  recordCallbackProcessed,
+  isCallbackProcessed,
 } from '../../db/repo.js';
 import type { GateDecision } from '../../db/repo.js';
 
@@ -40,6 +44,7 @@ const INPUT_CMD = /^input:(\d+)\s+([\s\S]+)$/i;
 const INPUT_OPTION_CMD = /^input:(\d+):(\d+)$/;
 const TIMEOUT_CMD = /^timeout:(\d+)\s+(retry|keep_blocked)$/i;
 const BLOCKED_CMD = /^blocked:(approve|intervene):(\d+)$/i;
+const RESUME_OVERRIDE_CMD = /^resume_override:(\d+):([a-z]+)$/i;
 
 function parseDecision(raw: string): GateDecision | null {
   const lower = raw.toLowerCase();
@@ -129,6 +134,10 @@ export class TelegramPoller {
         for (const update of body.result) {
           this.offset = update.update_id + 1;
           const callbackId = update.callback_query?.id;
+          if (callbackId && isCallbackProcessed(callbackId)) {
+            void this.answerCallback(token, callbackId);
+            continue;
+          }
           const text = update.message?.text ?? update.callback_query?.data ?? '';
           const match = GATE_CMD.exec(text);
           if (match) {
@@ -228,6 +237,20 @@ export class TelegramPoller {
               try { resolveStageRequest(Number(requestId), response.trim()); } catch (error) { notifyActionFailed('resolveStageRequest', error); }
             }
             if (callbackId) void this.answerCallback(token, callbackId);
+            continue;
+          }
+
+          const resumeOverrideMatch = RESUME_OVERRIDE_CMD.exec(text);
+          if (resumeOverrideMatch) {
+            const pipelineId = Number(resumeOverrideMatch[1]);
+            const tool: Tool = resumeOverrideMatch[2] ?? '';
+            if (pipelineId && tool && callbackId) {
+              const recorded = recordCallbackProcessed(callbackId, 'resume_override', { pipelineId, tool });
+              if (recorded && matchesConfiguredChat(updateContext(update).chatId, configuredTelegramChatId())) {
+                try { resumePipelineWithOverride({ pipelineId, tool }); } catch (error) { notifyActionFailed('resumePipelineWithOverride', error); }
+              }
+              void this.answerCallback(token, callbackId);
+            }
             continue;
           }
 

@@ -850,13 +850,14 @@ describe('executeBacklog failure persistence', () => {
       featureId: 'feat-02',
       tool: 'codex',
     });
-    expect(mockEventEmit).toHaveBeenCalledWith('run:failed', {
+    expect(mockEventEmit).toHaveBeenCalledWith('run:failed', expect.objectContaining({
       runId: 7,
       featureId: 'feat-02',
       tool: 'codex',
       error: 'timeout após 605s. última mensagem do agente: Atualizando registry. arquivos tocados: src/core/skills/registry.ts',
       kind: 'execution',
-    });
+      pipelineId: 9,
+    }));
     expect(mockNotify).not.toHaveBeenCalled();
   });
 

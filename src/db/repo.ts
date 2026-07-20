@@ -1391,6 +1391,13 @@ export function getRun(runId: number): RunRow | null {
     .get(runId) as RunRow | undefined) ?? null;
 }
 
+export function getLatestRunForPipeline(pipelineId: number): RunRow | null {
+  if (!hasDbFile()) return null;
+  return (getDb('readonly')
+    .prepare(`SELECT * FROM runs WHERE pipeline_id = ? ORDER BY id DESC LIMIT 1`)
+    .get(pipelineId) as RunRow | undefined) ?? null;
+}
+
 // T002: RunSummary interface
 export interface RunSummary {
   runId: number;
@@ -1962,6 +1969,32 @@ export function recordRunEvent(
   getDb('readwrite')
     .prepare(`INSERT INTO run_events (run_id, event, metadata) VALUES (?, ?, ?)`)
     .run(runId, event, metadata ? JSON.stringify(metadata) : null);
+}
+
+export function recordCallbackProcessed(
+  callbackId: string,
+  action: string,
+  payload?: Record<string, unknown>,
+): boolean {
+  if (!hasDbFile()) return true;
+  try {
+    const result = getDb('readwrite')
+      .prepare(
+        `INSERT OR IGNORE INTO processed_callback_queries (callback_id, action, payload) VALUES (?, ?, ?)`,
+      )
+      .run(callbackId, action, payload ? JSON.stringify(payload) : null);
+    return result.changes > 0;
+  } catch (error) {
+    logCaughtError('db/repo.recordCallbackProcessed', error);
+    return false;
+  }
+}
+
+export function isCallbackProcessed(callbackId: string): boolean {
+  if (!hasDbFile()) return false;
+  return getDb('readonly')
+    .prepare(`SELECT 1 FROM processed_callback_queries WHERE callback_id = ?`)
+    .get(callbackId) !== undefined;
 }
 
 export function listRunEvents(runId: number): RunEventRow[] {
