@@ -622,7 +622,8 @@ function getRepositoryDefaults(database: ReturnType<typeof getDb>, repoId: strin
 function isRepositoryUsable(path: string): boolean {
   try {
     return existsSync(path) && statSync(path).isDirectory();
-  } catch {
+  } catch (error) {
+    logCaughtError('db/repo.isRepositoryUsable', error);
     return false;
   }
 }

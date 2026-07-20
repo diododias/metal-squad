@@ -106,6 +106,12 @@ export interface EnvironmentInfo {
   version?: string;
 }
 
+export interface ErrorEntry {
+  timestamp: string;
+  module: string;
+  message: string;
+}
+
 export interface MsqWebState {
   revision: number;
   repoLabel: string;
@@ -143,6 +149,8 @@ export interface MsqWebState {
   /** Config page (Skills sub-tab) — discovered skills with precedence
    * already applied (repo > global > external > builtin), read-only. */
   skillsCatalog: Skill[];
+  /** Collector errors since the last snapshot — empty when all collectors succeeded. */
+  errors: ErrorEntry[];
 }
 
 export interface RunChangedFile {

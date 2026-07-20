@@ -6,17 +6,19 @@ export function useStatsRows(
   enabled: boolean,
   sinceDays: number | null,
   intervalMs = 3000,
-): StatsRunRow[] {
+): { rows: StatsRunRow[]; error: string | null } {
   const [rows, setRows] = useState<StatsRunRow[]>([]);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!enabled) return undefined;
     const refresh = (): void => {
       try {
         setRows(listRunsForStats(sinceDays !== null ? { sinceDays } : {}));
-      } catch (error) {
-        // DB locked or unavailable — keep stale data
-        logCaughtError('useStatsRows.refresh', error);
+        setError(null);
+      } catch (caught) {
+        logCaughtError('useStatsRows.refresh', caught);
+        setError(caught instanceof Error ? caught.message : 'Failed to refresh stats');
       }
     };
     refresh();
@@ -24,5 +26,5 @@ export function useStatsRows(
     return (): void => { clearInterval(timer); };
   }, [enabled, intervalMs, sinceDays]);
 
-  return rows;
+  return { rows, error };
 }

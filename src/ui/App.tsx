@@ -144,14 +144,14 @@ export function App(): React.ReactElement {
   const themeResolution = useMemo(() => resolveThemePreference(undefined), []);
   const repoLabel = useMemo(() => basename(resolveRepo().path), []);
   const tokenStats = useTokenStats(7);
-  const rawRuns = useRuns(2000);
+  const { runs: rawRuns } = useRuns(2000);
   // C1: TODO, EXECUTION/BLOCKED, DONE, FALHA/CANCELED — display order and
   // keyboard navigation order must stay in sync, so this reorder happens once
   // and `runs` (used everywhere below) is always the grouped array.
   const runs = useMemo(() => sortRunsByGroup(rawRuns), [rawRuns]);
-  const doneFeatureIds = useCompletedFeatures(2000);
+  const { doneFeatureIds } = useCompletedFeatures(2000);
   const { gates, resolve, forceResolve } = useGates(2000);
-  const runningTasks = useRunningTasks(2000);
+  const { runningTasks } = useRunningTasks(2000);
   const notifications = useNotifications(40);
   const toasts = useToasts(4);
   const width = useTerminalWidth();
@@ -261,8 +261,8 @@ export function App(): React.ReactElement {
     selectedRun ? selectedRun.runId : null,
     ui.outputPaused ? 2_000 : 750,
   );
-  const taskRuns = useTaskRuns(selectedRun ? selectedRun.runId : null);
-  const runBreakdown = useRunBreakdown(
+  const { taskRuns } = useTaskRuns(selectedRun ? selectedRun.runId : null);
+  const { breakdown: runBreakdown } = useRunBreakdown(
     selectedRun ? selectedRun.runId : null,
     selectedRun?.startedAt ?? null,
     selectedRun?.endedAt ?? null,
@@ -280,7 +280,7 @@ export function App(): React.ReactElement {
   const dashboardOpen = Boolean(ui.dashboard);
   const dashboardPeriodIndex = Math.min(ui.dashboardPeriod ?? 1, DASHBOARD_PERIODS.length - 1);
   const dashboardPeriod = DASHBOARD_PERIODS[dashboardPeriodIndex] ?? DASHBOARD_PERIODS[1] ?? { label: 'last 7 days', days: 7 };
-  const statsRows = useStatsRows(dashboardOpen, dashboardPeriod.days);
+  const { rows: statsRows } = useStatsRows(dashboardOpen, dashboardPeriod.days);
   const featureCatalog = getFeatureCatalog();
   const backlogSettings = getBacklogSettings();
   const selectedFeature = selectedRun ? featureCatalog[selectedRun.featureId] ?? null : null;
