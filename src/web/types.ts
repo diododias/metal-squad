@@ -1,6 +1,7 @@
 import type { MsqEvents } from '../core/events/types.js';
 import type { SessionStatusSnapshot, ToolCallRecord } from '../core/adapters/types.js';
 import type { EpicRow, ProjectRepoRow, ProjectRow, RunHistoryEntry, RunSummary, RunningTaskSummary, StatsRunRow, TaskRun, WorkItemRow } from '../db/repo.js';
+import type { WorkItemType } from '../db/workflowTemplates.js';
 import type { PendingApproval } from '../ui/hooks/useGates.js';
 import type { WorkItemCatalogEntry, BacklogSettings } from '../ui/catalog.js';
 import type { RunBreakdown } from '../core/stats.js';
@@ -151,6 +152,9 @@ export interface MsqWebState {
   skillsCatalog: Skill[];
   /** Collector errors since the last snapshot — empty when all collectors succeeded. */
   errors: ErrorEntry[];
+  /** Workflow Templates page — cheap summaries, no `workflow`/`stageSkills` definitions. */
+  workflowTemplates: WorkflowTemplateSummary[];
+  workflowTemplateMappings: WorkflowTemplateMappings;
 }
 
 export interface RunChangedFile {
@@ -334,6 +338,24 @@ export interface WorkItemActionError {
 export type WorkItemActionResult =
   | { type: 'action:result'; payload: { requestId: string; ok: true; workItem: WorkItemRow; revision: number } }
   | { type: 'action:result'; payload: { requestId: string; ok: false; error: WorkItemActionError } };
+
+export type MsqWorkItemType = WorkItemType;
+
+/** Cheap projection of a `WorkflowTemplate` for the web state snapshot — no
+ * `workflow`/`stageSkills` definition, which is fetched on demand. */
+export interface WorkflowTemplateSummary {
+  templateId: string;
+  name: string;
+  version: number;
+  revision: number;
+  builtin: boolean;
+  archived: boolean;
+  scopeProjectId: string | null;
+  stageCount: number;
+}
+
+/** Project -> Work Item type -> mapped template id. */
+export type WorkflowTemplateMappings = Record<string, Partial<Record<MsqWorkItemType, string>>>;
 
 export interface WorkflowTemplateActionError {
   code: string;

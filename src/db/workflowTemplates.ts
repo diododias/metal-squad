@@ -336,6 +336,21 @@ export function mapProjectWorkItemTemplate(input: {
   });
 }
 
+/** All Project→type→template mappings, or just one Project's when `projectId` is given. */
+export function listProjectTemplateMappings(
+  projectId?: string,
+): { projectId: string; workItemType: WorkItemType; templateId: string }[] {
+  if (!hasDbFile()) return [];
+  const where = projectId !== undefined ? ` WHERE project_id = ?` : '';
+  const params = projectId !== undefined ? [projectId] : [];
+  return getDb('readonly')
+    .prepare(
+      `SELECT project_id AS projectId, work_item_type AS workItemType, template_id AS templateId
+         FROM project_work_item_templates${where} ORDER BY project_id ASC, work_item_type ASC`,
+    )
+    .all(...params) as { projectId: string; workItemType: WorkItemType; templateId: string }[];
+}
+
 /**
  * Deterministic template resolution.
  *
