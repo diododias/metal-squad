@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import { detectStderrLevel, sanitizeToolCallRecord, type SessionHandle, type ToolAdapter, type RunResult, type RunFeatureOptions, type TokenUsage, type ToolCallRecord } from './types.js';
+import { detectStderrLevel, detectSessionLimit, sanitizeToolCallRecord, type SessionHandle, type ToolAdapter, type RunResult, type RunFeatureOptions, type TokenUsage, type ToolCallRecord } from './types.js';
 import type { Effort, Feature } from '../backlog/schema.js';
 import { CliAbortError, resolveToolInvocation, runCli } from './spawn.js';
 import { msqEventBus, logCaughtError } from '../events/index.js';
@@ -170,9 +170,18 @@ export const opencodeAdapter: ToolAdapter = {
     }
     streamParser.flush();
     if (code !== 0) {
+      const limitMessage = detectSessionLimit(stdout, stderr);
+      if (limitMessage) {
+        return { ok: false, blocked: true, summary: `session limit reached: ${limitMessage}` };
+      }
       const errorSummary = stderr.slice(-500) || `exit ${String(code)}`;
       console.error(`[opencode adapter] exit ${String(code)}: ${errorSummary}`);
       return { ok: false, summary: errorSummary };
+    }
+
+    const limitMessage = detectSessionLimit(stdout, stderr);
+    if (limitMessage) {
+      return { ok: false, blocked: true, summary: `session limit reached: ${limitMessage}` };
     }
 
     const events = extractOpenCodeEvents(stdout);
