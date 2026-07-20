@@ -148,28 +148,6 @@ export function listWorkflowTemplates(
   return rows.map(toTemplate);
 }
 
-export interface ProjectTemplateMapping {
-  projectId: string;
-  workItemType: WorkItemType;
-  templateId: string;
-}
-
-/** Read every Project -> Work Item type -> template binding.
- *
- * The web state collector turns the flat list into a `projectId -> type -> templateId`
- * map for the client picker; templates without a mapping still resolve through the
- * builtin fallback in `resolveTemplate`. Returns `[]` before the first migration
- * (mirrors `listWorkflowTemplates`'s `hasDbFile` guard). */
-export function listProjectTemplateMappings(): ProjectTemplateMapping[] {
-  if (!hasDbFile()) return [];
-  return getDb('readonly')
-    .prepare(
-      `SELECT project_id AS projectId, work_item_type AS workItemType, template_id AS templateId
-         FROM project_work_item_templates`,
-    )
-    .all() as ProjectTemplateMapping[];
-}
-
 export interface CreateWorkflowTemplateInput {
   projectId: string;
   name: string;
@@ -356,6 +334,21 @@ export function mapProjectWorkItemTemplate(input: {
       templateId: input.templateId,
     });
   });
+}
+
+/** All Project→type→template mappings, or just one Project's when `projectId` is given. */
+export function listProjectTemplateMappings(
+  projectId?: string,
+): { projectId: string; workItemType: WorkItemType; templateId: string }[] {
+  if (!hasDbFile()) return [];
+  const where = projectId !== undefined ? ` WHERE project_id = ?` : '';
+  const params = projectId !== undefined ? [projectId] : [];
+  return getDb('readonly')
+    .prepare(
+      `SELECT project_id AS projectId, work_item_type AS workItemType, template_id AS templateId
+         FROM project_work_item_templates${where} ORDER BY project_id ASC, work_item_type ASC`,
+    )
+    .all(...params) as { projectId: string; workItemType: WorkItemType; templateId: string }[];
 }
 
 /**
