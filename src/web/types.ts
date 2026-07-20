@@ -318,6 +318,12 @@ export type WorkItemActionErrorCode =
   | 'DEPENDENCY_NOT_FOUND'
   | 'CROSS_REPOSITORY_DEPENDENCY'
   | 'DEPENDENCY_CYCLE'
+  // Surfaced by the type-change action, which shares this error shape.
+  | 'WORK_ITEM_NOT_FOUND'
+  | 'WORK_ITEM_HAS_HISTORY'
+  | 'REVISION_CONFLICT'
+  | 'WORKFLOW_TEMPLATE_NOT_FOUND'
+  | 'WORKFLOW_TEMPLATE_INVALID'
   | 'WORK_ITEM_ACTION_FAILED';
 
 export interface WorkItemActionError {
@@ -326,6 +332,32 @@ export interface WorkItemActionError {
 }
 
 export type WorkItemActionResult =
+  | { type: 'action:result'; payload: { requestId: string; ok: true; workItem: WorkItemRow; revision: number } }
+  | { type: 'action:result'; payload: { requestId: string; ok: false; error: WorkItemActionError } };
+
+export interface WorkflowTemplateActionError {
+  code: string;
+  message: string;
+}
+
+export type WorkflowTemplateActionResult =
+  | { type: 'action:result'; payload: { requestId: string; ok: true; workflowTemplate: WorkflowTemplateSummary; revision: number } }
+  | { type: 'action:result'; payload: { requestId: string; ok: true } }
+  | { type: 'action:result'; payload: { requestId: string; ok: false; error: WorkflowTemplateActionError } };
+
+/** What a `changeWorkItemType` preview shows before the caller confirms: the
+ * template the item would move onto, and the stages it would end up with. */
+export interface WorkItemTypeChangePreview {
+  workItemId: string;
+  fromType: MsqWorkItemType;
+  toType: MsqWorkItemType;
+  templateId: string;
+  templateVersion: number;
+  stages: string[];
+}
+
+export type WorkItemTypeChangeResult =
+  | { type: 'action:result'; payload: { requestId: string; ok: true; preview: WorkItemTypeChangePreview } }
   | { type: 'action:result'; payload: { requestId: string; ok: true; workItem: WorkItemRow; revision: number } }
   | { type: 'action:result'; payload: { requestId: string; ok: false; error: WorkItemActionError } };
 
@@ -350,7 +382,13 @@ export type WebSocketClientMessage =
   | { type: 'action:moveRepo'; requestId: string; repoId: string; toProjectId: string; expectedRevision?: number }
   | { type: 'action:unlinkRepo'; requestId: string; projectId: string; repoId: string }
   | { type: 'action:createEpic'; requestId: string; projectId: string; title: string; description?: string | null }
-  | { type: 'action:createWorkItem'; requestId: string; epicId: string; repoId: string; title: string; description?: string | null; dependsOn?: string[] }
+  | { type: 'action:createWorkItem'; requestId: string; epicId: string; repoId: string; workItemType?: MsqWorkItemType; title: string; description?: string | null; dependsOn?: string[] }
+  | { type: 'action:createWorkflowTemplate'; requestId: string; projectId: string; name: string; definition: unknown }
+  | { type: 'action:updateWorkflowTemplate'; requestId: string; templateId: string; expectedRevision: number; patch: { name?: string; definition?: unknown } }
+  | { type: 'action:duplicateWorkflowTemplate'; requestId: string; templateId: string; projectId: string; name?: string }
+  | { type: 'action:archiveWorkflowTemplate'; requestId: string; templateId: string }
+  | { type: 'action:setTypeTemplate'; requestId: string; projectId: string; workItemType: MsqWorkItemType; templateId: string }
+  | { type: 'action:changeWorkItemType'; requestId: string; workItemId: string; workItemType: MsqWorkItemType; expectedRevision: number; preview?: boolean }
   | {
       type: 'action:updateEpic';
       requestId: string;
@@ -395,6 +433,8 @@ export type WebSocketServerMessage =
   | RepositoryActionResult
   | EpicActionResult
   | WorkItemActionResult
+  | WorkflowTemplateActionResult
+  | WorkItemTypeChangeResult
   | { type: 'run:detail'; payload: { runId: number; taskRuns: TaskRun[]; breakdown: RunBreakdown | null; sessionStatus: SessionStatusSnapshot | null; statusHistory: SessionStatusSnapshot[]; toolCalls: ToolCallRecord[] } }
   | { type: 'run:history'; payload: { featureId: string; runs: RunHistoryEntry[] } }
   | { type: 'run:changes'; payload: RunChangesPayload }

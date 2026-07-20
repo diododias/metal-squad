@@ -13,10 +13,13 @@ import {
   RepoInUseError,
   RepoNotLinkedToProjectError,
   RevisionConflictError,
+  WorkItemHasHistoryError,
+  WorkItemNotFoundError,
 } from './errors.js';
 import { listOccupiedFeatureIds } from './backlogCatalog.js';
 import { allocateFeatureId } from '../core/backlog/featureId.js';
-import { DefaultsSchema, FeatureSchema, type Defaults, type Feature, type WorkItem } from '../core/backlog/schema.js';
+import { DefaultsSchema, FeatureSchema, type Defaults, type Feature, type WorkItem, type WorkflowTemplateDefinition } from '../core/backlog/schema.js';
+import type { TemplateOrigin, WorkItemType } from './workflowTemplates.js';
 import { topoOrder } from '../core/orchestrator/graph.js';
 import { sanitizeToolCallRecord, type PublishEvidence, type SessionStatusSnapshot, type TokenUsage, type ToolCallRecord } from '../core/adapters/types.js';
 import { resolveDbPath } from '../config/index.js';
@@ -169,7 +172,7 @@ export interface WorkItemRow extends Omit<WorkItem, 'id'> {
   workItemId: string;
   epicId: string;
   repoId: string;
-  type: 'feature';
+  type: WorkItemType;
   revision: number;
   createdAt: string;
   updatedAt: string;
@@ -179,9 +182,23 @@ export interface CreateWorkItemInput {
   epicId: string;
   repoId: string;
   title: string;
+  type?: WorkItemType;
   description?: string | null;
   dependsOn?: string[];
   audit?: AuditContext;
+}
+
+/**
+ * The template materialised into a Work Item at creation time.
+ *
+ * Callers resolve this *before* opening the write transaction so an invalid
+ * template or a missing skill fails without leaving an orphaned row behind.
+ */
+export interface WorkItemTemplateSnapshot {
+  templateId: string;
+  templateVersion: number;
+  origin: TemplateOrigin;
+  definition: WorkflowTemplateDefinition;
 }
 
 /** Minimal persisted ownership data needed before a Work Item can touch the
@@ -312,7 +329,10 @@ export function updateEpic(epicId: string, patch: UpdateEpicPatch, expectedRevis
 /** Compatibility adapter for the legacy catalog table. It snapshots the
  * repository defaults at creation time and writes both normalized columns and
  * `data_json` inside the same transaction as the audit event. */
-export function createWorkItem(input: CreateWorkItemInput): WorkItemRow {
+export function createWorkItem(
+  input: CreateWorkItemInput,
+  snapshot?: WorkItemTemplateSnapshot,
+): WorkItemRow {
   return withTransaction((database) => {
     const epic = getEpicFromDatabase(database, input.epicId);
     if (!epic) throw new EpicNotFoundError(input.epicId);
@@ -351,14 +371,28 @@ export function createWorkItem(input: CreateWorkItemInput): WorkItemRow {
       effort: defaults.effort,
       thinking: defaults.thinking,
       skills: defaults.skills,
-      workflow: defaults.workflow,
+      // The template snapshot pins the workflow; Repository defaults only
+      // supply it when no template was resolved (legacy/import callers).
+      workflow: snapshot?.definition.workflow ?? defaults.workflow,
       ...(defaults.maxTokens === undefined ? {} : { maxTokens: defaults.maxTokens }),
       autoStart: false,
     });
     assertNoWorkItemCycle(database, input.repoId, input.epicId, feature);
 
     const description = input.description ?? null;
-    const data = { ...feature, type: 'feature' as const, ...(description === null ? {} : { description }) };
+    // Snapshot is materialised here and never rewritten: a later template
+    // update bumps `version` but leaves this `data_json` byte for byte intact.
+    const data = {
+      ...feature,
+      type: input.type ?? 'feature',
+      ...(description === null ? {} : { description }),
+      ...(snapshot === undefined ? {} : {
+        stageSkills: snapshot.definition.stageSkills,
+        templateId: snapshot.templateId,
+        templateVersion: snapshot.templateVersion,
+        templateOrigin: snapshot.origin,
+      }),
+    };
     const position = (database.prepare(
       `SELECT COALESCE(MAX(position), -1) + 1 AS position FROM backlog_features WHERE epic_id = ?`,
     ).get(input.epicId) as { position: number }).position;
@@ -371,6 +405,112 @@ export function createWorkItem(input: CreateWorkItemInput): WorkItemRow {
     if (!workItem) throw new Error(`Work Item was not created: ${workItemId}`);
     recordAuditEvent(database, input.audit, 'work_item', workItemId, 'create', null, workItem);
     return workItem;
+  });
+}
+
+/**
+ * Project + repo path for a not-yet-created Work Item, used to resolve its
+ * template before the insert. Mirrors the repo∈Project check in
+ * `createWorkItem` so an invalid target is rejected identically either way.
+ */
+export function getEpicTemplateTarget(
+  epicId: string,
+  repoId: string,
+): { projectId: string; repoPath: string } {
+  const row = getDb('readonly').prepare(
+    `SELECT e.project_id AS projectId, r.path AS repoPath, pr.project_id AS repoProjectId
+       FROM backlog_epics e
+       JOIN repos r ON r.repo_id = ?
+       LEFT JOIN project_repos pr ON pr.repo_id = r.repo_id
+      WHERE e.epic_id = ?`,
+  ).get(repoId, epicId) as { projectId: string; repoPath: string; repoProjectId: string | null } | undefined;
+  if (!row) throw new EpicNotFoundError(epicId);
+  if (row.repoProjectId !== row.projectId) throw new RepositoryNotInProjectError(repoId, row.projectId);
+  return { projectId: row.projectId, repoPath: row.repoPath };
+}
+
+/** Project + repo path for an existing Work Item, used to re-resolve its
+ * template when the type changes. */
+export function getWorkItemTemplateTarget(
+  workItemId: string,
+): { projectId: string; repoPath: string; type: WorkItemType; revision: number } {
+  const row = getDb('readonly').prepare(
+    `SELECT e.project_id AS projectId, r.path AS repoPath, f.data_json AS dataJson, f.revision
+       FROM backlog_features f
+       JOIN backlog_epics e ON e.epic_id = f.epic_id
+       JOIN repos r ON r.repo_id = f.repo_id
+      WHERE f.feature_id = ? AND f.archived_at IS NULL AND f.deleted_at IS NULL`,
+  ).get(workItemId) as { projectId: string; repoPath: string; dataJson: string; revision: number } | undefined;
+  if (!row) throw new WorkItemNotFoundError(workItemId);
+  const stored = JSON.parse(row.dataJson) as Record<string, unknown>;
+  return {
+    projectId: row.projectId,
+    repoPath: row.repoPath,
+    type: stored.type === 'bug' ? 'bug' : 'feature',
+    revision: row.revision,
+  };
+}
+
+/**
+ * True when the Work Item has never been executed.
+ *
+ * Only a pristine item may change type: once a run exists, its transcripts and
+ * gates are tied to the workflow that produced them, so swapping the snapshot
+ * would leave that history describing stages the item no longer has.
+ */
+export function isWorkItemPristine(workItemId: string): boolean {
+  const row = getDb('readonly').prepare(
+    `SELECT COUNT(*) AS runCount FROM runs WHERE feature_id = ?`,
+  ).get(workItemId) as { runCount: number };
+  return row.runCount === 0;
+}
+
+/**
+ * Re-materialises a pristine Work Item onto a new type's template snapshot.
+ *
+ * Atomic by construction: the type, the workflow and the whole snapshot move
+ * together in one transaction, so the item is never left describing one type
+ * with another type's stages.
+ */
+export function changeWorkItemType(
+  workItemId: string,
+  type: WorkItemType,
+  snapshot: WorkItemTemplateSnapshot,
+  expectedRevision: number,
+): WorkItemRow {
+  return withTransaction((database) => {
+    const before = getWorkItemFromDatabase(database, workItemId);
+    if (!before) throw new WorkItemNotFoundError(workItemId);
+    if (before.revision !== expectedRevision) {
+      throw new RevisionConflictError(workItemId, expectedRevision, before.revision, 'Work Item');
+    }
+    const runCount = (database.prepare(
+      `SELECT COUNT(*) AS runCount FROM runs WHERE feature_id = ?`,
+    ).get(workItemId) as { runCount: number }).runCount;
+    if (runCount > 0) throw new WorkItemHasHistoryError(workItemId, runCount);
+
+    const stored = JSON.parse((database.prepare(
+      `SELECT data_json AS dataJson FROM backlog_features WHERE feature_id = ?`,
+    ).get(workItemId) as { dataJson: string }).dataJson) as Record<string, unknown>;
+
+    const data = {
+      ...stored,
+      type,
+      workflow: snapshot.definition.workflow,
+      stageSkills: snapshot.definition.stageSkills,
+      templateId: snapshot.templateId,
+      templateVersion: snapshot.templateVersion,
+      templateOrigin: snapshot.origin,
+    };
+    database.prepare(
+      `UPDATE backlog_features
+          SET data_json = ?, revision = revision + 1, updated_at = datetime('now')
+        WHERE feature_id = ?`,
+    ).run(JSON.stringify(data), workItemId);
+
+    const after = getWorkItemFromDatabase(database, workItemId);
+    if (!after) throw new WorkItemNotFoundError(workItemId);
+    return after;
   });
 }
 
@@ -604,7 +744,8 @@ function getWorkItemFromDatabase(database: ReturnType<typeof getDb>, workItemId:
     workItemId: row.workItemId,
     epicId: row.epicId,
     repoId: row.repoId,
-    type: 'feature',
+    // Persisted type wins; legacy rows written before PRJ-22 have no `type`.
+    type: stored.type === 'bug' ? 'bug' : 'feature',
     description: row.description ?? (typeof stored.description === 'string' ? stored.description : undefined),
     revision: row.revision,
     createdAt: row.updatedAt,

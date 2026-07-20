@@ -217,6 +217,13 @@ const FeatureSchemaShape = z.object({
   specFile: z.string().optional(),
   context: z.array(z.string()).optional(),
   workflow: WorkflowSchema.default({}),
+  // Immutable template snapshot taken when the Work Item was created (PRJ-24).
+  // Absent on legacy rows and on YAML-authored items, which fall back to
+  // Repository defaults for stage skills.
+  stageSkills: z.record(z.string(), z.array(z.string())).optional(),
+  templateId: z.string().optional(),
+  templateVersion: z.number().int().positive().optional(),
+  templateOrigin: z.enum(['project-mapping', 'builtin']).optional(),
   retry: RetrySchema.optional(),
   maxTokens: z.number().int().positive().optional(),
   autoStart: z.boolean().default(false),

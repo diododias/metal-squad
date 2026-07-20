@@ -18,6 +18,7 @@ import {
   type RunningTaskSummary,
   type StatsRunRow,
 } from '../db/repo.js';
+import { listWorkflowTemplates, listProjectTemplateMappings } from '../db/workflowTemplates.js';
 import { resolveRepo } from '../core/repo.js';
 import { getFeatureCatalog, getBacklogSettings, getPendingFeatures, type WorkItemCatalogEntry } from '../ui/catalog.js';
 import { getRunGroup, sortRunsByGroup } from '../ui/dashboardGroups.js';
@@ -286,10 +287,57 @@ const CONFIG_CACHE_TTL_MS = 30_000;
 let runtimeConfigCache: { value: WebRuntimeConfig; expiresAt: number } | null = null;
 let skillsCatalogCache: { value: Skill[]; expiresAt: number } | null = null;
 
+// Templates only change through explicit actions, so this cache is invalidated
+// on write rather than expiring on a timer.
+let workflowTemplatesCache: {
+  summaries: WorkflowTemplateSummary[];
+  mappings: WorkflowTemplateMappings;
+} | null = null;
+
 /** Test hook: drop the runtime-config/skills caches. */
 export function resetWebStateCaches(): void {
   invalidateRuntimeConfigCache();
   skillsCatalogCache = null;
+  workflowTemplatesCache = null;
+}
+
+/** Drop cached templates after a template action so the next state reflects it. */
+export function invalidateWorkflowTemplatesCache(): void {
+  workflowTemplatesCache = null;
+}
+
+function collectWorkflowTemplates(): {
+  summaries: WorkflowTemplateSummary[];
+  mappings: WorkflowTemplateMappings;
+} {
+  if (workflowTemplatesCache) return workflowTemplatesCache;
+  let value: { summaries: WorkflowTemplateSummary[]; mappings: WorkflowTemplateMappings };
+  try {
+    const summaries = listWorkflowTemplates({ includeArchived: true }).map((template) => ({
+      templateId: template.templateId,
+      name: template.name,
+      version: template.version,
+      revision: template.revision,
+      builtin: template.builtin,
+      archived: template.archivedAt !== null,
+      scopeProjectId: template.scopeProjectId,
+      // A count is enough to render a picker; the stage list itself is part of
+      // the on-demand definition.
+      stageCount: template.definition.workflow.stages.length,
+    }));
+    const mappings: WorkflowTemplateMappings = {};
+    for (const mapping of listProjectTemplateMappings()) {
+      const forProject = mappings[mapping.projectId] ?? {};
+      forProject[mapping.workItemType] = mapping.templateId;
+      mappings[mapping.projectId] = forProject;
+    }
+    value = { summaries, mappings };
+  } catch (error) {
+    logCaughtError('web/state.collectWorkflowTemplates', error);
+    value = { summaries: [], mappings: {} };
+  }
+  workflowTemplatesCache = value;
+  return value;
 }
 
 /** Drop cached config after a settings write so the next state reflects it immediately. */
