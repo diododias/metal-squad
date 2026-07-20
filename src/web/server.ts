@@ -1,6 +1,6 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 import { readFileSync } from 'node:fs';
-import { dirname, join } from 'node:path';
+import { basename, dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawn, execFileSync } from 'node:child_process';
 import { WebSocketServer, type WebSocket } from 'ws';
@@ -50,14 +50,16 @@ import { workItemService } from '../core/workItemService.js';
 import { projectService, repoLinkService } from '../core/projectService.js';
 import { buildMsqWebState, appendNotification, resetWebStateCaches, invalidateWorkflowTemplatesCache } from './state.js';
 import { createWebAuth, isAllowedHostHeader, isAllowedOrigin, timingSafeEqualStrings } from './auth.js';
-import { EpicActionMessageSchema, ProjectActionMessageSchema, RepositoryActionMessageSchema, WorkItemActionMessageSchema, WorkflowTemplateActionMessageSchema, WorkItemTypeChangeMessageSchema, ResolveWorkflowTemplateMessageSchema } from './schemas.js';
+import { EpicActionMessageSchema, ProjectActionMessageSchema, RepositoryActionMessageSchema, WorkItemActionMessageSchema, WorkflowTemplateActionMessageSchema, WorkItemTypeChangeMessageSchema, ResolveWorkflowTemplateMessageSchema, WorkflowTemplateDefinitionMessageSchema, ValidateWorkflowTemplateMessageSchema } from './schemas.js';
 import {
   archiveWorkflowTemplate,
   createWorkflowTemplate,
   duplicateWorkflowTemplate,
+  getWorkflowTemplate,
   mapProjectWorkItemTemplate,
   resolveTemplate,
   updateWorkflowTemplate,
+  validateTemplateAgainstRepos,
   type WorkflowTemplate,
 } from '../db/workflowTemplates.js';
 import type {
@@ -897,6 +899,14 @@ export function createWebServer(options: {
         }
         break;
       }
+      case 'action:getWorkflowTemplateDefinition': {
+        sendTo(client, handleWorkflowTemplateDefinition(message));
+        break;
+      }
+      case 'action:validateWorkflowTemplate': {
+        sendTo(client, handleValidateWorkflowTemplate(message));
+        break;
+      }
       case 'action:startFeature': {
         startFeature(message.featureId, featureCwd);
         reconcileWebState(featureCwd);
@@ -1264,6 +1274,42 @@ export function createWebServer(options: {
       }
     } catch (error) {
       return { type: 'action:result', payload: { requestId: parsed.data.requestId, ok: false, error: workflowTemplateActionError(error) } };
+    }
+  }
+
+  /** Full definition for a template, fetched on demand (PRJ-26) when the
+   * client opens it for editing, duplication or diffing. */
+  function handleWorkflowTemplateDefinition(message: unknown): WebSocketServerMessage {
+    const parsed = WorkflowTemplateDefinitionMessageSchema.safeParse(message);
+    if (!parsed.success) {
+      return { type: 'action:result', payload: { requestId: actionResultRequestId(message), ok: false, error: { code: 'INVALID_PAYLOAD', message: 'Invalid workflow template definition request.' } } };
+    }
+    const { requestId, templateId } = parsed.data;
+    const template = getWorkflowTemplate(templateId);
+    if (!template) {
+      return { type: 'action:result', payload: { requestId, ok: false, error: { code: 'WORKFLOW_TEMPLATE_NOT_FOUND', message: `Workflow template ${templateId} was not found.` } } };
+    }
+    return { type: 'action:result', payload: { requestId, ok: true, templateId, definition: template.definition } };
+  }
+
+  /** Validates a draft definition against every active repo of a Project
+   * (PRJ-26), returning a repo×skill matrix rather than a single pass/fail so
+   * the UI can pinpoint exactly which repo is missing which skill before the
+   * caller saves or maps the template. */
+  function handleValidateWorkflowTemplate(message: unknown): WebSocketServerMessage {
+    const parsed = ValidateWorkflowTemplateMessageSchema.safeParse(message);
+    if (!parsed.success) {
+      return { type: 'action:result', payload: { requestId: actionResultRequestId(message), ok: false, error: { code: 'INVALID_PAYLOAD', message: 'Invalid workflow template validation request.' } } };
+    }
+    const { requestId, projectId, definition } = parsed.data;
+    try {
+      const repos = repoLinkService.list(projectId);
+      const { matrix } = validateTemplateAgainstRepos(definition, repos.map((repo) => ({ repoId: repo.repoId, repoPath: repo.path })));
+      const repoLabels = new Map(repos.map((repo) => [repo.repoId, basename(repo.path)]));
+      const withLabels = matrix.map((entry) => ({ repoId: entry.repoId, repoLabel: repoLabels.get(entry.repoId) ?? entry.repoId, missing: entry.missing }));
+      return { type: 'action:result', payload: { requestId, ok: true, valid: withLabels.every((entry) => entry.missing.length === 0), matrix: withLabels } };
+    } catch (error) {
+      return { type: 'action:result', payload: { requestId, ok: false, error: workflowTemplateActionError(error) } };
     }
   }
 
