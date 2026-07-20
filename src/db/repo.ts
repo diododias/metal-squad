@@ -1138,11 +1138,18 @@ export function getLatestPublishedRunForFeature(
 
 export function upsertRunSessionStatus(snapshot: SessionStatusSnapshot): void {
   const database = getDb('readwrite');
+  // `timed_out` deliberately does NOT map to a legacy status here: the run
+  // isn't necessarily "failed" (execute.ts decides — usually `blocked`,
+  // pending a timeout-approval decision). Writing `status='failed'` this
+  // early used to race createTimeoutOccurrence's terminal-status guard
+  // (src/core/runner/execute.ts calls it right after this event fires),
+  // which silently skipped creating the timeout occurrence/approval request
+  // and dropped the Telegram notification for every historical timeout (H31).
   const legacyStatus = snapshot.status === 'completed'
     ? 'done'
     : snapshot.status === 'interrupted'
       ? 'aborted'
-      : snapshot.status === 'failed' || snapshot.status === 'timed_out'
+      : snapshot.status === 'failed'
         ? 'failed'
         : null;
   database.prepare(
