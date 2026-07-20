@@ -2,6 +2,7 @@ import { accessSync, constants, existsSync } from 'node:fs';
 import { dirname } from 'node:path';
 import Database from 'better-sqlite3';
 import { DB_PATH_ENV, resolveDbPath, ensureDataDir } from '../config/index.js';
+import { BUILTIN_WORKFLOW_TEMPLATES } from '../core/workflow/stageSkills.js';
 
 let db: Database.Database | null = null;
 let dbMode: 'readonly' | 'readwrite' | null = null;
@@ -140,6 +141,36 @@ function migrate(d: Database.Database): void {
     );
 
     CREATE INDEX IF NOT EXISTS idx_project_repos_project ON project_repos(project_id, position);
+
+    CREATE TABLE IF NOT EXISTS workflow_templates (
+      template_id      TEXT PRIMARY KEY,
+      scope_project_id TEXT REFERENCES projects(project_id),
+      name             TEXT NOT NULL,
+      definition_json  TEXT NOT NULL,
+      version          INTEGER NOT NULL DEFAULT 1,
+      builtin          INTEGER NOT NULL DEFAULT 0,
+      archived_at      TEXT,
+      revision         INTEGER NOT NULL DEFAULT 1,
+      created_at       TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at       TEXT NOT NULL DEFAULT (datetime('now')),
+      CHECK (builtin IN (0, 1)),
+      CHECK (builtin = 0 OR scope_project_id IS NULL)
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_workflow_templates_scope ON workflow_templates(scope_project_id);
+    CREATE INDEX IF NOT EXISTS idx_workflow_templates_archived_at ON workflow_templates(archived_at);
+
+    CREATE TABLE IF NOT EXISTS project_work_item_templates (
+      project_id     TEXT NOT NULL REFERENCES projects(project_id),
+      work_item_type TEXT NOT NULL,
+      template_id    TEXT NOT NULL REFERENCES workflow_templates(template_id),
+      updated_at     TEXT NOT NULL DEFAULT (datetime('now')),
+      PRIMARY KEY (project_id, work_item_type),
+      CHECK (work_item_type IN ('feature','bug'))
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_project_work_item_templates_template
+      ON project_work_item_templates(template_id);
 
     CREATE TABLE IF NOT EXISTS audit_events (
       id           INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -658,6 +689,27 @@ function migrate(d: Database.Database): void {
   ensurePipelineColumn('project_id', `ALTER TABLE pipelines ADD COLUMN project_id TEXT REFERENCES projects(project_id)`);
   d.exec(`CREATE INDEX IF NOT EXISTS idx_pipelines_project ON pipelines(project_id)`);
   d.exec(`CREATE INDEX IF NOT EXISTS idx_pipelines_project_feature ON pipelines(project_id, feature_id)`);
+
+  seedBuiltinWorkflowTemplates(d);
+}
+
+/**
+ * Seeds the builtin workflow templates (PRJ-23).
+ *
+ * Idempotent by construction: builtins carry stable ids and `DO NOTHING` on
+ * conflict, so repeated `migrate()` calls neither duplicate nor overwrite them.
+ * Builtins are immutable — a user customises one by duplicating it into a
+ * Project scope.
+ */
+function seedBuiltinWorkflowTemplates(d: Database.Database): void {
+  const insert = d.prepare(
+    `INSERT INTO workflow_templates (template_id, scope_project_id, name, definition_json, version, builtin)
+     VALUES (?, NULL, ?, ?, 1, 1)
+     ON CONFLICT(template_id) DO NOTHING`,
+  );
+  for (const template of BUILTIN_WORKFLOW_TEMPLATES) {
+    insert.run(template.templateId, template.name, JSON.stringify(template.definition));
+  }
 }
 
 function toDbAccessError(error: unknown, dbPath: string): Error {

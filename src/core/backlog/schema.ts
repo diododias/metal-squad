@@ -154,6 +154,53 @@ export const DefaultsSchema = z.object({
   maxTokens: z.number().int().positive().optional(),
 });
 
+/**
+ * Workflow template contract (PRJ-23).
+ *
+ * `WorkflowSchema` deliberately does not carry `stageSkills` — that map lives
+ * separately in `DefaultsSchema.stageSkills`. A template must pin both to be a
+ * self-contained, snapshot-able definition, so it combines the two here.
+ */
+export const WorkflowTemplateDefinitionSchema = z
+  .object({
+    workflow: WorkflowSchema.default({}),
+    stageSkills: z.record(z.string(), z.array(z.string())).default({}),
+  })
+  .superRefine((definition, ctx) => {
+    const stages = definition.workflow.stages;
+
+    const seen = new Set<string>();
+    for (const [index, stage] of stages.entries()) {
+      if (stage.trim().length === 0) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['workflow', 'stages', index],
+          message: 'Stage names must not be empty.',
+        });
+      }
+      if (seen.has(stage)) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['workflow', 'stages', index],
+          message: `Stage "${stage}" is duplicated in workflow.stages.`,
+        });
+      }
+      seen.add(stage);
+    }
+
+    for (const stage of Object.keys(definition.stageSkills)) {
+      if (!stages.includes(stage)) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['stageSkills', stage],
+          message: `Stage "${stage}" must exist in workflow.stages.`,
+        });
+      }
+    }
+  });
+
+export type WorkflowTemplateDefinition = z.infer<typeof WorkflowTemplateDefinitionSchema>;
+
 const FeatureSchemaShape = z.object({
   id: z.string(),
   title: z.string(),
