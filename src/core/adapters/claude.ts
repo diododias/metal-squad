@@ -397,24 +397,11 @@ function parseClaudeLine(line: string, stageSkills: Record<string, string[]>): P
       } else if (block.type === 'text') {
         const text = normalizeSnippet(block.text);
         if (text) updates.push({ output: { line: text, source: 'agent' } });
-      } else if (block.type === 'tool_result') {
-        const output = normalizeSnippet(JSON.stringify(block.content ?? ''));
-        updates.push({
-          output: output ? { line: `tool result ${output}`, source: 'tool', toolName: 'tool result', level: block.is_error ? 'error' : undefined } : undefined,
-          toolCall: {
-            id: block.tool_use_id ?? `tool-result-${String(updates.length)}`,
-            sequence: updates.length + 1,
-            phase: block.is_error ? 'failed' : 'completed',
-            name: 'tool result',
-            arguments: null,
-            output: output || null,
-            step: null,
-            startedAt: new Date().toISOString(),
-            completedAt: new Date().toISOString(),
-            error: block.is_error ? output || 'tool failed' : null,
-          },
-        });
-      } else {
+      } else if (block.type === 'tool_use') {
+        // `tool_use` blocks: tool calls announced by the assistant. The matching
+        // `tool_result` arrives later in a `user` event (handled below); we
+        // emit `phase: 'started'` here and update to `'completed' | 'failed'`
+        // when the result comes back.
         const name = normalizeSnippet(block.name);
         const input = normalizeSnippet(JSON.stringify(block.input ?? {}));
         const stage = detectStageFromSkill(name, stageSkills);
@@ -447,6 +434,42 @@ function parseClaudeLine(line: string, stageSkills: Record<string, string[]>): P
       }
     }
     return updates;
+  }
+
+  // `user` events in Claude's stream-json carry `tool_result` blocks, which
+  // close the lifecycle of a `tool_use` block emitted earlier in an `assistant`
+  // event. Without this branch the tool call's phase stays at `'started'`
+  // forever and the Live Output tab renders every claude tool call as running
+  // (blue) instead of green/red. `emitToolCall` synthesizes a `'started'`
+  // record first if the matching `tool_use` was never seen, so a stray result
+  // still resolves to the correct terminal phase.
+  if (evt.type === 'user' && evt.message) {
+    const updates: ProgressUpdate[] = [];
+    let sequence = 0;
+    for (const block of evt.message.content ?? []) {
+      if (block.type !== 'tool_result') continue;
+      sequence += 1;
+      const output = normalizeSnippet(JSON.stringify(block.content ?? ''));
+      const isError = block.is_error === true;
+      updates.push({
+        output: output
+          ? { line: `tool result ${output}`, source: 'tool', toolName: 'tool result', level: isError ? 'error' : undefined }
+          : undefined,
+        toolCall: {
+          id: block.tool_use_id ?? `tool-result-${String(sequence)}`,
+          sequence,
+          phase: isError ? 'failed' : 'completed',
+          name: 'tool result',
+          arguments: null,
+          output: output || null,
+          step: null,
+          startedAt: new Date().toISOString(),
+          completedAt: new Date().toISOString(),
+          error: isError ? output || 'tool failed' : null,
+        },
+      });
+    }
+    if (updates.length > 0) return updates;
   }
 
   return [];
