@@ -120,6 +120,7 @@ export const claudeAdapter: ToolAdapter = {
         const partial = summarizePartialOutput(error.stdout, error.stderr, touchedFiles);
         const usage = this.parseUsage?.(error.stdout) ?? undefined;
         if (usage) emitUsage(opts.runId, feature, usage);
+        const session = buildClaudeSessionHandle(error.stdout, assignedSessionId, opts.runId);
         return {
           ok: false,
           summary: `timeout após ${String(Math.round(error.runtimeMs / 1000))}s. ${partial}`,
@@ -129,6 +130,7 @@ export const claudeAdapter: ToolAdapter = {
             runtimeMs: error.runtimeMs,
             ...(error.lastProgress ? { lastProgress: sanitizeTimeoutProgress(error.lastProgress) } : {}),
           },
+          ...(session ? { session } : {}),
         };
       }
       if (error instanceof CliAbortError) {

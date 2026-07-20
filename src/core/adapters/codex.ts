@@ -140,6 +140,7 @@ export const codexAdapter: ToolAdapter = {
         const partial = summarizePartialOutput(error.stdout, error.stderr, touchedFiles);
         const usage = this.parseUsage?.(error.stdout) ?? undefined;
         if (usage) emitUsage(opts.runId, feature, usage);
+        const session = buildCodexSessionHandle(error.stdout, opts, opts.runId);
         return {
           ok: false,
           summary: `timeout após ${String(Math.round(error.runtimeMs / 1000))}s. ${partial}`,
@@ -149,6 +150,7 @@ export const codexAdapter: ToolAdapter = {
             runtimeMs: error.runtimeMs,
             ...(error.lastProgress ? { lastProgress: sanitizeTimeoutProgress(error.lastProgress) } : {}),
           },
+          ...(session ? { session } : {}),
         };
       }
       if (error instanceof CliAbortError) {

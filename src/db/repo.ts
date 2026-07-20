@@ -21,7 +21,7 @@ import { allocateFeatureId } from '../core/backlog/featureId.js';
 import { DefaultsSchema, FeatureSchema, type Defaults, type Feature, type WorkItem, type WorkflowTemplateDefinition } from '../core/backlog/schema.js';
 import type { TemplateOrigin, WorkItemType } from './workflowTemplates.js';
 import { topoOrder } from '../core/orchestrator/graph.js';
-import { sanitizeToolCallRecord, type PublishEvidence, type SessionStatusSnapshot, type TokenUsage, type ToolCallRecord } from '../core/adapters/types.js';
+import { sanitizeToolCallRecord, type PublishEvidence, type SessionHandle, type SessionStatusSnapshot, type TokenUsage, type ToolCallRecord } from '../core/adapters/types.js';
 import { resolveDbPath } from '../config/index.js';
 import { msqEventBus, logCaughtError } from '../core/events/index.js';
 import type {
@@ -1059,6 +1059,40 @@ export function finishRun(
     .prepare(`UPDATE runs SET status = ?, summary = ?, ended_at = datetime('now') WHERE id = ?`)
     .run(status, summary ?? null, runId);
   recordRunEvent(runId, status, summary ? { summary } : undefined);
+}
+
+// Persists the adapter's real session id (e.g. the claude/codex session/thread
+// uuid) so a later resume — new process via `msq resume` or an in-process
+// scheduler re-dispatch after a gate/timeout — can pass `--resume <id>`
+// instead of always starting a fresh adapter session. This is distinct from
+// `session_status`/etc. above, which only track heartbeat progress.
+export function updateRunSessionHandle(runId: number, handle: SessionHandle): void {
+  getDb('readwrite')
+    .prepare(`UPDATE runs SET adapter_session_tool = ?, adapter_session_id = ? WHERE id = ?`)
+    .run(handle.tool, handle.sessionId, runId);
+}
+
+export function getLatestRunSessionHandle(
+  pipelineId: number,
+  featureId: string,
+  stage: string,
+): SessionHandle | null {
+  const row = getDb('readonly')
+    .prepare(
+      `SELECT id, adapter_session_tool AS tool, adapter_session_id AS sessionId
+         FROM runs
+        WHERE pipeline_id = ? AND feature_id = ? AND stage = ? AND adapter_session_id IS NOT NULL
+        ORDER BY id DESC
+        LIMIT 1`,
+    )
+    .get(pipelineId, featureId, stage) as { id: number; tool: Tool; sessionId: string } | undefined;
+  if (!row) return null;
+  return {
+    tool: row.tool,
+    sessionId: row.sessionId,
+    capturedFromRunId: row.id,
+    capturedAt: new Date().toISOString(),
+  };
 }
 
 export function updateRunPublishState(runId: number, publish: RunPublishState): void {

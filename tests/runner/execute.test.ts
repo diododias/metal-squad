@@ -37,6 +37,8 @@ const mockGetFeatureIdOwner = vi.fn();
 const mockListCompletedFeatureIds = vi.fn();
 const mockListRunsForTui = vi.fn();
 const mockGetLatestPublishedRunForFeature = vi.fn();
+const mockGetLatestRunSessionHandle = vi.fn();
+const mockUpdateRunSessionHandle = vi.fn();
 const mockSpawn = vi.fn();
 const mockVerifyPublishContract = vi.fn();
 const mockIsDescendantOfBase = vi.fn();
@@ -103,6 +105,8 @@ vi.mock('../../src/db/repo.js', () => ({
   listCompletedFeatureIds: mockListCompletedFeatureIds,
   listRunsForTui: mockListRunsForTui,
   getLatestPublishedRunForFeature: mockGetLatestPublishedRunForFeature,
+  getLatestRunSessionHandle: mockGetLatestRunSessionHandle,
+  updateRunSessionHandle: mockUpdateRunSessionHandle,
 }));
 
 vi.mock('node:child_process', async (importOriginal) => {
@@ -210,6 +214,9 @@ beforeEach(() => {
   mockListRunsForTui.mockReturnValue([]);
   mockGetLatestPublishedRunForFeature.mockReset();
   mockGetLatestPublishedRunForFeature.mockReturnValue(null);
+  mockGetLatestRunSessionHandle.mockReset();
+  mockGetLatestRunSessionHandle.mockReturnValue(null);
+  mockUpdateRunSessionHandle.mockReset();
   mockSpawn.mockReset();
   mockSpawn.mockReturnValue({ once: vi.fn(), unref: vi.fn() });
   mockResolveRepo.mockReturnValue({ repoId: 'repo-1', path: '/repo' });
@@ -1840,6 +1847,251 @@ describe('executeBacklog failure persistence', () => {
       pipelineId: 9,
       stage: 'implement',
     });
+  });
+
+  it('resumes a staged workflow with the adapter session persisted for the stage it was blocked on', async () => {
+    const backlog: Backlog = {
+      version: 2,
+      repo: 'repo',
+      defaults: { tool: 'codex', effort: 'medium', skills: ['implement'], stageSkills: {} },
+      epics: [
+        {
+          id: 'epic-1',
+          title: 'Epic',
+          features: [
+            {
+              id: 'feat-resume-session',
+              title: 'Feature',
+              spec: 'spec',
+              tasks: [],
+              tool: 'codex',
+              effort: 'medium',
+              dependsOn: [],
+              workflow: {
+                mode: 'staged',
+                stages: ['specify', 'plan'],
+                approvals: { channel: 'telegram', autoAdvance: false },
+                syncTasksToBacklog: false,
+                sessionPolicy: { mode: 'isolated', alwaysIsolatedStages: [] },
+              },
+            },
+          ],
+        },
+      ],
+    };
+
+    // Blocked mid "plan" in a previous attempt (timeout, needs_input
+    // abandoned, gate by failure — any block that leaves `currentStage` set
+    // and the feature in the "needs rerun" bucket).
+    pipelineRow = {
+      ...pipelineRow,
+      featureId: 'feat-resume-session',
+      currentStage: 'plan',
+      planJson: JSON.stringify(['feat-resume-session']),
+      abortedJson: JSON.stringify(['feat-resume-session']),
+    };
+    mockGetLatestRunSessionHandle.mockImplementation((pipelineId: number, featureId: string, stage: string) =>
+      pipelineId === 9 && featureId === 'feat-resume-session' && stage === 'plan'
+        ? { tool: 'codex', sessionId: 'thread-resume-1', capturedFromRunId: 5, capturedAt: '2026-07-19T00:00:00Z' }
+        : null,
+    );
+    mockRunFeature.mockResolvedValueOnce({ ok: true, summary: 'plan ok' });
+
+    const { executeBacklog } = await import('../../src/core/runner/execute.js');
+
+    await expect(
+      executeBacklog(backlog, { cwd: '/repo', concurrency: 1, resumePipelineId: 9 }),
+    ).resolves.toBeUndefined();
+
+    expect(mockGetLatestRunSessionHandle).toHaveBeenCalledWith(9, 'feat-resume-session', 'plan');
+    expect(mockRunFeature.mock.calls[0]?.[2]).toEqual(expect.objectContaining({
+      session: {
+        mode: 'resume',
+        handle: expect.objectContaining({ sessionId: 'thread-resume-1' }),
+      },
+    }));
+  });
+
+  it('does not reuse a persisted session on staged resume when its tool no longer matches the feature', async () => {
+    const backlog: Backlog = {
+      version: 2,
+      repo: 'repo',
+      defaults: { tool: 'codex', effort: 'medium', skills: ['implement'], stageSkills: {} },
+      epics: [
+        {
+          id: 'epic-1',
+          title: 'Epic',
+          features: [
+            {
+              id: 'feat-resume-tool-mismatch',
+              title: 'Feature',
+              spec: 'spec',
+              tasks: [],
+              tool: 'codex',
+              effort: 'medium',
+              dependsOn: [],
+              workflow: {
+                mode: 'staged',
+                stages: ['specify', 'plan'],
+                approvals: { channel: 'telegram', autoAdvance: false },
+                syncTasksToBacklog: false,
+                sessionPolicy: { mode: 'isolated', alwaysIsolatedStages: [] },
+              },
+            },
+          ],
+        },
+      ],
+    };
+
+    pipelineRow = {
+      ...pipelineRow,
+      featureId: 'feat-resume-tool-mismatch',
+      currentStage: 'plan',
+      planJson: JSON.stringify(['feat-resume-tool-mismatch']),
+      abortedJson: JSON.stringify(['feat-resume-tool-mismatch']),
+    };
+    // Persisted handle belongs to a different tool (e.g. the run that
+    // blocked used claude before a `--tool codex` resume override), so it
+    // must not be reused as-is.
+    mockGetLatestRunSessionHandle.mockReturnValue({
+      tool: 'claude',
+      sessionId: 'thread-wrong-tool',
+      capturedFromRunId: 5,
+      capturedAt: '2026-07-19T00:00:00Z',
+    });
+    mockRunFeature.mockResolvedValueOnce({ ok: true, summary: 'plan ok' });
+
+    const { executeBacklog } = await import('../../src/core/runner/execute.js');
+
+    await expect(
+      executeBacklog(backlog, { cwd: '/repo', concurrency: 1, resumePipelineId: 9 }),
+    ).resolves.toBeUndefined();
+
+    expect(mockRunFeature.mock.calls[0]?.[2]?.session).toBeUndefined();
+  });
+
+  it('resumes a single-stage (non-staged) feature with the previously persisted adapter session', async () => {
+    const backlog: Backlog = {
+      version: 2,
+      repo: 'repo',
+      defaults: { tool: 'codex', effort: 'medium', skills: ['implement'], stageSkills: {} },
+      epics: [
+        {
+          id: 'epic-1',
+          title: 'Epic',
+          features: [
+            {
+              id: 'feat-single-resume',
+              title: 'Single-stage feature',
+              spec: 'spec',
+              tasks: [],
+              tool: 'codex',
+              effort: 'medium',
+              dependsOn: [],
+              workflow: {
+                mode: 'single',
+                stages: ['implement'],
+                approvals: { channel: 'telegram', autoAdvance: false },
+                syncTasksToBacklog: false,
+                sessionPolicy: { mode: 'isolated', alwaysIsolatedStages: [] },
+                stagePublishes: { implement: false },
+              },
+            },
+          ],
+        },
+      ],
+    };
+
+    // The single-stage path has no `currentStage` bookkeeping (that's
+    // staged-only), so the resume signal here is purely the persisted
+    // pipeline snapshot + a matching session handle under this pipelineId.
+    pipelineRow = {
+      ...pipelineRow,
+      featureId: 'feat-single-resume',
+      abortedJson: JSON.stringify(['feat-single-resume']),
+    };
+    mockGetLatestRunSessionHandle.mockImplementation((pipelineId: number, featureId: string, stage: string) =>
+      pipelineId === 9 && featureId === 'feat-single-resume' && stage === 'implement'
+        ? { tool: 'codex', sessionId: 'thread-single-resume', capturedFromRunId: 3, capturedAt: '2026-07-19T00:00:00Z' }
+        : null,
+    );
+    mockRunFeature.mockResolvedValueOnce({ ok: true, summary: 'done' });
+
+    const { executeBacklog } = await import('../../src/core/runner/execute.js');
+
+    await expect(
+      executeBacklog(backlog, {
+        cwd: '/repo',
+        concurrency: 1,
+        featureId: 'feat-single-resume',
+        resumePipelineId: 9,
+      }),
+    ).resolves.toBeUndefined();
+
+    expect(mockGetLatestRunSessionHandle).toHaveBeenCalledWith(9, 'feat-single-resume', 'implement');
+    expect(mockRunFeature.mock.calls[0]?.[2]).toEqual(expect.objectContaining({
+      session: {
+        mode: 'resume',
+        handle: expect.objectContaining({ sessionId: 'thread-single-resume' }),
+      },
+    }));
+  });
+
+  it('starts a fresh session on single-stage resume when no adapter session was persisted (e.g. blocked by a usage limit)', async () => {
+    const backlog: Backlog = {
+      version: 2,
+      repo: 'repo',
+      defaults: { tool: 'codex', effort: 'medium', skills: ['implement'], stageSkills: {} },
+      epics: [
+        {
+          id: 'epic-1',
+          title: 'Epic',
+          features: [
+            {
+              id: 'feat-single-resume-fresh',
+              title: 'Single-stage feature',
+              spec: 'spec',
+              tasks: [],
+              tool: 'codex',
+              effort: 'medium',
+              dependsOn: [],
+              workflow: {
+                mode: 'single',
+                stages: ['implement'],
+                approvals: { channel: 'telegram', autoAdvance: false },
+                syncTasksToBacklog: false,
+                sessionPolicy: { mode: 'isolated', alwaysIsolatedStages: [] },
+                stagePublishes: { implement: false },
+              },
+            },
+          ],
+        },
+      ],
+    };
+
+    pipelineRow = {
+      ...pipelineRow,
+      featureId: 'feat-single-resume-fresh',
+      abortedJson: JSON.stringify(['feat-single-resume-fresh']),
+    };
+    // mockGetLatestRunSessionHandle defaults to `null` in beforeEach — no
+    // handle was ever persisted, which is exactly what happens when the
+    // adapter blocked on "session limit reached" (it never returns
+    // `res.session` for that case) or when this is genuinely a first run.
+    mockRunFeature.mockResolvedValueOnce({ ok: true, summary: 'done' });
+
+    const { executeBacklog } = await import('../../src/core/runner/execute.js');
+
+    await expect(
+      executeBacklog(backlog, {
+        cwd: '/repo',
+        concurrency: 1,
+        featureId: 'feat-single-resume-fresh',
+        resumePipelineId: 9,
+      }),
+    ).resolves.toBeUndefined();
+
+    expect(mockRunFeature.mock.calls[0]?.[2]?.session).toBeUndefined();
   });
 
   it('reuses the previous session on low-usage adaptive transitions when the next stage is eligible', async () => {
