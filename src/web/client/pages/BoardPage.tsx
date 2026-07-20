@@ -166,6 +166,7 @@ export function BoardPage({ state, isMobile, onOpenRun, onOpenBacklogItem }: Boa
                       effort: f.effort,
                       autoAdvance: f.workflow.autoAdvance,
                       repoLabel: projectRepoCount > 1 ? f.repoLabel : null, workItemType: f.workItemType,
+                      templateId: f.templateId, templateVersion: f.templateVersion,
                       repoUnhealthy: repositories.find((repo) => repo.repoId === f.repoId)?.health === 'unavailable',
                     }}
                   />
@@ -226,6 +227,8 @@ export function BoardPage({ state, isMobile, onOpenRun, onOpenBacklogItem }: Boa
                         prNumber: r.prNumber,
                         repoLabel: projectRepoCount > 1 ? state.featureCatalog[r.featureId]?.repoLabel : null,
                         workItemType: state.featureCatalog[r.featureId]?.workItemType,
+                        templateId: state.featureCatalog[r.featureId]?.templateId,
+                        templateVersion: state.featureCatalog[r.featureId]?.templateVersion,
                       }}
                     />
                   </div>

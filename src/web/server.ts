@@ -50,7 +50,7 @@ import { workItemService } from '../core/workItemService.js';
 import { projectService, repoLinkService } from '../core/projectService.js';
 import { buildMsqWebState, appendNotification, resetWebStateCaches, invalidateWorkflowTemplatesCache } from './state.js';
 import { createWebAuth, isAllowedHostHeader, isAllowedOrigin, timingSafeEqualStrings } from './auth.js';
-import { EpicActionMessageSchema, ProjectActionMessageSchema, RepositoryActionMessageSchema, WorkItemActionMessageSchema, WorkflowTemplateActionMessageSchema, WorkItemTypeChangeMessageSchema } from './schemas.js';
+import { EpicActionMessageSchema, ProjectActionMessageSchema, RepositoryActionMessageSchema, WorkItemActionMessageSchema, WorkflowTemplateActionMessageSchema, WorkItemTypeChangeMessageSchema, ResolveWorkflowTemplateMessageSchema } from './schemas.js';
 import {
   archiveWorkflowTemplate,
   createWorkflowTemplate,
@@ -79,6 +79,7 @@ import type {
   WorkItemActionError,
   WorkItemActionResult,
   MsqWorkItemType,
+  ResolveWorkflowTemplateResult,
   WebSocketClientMessage,
   WebSocketServerMessage,
 } from './types.js';
@@ -869,6 +870,11 @@ export function createWebServer(options: {
         if (result.payload.ok) reconcileWebState(featureCwd, { forceBroadcast: true });
         break;
       }
+      case 'action:resolveWorkflowTemplate': {
+        const result = handleResolveWorkflowTemplate(message);
+        sendTo(client, result);
+        break;
+      }
       case 'action:changeWorkItemType': {
         const result = handleWorkItemTypeChange(message);
         sendTo(client, result);
@@ -1305,6 +1311,38 @@ export function createWebServer(options: {
       origin: resolved.origin,
       definition: resolved.definition,
     };
+  }
+
+  /**
+   * Read-only preview for the Work Item creation form: resolves the template
+   * from the same inputs `action:createWorkItem` will use (epic + repo +
+   * type), including skill validation against the target repo, without
+   * creating anything. The client gates its submit button on this succeeding.
+   */
+  function handleResolveWorkflowTemplate(message: unknown): ResolveWorkflowTemplateResult {
+    const parsed = ResolveWorkflowTemplateMessageSchema.safeParse(message);
+    if (!parsed.success) {
+      return { type: 'action:result', payload: { requestId: actionResultRequestId(message), ok: false, error: { code: 'INVALID_PAYLOAD', message: 'Invalid template preview payload.' } } };
+    }
+    const { requestId, epicId, repoId, workItemType } = parsed.data;
+    try {
+      const snapshot = resolveSnapshotForWorkItem(epicId, repoId, workItemType);
+      return {
+        type: 'action:result',
+        payload: {
+          requestId,
+          ok: true,
+          preview: {
+            templateId: snapshot.templateId,
+            templateVersion: snapshot.templateVersion,
+            origin: snapshot.origin,
+            stages: [...snapshot.definition.workflow.stages],
+          },
+        },
+      };
+    } catch (error) {
+      return { type: 'action:result', payload: { requestId, ok: false, error: workItemActionError(error) } };
+    }
   }
 
   /**

@@ -42,6 +42,8 @@ export interface KanbanCardRun {
   prNumber?: number | null;
   repoLabel?: string | null;
   workItemType?: string | null;
+  templateId?: string | null;
+  templateVersion?: number | null;
   repoUnhealthy?: boolean;
 }
 
@@ -111,7 +113,12 @@ export function KanbanCard({ run, selected, onClick }: KanbanCardProps): React.J
           <StatusPill status={run.status} />
         </div>
       </div>
-      {run.workItemType && <span title={`type: ${run.workItemType}`} style={{ display: 'inline-block', marginBottom: 6, padding: '2px 6px', border: '1px solid var(--border-dim)', borderRadius: 'var(--radius-sm)', fontSize: 'var(--text-2xs)', color: 'var(--text-dim)', textTransform: 'uppercase' }}>{run.workItemType}</span>}
+      {(run.workItemType ?? run.templateId) && (
+        <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', marginBottom: 6 }}>
+          {run.workItemType && <span title={`type: ${run.workItemType}`} style={{ display: 'inline-block', padding: '2px 6px', border: '1px solid var(--border-dim)', borderRadius: 'var(--radius-sm)', fontSize: 'var(--text-2xs)', color: 'var(--text-dim)', textTransform: 'uppercase' }}>{run.workItemType}</span>}
+          {run.templateId && <span title={`workflow template: ${run.templateId}${run.templateVersion != null ? ` v${String(run.templateVersion)}` : ''}`} style={{ display: 'inline-block', padding: '2px 6px', border: '1px solid var(--border-dim)', borderRadius: 'var(--radius-sm)', fontSize: 'var(--text-2xs)', color: 'var(--text-dim)' }}>{run.templateId}{run.templateVersion != null && ` v${String(run.templateVersion)}`}</span>}
+        </div>
+      )}
       {run.repoUnhealthy && <div title="Repository unavailable" style={{ marginBottom: 6, color: 'var(--accent-danger)', fontSize: 'var(--text-2xs)' }}>repository unavailable — cannot start</div>}
 
       {/* Muted context line below the title: epic truncates on its own line;

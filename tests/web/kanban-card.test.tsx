@@ -191,6 +191,18 @@ describe('KanbanCard Project scope (repo, type, health)', () => {
     expect(html).not.toContain('title="type:');
   });
 
+  it('renders the template/version badge when templateId is present', () => {
+    const html = renderToStaticMarkup(<KanbanCard run={{ ...run, templateId: 'tmpl-feature', templateVersion: 3 }} />);
+    expect(html).toContain('title="workflow template: tmpl-feature v3"');
+    expect(html).toContain('tmpl-feature');
+    expect(html).toContain('v3');
+  });
+
+  it('omits the template/version badge when templateId is absent', () => {
+    const html = renderToStaticMarkup(<KanbanCard run={run} />);
+    expect(html).not.toContain('title="workflow template:');
+  });
+
   it('shows the repo cell in the tool rail only when repoLabel is provided', () => {
     const withRepo = renderToStaticMarkup(<KanbanCard run={{ ...run, repoLabel: 'repo-one' }} />);
     expect(withRepo).toContain('title="repository: repo-one"');

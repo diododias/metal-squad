@@ -1,9 +1,10 @@
 import React, { useEffect, useState } from 'react';
 import { Button } from '../components/core/Button.js';
 import { FeatureConfigDetail } from '../components/FeatureConfigDetail.js';
+import { WorkflowStepper } from '../components/navigation/WorkflowStepper.js';
 import { PageHeader } from '../PageHeader.js';
 import { useActiveProject } from '../hooks/useActiveProject.js';
-import type { MsqWebState, FeatureConfigPatch, FeatureConfigSaveResult, TaskConfigPatch } from '../../types.js';
+import type { MsqWebState, FeatureConfigPatch, FeatureConfigSaveResult, TaskConfigPatch, WebSocketClientMessage, WebSocketServerMessage, MsqWorkItemType } from '../../types.js';
 import type { RunHistoryEntry } from '../../../db/repo.js';
 
 export interface BacklogItemDetailProps {
@@ -17,7 +18,12 @@ export interface BacklogItemDetailProps {
   workflowSaveResult?: FeatureConfigSaveResult;
   onSaveTaskConfig: (featureId: string, taskId: string, patch: TaskConfigPatch) => void;
   onOpenRun: (featureId: string) => void;
+  send: (message: WebSocketClientMessage) => void;
+  actionResults: Record<string, Extract<WebSocketServerMessage, { type: 'action:result' }>>;
 }
+
+let typeChangeSequence = 0;
+const typeChangeRequestId = (): string => `type-change-${String(Date.now())}-${String(++typeChangeSequence)}`;
 
 export function BacklogItemDetail({
   state,
@@ -28,11 +34,21 @@ export function BacklogItemDetail({
   onStart,
   onSaveConfig,
   workflowSaveResult,
+  send,
+  actionResults,
 }: BacklogItemDetailProps): React.JSX.Element {
   const feature = state.featureCatalog[featureId];
   const [specDraft, setSpecDraft] = useState('');
+  const [typeChange, setTypeChange] = useState<{
+    pendingRequestId?: string;
+    proposedType?: MsqWorkItemType;
+    preview?: { stages: string[]; templateId: string; templateVersion: number };
+    error?: string;
+  }>({});
+  const handledTypeChangeResults = React.useRef(new Set<string>());
   const doneFeatureIds = new Set(state.doneFeatureIds);
   const failedFeatureIds = new Set<string>();
+  const hasRunHistory = state.runs.some((run) => run.featureId === featureId);
   for (const run of state.runs) {
     if (run.status === 'failed') {
       failedFeatureIds.add(run.featureId);
@@ -52,6 +68,48 @@ export function BacklogItemDetail({
 
   useEffect(() => onSubscribeHistory(featureId), [featureId, onSubscribeHistory]);
   useEffect(() => { setSpecDraft(feature?.description ?? ''); }, [feature?.description]);
+
+  useEffect(() => {
+    if (!typeChange.pendingRequestId) return;
+    const result = actionResults[typeChange.pendingRequestId];
+    if (!result || handledTypeChangeResults.current.has(typeChange.pendingRequestId)) return;
+    handledTypeChangeResults.current.add(typeChange.pendingRequestId);
+    if (result.payload.ok && 'preview' in result.payload && 'stages' in result.payload.preview) {
+      const { preview } = result.payload;
+      setTypeChange((current) => ({
+        ...current,
+        pendingRequestId: undefined,
+        preview: { stages: preview.stages, templateId: preview.templateId, templateVersion: preview.templateVersion },
+        error: undefined,
+      }));
+    } else if (result.payload.ok && 'workItem' in result.payload) {
+      setTypeChange({});
+    } else {
+      setTypeChange((current) => ({
+        ...current,
+        pendingRequestId: undefined,
+        error: 'error' in result.payload ? result.payload.error.message : 'Work Item type change was not acknowledged.',
+      }));
+    }
+  }, [actionResults, typeChange.pendingRequestId]);
+
+  function requestTypePreview(toType: MsqWorkItemType): void {
+    if (!feature) return;
+    const id = typeChangeRequestId();
+    setTypeChange({ pendingRequestId: id, proposedType: toType, preview: undefined, error: undefined });
+    send({ type: 'action:changeWorkItemType', requestId: id, workItemId: featureId, workItemType: toType, expectedRevision: feature.revision, preview: true });
+  }
+
+  function confirmTypeChange(): void {
+    if (!feature || !typeChange.proposedType) return;
+    const id = typeChangeRequestId();
+    setTypeChange((current) => ({ ...current, pendingRequestId: id, error: undefined }));
+    send({ type: 'action:changeWorkItemType', requestId: id, workItemId: featureId, workItemType: typeChange.proposedType, expectedRevision: feature.revision });
+  }
+
+  function cancelTypeChange(): void {
+    setTypeChange({});
+  }
 
   if (!feature) {
     return (
@@ -106,6 +164,60 @@ export function BacklogItemDetail({
       />
       <div style={{ flex: 1, overflow: 'auto', padding: 20 }}>
         <section style={{ marginBottom: 20, padding: 16, border: '1px solid var(--border-dim)', borderRadius: 'var(--radius-md)', background: 'var(--bg-panel)' }}>
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center', marginBottom: 12 }}>
+            <span title={`type: ${feature.workItemType}`} style={{ display: 'inline-block', padding: '2px 6px', border: '1px solid var(--border-dim)', borderRadius: 'var(--radius-sm)', fontSize: 'var(--text-2xs)', color: 'var(--text-dim)', textTransform: 'uppercase' }}>{feature.workItemType}</span>
+            {feature.templateId && (
+              <span title={`workflow template: ${feature.templateId}${feature.templateVersion != null ? ` v${String(feature.templateVersion)}` : ''}`} style={{ display: 'inline-block', padding: '2px 6px', border: '1px solid var(--border-dim)', borderRadius: 'var(--radius-sm)', fontSize: 'var(--text-2xs)', color: 'var(--text-dim)' }}>
+                {feature.templateId}{feature.templateVersion != null && ` v${String(feature.templateVersion)}`}
+              </span>
+            )}
+            {!typeChange.proposedType && (
+              hasRunHistory ? (
+                <span title="This Work Item has run history — its type is locked." style={{ fontSize: 'var(--text-2xs)', color: 'var(--text-faint)' }}>
+                  type locked (has run history)
+                </span>
+              ) : (
+                <div style={{ display: 'flex', gap: 6 }}>
+                  {(['feature', 'bug'] as const).filter((candidate) => candidate !== feature.workItemType).map((candidate) => (
+                    <Button key={candidate} variant="neutral" size="sm" onClick={() => { requestTypePreview(candidate); }}>
+                      change to {candidate}
+                    </Button>
+                  ))}
+                </div>
+              )
+            )}
+          </div>
+          {typeChange.proposedType && (
+            <div style={{ marginBottom: 12, padding: 12, border: '1px solid var(--border-dim)', borderRadius: 'var(--radius-sm)', background: 'var(--bg-sunken)' }}>
+              <div style={{ marginBottom: 8, color: 'var(--text-primary)', fontWeight: 600, fontSize: 'var(--text-sm)' }}>
+                Change type: {feature.workItemType} → {typeChange.proposedType}
+              </div>
+              {typeChange.error && <div role="alert" style={{ marginBottom: 8, color: 'var(--accent-danger)', fontSize: 'var(--text-xs)' }}>{typeChange.error}</div>}
+              {typeChange.preview && (
+                <div style={{ display: 'grid', gap: 8 }}>
+                  <div style={{ fontSize: 'var(--text-xs)', color: 'var(--text-dim)' }}>
+                    New template: {typeChange.preview.templateId} v{typeChange.preview.templateVersion}
+                  </div>
+                  <div>
+                    <div style={{ fontSize: 'var(--text-2xs)', color: 'var(--text-faint)', marginBottom: 2 }}>current workflow</div>
+                    <WorkflowStepper stages={feature.workflow.stages} currentStage={null} allPending size="compact" />
+                  </div>
+                  <div>
+                    <div style={{ fontSize: 'var(--text-2xs)', color: 'var(--text-faint)', marginBottom: 2 }}>new workflow</div>
+                    <WorkflowStepper stages={typeChange.preview.stages} currentStage={null} allPending size="compact" />
+                  </div>
+                </div>
+              )}
+              <div style={{ display: 'flex', gap: 8, marginTop: 10 }}>
+                <Button variant="primary" size="sm" disabled={!typeChange.preview || Boolean(typeChange.pendingRequestId)} onClick={confirmTypeChange}>
+                  {typeChange.pendingRequestId ? 'applying…' : 'confirm change'}
+                </Button>
+                <Button variant="neutral" size="sm" disabled={Boolean(typeChange.pendingRequestId) && !typeChange.preview} onClick={cancelTypeChange}>
+                  cancel
+                </Button>
+              </div>
+            </div>
+          )}
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, marginBottom: 10 }}>
             <div>
               <div style={{ color: 'var(--text-primary)', fontWeight: 600 }}>Specification</div>

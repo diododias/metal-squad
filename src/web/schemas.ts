@@ -109,6 +109,20 @@ export const WorkItemActionMessageSchema = z.object({
 
 export type WorkItemActionMessage = z.infer<typeof WorkItemActionMessageSchema>;
 
+/** Read-only preview of the template a new Work Item would get, resolved from
+ * the same inputs `action:createWorkItem` uses (epic + repo + type) — before
+ * any Work Item row exists, so `action:changeWorkItemType`'s preview (which
+ * needs an existing `workItemId`) does not apply here. */
+export const ResolveWorkflowTemplateMessageSchema = z.object({
+  type: z.literal('action:resolveWorkflowTemplate'),
+  requestId: RequestIdSchema,
+  epicId: z.string().min(1),
+  repoId: z.string().min(1),
+  workItemType: WorkItemTypeActionSchema,
+}).strict();
+
+export type ResolveWorkflowTemplateMessage = z.infer<typeof ResolveWorkflowTemplateMessageSchema>;
+
 /** Template management actions (PRJ-24). Each carries `requestId`; mutations
  * that race a concurrent editor carry `expectedRevision`. */
 export const WorkflowTemplateActionMessageSchema = z.discriminatedUnion('type', [

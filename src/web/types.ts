@@ -393,6 +393,20 @@ export type WorkItemTypeChangeResult =
   | { type: 'action:result'; payload: { requestId: string; ok: true; workItem: WorkItemRow; revision: number } }
   | { type: 'action:result'; payload: { requestId: string; ok: false; error: WorkItemActionError } };
 
+/** What the Work Item creation form shows before `action:createWorkItem`: the
+ * template a new Work Item of this type/epic/repo would get. Identical shape
+ * to the snapshot `action:createWorkItem` will persist (PRJ-24). */
+export interface WorkflowTemplatePreview {
+  templateId: string;
+  templateVersion: number;
+  origin: 'project-mapping' | 'builtin';
+  stages: string[];
+}
+
+export type ResolveWorkflowTemplateResult =
+  | { type: 'action:result'; payload: { requestId: string; ok: true; preview: WorkflowTemplatePreview } }
+  | { type: 'action:result'; payload: { requestId: string; ok: false; error: WorkItemActionError } };
+
 export type WebSocketClientMessage =
   | { type: 'auth'; token: string }
   | {
@@ -415,6 +429,7 @@ export type WebSocketClientMessage =
   | { type: 'action:unlinkRepo'; requestId: string; projectId: string; repoId: string }
   | { type: 'action:createEpic'; requestId: string; projectId: string; title: string; description?: string | null }
   | { type: 'action:createWorkItem'; requestId: string; epicId: string; repoId: string; workItemType?: MsqWorkItemType; title: string; description?: string | null; dependsOn?: string[] }
+  | { type: 'action:resolveWorkflowTemplate'; requestId: string; epicId: string; repoId: string; workItemType: MsqWorkItemType }
   | { type: 'action:createWorkflowTemplate'; requestId: string; projectId: string; name: string; definition: unknown }
   | { type: 'action:updateWorkflowTemplate'; requestId: string; templateId: string; expectedRevision: number; patch: { name?: string; definition?: unknown } }
   | { type: 'action:duplicateWorkflowTemplate'; requestId: string; templateId: string; projectId: string; name?: string }
@@ -467,6 +482,7 @@ export type WebSocketServerMessage =
   | WorkItemActionResult
   | WorkflowTemplateActionResult
   | WorkItemTypeChangeResult
+  | ResolveWorkflowTemplateResult
   | { type: 'run:detail'; payload: { runId: number; taskRuns: TaskRun[]; breakdown: RunBreakdown | null; sessionStatus: SessionStatusSnapshot | null; statusHistory: SessionStatusSnapshot[]; toolCalls: ToolCallRecord[] } }
   | { type: 'run:history'; payload: { featureId: string; runs: RunHistoryEntry[] } }
   | { type: 'run:changes'; payload: RunChangesPayload }
