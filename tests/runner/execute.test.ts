@@ -183,7 +183,7 @@ beforeEach(() => {
   mockIsDescendantOfBase.mockReset();
   mockIsDescendantOfBase.mockReturnValue(true);
   mockFetchDependencyBranches.mockReset();
-  mockFetchDependencyBranches.mockReturnValue(null);
+  mockFetchDependencyBranches.mockReturnValue({ failure: null, publications: [] });
   mockResolveDependencyPublications.mockReset();
   mockResolveDependencyPublications.mockReturnValue([]);
   mockResolveRuntimeConfig.mockReset();
@@ -405,7 +405,8 @@ describe('executeBacklog failure persistence', () => {
       remoteBranch: 'origin/feat/parent',
     }]);
     mockFetchDependencyBranches.mockReturnValueOnce({
-      featureId: 'feat-parent', remote: 'origin', ref: 'feat/parent',
+      failure: { featureId: 'feat-parent', remote: 'origin', ref: 'feat/parent' },
+      publications: [],
     });
     mockRunFeature.mockResolvedValue({ ok: true, summary: 'done after dependency became available' });
 

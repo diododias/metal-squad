@@ -11,6 +11,7 @@ import {
   listRepositoryStateSummaries,
   listRunsForStats,
   listEpics,
+  type EpicRow,
   type GateRow,
   type StageRequestRow,
   type RunSummary,
@@ -28,7 +29,7 @@ import { createSkillRegistry } from '../core/skills/registry.js';
 import type { Skill } from '../core/skills/types.js';
 import { collectEnvironmentInfo } from './environment.js';
 import { logCaughtError } from '../core/events/index.js';
-import type { MsqWebState, ProjectSummary, RepositorySummary, ThemeSnapshot, TimeoutApprovalState, TokenStats, UiNotification, WebRuntimeConfig, WorkflowTemplateMappings, WorkflowTemplateSummary } from './types.js';
+import type { MsqWebState, ProjectSummary, RepositorySummary, ThemeSnapshot, TimeoutApprovalState, TokenStats, UiNotification, WebRuntimeConfig, ErrorEntry } from './types.js';
 
 const DASHBOARD_PERIODS: { label: string; days: number | null }[] = [
   { label: 'today', days: 1 },
@@ -36,6 +37,20 @@ const DASHBOARD_PERIODS: { label: string; days: number | null }[] = [
   { label: 'last 30 days', days: 30 },
   { label: 'all time', days: null },
 ];
+
+/** Mutable error buffer collected during a single snapshot build. Populated by
+ * collector functions and flushed by buildMsqWebState. */
+let snapshotErrors: ErrorEntry[] = [];
+
+function pushError(module: string, error: unknown): void {
+  const message = error instanceof Error ? error.message : String(error);
+  snapshotErrors.push({
+    timestamp: new Date().toISOString(),
+    module,
+    message,
+  });
+  logCaughtError(module, error);
+}
 
 function gateToPendingApproval(gate: GateRow): { kind: 'gate'; id: number; featureId: string; repoId: string; prompt: string; createdAt: string } {
   return {
@@ -67,7 +82,7 @@ function collectGates(): MsqWebState['gates'] {
     const stageRequests = listPendingStageRequests().map(stageRequestToPendingApproval);
     return [...gates, ...stageRequests];
   } catch (error) {
-    logCaughtError('web/state.collectGates', error);
+    pushError('web/state.collectGates', error);
     return [];
   }
 }
@@ -76,7 +91,7 @@ function collectRuns(): RunSummary[] {
   try {
     return sortRunsByGroup(listRunsForTui(2000));
   } catch (error) {
-    logCaughtError('web/state.collectRuns', error);
+    pushError('web/state.collectRuns', error);
     return [];
   }
 }
@@ -85,7 +100,7 @@ function collectRunningTasks(): RunningTaskSummary[] {
   try {
     return listRunningTaskRuns(50);
   } catch (error) {
-    logCaughtError('web/state.collectRunningTasks', error);
+    pushError('web/state.collectRunningTasks', error);
     return [];
   }
 }
@@ -105,7 +120,7 @@ function collectTimeoutApprovals(): TimeoutApprovalState[] {
       createdAt: request.createdAt,
     }));
   } catch (error) {
-    logCaughtError('web/state.collectTimeoutApprovals', error);
+    pushError('web/state.collectTimeoutApprovals', error);
     return [];
   }
 }
@@ -121,7 +136,7 @@ function collectPendingFeatures(runs: RunSummary[], repoId: string): WorkItemCat
     );
     return getPendingFeatures(catalog, doneFeatureIds, activeFeatureIds);
   } catch (error) {
-    logCaughtError('web/state.collectPendingFeatures', error);
+    pushError('web/state.collectPendingFeatures', error);
     return [];
   }
 }
@@ -141,7 +156,7 @@ function collectDashboardRows(): StatsRunRow[] {
   try {
     return listRunsForStats({ sinceDays: 7 });
   } catch (error) {
-    logCaughtError('web/state.collectDashboardRows', error);
+    pushError('web/state.collectDashboardRows', error);
     return [];
   }
 }
@@ -175,7 +190,7 @@ function collectProjectSummaries(): ProjectSummary[] {
       archivedAt: project.archivedAt,
     }));
   } catch (error) {
-    logCaughtError('web/state.collectProjectSummaries', error);
+    pushError('web/state.collectProjectSummaries', error);
     return [];
   }
 }
@@ -192,7 +207,7 @@ function collectRepositorySummaries(): RepositorySummary[] {
       lastCheckedAt: null,
     }));
   } catch (error) {
-    logCaughtError('web/state.collectRepositorySummaries', error);
+    pushError('web/state.collectRepositorySummaries', error);
     return [];
   }
 }
@@ -201,7 +216,7 @@ function collectProjectStateRevision(): number {
   try {
     return getProjectStateRevision();
   } catch (error) {
-    logCaughtError('web/state.collectProjectStateRevision', error);
+    pushError('web/state.collectProjectStateRevision', error);
     return 0;
   }
 }
@@ -217,7 +232,7 @@ function buildThemeSnapshot(): ThemeSnapshot {
     ) as Record<ThemeRoleName, string>;
     return { name: resolution.active, roles };
   } catch (error) {
-    logCaughtError('web/state.buildThemeSnapshot', error);
+    pushError('web/state.buildThemeSnapshot', error);
     return {
       name: 'default',
       roles: {
@@ -337,7 +352,7 @@ function collectRuntimeConfig(writability: WebRuntimeConfig['writability']): Web
   try {
     config = resolveRuntimeConfig(process.cwd());
   } catch (error) {
-    logCaughtError('web/state.collectRuntimeConfig', error);
+    pushError('web/state.collectRuntimeConfig', error);
     config = ConfigSchema.parse({});
   }
   const value = sanitizeRuntimeConfig(config, writability);
@@ -352,7 +367,7 @@ function collectSkillsCatalog(): Skill[] {
   try {
     value = createSkillRegistry().discover(process.cwd());
   } catch (error) {
-    logCaughtError('web/state.collectSkillsCatalog', error);
+    pushError('web/state.collectSkillsCatalog', error);
     value = [];
   }
   skillsCatalogCache = { value, expiresAt: now + CONFIG_CACHE_TTL_MS };
@@ -360,24 +375,54 @@ function collectSkillsCatalog(): Skill[] {
 }
 
 export function buildMsqWebState(): MsqWebState {
+  snapshotErrors = [];
+
   const repo = resolveRepo();
   const repoLabel = basename(repo.path);
+
   const runs = collectRuns();
   const gates = collectGates();
   const pendingFeatures = collectPendingFeatures(runs, repo.repoId);
-  const workflowTemplates = collectWorkflowTemplates();
-  const doneFeatureIds = [...listCompletedFeatureIds(repo.repoId)];
+
+  let doneFeatureIds: string[];
+  try {
+    doneFeatureIds = [...listCompletedFeatureIds(repo.repoId)];
+  } catch (error) {
+    pushError('web/state.listCompletedFeatureIds', error);
+    doneFeatureIds = [];
+  }
+
   const runningTasks = collectRunningTasks();
   const timeoutApprovals = collectTimeoutApprovals();
-  const featureCatalog = normalizeFeatureCatalog(getFeatureCatalog());
+
+  let featureCatalog: Record<string, WorkItemCatalogEntry>;
+  try {
+    featureCatalog = normalizeFeatureCatalog(getFeatureCatalog());
+  } catch (error) {
+    pushError('web/state.getFeatureCatalog', error);
+    featureCatalog = {};
+  }
+
   const backlogSettings = getBacklogSettings();
+
   const environment = collectEnvironmentInfo();
   const projects = collectProjectSummaries();
   const repositories = collectRepositorySummaries();
-  const epics = listEpics();
+
+  let epics: EpicRow[];
+  try {
+    epics = listEpics();
+  } catch (error) {
+    pushError('web/state.listEpics', error);
+    epics = [];
+  }
+
   const executionRuns = runs.filter((run) => getRunGroup(run.status) === 'execution');
   const doneRuns = runs.filter((run) => run.status === 'done');
   const falhaRunsList = runs.filter((run) => getRunGroup(run.status) === 'canceled');
+
+  const errors = snapshotErrors;
+  snapshotErrors = [];
 
   return {
     revision: collectProjectStateRevision(),
@@ -412,8 +457,7 @@ export function buildMsqWebState(): MsqWebState {
       configWritable: environment.configWritable,
     }),
     skillsCatalog: collectSkillsCatalog(),
-    workflowTemplates: workflowTemplates.summaries,
-    workflowTemplateMappings: workflowTemplates.mappings,
+    errors,
   };
 }
 

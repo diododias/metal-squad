@@ -651,7 +651,11 @@ export async function executeBacklog(
     }
     const controller = new AbortController();
     activeControllers.set(feature.id, controller);
-    const dependencyFetchFailure = fetchDependencyBranches(dependencyPublications, opts.cwd);
+    const dependencyFetch = fetchDependencyBranches(dependencyPublications, opts.cwd);
+    const dependencyFetchFailure = dependencyFetch.failure;
+    // A dependency whose PR was merged resolves to its base branch, so the
+    // prompt and stacking base must use the ref that still exists.
+    const resolvedPublications = dependencyFetch.publications;
     if (dependencyFetchFailure) {
       const runId = createRun(repoId, feature.id, feature.tool, { pipelineId });
       lastRunIdByFeature.set(feature.id, runId);
@@ -686,7 +690,7 @@ export async function executeBacklog(
           effectiveStageSkills,
           repoStageSkills,
           controller.signal,
-          dependencyPublications,
+          resolvedPublications,
         );
       } finally {
         activeControllers.delete(feature.id);
@@ -696,7 +700,7 @@ export async function executeBacklog(
     const skills = registry.resolve(feature.skills ?? [], opts.cwd);
     const basePrompt = buildPrompt(feature, skills, opts.cwd, {
       maxContextChars: config.promptContextCharLimit,
-      dependencyPublications,
+      dependencyPublications: resolvedPublications,
       baseBranch: config.integration.baseBranch,
     });
     // The single-stage / scheduler path used to ship without the communication

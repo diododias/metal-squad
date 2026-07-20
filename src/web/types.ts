@@ -106,28 +106,11 @@ export interface EnvironmentInfo {
   version?: string;
 }
 
-export type MsqWorkItemType = 'feature' | 'bug';
-
-/**
- * Template projection for `state:full`.
- *
- * Deliberately omits `definition`: stage/skill maps are unbounded and would be
- * re-serialised on every tick. Clients load the full definition on demand, the
- * same way specs and transcripts are kept out of the pushed state.
- */
-export interface WorkflowTemplateSummary {
-  templateId: string;
-  name: string;
-  version: number;
-  revision: number;
-  builtin: boolean;
-  archived: boolean;
-  scopeProjectId: string | null;
-  stageCount: number;
+export interface ErrorEntry {
+  timestamp: string;
+  module: string;
+  message: string;
 }
-
-/** `projectId -> Work Item type -> templateId` mapping used to render pickers. */
-export type WorkflowTemplateMappings = Record<string, Partial<Record<MsqWorkItemType, string>>>;
 
 export interface MsqWebState {
   revision: number;
@@ -166,10 +149,8 @@ export interface MsqWebState {
   /** Config page (Skills sub-tab) — discovered skills with precedence
    * already applied (repo > global > external > builtin), read-only. */
   skillsCatalog: Skill[];
-  /** Summaries only — see `WorkflowTemplateSummary` for why the definition is
-   * fetched on demand instead of pushed. */
-  workflowTemplates: WorkflowTemplateSummary[];
-  workflowTemplateMappings: WorkflowTemplateMappings;
+  /** Collector errors since the last snapshot — empty when all collectors succeeded. */
+  errors: ErrorEntry[];
 }
 
 export interface RunChangedFile {

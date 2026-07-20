@@ -13,4 +13,9 @@ export type ForgeResult<T> =
 export interface ForgeAdapter {
   available(): boolean;
   viewPullRequest(cwd: string): ForgeResult<ForgePullRequestView | null>;
+  /**
+   * Read a pull request by number, which stays readable after its head branch
+   * has been deleted by a merge.
+   */
+  viewPullRequestByNumber(cwd: string, prNumber: number): ForgeResult<ForgePullRequestView | null>;
 }

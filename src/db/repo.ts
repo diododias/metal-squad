@@ -763,7 +763,8 @@ function getRepositoryDefaults(database: ReturnType<typeof getDb>, repoId: strin
 function isRepositoryUsable(path: string): boolean {
   try {
     return existsSync(path) && statSync(path).isDirectory();
-  } catch {
+  } catch (error) {
+    logCaughtError('db/repo.isRepositoryUsable', error);
     return false;
   }
 }
@@ -1124,7 +1125,11 @@ export function getLatestPublishedRunForFeature(
          r.started_at AS startedAt
        FROM runs r
        WHERE r.repo_id = ? AND r.feature_id = ? AND r.pr_url IS NOT NULL
-       ORDER BY r.started_at DESC
+       ${runColumns.has('publish_verified')
+         // A verified publication outranks a merely recent one: a run that
+         // timed out before verification must not become the stacking base.
+         ? `ORDER BY COALESCE(r.publish_verified, 0) DESC, r.started_at DESC`
+         : `ORDER BY r.started_at DESC`}
        LIMIT 1`,
     )
     .get(repoId, featureId) as PublishedRunRow | undefined;
