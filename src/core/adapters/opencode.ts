@@ -186,11 +186,6 @@ export const opencodeAdapter: ToolAdapter = {
       return { ok: false, summary: errorSummary };
     }
 
-    const limitMessage = detectSessionLimit(stdout, stderr);
-    if (limitMessage) {
-      return { ok: false, blocked: true, summary: `session limit reached: ${limitMessage}` };
-    }
-
     const events = extractOpenCodeEvents(stdout);
     const json = safeJson<OpenCodeResponse>(stdout) ?? events[events.length - 1] ?? null;
 
@@ -211,6 +206,23 @@ export const opencodeAdapter: ToolAdapter = {
     const session = buildOpenCodeSessionHandle(events, json, opts, opts.runId);
     const control = parseControlSignal(finalText);
     if (usage) emitUsage(opts.runId, feature, usage);
+
+    // See claude.ts: a parsed control signal proves the session closed
+    // cleanly, so it takes precedence over the session-limit text heuristic,
+    // which can false-positive on incidental matches in tool output.
+    if (!control) {
+      const limitMessage = detectSessionLimit(stdout, stderr);
+      if (limitMessage) {
+        return {
+          ok: false,
+          blocked: true,
+          summary: `session limit reached: ${limitMessage}`,
+          usage,
+          ...(session ? { session } : {}),
+        };
+      }
+    }
+
     return {
       ok: true,
       summary: finalText.slice(0, 200),

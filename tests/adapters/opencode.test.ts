@@ -387,6 +387,40 @@ describe('opencodeAdapter.runFeature', () => {
     expect(result.control).toEqual({ type: 'needs_input', prompt: 'Enter value' });
   });
 
+  it('does not block a run whose stdout merely mentions "session limit" when a control signal is present', async () => {
+    mockRunCli.mockResolvedValue({
+      code: 0,
+      stdout: JSON.stringify({
+        response: 'commit 0767d46 feat(notify): suggest and enable adapter fallback resume on Telegram session limit (#218)\nMSQ_DONE: done.',
+      }),
+      stderr: '',
+    });
+    mockParseControlSignal.mockReturnValue({ type: 'done', summary: 'done.' });
+
+    const { opencodeAdapter } = await import('../../src/core/adapters/opencode.js');
+    const result = await opencodeAdapter.runFeature(MOCK_FEATURE as never, 'prompt', MOCK_OPTS);
+
+    expect(result.ok).toBe(true);
+    expect(result.blocked).toBeUndefined();
+    expect(result.control).toEqual({ type: 'done', summary: 'done.' });
+  });
+
+  it('still reports a blocked run when stdout mentions a rate limit and no control signal is present', async () => {
+    mockRunCli.mockResolvedValue({
+      code: 0,
+      stdout: JSON.stringify({ response: 'Error: rate limit exceeded, please retry later' }),
+      stderr: '',
+    });
+    mockParseControlSignal.mockReturnValue(undefined);
+
+    const { opencodeAdapter } = await import('../../src/core/adapters/opencode.js');
+    const result = await opencodeAdapter.runFeature(MOCK_FEATURE as never, 'prompt', MOCK_OPTS);
+
+    expect(result.ok).toBe(false);
+    expect(result.blocked).toBe(true);
+    expect(result.summary).toContain('session limit reached');
+  });
+
   it('uses raw stdout as summary when JSON has no response field', async () => {
     mockRunCli.mockResolvedValue({ code: 0, stdout: 'plain output text', stderr: '' });
 
