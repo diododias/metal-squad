@@ -63,6 +63,7 @@ const mocks = vi.hoisted(() => ({
     update: vi.fn(),
   },
   repoLinkService: {
+    list: vi.fn(() => []),
     link: vi.fn(),
     move: vi.fn(),
     unlink: vi.fn(),
