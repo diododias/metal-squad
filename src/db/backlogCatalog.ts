@@ -163,6 +163,7 @@ export interface WorkItemCatalogEntry {
   position: number;
   dataJson: string;
   workItemType: WorkItemType;
+  revision: number;
   integrityIssue?: string;
 }
 
@@ -207,7 +208,7 @@ export function listWorkItemsByScope(scope: WorkItemScope = {}): WorkItemCatalog
   const rows = db.prepare(
     `SELECT f.feature_id AS featureId, f.epic_id AS epicId, f.repo_id AS featureRepoId,
             e.project_id AS projectId, pr.repo_id AS linkedRepoId, pr.project_id AS linkedProjectId, r.path AS repoPath,
-            e.title AS epicTitle, f.title, f.type AS workItemType, f.position, f.data_json AS dataJson
+            e.title AS epicTitle, f.title, f.type AS workItemType, f.revision, f.position, f.data_json AS dataJson
        FROM backlog_features f
        JOIN backlog_epics e ON e.epic_id = f.epic_id
        LEFT JOIN project_repos pr ON pr.repo_id = f.repo_id
@@ -216,7 +217,7 @@ export function listWorkItemsByScope(scope: WorkItemScope = {}): WorkItemCatalog
       ORDER BY e.position ASC, f.position ASC, f.feature_id ASC${pagination}`,
   ).all(...params) as {
     featureId: string; epicId: string; featureRepoId: string; projectId: string | null;
-    linkedRepoId: string | null; linkedProjectId: string | null; repoPath: string | null; epicTitle: string; title: string; workItemType: WorkItemType; position: number; dataJson: string;
+    linkedRepoId: string | null; linkedProjectId: string | null; repoPath: string | null; epicTitle: string; title: string; workItemType: WorkItemType; revision: number; position: number; dataJson: string;
   }[];
   return rows.map((row) => {
     const issues: string[] = [];
@@ -236,6 +237,7 @@ export function listWorkItemsByScope(scope: WorkItemScope = {}): WorkItemCatalog
       position: row.position,
       dataJson: row.dataJson,
       workItemType: row.workItemType,
+      revision: row.revision,
       ...(issues.length > 0 ? { integrityIssue: issues.join(' ') } : {}),
     };
   });

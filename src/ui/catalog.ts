@@ -20,6 +20,12 @@ export interface WorkItemCatalogEntry {
   repoId: string | null;
   repoLabel: string | null;
   workItemType: WorkItemType;
+  /** Row revision — required as `expectedRevision` by `action:changeWorkItemType`. */
+  revision: number;
+  /** Workflow template snapshot materialised at creation time (PRJ-24). Absent
+   * for Work Items created before templates existed. */
+  templateId?: string;
+  templateVersion?: number;
   integrityIssue?: string;
   skills: string[];
   tool: string;
@@ -122,6 +128,7 @@ export function getFeatureCatalog(scope: WorkItemScope = {}): Record<string, Wor
         id: string; title: string; skills?: string[]; tool: string; model?: string; effort: string;
         thinking?: string; spec?: string; tasks?: Task[]; dependsOn: string[]; workflow: Workflow;
         retry?: Retry; specFile?: string; context?: string[]; maxTokens?: number; autoStart?: boolean;
+        templateId?: string; templateVersion?: number;
       };
       return [row.featureId, {
         id: feature.id,
@@ -133,6 +140,9 @@ export function getFeatureCatalog(scope: WorkItemScope = {}): Record<string, Wor
         repoId: row.repoId,
         repoLabel: row.repoLabel,
         workItemType: row.workItemType,
+        revision: row.revision,
+        templateId: feature.templateId,
+        templateVersion: feature.templateVersion,
         integrityIssue: row.integrityIssue,
         skills: feature.skills ?? [],
         tool: feature.tool,
