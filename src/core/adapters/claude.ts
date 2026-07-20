@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
-import { detectStderrLevel, sanitizeToolCallRecord, type SessionHandle, type ToolAdapter, type RunResult, type RunFeatureOptions, type TokenUsage, type ToolCallRecord } from './types.js';
+import { detectStderrLevel, detectSessionLimit, sanitizeToolCallRecord, type SessionHandle, type ToolAdapter, type RunResult, type RunFeatureOptions, type TokenUsage, type ToolCallRecord } from './types.js';
 import type { Effort, Feature } from '../backlog/schema.js';
 import { CliAbortError, CliTimeoutError, resolveToolInvocation, runCli } from './spawn.js';
 import { logCaughtError } from '../events/logging.js';
@@ -142,8 +142,17 @@ export const claudeAdapter: ToolAdapter = {
     }
 
     if (code !== 0) {
+      const limitMessage = detectSessionLimit(stdout, stderr);
+      if (limitMessage) {
+        return { ok: false, blocked: true, summary: `session limit reached: ${limitMessage}` };
+      }
       const partial = summarizePartialOutput(stdout, stderr, detectTouchedFiles(opts.cwd));
       return { ok: false, summary: `exit ${String(code)}. ${partial}` };
+    }
+
+    const limitMessage = detectSessionLimit(stdout, stderr);
+    if (limitMessage) {
+      return { ok: false, blocked: true, summary: `session limit reached: ${limitMessage}` };
     }
 
     const resultEvent = findResultEvent(stdout);

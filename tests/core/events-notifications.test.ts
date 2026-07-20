@@ -3,12 +3,22 @@ import { createMsqEventBus } from '../../src/core/events/bus.js';
 
 const mockDispatch = vi.fn();
 const mockGetPausedPipelineIdForBudget = vi.fn();
+const mockGetRun = vi.fn();
+const mockResolveRuntimeConfig = vi.fn();
+const mockGetAdapter = vi.fn();
 
 vi.mock('../../src/core/notify/manager.js', () => ({
   dispatch: mockDispatch,
 }));
 vi.mock('../../src/db/repo.js', () => ({
   getPausedPipelineIdForBudget: mockGetPausedPipelineIdForBudget,
+  getRun: mockGetRun,
+}));
+vi.mock('../../src/config/index.js', () => ({
+  resolveRuntimeConfig: mockResolveRuntimeConfig,
+}));
+vi.mock('../../src/core/adapters/index.js', () => ({
+  getAdapter: mockGetAdapter,
 }));
 
 describe('attachEventNotifications', () => {
@@ -17,6 +27,11 @@ describe('attachEventNotifications', () => {
     mockDispatch.mockResolvedValue(undefined);
     mockGetPausedPipelineIdForBudget.mockReset();
     mockGetPausedPipelineIdForBudget.mockReturnValue(undefined);
+    mockGetRun.mockReset();
+    mockGetRun.mockReturnValue(null);
+    mockResolveRuntimeConfig.mockReset();
+    mockResolveRuntimeConfig.mockReturnValue({ tools: [] });
+    mockGetAdapter.mockReset();
   });
 
   it('dispatches run:start notifications', async () => {
@@ -296,6 +311,114 @@ describe('attachEventNotifications', () => {
         },
       }),
     );
+
+    detach();
+  });
+
+  it('dispatches a generic run:failed notification for non-session-limit failures', async () => {
+    const { attachEventNotifications } = await import('../../src/core/events/notifications.js');
+    const eventBus = createMsqEventBus();
+    const detach = attachEventNotifications(eventBus);
+
+    eventBus.emit('run:failed', {
+      runId: 7,
+      featureId: 'feat-9',
+      tool: 'codex',
+      error: 'timeout após 605s',
+      kind: 'execution',
+      pipelineId: 9,
+    });
+
+    expect(mockDispatch).toHaveBeenCalledWith(
+      'run:failed',
+      'metal-squad: feat-9 failed — timeout após 605s',
+      expect.objectContaining({
+        featureId: 'feat-9',
+        runId: 7,
+        pipelineId: 9,
+        error: 'timeout após 605s',
+      }),
+    );
+
+    detach();
+  });
+
+  it('builds a session-limit aware run:failed message with available tools and resume buttons', async () => {
+    mockResolveRuntimeConfig.mockReturnValue({
+      tools: [
+        { id: 'codex' },
+        { id: 'claude' },
+        { id: 'opencode' },
+      ],
+    });
+    mockGetAdapter.mockImplementation((tool: string) => ({
+      isAvailable: () => tool !== 'opencode',
+    }));
+
+    const { attachEventNotifications } = await import('../../src/core/events/notifications.js');
+    const eventBus = createMsqEventBus();
+    const detach = attachEventNotifications(eventBus);
+
+    eventBus.emit('run:failed', {
+      runId: 7,
+      featureId: 'feat-9',
+      tool: 'codex',
+      error: 'session limit reached: session limit',
+      kind: 'execution',
+      pipelineId: 9,
+      blocked: true,
+    });
+
+    expect(mockDispatch).toHaveBeenCalledWith(
+      'run:failed',
+      expect.stringContaining('adapter codex hit session limit'),
+      expect.objectContaining({
+        featureId: 'feat-9',
+        runId: 7,
+        pipelineId: 9,
+        reply_markup: {
+          inline_keyboard: [[
+            { text: 'Resume with claude', callback_data: 'resume_override:9:claude' },
+          ]],
+        },
+      }),
+    );
+
+    detach();
+  });
+
+  it('falls back to a textual suggestion when no other tool is available for session limit', async () => {
+    mockResolveRuntimeConfig.mockReturnValue({
+      tools: [{ id: 'codex' }],
+    });
+    mockGetAdapter.mockReturnValue({ isAvailable: () => true });
+
+    const { attachEventNotifications } = await import('../../src/core/events/notifications.js');
+    const eventBus = createMsqEventBus();
+    const detach = attachEventNotifications(eventBus);
+
+    eventBus.emit('run:failed', {
+      runId: 7,
+      featureId: 'feat-9',
+      tool: 'codex',
+      error: 'session limit reached: session limit',
+      kind: 'execution',
+      pipelineId: 9,
+      blocked: true,
+    });
+
+    expect(mockDispatch).toHaveBeenCalledWith(
+      'run:failed',
+      expect.stringContaining('msq resume 9 --tool <adapter>'),
+      expect.objectContaining({
+        featureId: 'feat-9',
+        runId: 7,
+        pipelineId: 9,
+      }),
+    );
+
+    const metadata = mockDispatch.mock.calls[0]?.[2] as Record<string, unknown>;
+    expect(metadata?.reply_markup).toBeUndefined();
 
     detach();
   });

@@ -537,3 +537,43 @@ describe('getLatestPublishedRunForFeature', () => {
     expect(mockGet).not.toHaveBeenCalled();
   });
 });
+
+describe('callback query deduplication', () => {
+  it('records a callback as processed and returns true on first insert', async () => {
+    mockRun.mockReturnValue({ changes: 1 });
+    const { recordCallbackProcessed } = await import('../../src/db/repo.js');
+    const result = recordCallbackProcessed('cb-1', 'resume_override', { pipelineId: 123, tool: 'claude' });
+    expect(mockRun).toHaveBeenCalledWith('cb-1', 'resume_override', expect.stringContaining('claude'));
+    expect(result).toBe(true);
+  });
+
+  it('returns false when the callback was already processed', async () => {
+    mockRun.mockReturnValue({ changes: 0 });
+    const { recordCallbackProcessed } = await import('../../src/db/repo.js');
+    const result = recordCallbackProcessed('cb-1', 'resume_override', { pipelineId: 123, tool: 'claude' });
+    expect(result).toBe(false);
+  });
+
+  it('checks whether a callback was already processed', async () => {
+    mockGet.mockReturnValueOnce(1).mockReturnValueOnce(undefined);
+    const { isCallbackProcessed } = await import('../../src/db/repo.js');
+    expect(isCallbackProcessed('cb-1')).toBe(true);
+    expect(isCallbackProcessed('cb-2')).toBe(false);
+  });
+});
+
+describe('getLatestRunForPipeline', () => {
+  it('returns the most recent run for a pipeline', async () => {
+    const row = { id: 456, pipeline_id: 123, status: 'failed' };
+    mockGet.mockReturnValue(row);
+    const { getLatestRunForPipeline } = await import('../../src/db/repo.js');
+    expect(getLatestRunForPipeline(123)).toEqual(row);
+    expect(mockGet).toHaveBeenCalledWith(123);
+  });
+
+  it('returns null when the pipeline has no runs', async () => {
+    mockGet.mockReturnValue(undefined);
+    const { getLatestRunForPipeline } = await import('../../src/db/repo.js');
+    expect(getLatestRunForPipeline(123)).toBeNull();
+  });
+});
