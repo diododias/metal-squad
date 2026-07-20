@@ -155,16 +155,29 @@ export const claudeAdapter: ToolAdapter = {
       return { ok: false, summary: `exit ${String(code)}. ${partial}` };
     }
 
-    const limitMessage = detectSessionLimit(stdout, stderr);
-    if (limitMessage) {
-      return { ok: false, blocked: true, summary: `session limit reached: ${limitMessage}` };
-    }
-
     const resultEvent = findResultEvent(stdout);
     const usage = this.parseUsage?.(stdout) ?? undefined;
     const session = buildClaudeSessionHandle(stdout, assignedSessionId, opts.runId);
     const control = parseControlSignal(resultEvent?.result ?? '');
     if (usage) emitUsage(opts.runId, feature, usage);
+
+    // A well-formed protocol control signal is authoritative proof the session
+    // closed cleanly; only fall back to the session-limit text heuristic when
+    // there is none, since it can false-positive on incidental matches (e.g. a
+    // `git log` tool result mentioning "session limit" in a commit message).
+    if (!control) {
+      const limitMessage = detectSessionLimit(stdout, stderr);
+      if (limitMessage) {
+        return {
+          ok: false,
+          blocked: true,
+          summary: `session limit reached: ${limitMessage}`,
+          usage,
+          ...(session ? { session } : {}),
+        };
+      }
+    }
+
     return {
       ok: resultEvent?.subtype !== 'error_max_turns',
       summary: (resultEvent?.result ?? '').slice(0, 200),

@@ -175,16 +175,28 @@ export const codexAdapter: ToolAdapter = {
       return { ok: false, summary: stdoutError || stderr.slice(-500) || `exit ${String(code)}` };
     }
 
-    const limitMessage = detectSessionLimit(stdout, stderr);
-    if (limitMessage) {
-      return { ok: false, blocked: true, summary: `session limit reached: ${limitMessage}` };
-    }
-
     const finalMsg = lastAgentMessage(stdout);
     const usage = this.parseUsage?.(stdout) ?? undefined;
     const session = buildCodexSessionHandle(stdout, opts, opts.runId);
     const control = parseControlSignal(finalMsg);
     if (usage) emitUsage(opts.runId, feature, usage);
+
+    // See claude.ts: a parsed control signal proves the session closed
+    // cleanly, so it takes precedence over the session-limit text heuristic,
+    // which can false-positive on incidental matches in tool output.
+    if (!control) {
+      const limitMessage = detectSessionLimit(stdout, stderr);
+      if (limitMessage) {
+        return {
+          ok: false,
+          blocked: true,
+          summary: `session limit reached: ${limitMessage}`,
+          usage,
+          ...(session ? { session } : {}),
+        };
+      }
+    }
+
     return {
       ok: true,
       summary: finalMsg.slice(0, 200),
