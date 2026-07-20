@@ -3,9 +3,9 @@ import React from 'react';
 import { getChromeHeight, getMainPanelContentHeight } from '../../src/ui/layout/budget.js';
 
 const mockUseRuns = vi.fn();
-const mockUseCompletedFeatures = vi.fn(() => new Set<string>());
-const mockUseTaskRuns = vi.fn(() => []);
-const mockUseRunningTasks = vi.fn(() => []);
+const mockUseCompletedFeatures = vi.fn(() => ({ doneFeatureIds: new Set<string>(), error: null }));
+const mockUseTaskRuns = vi.fn(() => ({ taskRuns: [], error: null }));
+const mockUseRunningTasks = vi.fn(() => ({ runningTasks: [], error: null }));
 const mockUseGates = vi.fn();
 const mockUseRunOutput = vi.fn();
 const mockUseTerminalWidth = vi.fn();
@@ -121,11 +121,11 @@ vi.mock('../../src/ui/hooks/useRunOutput.js', () => ({
 }));
 
 vi.mock('../../src/ui/hooks/useRunBreakdown.js', () => ({
-  useRunBreakdown: vi.fn(() => null),
+  useRunBreakdown: vi.fn(() => ({ breakdown: null, error: null })),
 }));
 
 vi.mock('../../src/ui/hooks/useStatsRows.js', () => ({
-  useStatsRows: vi.fn(() => []),
+  useStatsRows: vi.fn(() => ({ rows: [], error: null })),
 }));
 
 vi.mock('../../src/ui/hooks/useTerminalWidth.js', () => ({
@@ -298,8 +298,8 @@ describe('App', () => {
     };
     mockUseTerminalWidth.mockReturnValue(88);
     mockLoadBacklog.mockClear();
-    mockUseRuns.mockReturnValue([]);
-    mockUseRunningTasks.mockReturnValue([]);
+    mockUseRuns.mockReturnValue({ runs: [], error: null });
+    mockUseRunningTasks.mockReturnValue({ runningTasks: [], error: null });
     mockUseGates.mockReturnValue({ gates: [], resolve: vi.fn(), forceResolve: vi.fn(() => ({ resumedPipelineId: null })) });
     mockUseRunOutput.mockReturnValue([]);
     mockUseNotifications.mockReturnValue([]);
@@ -394,7 +394,7 @@ describe('App', () => {
   });
 
   it('passes selected run metadata to child panels', async () => {
-    mockUseRuns.mockReturnValue([{
+    mockUseRuns.mockReturnValue({ runs: [{
       runId: 1,
       repoId: 'repo-1',
       featureId: 'feat-1',
@@ -407,7 +407,7 @@ describe('App', () => {
       outputTokens: 300,
       gateId: null,
       gateDecision: null,
-    }]);
+    }], error: null });
     mockUseGates.mockReturnValue({
       gates: [{ id: 1, featureId: 'feat-1', repoId: 'repo-1' }],
       resolve: vi.fn(),
@@ -432,10 +432,10 @@ describe('App', () => {
 
   it('handles keyboard interactions for navigation', async () => {
     const resolve = vi.fn();
-    mockUseRuns.mockReturnValue([
+    mockUseRuns.mockReturnValue({ runs: [
       { runId: 1, featureId: 'feat-1', status: 'running' },
       { runId: 2, featureId: 'feat-2', status: 'running' },
-    ]);
+    ], error: null });
     mockUseGates.mockReturnValue({
       gates: [{ id: 7, featureId: 'feat-1', repoId: 'repo-1' }],
       resolve,
@@ -461,7 +461,7 @@ describe('App', () => {
   });
 
   it('opens the command palette with ctrl+p and :', async () => {
-    mockUseRuns.mockReturnValue([{ runId: 1, featureId: 'feat-1' }]);
+    mockUseRuns.mockReturnValue({ runs: [{ runId: 1, featureId: 'feat-1' }], error: null });
     mockUseGates.mockReturnValue({ gates: [], resolve: vi.fn() });
     const { App } = await import('../../src/ui/App.js');
 
@@ -487,7 +487,7 @@ describe('App', () => {
       detailSectionIndex: 0,
       detailDense: false,
     };
-    mockUseRuns.mockReturnValue([{ runId: 1, featureId: 'feat-1', status: 'running' }]);
+    mockUseRuns.mockReturnValue({ runs: [{ runId: 1, featureId: 'feat-1', status: 'running' }], error: null });
     mockUseGates.mockReturnValue({
       gates: [{ kind: 'gate', id: 7, featureId: 'feat-1', repoId: 'repo-1', prompt: '', createdAt: '' }],
       resolve: vi.fn(),
@@ -595,7 +595,7 @@ describe('App', () => {
   });
 
   it('opens the help overlay with ? and closes the palette first', async () => {
-    mockUseRuns.mockReturnValue([{ runId: 1, featureId: 'feat-1' }]);
+    mockUseRuns.mockReturnValue({ runs: [{ runId: 1, featureId: 'feat-1' }], error: null });
     mockUseGates.mockReturnValue({ gates: [], resolve: vi.fn() });
     const { App } = await import('../../src/ui/App.js');
 
@@ -620,7 +620,7 @@ describe('App', () => {
       detailSectionIndex: 0,
       detailDense: false,
     };
-    mockUseRuns.mockReturnValue([{ runId: 1, featureId: 'feat-1', status: 'running' }]);
+    mockUseRuns.mockReturnValue({ runs: [{ runId: 1, featureId: 'feat-1', status: 'running' }], error: null });
     mockUseGates.mockReturnValue({ gates: [], resolve: vi.fn() });
     const { App } = await import('../../src/ui/App.js');
 
@@ -646,7 +646,7 @@ describe('App', () => {
       detailSectionIndex: 0,
       detailDense: false,
     };
-    mockUseRuns.mockReturnValue([{ runId: 1, featureId: 'feat-1', status: 'running' }]);
+    mockUseRuns.mockReturnValue({ runs: [{ runId: 1, featureId: 'feat-1', status: 'running' }], error: null });
     mockUseGates.mockReturnValue({ gates: [], resolve: vi.fn() });
     const { App } = await import('../../src/ui/App.js');
 
@@ -672,7 +672,7 @@ describe('App', () => {
       detailSectionIndex: 0,
       detailDense: false,
     };
-    mockUseRuns.mockReturnValue([{ runId: 1, featureId: 'feat-1', status: 'running' }]);
+    mockUseRuns.mockReturnValue({ runs: [{ runId: 1, featureId: 'feat-1', status: 'running' }], error: null });
     mockUseGates.mockReturnValue({ gates: [], resolve: vi.fn() });
     const { App } = await import('../../src/ui/App.js');
 
@@ -698,7 +698,7 @@ describe('App', () => {
       detailSectionIndex: 0,
       detailDense: false,
     };
-    mockUseRuns.mockReturnValue([{ runId: 1, featureId: 'feat-1', status: 'running' }]);
+    mockUseRuns.mockReturnValue({ runs: [{ runId: 1, featureId: 'feat-1', status: 'running' }], error: null });
     mockUseGates.mockReturnValue({ gates: [], resolve: vi.fn() });
     const { App } = await import('../../src/ui/App.js');
 
@@ -725,7 +725,7 @@ describe('App', () => {
       detailSectionIndex: 0,
       detailDense: false,
     };
-    mockUseRuns.mockReturnValue([{ runId: 1, featureId: 'feat-1', status: 'running' }]);
+    mockUseRuns.mockReturnValue({ runs: [{ runId: 1, featureId: 'feat-1', status: 'running' }], error: null });
     const gateApproval = { kind: 'gate' as const, id: 7, featureId: 'feat-1', repoId: 'repo-1', prompt: '', createdAt: '' };
     mockUseGates.mockReturnValue({
       gates: [gateApproval],
@@ -759,7 +759,7 @@ describe('App', () => {
       detailSectionIndex: 0,
       detailDense: false,
     };
-    mockUseRuns.mockReturnValue([{ runId: 1, featureId: 'feat-1', status: 'running' }]);
+    mockUseRuns.mockReturnValue({ runs: [{ runId: 1, featureId: 'feat-1', status: 'running' }], error: null });
     const gateApproval = { kind: 'gate' as const, id: 7, featureId: 'feat-1', repoId: 'repo-1', prompt: '', createdAt: '' };
     mockUseGates.mockReturnValue({
       gates: [gateApproval],
@@ -786,7 +786,7 @@ describe('App', () => {
   it('gate shortcuts act globally while a gate is pending, run-detail shortcuts still do not', async () => {
     const resolve = vi.fn();
     const forceResolve = vi.fn(() => ({ resumedPipelineId: null }));
-    mockUseRuns.mockReturnValue([{
+    mockUseRuns.mockReturnValue({ runs: [{
       runId: 1,
       pipelineId: 42,
       pipelineStatus: 'running',
@@ -802,7 +802,7 @@ describe('App', () => {
       gateDecision: null,
       repoId: 'repo-1',
       pipelineResumeSummary: null,
-    }]);
+    }], error: null });
     mockUseGates.mockReturnValue({
       gates: [{ kind: 'gate', id: 7, featureId: 'feat-1', repoId: 'repo-1', prompt: '', createdAt: '' }],
       resolve,
@@ -837,7 +837,7 @@ describe('App', () => {
       detailSectionIndex: 0,
       detailDense: false,
     };
-    mockUseRuns.mockReturnValue([{ runId: 1, featureId: 'feat-1', status: 'running' }]);
+    mockUseRuns.mockReturnValue({ runs: [{ runId: 1, featureId: 'feat-1', status: 'running' }], error: null });
     mockUseGates.mockReturnValue({
       gates: [{ kind: 'gate', id: 7, featureId: 'feat-1', repoId: 'repo-1', prompt: '', createdAt: '' }],
       resolve: vi.fn(),
@@ -867,7 +867,7 @@ describe('App', () => {
       detailSectionIndex: 0,
       detailDense: false,
     };
-    mockUseRuns.mockReturnValue([{
+    mockUseRuns.mockReturnValue({ runs: [{
       runId: 1,
       pipelineId: 42,
       pipelineStatus: 'running',
@@ -883,7 +883,7 @@ describe('App', () => {
       gateDecision: null,
       repoId: 'repo-1',
       pipelineResumeSummary: null,
-    }]);
+    }], error: null });
     mockUseGates.mockReturnValue({ gates: [], resolve: vi.fn() });
     const { App } = await import('../../src/ui/App.js');
 
@@ -906,7 +906,7 @@ describe('App', () => {
       detailSectionIndex: 0,
       detailDense: false,
     };
-    mockUseRuns.mockReturnValue([{
+    mockUseRuns.mockReturnValue({ runs: [{
       runId: 1,
       pipelineId: 42,
       pipelineStatus: 'running',
@@ -922,7 +922,7 @@ describe('App', () => {
       gateDecision: null,
       repoId: 'repo-1',
       pipelineResumeSummary: null,
-    }]);
+    }], error: null });
     mockUseGates.mockReturnValue({ gates: [], resolve: vi.fn() });
     const { App } = await import('../../src/ui/App.js');
 
@@ -950,7 +950,7 @@ describe('App', () => {
       detailSectionIndex: 0,
       detailDense: false,
     };
-    mockUseRuns.mockReturnValue([{
+    mockUseRuns.mockReturnValue({ runs: [{
       runId: 1,
       pipelineId: 42,
       pipelineStatus: 'running',
@@ -966,7 +966,7 @@ describe('App', () => {
       gateDecision: null,
       repoId: 'repo-1',
       pipelineResumeSummary: null,
-    }]);
+    }], error: null });
     mockUseGates.mockReturnValue({ gates: [], resolve: vi.fn() });
     const { App } = await import('../../src/ui/App.js');
 
@@ -994,7 +994,7 @@ describe('App', () => {
       detailSectionIndex: 2,
       detailDense: false,
     };
-    mockUseRuns.mockReturnValue([{ runId: 1, featureId: 'feat-1', status: 'running' }]);
+    mockUseRuns.mockReturnValue({ runs: [{ runId: 1, featureId: 'feat-1', status: 'running' }], error: null });
     mockUseGates.mockReturnValue({ gates: [], resolve: vi.fn() });
     const { App } = await import('../../src/ui/App.js');
 
@@ -1034,10 +1034,10 @@ describe('App', () => {
       detailSectionIndex: 0,
       detailDense: false,
     };
-    mockUseRuns.mockReturnValue([
+    mockUseRuns.mockReturnValue({ runs: [
       { runId: 1, featureId: 'feat-1', status: 'running' },
       { runId: 2, featureId: 'feat-2', status: 'running' },
-    ]);
+    ], error: null });
     mockUseGates.mockReturnValue({ gates: [], resolve: vi.fn() });
     const { App } = await import('../../src/ui/App.js');
 
@@ -1070,7 +1070,7 @@ describe('App', () => {
       detailSectionIndex: 0,
       detailDense: false,
     };
-    mockUseRuns.mockReturnValue([{ runId: 1, featureId: 'feat-1', status: 'running' }]);
+    mockUseRuns.mockReturnValue({ runs: [{ runId: 1, featureId: 'feat-1', status: 'running' }], error: null });
     mockUseGates.mockReturnValue({ gates: [], resolve: vi.fn() });
     const { App } = await import('../../src/ui/App.js');
 
@@ -1099,7 +1099,7 @@ describe('App', () => {
       detailSectionIndex: 0,
       detailDense: false,
     };
-    mockUseRuns.mockReturnValue([{ runId: 1, featureId: 'feat-1', status: 'running' }]);
+    mockUseRuns.mockReturnValue({ runs: [{ runId: 1, featureId: 'feat-1', status: 'running' }], error: null });
     mockUseGates.mockReturnValue({ gates: [], resolve: vi.fn() });
     const { App } = await import('../../src/ui/App.js');
 
@@ -1157,7 +1157,7 @@ describe('App', () => {
       detailSectionIndex: 0,
       detailDense: false,
     };
-    mockUseRuns.mockReturnValue([{
+    mockUseRuns.mockReturnValue({ runs: [{
       runId: 1,
       pipelineId: 42,
       pipelineStatus: 'running',
@@ -1173,7 +1173,7 @@ describe('App', () => {
       gateDecision: null,
       repoId: 'repo-1',
       pipelineResumeSummary: null,
-    }]);
+    }], error: null });
     mockUseGates.mockReturnValue({ gates: [], resolve: vi.fn() });
     const { App } = await import('../../src/ui/App.js');
 

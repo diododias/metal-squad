@@ -1,12 +1,35 @@
 import type { MsqEvents } from '../core/events/types.js';
 import type { SessionStatusSnapshot, ToolCallRecord } from '../core/adapters/types.js';
-import type { RunHistoryEntry, RunSummary, RunningTaskSummary, StatsRunRow, TaskRun } from '../db/repo.js';
+import type { EpicRow, ProjectRepoRow, ProjectRow, RunHistoryEntry, RunSummary, RunningTaskSummary, StatsRunRow, TaskRun, WorkItemRow } from '../db/repo.js';
 import type { PendingApproval } from '../ui/hooks/useGates.js';
-import type { FeatureCatalogEntry, BacklogSettings } from '../ui/catalog.js';
+import type { WorkItemCatalogEntry, BacklogSettings } from '../ui/catalog.js';
 import type { RunBreakdown } from '../core/stats.js';
 import type { ThemeRoleName } from '../ui/theme/types.js';
 import type { AppConfigPatch as ConfigAppConfigPatch, Config, NotificationChannelConfig, NotificationsPatch, ToolRegistryEntry } from '../config/index.js';
 import type { Skill } from '../core/skills/types.js';
+import type { WorkItemType as MsqWorkItemType } from '../db/workflowTemplates.js';
+
+export type { MsqWorkItemType };
+
+/** Client-facing shape of a workflow template: enough to render a picker or
+ * badge without shipping the full stage/skill definition. Mirrors the projection
+ * in `web/state.collectWorkflowTemplates`; keep in sync. */
+export interface WorkflowTemplateSummary {
+  templateId: string;
+  name: string;
+  version: number;
+  revision: number;
+  builtin: boolean;
+  archived: boolean;
+  scopeProjectId: string | null;
+  stageCount: number;
+}
+
+/** Project -> Work Item type -> templateId. Projects without an explicit mapping
+ * resolve to the builtin for the type (see `resolveTemplate`); this map is the
+ * cache of explicit bindings only, used by the web state to drive the type
+ * preview/picker on the client. */
+export type WorkflowTemplateMappings = Record<string, Partial<Record<MsqWorkItemType, string>>>;
 
 export interface TokenStats {
   status: 'loading' | 'ready' | 'error';
@@ -30,6 +53,14 @@ export interface TimeoutApprovalState {
 export interface UiNotification {
   id: string;
   type: 'info' | 'notice';
+  /**
+   * Optional tonal override derived from the originating event. When present,
+   * the toast/feed surfaces use this in preference to `type`. Older clients
+   * (and the persisted `state:full` snapshot) still derive tone from `type`.
+   */
+  tone?: 'info' | 'ok' | 'warn' | 'danger';
+  /** Optional originating event label (e.g. `run:done`, `gate:created`). */
+  event?: string;
   message: string;
   createdAt: string;
 }
@@ -61,6 +92,30 @@ export type WebRuntimeConfig = Omit<Config, 'notifications'> & {
   };
 };
 
+export interface ProjectSummary {
+  projectId: string;
+  name: string;
+  /** Stable ordering for client-only active-project fallback. */
+  position: number;
+  description: string | null;
+  revision: number;
+  counts: { epics: number; workItems: number; archived: number };
+  activeRuns: number;
+  tokens: TokenStats;
+  archivedAt: string | null;
+}
+
+export interface RepositorySummary {
+  repoId: string;
+  label: string;
+  projectId: string | null;
+  health: 'ok' | 'unavailable' | 'unchecked';
+  lastCheckedAt: string | null;
+  /** Omitted from the default broadcast; a future authenticated,
+   * route-specific response may expose it. */
+  path?: string;
+}
+
 /** Read-only diagnostics collected by the backend for the Settings page. */
 export interface EnvironmentInfo {
   databasePath: string;
@@ -74,14 +129,25 @@ export interface EnvironmentInfo {
   version?: string;
 }
 
+export interface ErrorEntry {
+  timestamp: string;
+  module: string;
+  message: string;
+}
+
 export interface MsqWebState {
+  revision: number;
   repoLabel: string;
+  projects: ProjectSummary[];
+  repositories: RepositorySummary[];
+  epics: EpicRow[];
   runs: RunSummary[];
   gates: PendingApproval[];
-  pendingFeatures: FeatureCatalogEntry[];
+  pendingFeatures: WorkItemCatalogEntry[];
+  doneFeatureIds: string[];
   runningTasks: RunningTaskSummary[];
   timeoutApprovals: TimeoutApprovalState[];
-  featureCatalog: Record<string, FeatureCatalogEntry>;
+  featureCatalog: Record<string, WorkItemCatalogEntry>;
   backlogSettings: BacklogSettings;
   environment: EnvironmentInfo;
   stats: {
@@ -106,6 +172,17 @@ export interface MsqWebState {
   /** Config page (Skills sub-tab) — discovered skills with precedence
    * already applied (repo > global > external > builtin), read-only. */
   skillsCatalog: Skill[];
+  /** Project Templates page — list of templates available to any project, with
+   * the lightweight summary shape (no full definition). The full definition is
+   * fetched on demand when the user opens a template. */
+  workflowTemplates: WorkflowTemplateSummary[];
+  /** Project Templates page — `projectId -> workItemType -> templateId` cache of
+   * explicit Project bindings. Projects without a mapping resolve to the
+   * builtin for the type (see `resolveTemplate`); this map drives the type
+   * preview/picker on the client. */
+  workflowTemplateMappings: WorkflowTemplateMappings;
+  /** Collector errors since the last snapshot — empty when all collectors succeeded. */
+  errors: ErrorEntry[];
 }
 
 export interface RunChangedFile {
@@ -207,6 +284,129 @@ export interface FeatureConfigSaveResult {
   payload: { featureId: string; ok: boolean; issues?: FeatureConfigSaveIssue[] };
 }
 
+export type ProjectActionErrorCode =
+  | 'INVALID_PAYLOAD'
+  | 'PROJECT_NOT_FOUND'
+  | 'REPO_NOT_FOUND'
+  | 'REPO_NOT_LINKED_TO_PROJECT'
+  | 'REPO_ALREADY_LINKED'
+  | 'REPO_IN_USE'
+  | 'REPO_PATH_CONFIRMATION_REQUIRED'
+  | 'REPO_PATH_NOT_FOUND'
+  | 'REPO_PATH_NOT_DIRECTORY'
+  | 'REPO_PATH_NOT_ALLOWED'
+  | 'REVISION_CONFLICT'
+  | 'PROJECT_ACTION_FAILED';
+
+export interface ProjectActionError {
+  code: ProjectActionErrorCode;
+  message: string;
+}
+
+export type ProjectActionResult =
+  | {
+      type: 'action:result';
+      payload: { requestId: string; ok: true; entity: ProjectRow };
+    }
+  | {
+      type: 'action:result';
+      payload: {
+        requestId: string;
+        ok: false;
+        error: ProjectActionError;
+      };
+    };
+
+export type RepositoryActionResult =
+  | {
+      type: 'action:result';
+      payload: { requestId: string; ok: true; entity: ProjectRepoRow | { repoId: string; unlinked: boolean } | null };
+    }
+  | {
+      type: 'action:result';
+      payload: { requestId: string; ok: false; error: ProjectActionError };
+    };
+
+export type EpicActionErrorCode =
+  | 'INVALID_PAYLOAD'
+  | 'PROJECT_NOT_FOUND'
+  | 'REVISION_CONFLICT'
+  | 'EPIC_ACTION_FAILED';
+
+export interface EpicActionError {
+  code: EpicActionErrorCode;
+  message: string;
+}
+
+export type EpicActionResult =
+  | { type: 'action:result'; payload: { requestId: string; ok: true; entity: EpicRow } }
+  | { type: 'action:result'; payload: { requestId: string; ok: false; error: EpicActionError } };
+
+export type WorkItemActionErrorCode =
+  | 'INVALID_PAYLOAD'
+  | 'EPIC_NOT_FOUND'
+  | 'REPOSITORY_NOT_IN_PROJECT'
+  | 'REPOSITORY_UNAVAILABLE'
+  | 'DEPENDENCY_NOT_FOUND'
+  | 'CROSS_REPOSITORY_DEPENDENCY'
+  | 'DEPENDENCY_CYCLE'
+  // Surfaced by the type-change action, which shares this error shape.
+  | 'WORK_ITEM_NOT_FOUND'
+  | 'WORK_ITEM_HAS_HISTORY'
+  | 'REVISION_CONFLICT'
+  | 'WORKFLOW_TEMPLATE_NOT_FOUND'
+  | 'WORKFLOW_TEMPLATE_INVALID'
+  | 'WORK_ITEM_ACTION_FAILED';
+
+export interface WorkItemActionError {
+  code: WorkItemActionErrorCode;
+  message: string;
+}
+
+export type WorkItemActionResult =
+  | { type: 'action:result'; payload: { requestId: string; ok: true; workItem: WorkItemRow; revision: number } }
+  | { type: 'action:result'; payload: { requestId: string; ok: false; error: WorkItemActionError } };
+
+export interface WorkflowTemplateActionError {
+  code: string;
+  message: string;
+}
+
+export type WorkflowTemplateActionResult =
+  | { type: 'action:result'; payload: { requestId: string; ok: true; workflowTemplate: WorkflowTemplateSummary; revision: number } }
+  | { type: 'action:result'; payload: { requestId: string; ok: true } }
+  | { type: 'action:result'; payload: { requestId: string; ok: false; error: WorkflowTemplateActionError } };
+
+/** What a `changeWorkItemType` preview shows before the caller confirms: the
+ * template the item would move onto, and the stages it would end up with. */
+export interface WorkItemTypeChangePreview {
+  workItemId: string;
+  fromType: MsqWorkItemType;
+  toType: MsqWorkItemType;
+  templateId: string;
+  templateVersion: number;
+  stages: string[];
+}
+
+export type WorkItemTypeChangeResult =
+  | { type: 'action:result'; payload: { requestId: string; ok: true; preview: WorkItemTypeChangePreview } }
+  | { type: 'action:result'; payload: { requestId: string; ok: true; workItem: WorkItemRow; revision: number } }
+  | { type: 'action:result'; payload: { requestId: string; ok: false; error: WorkItemActionError } };
+
+/** What the Work Item creation form shows before `action:createWorkItem`: the
+ * template a new Work Item of this type/epic/repo would get. Identical shape
+ * to the snapshot `action:createWorkItem` will persist (PRJ-24). */
+export interface WorkflowTemplatePreview {
+  templateId: string;
+  templateVersion: number;
+  origin: 'project-mapping' | 'builtin';
+  stages: string[];
+}
+
+export type ResolveWorkflowTemplateResult =
+  | { type: 'action:result'; payload: { requestId: string; ok: true; preview: WorkflowTemplatePreview } }
+  | { type: 'action:result'; payload: { requestId: string; ok: false; error: WorkItemActionError } };
+
 export type WebSocketClientMessage =
   | { type: 'auth'; token: string }
   | {
@@ -216,6 +416,33 @@ export type WebSocketClientMessage =
   | { type: 'action:updateFeatureConfig'; featureId: string; patch: FeatureConfigPatch }
   | { type: 'action:updateTaskConfig'; featureId: string; taskId: string; patch: TaskConfigPatch }
   | { type: 'action:updateProjectDefaults'; patch: ProjectDefaultsPatch }
+  | { type: 'action:createProject'; requestId: string; name: string; description?: string | null }
+  | {
+      type: 'action:updateProject';
+      requestId: string;
+      projectId: string;
+      expectedRevision: number;
+      patch: { name?: string; description?: string | null; position?: number };
+    }
+  | { type: 'action:linkRepo'; requestId: string; projectId: string; repoId?: string; path?: string; confirm?: boolean }
+  | { type: 'action:moveRepo'; requestId: string; repoId: string; toProjectId: string; expectedRevision?: number }
+  | { type: 'action:unlinkRepo'; requestId: string; projectId: string; repoId: string }
+  | { type: 'action:createEpic'; requestId: string; projectId: string; title: string; description?: string | null }
+  | { type: 'action:createWorkItem'; requestId: string; epicId: string; repoId: string; workItemType?: MsqWorkItemType; title: string; description?: string | null; dependsOn?: string[] }
+  | { type: 'action:resolveWorkflowTemplate'; requestId: string; epicId: string; repoId: string; workItemType: MsqWorkItemType }
+  | { type: 'action:createWorkflowTemplate'; requestId: string; projectId: string; name: string; definition: unknown }
+  | { type: 'action:updateWorkflowTemplate'; requestId: string; templateId: string; expectedRevision: number; patch: { name?: string; definition?: unknown } }
+  | { type: 'action:duplicateWorkflowTemplate'; requestId: string; templateId: string; projectId: string; name?: string }
+  | { type: 'action:archiveWorkflowTemplate'; requestId: string; templateId: string }
+  | { type: 'action:setTypeTemplate'; requestId: string; projectId: string; workItemType: MsqWorkItemType; templateId: string }
+  | { type: 'action:changeWorkItemType'; requestId: string; workItemId: string; workItemType: MsqWorkItemType; expectedRevision: number; preview?: boolean }
+  | {
+      type: 'action:updateEpic';
+      requestId: string;
+      epicId: string;
+      expectedRevision: number;
+      patch: { title?: string; description?: string | null; status?: 'todo' | 'in_progress' | 'done'; position?: number };
+    }
   | { type: 'action:updateBudgetConfig'; patch: BudgetConfigPatch }
   | { type: 'action:updateNotifications'; patch: NotificationsPatch }
   | { type: 'action:updateAppConfig'; patch: AppConfigPatch }
@@ -249,6 +476,13 @@ export type WebSocketClientMessage =
 export type WebSocketServerMessage =
   | { type: 'state:full'; payload: MsqWebState }
   | FeatureConfigSaveResult
+  | ProjectActionResult
+  | RepositoryActionResult
+  | EpicActionResult
+  | WorkItemActionResult
+  | WorkflowTemplateActionResult
+  | WorkItemTypeChangeResult
+  | ResolveWorkflowTemplateResult
   | { type: 'run:detail'; payload: { runId: number; taskRuns: TaskRun[]; breakdown: RunBreakdown | null; sessionStatus: SessionStatusSnapshot | null; statusHistory: SessionStatusSnapshot[]; toolCalls: ToolCallRecord[] } }
   | { type: 'run:history'; payload: { featureId: string; runs: RunHistoryEntry[] } }
   | { type: 'run:changes'; payload: RunChangesPayload }

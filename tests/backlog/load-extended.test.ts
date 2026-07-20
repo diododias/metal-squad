@@ -47,3 +47,85 @@ epics: []
     expect(backlog.defaults).toMatchObject({ tool: 'claude', effort: 'medium' });
   });
 });
+
+describe('loadBacklog — Work Item type (PRJ-22)', () => {
+  let cwd = '';
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+    if (cwd) rmSync(cwd, { recursive: true, force: true });
+    cwd = '';
+  });
+
+  it('defaults a v2 Work Item without a type to "feature"', async () => {
+    cwd = mkdtempSync(join(tmpdir(), 'msq-backlog-'));
+    writeFileSync(join(cwd, 'backlog.yaml'), `version: 2
+repo: demo
+epics:
+  - id: epic-1
+    title: Epic
+    features:
+      - id: feat-1
+        title: Feature
+`);
+
+    const { loadBacklog } = await import('../../src/core/backlog/load.js');
+    const backlog = loadBacklog(undefined, cwd);
+
+    expect(backlog.epics[0]?.features[0]?.type).toBe('feature');
+  });
+
+  it('defaults a legacy v1 Work Item without a type to "feature"', async () => {
+    cwd = mkdtempSync(join(tmpdir(), 'msq-backlog-'));
+    writeFileSync(join(cwd, 'backlog.yaml'), `version: 1
+repo: demo
+epics:
+  - id: epic-1
+    title: Epic
+    features:
+      - id: feat-1
+        title: Feature
+`);
+
+    const { loadBacklog } = await import('../../src/core/backlog/load.js');
+    const backlog = loadBacklog(undefined, cwd);
+
+    expect(backlog.epics[0]?.features[0]?.type).toBe('feature');
+  });
+
+  it('preserves an explicit "bug" type declared in the YAML', async () => {
+    cwd = mkdtempSync(join(tmpdir(), 'msq-backlog-'));
+    writeFileSync(join(cwd, 'backlog.yaml'), `version: 2
+repo: demo
+epics:
+  - id: epic-1
+    title: Epic
+    features:
+      - id: feat-1
+        title: Feature
+        type: bug
+`);
+
+    const { loadBacklog } = await import('../../src/core/backlog/load.js');
+    const backlog = loadBacklog(undefined, cwd);
+
+    expect(backlog.epics[0]?.features[0]?.type).toBe('bug');
+  });
+
+  it('rejects an unsupported type value instead of treating it as free text', async () => {
+    cwd = mkdtempSync(join(tmpdir(), 'msq-backlog-'));
+    writeFileSync(join(cwd, 'backlog.yaml'), `version: 2
+repo: demo
+epics:
+  - id: epic-1
+    title: Epic
+    features:
+      - id: feat-1
+        title: Feature
+        type: hotfix
+`);
+
+    const { loadBacklog } = await import('../../src/core/backlog/load.js');
+    expect(() => loadBacklog(undefined, cwd)).toThrow();
+  });
+});

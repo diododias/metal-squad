@@ -5,6 +5,9 @@ import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { getOrCreateWebToken, resolveWebConfig } from '../web/token.js';
 import { logCaughtError } from '../core/events/logging.js';
+import { createLogger } from '../core/logger/index.js';
+
+const logger = createLogger('commands/daemon');
 
 const PID_PATH = join(homedir(), '.local', 'share', 'metal-squad', 'daemon.pid');
 
@@ -12,7 +15,8 @@ function isProcessAlive(pid: number): boolean {
   try {
     process.kill(pid, 0);
     return true;
-  } catch {
+  } catch (error) {
+    logger.debug(`process.kill(${String(pid)}, 0) failed — process not alive`, error);
     return false;
   }
 }

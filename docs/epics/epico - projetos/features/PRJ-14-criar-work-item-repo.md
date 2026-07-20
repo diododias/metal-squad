@@ -16,7 +16,7 @@ atributo `type` (feature|bug) chega em PRJ-22/24.
 
 ## Contexto de execução
 
-Hoje **não existe** ação de criar demanda pela web. O union de ações
+Hoje **não existe** ação de criar Work Item pela web. O union de ações
 (`src/web/types.ts:210-248`) só tem `startFeature`, edições de config e controle
 de pipeline — a criação de features acontece via `backlog.yaml` + import. O ponto
 onde novas ações entram é o `switch (message.type)` de `handleClientMessage`

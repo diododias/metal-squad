@@ -48,9 +48,17 @@ export class GithubForge implements ForgeAdapter {
   }
 
   public viewPullRequest(cwd: string): ForgeResult<ForgePullRequestView | null> {
+    return this.readPullRequest(cwd, []);
+  }
+
+  public viewPullRequestByNumber(cwd: string, prNumber: number): ForgeResult<ForgePullRequestView | null> {
+    return this.readPullRequest(cwd, [String(prNumber)]);
+  }
+
+  private readPullRequest(cwd: string, selector: string[]): ForgeResult<ForgePullRequestView | null> {
     const result = runCommand(
       'gh',
-      ['pr', 'view', '--json', 'number,url,state,baseRefName,headRefName'],
+      ['pr', 'view', ...selector, '--json', 'number,url,state,baseRefName,headRefName'],
       cwd,
     );
     if (!result.ok) {

@@ -1,6 +1,8 @@
 import { execFileSync } from 'node:child_process';
 import { getLatestPublishedRunForFeature } from '../../db/repo.js';
 import { logCaughtError } from '../events/logging.js';
+import { GithubForge } from './forge/github.js';
+import type { ForgeAdapter } from './forge/types.js';
 
 export interface DependencyPublication {
   featureId: string;
@@ -8,12 +10,70 @@ export interface DependencyPublication {
   prUrl: string;
   branchName: string;
   remoteBranch: string | null;
+  baseBranch: string | null;
+  /**
+   * Set when the dependency PR was already merged and its head branch is gone,
+   * so the usable base is the branch it was merged into.
+   */
+  mergedInto?: string;
 }
 
 export interface DependencyFetchFailure {
   featureId: string;
   remote: string;
   ref: string;
+}
+
+export interface DependencyFetchOutcome {
+  failure: DependencyFetchFailure | null;
+  /**
+   * Publications rewritten to the ref that actually exists on the remote. A
+   * dependency whose PR was merged points at its base branch instead of the
+   * deleted head branch.
+   */
+  publications: DependencyPublication[];
+}
+
+function fetchRef(remote: string, ref: string, cwd: string): boolean {
+  try {
+    execFileSync('git', ['fetch', remote, ref], {
+      cwd,
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+    return true;
+  } catch (error) {
+    logCaughtError(`git/dependencies.fetch(${remote} ${ref})`, error);
+    return false;
+  }
+}
+
+/**
+ * A dependency PR that is already merged has its head branch deleted by the
+ * forge, so fetching that ref fails forever. The merged work lives in the base
+ * branch, which is the correct ref for a dependent feature to stack on.
+ */
+function resolveMergedFallback(
+  publication: DependencyPublication,
+  cwd: string,
+  forge: ForgeAdapter,
+): DependencyPublication | null {
+  if (publication.prNumber === null || !forge.available()) return null;
+
+  const view = forge.viewPullRequestByNumber(cwd, publication.prNumber);
+  if (!view.ok || view.value?.state !== 'MERGED') return null;
+
+  const base = view.value.baseRefName ?? publication.baseBranch;
+  if (!base) return null;
+
+  if (!fetchRef('origin', base, cwd)) return null;
+
+  return {
+    ...publication,
+    branchName: base,
+    remoteBranch: `origin/${base}`,
+    mergedInto: base,
+  };
 }
 
 /**
@@ -24,22 +84,28 @@ export interface DependencyFetchFailure {
 export function fetchDependencyBranches(
   publications: readonly DependencyPublication[],
   cwd: string,
-): DependencyFetchFailure | null {
+  forge: ForgeAdapter = new GithubForge(),
+): DependencyFetchOutcome {
+  const resolved: DependencyPublication[] = [];
+
   for (const publication of publications) {
     const { remote, ref } = resolveDependencyFetchTarget(publication);
-    try {
-      execFileSync('git', ['fetch', remote, ref], {
-        cwd,
-        encoding: 'utf8',
-        stdio: ['ignore', 'pipe', 'pipe'],
-      });
-    } catch (error) {
-      logCaughtError(`git/dependencies.fetch(${remote} ${ref})`, error);
-      return { featureId: publication.featureId, remote, ref };
+    if (fetchRef(remote, ref, cwd)) {
+      resolved.push(publication);
+      continue;
     }
+
+    const fallback = resolveMergedFallback(publication, cwd, forge);
+    if (!fallback) {
+      return {
+        failure: { featureId: publication.featureId, remote, ref },
+        publications: resolved,
+      };
+    }
+    resolved.push(fallback);
   }
 
-  return null;
+  return { failure: null, publications: resolved };
 }
 
 function resolveDependencyFetchTarget(publication: DependencyPublication): { remote: string; ref: string } {
@@ -79,6 +145,7 @@ export function resolveDependencyPublications(
       prUrl: row.prUrl,
       branchName: row.branchName,
       remoteBranch: row.remoteBranch,
+      baseBranch: row.baseBranch ?? null,
     }];
   });
 }

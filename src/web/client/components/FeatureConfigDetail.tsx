@@ -56,6 +56,35 @@ function sameStageOrder(left: readonly string[], right: readonly string[]): bool
   return left.length === right.length && left.every((stage, index) => stage === right[index]);
 }
 
+export function DependencyTag({ depId, doneFeatureIds, failedFeatureIds }: { 
+  depId: string; 
+  doneFeatureIds?: Set<string>; 
+  failedFeatureIds?: Set<string>;
+}): React.JSX.Element {
+  const isDone = doneFeatureIds?.has(depId);
+  const isFailed = failedFeatureIds?.has(depId);
+  
+  let bgColor = 'var(--accent-warn)';
+  if (isDone) bgColor = 'var(--accent-ok)';
+  if (isFailed) bgColor = 'var(--accent-fail)';
+  
+  return (
+    <span style={{ 
+      display: 'inline-block',
+      fontFamily: 'var(--font-mono)',
+      fontSize: 'var(--text-2xs)',
+      padding: '2px 7px',
+      borderRadius: 'var(--radius-sm)',
+      backgroundColor: bgColor,
+      color: 'white',
+      fontWeight: 600,
+      whiteSpace: 'nowrap'
+    }}>
+      {depId}
+    </span>
+  );
+}
+
 function ConfigCard({ title, children }: { title: string; children: React.ReactNode }): React.JSX.Element {
   return (
     <div style={{ background: 'var(--bg-panel)', border: '1px solid var(--border-dim)', borderRadius: 'var(--radius-md)', padding: 14 }}>
@@ -92,9 +121,11 @@ export interface FeatureConfigDetailProps {
   onSaveTaskConfig?: (taskId: string, patch: TaskConfigPatch) => void;
   workflowSaveResult?: FeatureConfigSaveResult;
   toolIds?: string[];
+  doneFeatureIds?: Set<string>;
+  failedFeatureIds?: Set<string>;
 }
 
-export function FeatureConfigDetail({ feature, backlogSettings, approvalChannels = ['telegram'], onSaveConfig, workflowSaveResult, toolIds = ['claude', 'codex', 'opencode'] }: FeatureConfigDetailProps): React.JSX.Element {
+export function FeatureConfigDetail({ feature, backlogSettings, approvalChannels = ['telegram'], onSaveConfig, workflowSaveResult, toolIds = ['claude', 'codex', 'opencode'], doneFeatureIds, failedFeatureIds }: FeatureConfigDetailProps): React.JSX.Element {
   const stages = feature.workflow.stages;
   const [selectedStage, setSelectedStage] = useState(stages[0] ?? 'specify');
   const [draftPrompt, setDraftPrompt] = useState('');
@@ -433,15 +464,18 @@ export function FeatureConfigDetail({ feature, backlogSettings, approvalChannels
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '6px 0' }}>
           <span style={{ color: 'var(--text-dim)' }}>dependsOn</span>
           <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
-            {feature.dependsOn.length ? feature.dependsOn.map((d) => <Tag key={d}>{d}</Tag>) : <span style={{ fontSize: 'var(--text-xs)', color: 'var(--text-faint)' }}>none</span>}
-          </div>
-        </div>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '6px 0' }}>
-          <span style={{ color: 'var(--text-dim)' }}>pendingDependencies</span>
-          <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
-            {(feature.pendingDependencies?.length ?? 0) > 0
-              ? feature.pendingDependencies?.map((d) => <Tag key={d}>{d}</Tag>)
-              : <span style={{ fontSize: 'var(--text-xs)', color: 'var(--accent-ok)' }}>ready</span>}
+            {feature.dependsOn.length ? (
+              feature.dependsOn.map((d) => (
+                <DependencyTag 
+                  key={d} 
+                  depId={d} 
+                  doneFeatureIds={doneFeatureIds} 
+                  failedFeatureIds={failedFeatureIds} 
+                />
+              ))
+            ) : (
+              <span style={{ fontSize: 'var(--text-xs)', color: 'var(--text-faint)' }}>none</span>
+            )}
           </div>
         </div>
       </ConfigCard>

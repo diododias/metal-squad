@@ -39,9 +39,12 @@ describe('ui hooks', () => {
     }));
 
     const { useRuns } = await import('../../src/ui/hooks/useRuns.js');
-    const runs = useRuns(1234);
+    const result = useRuns(1234);
 
-    expect(runs).toEqual([{ runId: 1, latestTransitionReason: 'adaptive_disabled' }]);
+    expect(result).toEqual({
+      runs: [{ runId: 1, latestTransitionReason: 'adaptive_disabled' }],
+      error: null,
+    });
     expect(setIntervalSpy).toHaveBeenCalledWith(expect.any(Function), 1234);
     listeners.get('run:start')?.[0]?.();
     expect(setRuns).toHaveBeenCalledWith([{ runId: 2, latestTransitionReason: 'low_usage_reuse' }]);
@@ -79,9 +82,10 @@ describe('ui hooks', () => {
     }));
 
     const { useRuns } = await import('../../src/ui/hooks/useRuns.js');
-    expect(useRuns()).toEqual([]);
+    expect(useRuns()).toEqual({ runs: [], error: null });
     expect(() => listeners.get('run:start')?.[0]?.()).not.toThrow();
-    expect(setRuns).not.toHaveBeenCalled();
+    // refresh throws, so error state is set but stale data is kept
+    expect(setRuns).toHaveBeenCalledWith('db locked');
   });
 
   it('useCompletedFeatures loads initial ids and refreshes on run:done', async () => {
@@ -118,9 +122,9 @@ describe('ui hooks', () => {
     }));
 
     const { useCompletedFeatures } = await import('../../src/ui/hooks/useCompletedFeatures.js');
-    const doneIds = useCompletedFeatures(1234);
+    const result = useCompletedFeatures(1234);
 
-    expect(doneIds).toEqual(new Set(['feat-1']));
+    expect(result).toEqual({ doneFeatureIds: new Set(['feat-1']), error: null });
     listeners.get('run:done')?.[0]?.();
     expect(setDone).toHaveBeenCalledWith(new Set(['feat-1', 'feat-2']));
   });
@@ -256,7 +260,7 @@ describe('ui hooks', () => {
     }));
 
     const { useTaskRuns } = await import('../../src/ui/hooks/useRuns.js');
-    expect(useTaskRuns(7)).toEqual([{ taskId: 'T1', status: 'running' }]);
+    expect(useTaskRuns(7)).toEqual({ taskRuns: [{ taskId: 'T1', status: 'running' }], error: null });
     expect(setIntervalSpy).toHaveBeenCalledWith(expect.any(Function), 2000);
 
     listeners.get('task:started')?.[0]?.({

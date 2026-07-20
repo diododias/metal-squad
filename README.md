@@ -300,10 +300,12 @@ epics:
         effort: high
 ```
 
-`backlog.yaml` is an import asset for epics and features. Project defaults and
-budget settings are stored in the catalog DB, not authored in this file. The
+`backlog.yaml` is an import seed for epics and Work Items. Repository defaults
+and budget settings are stored in the catalog DB, not authored in this file. The
 loader accepts legacy `defaults` and `budget` blocks for migration, warns that
-they are ignored, and resolves the effective values from the Projeto settings.
+they are ignored, and resolves effective execution values from Repository
+defaults. The current v2 seed still uses `features` as a compatibility import
+key; new domain contracts use Work Item terminology.
 
 ### Supported Fields
 
@@ -313,11 +315,12 @@ Top level:
 - `repo`
 - `epics`
 
-Defaults e budget sao configurados no Projeto (catalogo SQLite). O
-`backlog.yaml` e um asset de importacao somente de epics e features. Backlogs
-legados com `defaults` continuam carregando, mas o bloco e ignorado com aviso.
+Defaults e budget são configurados nos Repository defaults do catálogo SQLite.
+O `backlog.yaml` é um seed de importação somente de Epics e Work Items.
+Backlogs legados com `defaults` continuam carregando, mas o bloco é ignorado
+com aviso.
 
-`feature`:
+`feature` (chave de importação v2; entidade canônica: `Work Item`):
 
 - `id`
 - `title`
@@ -351,21 +354,22 @@ legados com `defaults` continuam carregando, mas o bloco e ignorado com aviso.
 - `backoffMs`
 - `onFail`: `stop | continue | gate`
 
-### Settings Ownership: App, Projeto, and Feature
+### Settings Ownership: App, Repository defaults, and Work Item
 
 Settings have three explicit owners:
 
 | Level | Source of truth | Owns | Execution inheritance |
 | --- | --- | --- | --- |
 | App | `~/.config/metal-squad/config.json` | runtime infrastructure, notifications, web settings, budget alerts, and the tool registry | Does not provide execution defaults |
-| Projeto | catalog DB for the repository | execution defaults (`tool`, `model`, `effort`, `thinking`, skills, workflow, stage-to-skill map, and `maxTokens`) | Base for every feature in the project |
-| Feature | catalog feature record, imported from `backlog.yaml` and editable in Settings | feature-specific execution overrides and feature work | Overrides Projeto only |
+| Repository defaults | catalog DB for the repository | execution defaults (`tool`, `model`, `effort`, `thinking`, skills, workflow, stage-to-skill map, and `maxTokens`) | Base for every Work Item in the Repository |
+| Work Item | catalog entry imported from `backlog.yaml` and editable in Settings | Work Item-specific execution overrides and work | Overrides Repository defaults only |
 
-`msq config show --feature <id>` resolves execution values in only two steps:
-**Projeto → Feature**. App configuration is intentionally outside that
-inheritance chain. A feature's `tool` value is a reference to an App-level
+`msq config show --feature <id>` is the current compatibility command and
+resolves execution values in only two steps: **Repository defaults → Work Item**.
+App configuration is intentionally outside that inheritance chain. A Work
+Item's `tool` value is a reference to an App-level
 tool-registry entry; the registry controls how the selected tool runs, not a
-third layer of feature defaults.
+third layer of Work Item defaults.
 
 ### Tool Registry
 
@@ -419,17 +423,36 @@ Manual starts (`msq run --feature <id>`, or the web/TUI "start" action) work
 the same as before for any feature, whether or not it has `autoStart: true`.
 Only the *automatic* continuation is opt-in.
 
-### Defaults and Inheritance
+### Repository defaults and Work Item inheritance
 
 `metal-squad` applies defaults in this order:
 
-1. Defaults do Projeto (DB)
-2. Valores explicitos da feature
+1. Repository defaults (DB)
+2. Valores explícitos do Work Item
 
 Current propagation behavior:
 
-- Defaults do Projeto propagam para features que omitem valores de execucao.
-- Valores explicitos da feature continuam tendo precedencia.
+- Repository defaults propagam para Work Items que omitem valores de execução.
+- Valores explícitos do Work Item continuam tendo precedência.
+
+### Projects and source-of-truth governance
+
+The Projects roadmap adopts the hierarchy `Project -> Epic -> Work Item ->
+Task`. A Project groups Repositories and Epics and owns the type-to-template
+map. An Epic has no operational Repository, and each Work Item targets exactly
+one Repository in its Epic's Project.
+
+SQLite remains authoritative for operational state. Versioned specs, ADRs and
+the constitution preserve intent and governance. `backlog.yaml` is a
+non-destructive import seed with dry-run and explicit conflicts; it is not a
+bidirectional reconciliation source. See [ADR-001](./docs/adr/ADR-001-governanca-fonte-de-verdade-terminologia.md)
+and the [Projects roadmap](./docs/epics/epico%20-%20projetos/ROADMAP.md).
+
+New Project contracts use `WorkItem`, `WorkItemCatalogEntry`, `workItemId`,
+`action:createWorkItem`, and `msq work-items`. The existing v2 `features` YAML
+key and persistence names such as `backlog_features`, `feature_id`,
+`FeatureSchema`, and `projectDefaults` remain compatibility aliases during the
+epic; they are not new domain names.
 
 ### File Validation
 
@@ -619,11 +642,14 @@ Supported template variables:
 
 Prompt inputs are assembled from:
 
-- `feature.spec`
-- `feature.specFile`
-- `feature.context`
-- `feature.tasks`
-- `task.taskFile`
+- `feature.spec` — inlined as the feature summary
+- `feature.specFile` — content **inlined** under a `--- path ---` block (the spec
+  stays the only authoritative description of the feature shipped in full)
+- `feature.context` — emitted as **paths only** so the agent loads them on demand
+- `feature.tasks` — task metadata (`id`, `title`, status, deps, skills) is
+  inlined
+- `task.taskFile` — emitted as a `Task file: <path>` line per task, **not**
+  inlined; the agent decides when (or whether) to read it
 
 Long prompt sections are truncated according to `promptContextCharLimit`.
 

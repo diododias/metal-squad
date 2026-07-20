@@ -2,6 +2,7 @@ import { accessSync, constants, existsSync } from 'node:fs';
 import { dirname } from 'node:path';
 import Database from 'better-sqlite3';
 import { DB_PATH_ENV, resolveDbPath, ensureDataDir } from '../config/index.js';
+import { BUILTIN_WORKFLOW_TEMPLATES } from '../core/workflow/stageSkills.js';
 
 let db: Database.Database | null = null;
 let dbMode: 'readonly' | 'readwrite' | null = null;
@@ -113,6 +114,77 @@ function migrate(d: Database.Database): void {
       path      TEXT NOT NULL,
       created_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
+
+    CREATE TABLE IF NOT EXISTS projects (
+      project_id   TEXT PRIMARY KEY,
+      name         TEXT NOT NULL,
+      description  TEXT,
+      position     INTEGER NOT NULL DEFAULT 0,
+      archived_at  TEXT,
+      deleted_at   TEXT,
+      revision     INTEGER NOT NULL DEFAULT 1,
+      created_at   TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at   TEXT NOT NULL DEFAULT (datetime('now')),
+      CHECK (archived_at IS NULL OR deleted_at IS NULL)
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_projects_position ON projects(position);
+    CREATE INDEX IF NOT EXISTS idx_projects_archived_at ON projects(archived_at);
+    CREATE INDEX IF NOT EXISTS idx_projects_deleted_at ON projects(deleted_at);
+
+    CREATE TABLE IF NOT EXISTS project_repos (
+      repo_id      TEXT PRIMARY KEY REFERENCES repos(repo_id) ON DELETE RESTRICT,
+      project_id   TEXT NOT NULL REFERENCES projects(project_id) ON DELETE RESTRICT,
+      position     INTEGER NOT NULL DEFAULT 0,
+      created_at   TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at   TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_project_repos_project ON project_repos(project_id, position);
+
+    CREATE TABLE IF NOT EXISTS workflow_templates (
+      template_id      TEXT PRIMARY KEY,
+      scope_project_id TEXT REFERENCES projects(project_id),
+      name             TEXT NOT NULL,
+      definition_json  TEXT NOT NULL,
+      version          INTEGER NOT NULL DEFAULT 1,
+      builtin          INTEGER NOT NULL DEFAULT 0,
+      archived_at      TEXT,
+      revision         INTEGER NOT NULL DEFAULT 1,
+      created_at       TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at       TEXT NOT NULL DEFAULT (datetime('now')),
+      CHECK (builtin IN (0, 1)),
+      CHECK (builtin = 0 OR scope_project_id IS NULL)
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_workflow_templates_scope ON workflow_templates(scope_project_id);
+    CREATE INDEX IF NOT EXISTS idx_workflow_templates_archived_at ON workflow_templates(archived_at);
+
+    CREATE TABLE IF NOT EXISTS project_work_item_templates (
+      project_id     TEXT NOT NULL REFERENCES projects(project_id),
+      work_item_type TEXT NOT NULL,
+      template_id    TEXT NOT NULL REFERENCES workflow_templates(template_id),
+      updated_at     TEXT NOT NULL DEFAULT (datetime('now')),
+      PRIMARY KEY (project_id, work_item_type),
+      CHECK (work_item_type IN ('feature','bug'))
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_project_work_item_templates_template
+      ON project_work_item_templates(template_id);
+
+    CREATE TABLE IF NOT EXISTS audit_events (
+      id           INTEGER PRIMARY KEY AUTOINCREMENT,
+      request_id   TEXT,
+      actor        TEXT,
+      entity_kind  TEXT NOT NULL,
+      entity_id    TEXT NOT NULL,
+      action       TEXT NOT NULL,
+      before_json  TEXT,
+      after_json   TEXT,
+      created_at   TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_audit_events_entity ON audit_events(entity_kind, entity_id, id DESC);
 
     CREATE TABLE IF NOT EXISTS runs (
       id         INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -428,6 +500,16 @@ function migrate(d: Database.Database): void {
 
     CREATE INDEX IF NOT EXISTS idx_recovery_decisions_occurrence
       ON recovery_decisions(timeout_occurrence_id);
+
+    CREATE TABLE IF NOT EXISTS processed_callback_queries (
+      callback_id TEXT PRIMARY KEY,
+      action TEXT NOT NULL,
+      payload TEXT,
+      processed_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_processed_callback_queries_at
+      ON processed_callback_queries(processed_at);
   `);
 
   const runColumns = d
@@ -575,6 +657,69 @@ function migrate(d: Database.Database): void {
     }
   };
   ensureStageRequestColumn('options', `ALTER TABLE stage_requests ADD COLUMN options TEXT`);
+
+  const epicColumns = d
+    .prepare(`PRAGMA table_info(backlog_epics)`)
+    .all() as { name?: string }[];
+  const ensureEpicColumn = (name: string, sql: string): void => {
+    if (!epicColumns.some((column) => column.name === name)) {
+      d.exec(sql);
+      epicColumns.push({ name });
+    }
+  };
+  ensureEpicColumn('project_id', `ALTER TABLE backlog_epics ADD COLUMN project_id TEXT REFERENCES projects(project_id)`);
+  ensureEpicColumn('description', `ALTER TABLE backlog_epics ADD COLUMN description TEXT`);
+  ensureEpicColumn('status', `ALTER TABLE backlog_epics ADD COLUMN status TEXT`);
+  ensureEpicColumn('deleted_at', `ALTER TABLE backlog_epics ADD COLUMN deleted_at TEXT`);
+  ensureEpicColumn('revision', `ALTER TABLE backlog_epics ADD COLUMN revision INTEGER NOT NULL DEFAULT 1`);
+  d.exec(`CREATE INDEX IF NOT EXISTS idx_backlog_epics_project ON backlog_epics(project_id)`);
+  d.exec(`CREATE INDEX IF NOT EXISTS idx_backlog_epics_deleted_at ON backlog_epics(deleted_at)`);
+  d.exec(`CREATE INDEX IF NOT EXISTS idx_backlog_epics_project_lifecycle ON backlog_epics(project_id, archived_at, deleted_at, position)`);
+
+  const backlogFeatureColumns = d
+    .prepare(`PRAGMA table_info(backlog_features)`)
+    .all() as { name?: string }[];
+  const ensureBacklogFeatureColumn = (name: string, sql: string): void => {
+    if (!backlogFeatureColumns.some((column) => column.name === name)) {
+      d.exec(sql);
+      backlogFeatureColumns.push({ name });
+    }
+  };
+  ensureBacklogFeatureColumn('description', `ALTER TABLE backlog_features ADD COLUMN description TEXT`);
+  ensureBacklogFeatureColumn('deleted_at', `ALTER TABLE backlog_features ADD COLUMN deleted_at TEXT`);
+  ensureBacklogFeatureColumn('revision', `ALTER TABLE backlog_features ADD COLUMN revision INTEGER NOT NULL DEFAULT 1`);
+  ensureBacklogFeatureColumn('type', `ALTER TABLE backlog_features ADD COLUMN type TEXT NOT NULL DEFAULT 'feature'`);
+  d.exec(`CREATE INDEX IF NOT EXISTS idx_backlog_features_deleted_at ON backlog_features(deleted_at)`);
+  d.exec(`CREATE INDEX IF NOT EXISTS idx_backlog_features_repo_epic_lifecycle ON backlog_features(repo_id, epic_id, archived_at, deleted_at, position)`);
+
+  ensureRunColumn('project_id', `ALTER TABLE runs ADD COLUMN project_id TEXT REFERENCES projects(project_id)`);
+  d.exec(`CREATE INDEX IF NOT EXISTS idx_runs_project ON runs(project_id)`);
+  d.exec(`CREATE INDEX IF NOT EXISTS idx_runs_project_status ON runs(project_id, status, id DESC)`);
+
+  ensurePipelineColumn('project_id', `ALTER TABLE pipelines ADD COLUMN project_id TEXT REFERENCES projects(project_id)`);
+  d.exec(`CREATE INDEX IF NOT EXISTS idx_pipelines_project ON pipelines(project_id)`);
+  d.exec(`CREATE INDEX IF NOT EXISTS idx_pipelines_project_feature ON pipelines(project_id, feature_id)`);
+
+  seedBuiltinWorkflowTemplates(d);
+}
+
+/**
+ * Seeds the builtin workflow templates (PRJ-23).
+ *
+ * Idempotent by construction: builtins carry stable ids and `DO NOTHING` on
+ * conflict, so repeated `migrate()` calls neither duplicate nor overwrite them.
+ * Builtins are immutable — a user customises one by duplicating it into a
+ * Project scope.
+ */
+function seedBuiltinWorkflowTemplates(d: Database.Database): void {
+  const insert = d.prepare(
+    `INSERT INTO workflow_templates (template_id, scope_project_id, name, definition_json, version, builtin)
+     VALUES (?, NULL, ?, ?, 1, 1)
+     ON CONFLICT(template_id) DO NOTHING`,
+  );
+  for (const template of BUILTIN_WORKFLOW_TEMPLATES) {
+    insert.run(template.templateId, template.name, JSON.stringify(template.definition));
+  }
 }
 
 function toDbAccessError(error: unknown, dbPath: string): Error {

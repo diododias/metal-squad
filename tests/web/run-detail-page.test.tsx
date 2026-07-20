@@ -4,8 +4,10 @@ import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { RunDetailPage } from '../../src/web/client/pages/RunDetailPage.js';
+import { ActiveProjectContext } from '../../src/web/client/hooks/useActiveProject.js';
 import type { MsqWebState, WebSocketClientMessage } from '../../src/web/types.js';
 import type { RunSummary } from '../../src/db/repo.js';
+import type { OutputLine } from '../../src/web/client/hooks/useLocalOutput.js';
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -48,6 +50,14 @@ function makeState(run: RunSummary): MsqWebState {
 }
 
 function renderPage(run: RunSummary, send: (message: WebSocketClientMessage) => void): HTMLElement {
+  return renderPageWithLines(run, {}, send);
+}
+
+function renderPageWithLines(
+  run: RunSummary,
+  linesByRun: Record<number, OutputLine[]>,
+  send: (message: WebSocketClientMessage) => void,
+): HTMLElement {
   const container = document.createElement('div');
   document.body.append(container);
   const root = createRoot(container);
@@ -58,7 +68,7 @@ function renderPage(run: RunSummary, send: (message: WebSocketClientMessage) => 
         state={makeState(run)}
         featureId="feat-1"
         runDetails={{}}
-        linesByRun={{}}
+        linesByRun={linesByRun}
         onSubscribeRun={() => () => undefined}
         onBack={() => undefined}
         send={send}
@@ -473,5 +483,164 @@ describe('RunDetailPage mobile close control', () => {
 
     expect(Array.from(container.querySelectorAll('button')).some((b) => b.textContent === 'close')).toBe(true);
     expect(container.querySelector('[aria-label="Close run detail"]')).toBeNull();
+  });
+});
+
+describe('RunDetailPage Project/repo context', () => {
+  function stateWithItemContext(run: RunSummary): MsqWebState {
+    return {
+      runs: [run],
+      projects: [{ projectId: 'project-a', name: 'Project A', position: 0, description: null, revision: 1, counts: { epics: 0, workItems: 0, archived: 0 }, activeRuns: 0, tokens: { status: 'ready', totalTokens: 0, error: null }, archivedAt: null }],
+      featureCatalog: {
+        'feat-1': {
+          id: 'feat-1',
+          title: 'Feature One',
+          projectId: 'project-a',
+          repoLabel: 'repo-one',
+          workflow: { stages: ['implement'], stepGuidance: {} },
+        },
+      },
+      backlogSettings: { stageSkills: {} },
+      runtimeConfig: { web: { statusSpinner: false }, tools: [{ id: 'claude' }, { id: 'codex' }, { id: 'opencode' }], notifications: { channels: [] } },
+    } as unknown as MsqWebState;
+  }
+
+  it('shows the item Project name and repo label in the breadcrumb', () => {
+    const container = document.createElement('div');
+    document.body.append(container);
+    const root = createRoot(container);
+    roots.push(root);
+    act(() => {
+      root.render(
+        <RunDetailPage
+          state={stateWithItemContext(makeRun())}
+          featureId="feat-1"
+          runDetails={{}}
+          linesByRun={{}}
+          onSubscribeRun={() => () => undefined}
+          onBack={() => undefined}
+          send={vi.fn()}
+        />,
+      );
+    });
+
+    expect(container.textContent).toContain('Project A · repo-one · feat-1');
+  });
+
+  it('switches the active project context to the item Project before returning from a mismatched selection', () => {
+    const setActiveProject = vi.fn();
+    const onBack = vi.fn();
+    const container = document.createElement('div');
+    document.body.append(container);
+    const root = createRoot(container);
+    roots.push(root);
+
+    act(() => {
+      root.render(
+        <ActiveProjectContext.Provider value={{ activeProjectId: 'project-other', activeProject: null, setActiveProject, selectionInvalidated: false }}>
+          <RunDetailPage
+            state={stateWithItemContext(makeRun())}
+            featureId="feat-1"
+            runDetails={{}}
+            linesByRun={{}}
+            onSubscribeRun={() => () => undefined}
+            onBack={onBack}
+            send={vi.fn()}
+          />
+        </ActiveProjectContext.Provider>,
+      );
+    });
+
+    const closeButton = Array.from(container.querySelectorAll('button')).find((button) => button.textContent === 'close');
+    act(() => { closeButton?.click(); });
+
+    expect(setActiveProject).toHaveBeenCalledWith('project-a');
+    expect(onBack).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not switch context when the item already belongs to the active Project', () => {
+    const setActiveProject = vi.fn();
+    const container = document.createElement('div');
+    document.body.append(container);
+    const root = createRoot(container);
+    roots.push(root);
+
+    act(() => {
+      root.render(
+        <ActiveProjectContext.Provider value={{ activeProjectId: 'project-a', activeProject: null, setActiveProject, selectionInvalidated: false }}>
+          <RunDetailPage
+            state={stateWithItemContext(makeRun())}
+            featureId="feat-1"
+            runDetails={{}}
+            linesByRun={{}}
+            onSubscribeRun={() => () => undefined}
+            onBack={() => undefined}
+            send={vi.fn()}
+          />
+        </ActiveProjectContext.Provider>,
+      );
+    });
+
+    const closeButton = Array.from(container.querySelectorAll('button')).find((button) => button.textContent === 'close');
+    act(() => { closeButton?.click(); });
+
+    expect(setActiveProject).not.toHaveBeenCalled();
+  });
+});
+
+describe('RunDetailPage heartbeat display', () => {
+  const heartbeatLine = '[msq] opencode running for 47s (stdout 1500B stderr 0B idle 12s) polishing the README';
+
+  function openLiveOutput(container: HTMLElement): void {
+    const tab = Array.from(container.querySelectorAll('button, [role="tab"]')).find((el) => el.textContent === 'Live Output');
+    act(() => { (tab as HTMLElement)?.click(); });
+  }
+
+  it('renders heartbeats as a thinking… style system line while the run is active', () => {
+    const container = renderPageWithLines(
+      makeRun({ status: 'running', rawStatus: 'running', pipelineStatus: 'running' as never }),
+      { 1: [{ runId: 1, source: 'heartbeat', line: heartbeatLine, createdAt: '2026-07-16T13:50:21.000Z' }] },
+      vi.fn(),
+    );
+
+    openLiveOutput(container);
+    // The verbose diagnostic payload should be hidden; the readable suffix surfaces instead.
+    expect(container.textContent ?? '').not.toContain('running for 47s');
+    expect(container.textContent ?? '').toContain('polishing the README');
+  });
+
+  it('collapses a heartbeat with no activity suffix to a thinking… placeholder while running', () => {
+    const container = renderPageWithLines(
+      makeRun({ status: 'running', rawStatus: 'running', pipelineStatus: 'running' as never }),
+      { 1: [{ runId: 1, source: 'heartbeat', line: '[msq] opencode running for 1s (stdout 0B stderr 0B idle 0s)', createdAt: '2026-07-16T13:50:22.000Z' }] },
+      vi.fn(),
+    );
+
+    openLiveOutput(container);
+    expect(container.textContent ?? '').toContain('thinking');
+  });
+
+  it('drops heartbeat lines once the run is terminal so they don\'t linger on the Live Output tab', () => {
+    for (const terminal of ['done', 'failed', 'aborted', 'blocked'] as const) {
+      const container = renderPageWithLines(
+        makeRun({ status: terminal, rawStatus: terminal as never, pipelineStatus: 'done' as never }),
+        { 1: [
+          { runId: 1, source: 'agent', line: 'real agent output', createdAt: '2026-07-16T13:50:21.000Z' },
+          { runId: 1, source: 'heartbeat', line: heartbeatLine, createdAt: '2026-07-16T13:50:30.000Z' },
+        ] },
+        vi.fn(),
+      );
+
+      openLiveOutput(container);
+      expect(container.textContent ?? '').toContain('real agent output');
+      expect(container.textContent ?? '').not.toContain('polishing the README');
+      expect(container.textContent ?? '').not.toContain('running for 47s');
+
+      act(() => {
+        for (const root of roots) root.unmount();
+      });
+      roots.length = 0;
+      document.body.replaceChildren();
+    }
   });
 });

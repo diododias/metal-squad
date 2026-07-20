@@ -9,6 +9,12 @@ const mockGetFeatureTopicAssociation = vi.fn();
 const mockGetTimeoutApprovalRequest = vi.fn();
 const mockResolveTimeoutApproval = vi.fn();
 const mockResumeBlockedRun = vi.fn();
+const mockRecordCallbackProcessed = vi.fn();
+const mockIsCallbackProcessed = vi.fn();
+const mockGetPipeline = vi.fn();
+const mockFindResumablePipeline = vi.fn();
+const mockGetAdapter = vi.fn();
+const mockResumePipelineWithOverride = vi.fn();
 const mockFetch = vi.fn();
 
 vi.mock('../../src/security/secrets.js', () => ({ getSecret: mockGetSecret }));
@@ -20,8 +26,14 @@ vi.mock('../../src/db/repo.js', () => ({
   getFeatureTopicAssociation: mockGetFeatureTopicAssociation,
   getTimeoutApprovalRequest: mockGetTimeoutApprovalRequest,
   resolveTimeoutApproval: mockResolveTimeoutApproval,
+  recordCallbackProcessed: mockRecordCallbackProcessed,
+  isCallbackProcessed: mockIsCallbackProcessed,
+  getPipeline: mockGetPipeline,
+  findResumablePipeline: mockFindResumablePipeline,
 }));
 vi.mock('../../src/core/runner/resume-blocked-run.js', () => ({ resumeBlockedRun: mockResumeBlockedRun }));
+vi.mock('../../src/core/notify/resume-override.js', () => ({ resumePipelineWithOverride: mockResumePipelineWithOverride }));
+vi.mock('../../src/core/adapters/index.js', () => ({ getAdapter: mockGetAdapter }));
 vi.mock('../../src/config/index.js', () => ({
   resolveRuntimeConfig: vi.fn(() => ({
     telegramChatId: undefined,
@@ -61,6 +73,16 @@ beforeEach(() => {
   mockGetTimeoutApprovalRequest.mockReset();
   mockResolveTimeoutApproval.mockReset();
   mockResumeBlockedRun.mockReset();
+  mockRecordCallbackProcessed.mockReset();
+  mockRecordCallbackProcessed.mockReturnValue(true);
+  mockIsCallbackProcessed.mockReset();
+  mockIsCallbackProcessed.mockReturnValue(false);
+  mockGetPipeline.mockReset();
+  mockGetPipeline.mockReturnValue(null);
+  mockFindResumablePipeline.mockReset();
+  mockFindResumablePipeline.mockReturnValue(null);
+  mockGetAdapter.mockReset();
+  mockResumePipelineWithOverride.mockReset();
   mockFetch.mockReset();
 });
 
@@ -704,4 +726,48 @@ describe('startTelegramPoller / stopTelegramPoller', () => {
     const { stopTelegramPoller } = await import('../../src/core/notify/telegram-poller.js');
     expect(() => stopTelegramPoller()).not.toThrow();
   });
+
+  it('resumes a pipeline with another adapter when resume_override callback is received', async () => {
+    mockGetSecret.mockResolvedValue('token');
+    mockFindResumablePipeline.mockReturnValue({ id: 123, cwd: '/repo' });
+    mockGetAdapter.mockReturnValue({ isAvailable: () => true });
+
+    const { TelegramPoller } = await import('../../src/core/notify/telegram-poller.js');
+    const poller = new TelegramPoller();
+
+    mockFetch.mockResolvedValueOnce(makeUpdateResponse([{
+      update_id: 1,
+      callback_query: { id: 'cb-1', data: 'resume_override:123:claude', message: { chat: { id: 'chat-1' } } },
+    }]));
+    mockFetch.mockResolvedValue({ ok: true, json: () => Promise.resolve({ ok: true, result: [] }) });
+
+    poller.start();
+    await flushMicrotasks();
+    poller.stop();
+
+    expect(mockRecordCallbackProcessed).toHaveBeenCalledWith('cb-1', 'resume_override', { pipelineId: 123, tool: 'claude' });
+    expect(mockResumePipelineWithOverride).toHaveBeenCalledWith({ pipelineId: 123, tool: 'claude' });
+  });
+
+  it('ignores resume_override callback if it was already processed', async () => {
+    mockGetSecret.mockResolvedValue('token');
+    mockIsCallbackProcessed.mockReturnValue(true);
+
+    const { TelegramPoller } = await import('../../src/core/notify/telegram-poller.js');
+    const poller = new TelegramPoller();
+
+    mockFetch.mockResolvedValueOnce(makeUpdateResponse([{
+      update_id: 1,
+      callback_query: { id: 'cb-1', data: 'resume_override:123:claude', message: { chat: { id: 'chat-1' } } },
+    }]));
+    mockFetch.mockResolvedValue({ ok: true, json: () => Promise.resolve({ ok: true, result: [] }) });
+
+    poller.start();
+    await flushMicrotasks();
+    poller.stop();
+
+    expect(mockRecordCallbackProcessed).not.toHaveBeenCalled();
+    expect(mockResumePipelineWithOverride).not.toHaveBeenCalled();
+  });
+
 });

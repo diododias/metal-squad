@@ -36,6 +36,16 @@ beforeEach(async () => {
   mockPrepare.mockReset();
   mockPrepare.mockImplementation(() => ({ all: mockAll, run: mockRun, get: mockGet }));
   mockRun.mockReturnValue({ lastInsertRowid: 1, changes: 1 });
+
+  // migrate() seeds the builtin workflow templates (PRJ-23), which issues
+  // run() calls of its own. Open the database here and clear the spies
+  // afterwards so `mock.calls[0]` keeps meaning "first call made by the
+  // function under test" rather than the seed.
+  const { getDb } = await import('../../src/db/index.js');
+  getDb('readwrite');
+  mockRun.mockClear();
+  mockPrepare.mockClear();
+  mockExec.mockClear();
 });
 
 describe('registerRepo', () => {

@@ -9,10 +9,21 @@ const mocks = vi.hoisted(() => ({
   listRunningTaskRuns: vi.fn(),
   listRunsForStats: vi.fn(),
   listPendingTimeoutApprovalRequests: vi.fn(),
+  getProjectStateRevision: vi.fn(),
+  listProjectStateSummaries: vi.fn(),
+  listRepositoryStateSummaries: vi.fn(),
+  listEpics: vi.fn(),
   getFeatureCatalog: vi.fn(),
   getBacklogSettings: vi.fn(),
   resolveRuntimeConfig: vi.fn(),
   collectEnvironmentInfo: vi.fn(),
+  listWorkflowTemplates: vi.fn((): Record<string, unknown>[] => []),
+  listProjectTemplateMappings: vi.fn((): Record<string, unknown>[] => []),
+}));
+
+vi.mock('../../src/db/workflowTemplates.js', () => ({
+  listWorkflowTemplates: mocks.listWorkflowTemplates,
+  listProjectTemplateMappings: mocks.listProjectTemplateMappings,
 }));
 
 vi.mock('../../src/core/repo.js', () => ({
@@ -27,6 +38,10 @@ vi.mock('../../src/db/repo.js', () => ({
   listRunningTaskRuns: mocks.listRunningTaskRuns,
   listRunsForStats: mocks.listRunsForStats,
   listPendingTimeoutApprovalRequests: mocks.listPendingTimeoutApprovalRequests,
+  getProjectStateRevision: mocks.getProjectStateRevision,
+  listProjectStateSummaries: mocks.listProjectStateSummaries,
+  listRepositoryStateSummaries: mocks.listRepositoryStateSummaries,
+  listEpics: mocks.listEpics,
 }));
 
 vi.mock('../../src/ui/catalog.js', () => ({
@@ -60,6 +75,10 @@ describe('buildMsqWebState pendingFeatures projection', () => {
     mocks.listRunningTaskRuns.mockReturnValue([]);
     mocks.listRunsForStats.mockReturnValue([]);
     mocks.listPendingTimeoutApprovalRequests.mockReturnValue([]);
+    mocks.getProjectStateRevision.mockReturnValue(7);
+    mocks.listProjectStateSummaries.mockReturnValue([]);
+    mocks.listRepositoryStateSummaries.mockReturnValue([]);
+    mocks.listEpics.mockReturnValue([]);
     mocks.getFeatureCatalog.mockReturnValue({
       'feat-1': {
         id: 'feat-1',
@@ -390,6 +409,49 @@ describe('buildMsqWebState pendingFeatures projection', () => {
     });
   });
 
+  it('projects global Projects and Repositories without leaking repository paths', async () => {
+    const { buildMsqWebState } = await import('../../src/web/state.js');
+    mocks.listProjectStateSummaries.mockReturnValue([{
+      projectId: 'project-1', name: 'Platform', position: 4, description: 'Global state', revision: 3,
+      archivedAt: null, epicCount: 2, workItemCount: 4, archivedCount: 1,
+      activeRuns: 2, totalTokens: 987,
+    }]);
+    mocks.listRepositoryStateSummaries.mockReturnValue([{
+      repoId: 'repo-1', projectId: 'project-1', path: '/private/secret/platform',
+    }]);
+
+    const state = buildMsqWebState();
+
+    expect(state.revision).toBe(7);
+    expect(state.projects).toEqual([{
+      projectId: 'project-1', name: 'Platform', position: 4, description: 'Global state', revision: 3,
+      archivedAt: null, counts: { epics: 2, workItems: 4, archived: 1 }, activeRuns: 2,
+      tokens: { status: 'ready', totalTokens: 987, error: null },
+    }]);
+    expect(state.repositories).toEqual([{
+      repoId: 'repo-1', projectId: 'project-1', label: 'platform',
+      health: 'unchecked', lastCheckedAt: null,
+    }]);
+    expect(JSON.stringify(state)).not.toContain('/private/secret/platform');
+    expect(state).not.toHaveProperty('activeProjectId');
+  });
+
+  it('broadcasts the same global catalog to separate clients without a server-side selection', async () => {
+    const { buildMsqWebState } = await import('../../src/web/state.js');
+    mocks.listProjectStateSummaries.mockReturnValue([{
+      projectId: 'project-1', name: 'Shared', position: 0, description: null, revision: 1,
+      archivedAt: null, epicCount: 0, workItemCount: 0, archivedCount: 0,
+      activeRuns: 0, totalTokens: 0,
+    }]);
+
+    const firstClientPayload = buildMsqWebState();
+    const secondClientPayload = buildMsqWebState();
+
+    expect(secondClientPayload.projects).toEqual(firstClientPayload.projects);
+    expect(secondClientPayload.repositories).toEqual(firstClientPayload.repositories);
+    expect(firstClientPayload).not.toHaveProperty('activeProjectId');
+  });
+
   it('strips notification credentials from runtimeConfig before broadcast', async () => {
     const { buildMsqWebState } = await import('../../src/web/state.js');
     mocks.listRunsForTui.mockReturnValue([]);
@@ -439,5 +501,75 @@ describe('buildMsqWebState pendingFeatures projection', () => {
 
     invalidateRuntimeConfigCache();
     expect(buildMsqWebState().runtimeConfig.concurrency).toBe(9);
+  });
+
+  it('projects workflow template summaries and mappings without the full definitions', async () => {
+    const { buildMsqWebState, invalidateWorkflowTemplatesCache } = await import('../../src/web/state.js');
+    mocks.listRunsForTui.mockReturnValue([]);
+    const heavyDefinition = {
+      workflow: { stages: ['plan', 'implement', 'verify'] },
+      stageSkills: { plan: ['speckit-plan'], implement: ['dev-flow'], verify: ['dev-flow'] },
+    };
+    mocks.listWorkflowTemplates.mockReturnValue([
+      {
+        templateId: 'tpl-1', name: 'Custom feature', version: 4, revision: 6, builtin: false,
+        archivedAt: null, scopeProjectId: 'project-1', definition: heavyDefinition,
+      },
+      {
+        templateId: 'tpl-2', name: 'Retired', version: 1, revision: 2, builtin: false,
+        archivedAt: '2026-07-18T10:00:00.000Z', scopeProjectId: 'project-1',
+        definition: { workflow: { stages: ['old'] }, stageSkills: {} },
+      },
+    ]);
+    mocks.listProjectTemplateMappings.mockReturnValue([
+      { projectId: 'project-1', workItemType: 'feature', templateId: 'tpl-1' },
+      { projectId: 'project-1', workItemType: 'bug', templateId: 'tpl-2' },
+    ]);
+    invalidateWorkflowTemplatesCache();
+
+    const state = buildMsqWebState();
+
+    expect(state.workflowTemplates).toEqual([
+      {
+        templateId: 'tpl-1', name: 'Custom feature', version: 4, revision: 6,
+        builtin: false, archived: false, scopeProjectId: 'project-1', stageCount: 3,
+      },
+      {
+        templateId: 'tpl-2', name: 'Retired', version: 1, revision: 2,
+        builtin: false, archived: true, scopeProjectId: 'project-1', stageCount: 1,
+      },
+    ]);
+    expect(state.workflowTemplateMappings).toEqual({
+      'project-1': { feature: 'tpl-1', bug: 'tpl-2' },
+    });
+
+    // The pushed state must stay cheap: stage/skill maps are fetched on demand.
+    const serialized = JSON.stringify(state.workflowTemplates);
+    expect(serialized).not.toContain('speckit-plan');
+    expect(serialized).not.toContain('stageSkills');
+    expect(state.workflowTemplates[0]).not.toHaveProperty('definition');
+  });
+
+  it('reuses cached templates until a template action invalidates them', async () => {
+    const { buildMsqWebState, invalidateWorkflowTemplatesCache } = await import('../../src/web/state.js');
+    mocks.listRunsForTui.mockReturnValue([]);
+    mocks.listWorkflowTemplates.mockReturnValue([]);
+    mocks.listProjectTemplateMappings.mockReturnValue([]);
+
+    expect(buildMsqWebState().workflowTemplates).toEqual([]);
+    const callsAfterFirst = mocks.listWorkflowTemplates.mock.calls.length;
+
+    // A second tick must not re-read the templates from SQLite.
+    buildMsqWebState();
+    expect(mocks.listWorkflowTemplates.mock.calls.length).toBe(callsAfterFirst);
+
+    mocks.listWorkflowTemplates.mockReturnValue([{
+      templateId: 'tpl-9', name: 'Fresh', version: 1, revision: 1, builtin: true,
+      archivedAt: null, scopeProjectId: null,
+      definition: { workflow: { stages: ['plan'] }, stageSkills: {} },
+    }]);
+    invalidateWorkflowTemplatesCache();
+
+    expect(buildMsqWebState().workflowTemplates).toMatchObject([{ templateId: 'tpl-9' }]);
   });
 });

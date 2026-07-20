@@ -1,5 +1,22 @@
 import type { Effort, Feature, Tool } from '../backlog/schema.js';
 
+const SESSION_LIMIT_PATTERNS: RegExp[] = [
+  /session limit/i,
+  /rate limit/i,
+  /insufficient balance/i,
+  /insuficiente/i,
+  /quota exceeded/i,
+];
+
+export function detectSessionLimit(stdout: string, stderr: string): string | null {
+  const combined = `${stdout}\n${stderr}`;
+  for (const pattern of SESSION_LIMIT_PATTERNS) {
+    const match = pattern.exec(combined);
+    if (match) return match[0];
+  }
+  return null;
+}
+
 export type SessionStatus = 'running' | 'idle' | 'interrupted' | 'failed' | 'timed_out' | 'completed';
 
 export interface SessionStatusSnapshot {

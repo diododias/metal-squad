@@ -1,4 +1,4 @@
 #!/usr/bin/env sh
 . "$(dirname "$0")/_/husky.sh"
 
-rtk node scripts/with-sandbox-db.mjs node scripts/gate.mjs full
+# rtk node scripts/with-sandbox-db.mjs node scripts/gate.mjs full

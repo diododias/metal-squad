@@ -71,7 +71,7 @@ describe('buildPrompt — dynamic skill-based prompt builder', () => {
     expect(prompt).toContain('The spec content');
   });
 
-  it('injects context files via {{context}} placeholder, skips missing files', async () => {
+  it('injects context file paths (paths only) via {{context}} placeholder, skips missing files', async () => {
     cwd = mkdtempSync(join(tmpdir(), 'msq-buildprompt-'));
     mkdirSync(join(cwd, 'ctx'));
     writeFileSync(join(cwd, 'ctx', 'a.md'), 'Context A');
@@ -99,11 +99,13 @@ describe('buildPrompt — dynamic skill-based prompt builder', () => {
       cwd,
     );
 
-    expect(prompt).toContain('--- ctx/a.md ---\nContext A');
+    expect(prompt).toContain('- ctx/a.md');
+    expect(prompt).not.toContain('Context A');
+    expect(prompt).not.toContain('--- ctx/a.md ---');
     expect(prompt).not.toContain('missing.md');
   });
 
-  it('expands directory entries in context into their readable files', async () => {
+  it('expands directory entries in context into their readable file paths (no content)', async () => {
     cwd = mkdtempSync(join(tmpdir(), 'msq-buildprompt-'));
     mkdirSync(join(cwd, 'ctx'));
     mkdirSync(join(cwd, 'ctx', 'nested'));
@@ -133,8 +135,10 @@ describe('buildPrompt — dynamic skill-based prompt builder', () => {
       cwd,
     );
 
-    expect(prompt).toContain('--- ctx/a.ts ---\nexport const a = 1;');
-    expect(prompt).toContain('--- ctx/nested/b.ts ---\nexport const b = 2;');
+    expect(prompt).toContain('- ctx/a.ts');
+    expect(prompt).toContain('- ctx/nested/b.ts');
+    expect(prompt).not.toContain('export const a = 1;');
+    expect(prompt).not.toContain('export const b = 2;');
   });
 
   it('falls back to builtin implement skill when skills array is empty', async () => {
@@ -148,7 +152,7 @@ describe('buildPrompt — dynamic skill-based prompt builder', () => {
     expect(prompt).toContain('My Feature');
   });
 
-  it('always includes technical context regardless of skill metadata inputs', async () => {
+  it('always includes technical context paths regardless of skill metadata inputs', async () => {
     cwd = mkdtempSync(join(tmpdir(), 'msq-buildprompt-'));
     mkdirSync(join(cwd, 'specs'));
     mkdirSync(join(cwd, 'ctx'));
@@ -180,11 +184,12 @@ describe('buildPrompt — dynamic skill-based prompt builder', () => {
     );
 
     expect(prompt).toContain('SPEC_DATA');
-    expect(prompt).toContain('CTX_DATA');
+    expect(prompt).toContain('- ctx/c.md');
+    expect(prompt).not.toContain('CTX_DATA');
     expect(prompt).not.toContain('ctx=');
   });
 
-  it('injects task metadata and taskFile content via {{tasks}} placeholder', async () => {
+  it('injects task metadata and taskFile path (no content) via {{tasks}} placeholder', async () => {
     cwd = mkdtempSync(join(tmpdir(), 'msq-buildprompt-'));
     mkdirSync(join(cwd, 'tasks'));
     writeFileSync(join(cwd, 'tasks', 't1.md'), 'Implement the parser');
@@ -222,10 +227,50 @@ describe('buildPrompt — dynamic skill-based prompt builder', () => {
     expect(prompt).toContain('## task-1 — Parser');
     expect(prompt).toContain('Status: running');
     expect(prompt).toContain('Skills: implement, test');
-    expect(prompt).toContain('--- tasks/t1.md ---\nImplement the parser');
+    expect(prompt).toContain('Task file: tasks/t1.md');
+    expect(prompt).not.toContain('--- tasks/t1.md ---');
+    expect(prompt).not.toContain('Implement the parser');
   });
 
-  it('does not truncate technical context when maxContextChars is configured', async () => {
+  it('omits taskFile line when the file is missing', async () => {
+    cwd = mkdtempSync(join(tmpdir(), 'msq-buildprompt-'));
+
+    const { buildPrompt } = await import('../../src/core/backlog/prompt.js');
+    const prompt = buildPrompt(
+      {
+        id: 'f1',
+        title: 'F',
+        tool: 'claude',
+        effort: 'medium',
+        dependsOn: [],
+        tasks: [
+          {
+            id: 'task-1',
+            title: 'Parser',
+            dependsOn: [],
+            skills: [],
+            status: 'todo',
+            taskFile: 'tasks/missing.md',
+          },
+        ],
+      },
+      [
+        {
+          name: 'implement',
+          source: 'builtin' as const,
+          promptTemplate: 'Tasks:\n{{tasks}}',
+          metadata: { description: 'impl' },
+        },
+      ],
+      cwd,
+    );
+
+    expect(prompt).toContain('## task-1 — Parser');
+    expect(prompt).not.toContain('Task file:');
+    expect(prompt).not.toContain('missing.md');
+  });
+
+  it('lists technical context as paths only (no content) regardless of maxContextChars', async () => {
     cwd = mkdtempSync(join(tmpdir(), 'msq-buildprompt-'));
     mkdirSync(join(cwd, 'ctx'));
     writeFileSync(join(cwd, 'ctx', 'big.md'), 'A'.repeat(160));
@@ -254,7 +299,8 @@ describe('buildPrompt — dynamic skill-based prompt builder', () => {
     );
 
     expect(prompt).not.toContain('[truncated to respect promptContextCharLimit]');
-    expect(prompt).toContain('A'.repeat(160));
+    expect(prompt).toContain('- ctx/big.md');
+    expect(prompt).not.toContain('A'.repeat(160));
   });
 
   it('adds step-guidance skill prompts and direct prompt only for the active stage', async () => {
@@ -470,8 +516,11 @@ epics:
 
     expect(prompt.startsWith('/implement')).toBe(true);
     expect(prompt).toContain('Feature summary:\nShort summary');
+    // spec stays inlined; context files become paths only
     expect(prompt).toContain('--- specs/feat.md ---\nDetailed spec');
-    expect(prompt).toContain('--- context/notes.md ---\nContext details');
+    expect(prompt).toContain('- context/notes.md');
+    expect(prompt).not.toContain('Context details');
+    expect(prompt).not.toContain('--- context/notes.md ---');
     expect(prompt).not.toContain('context/missing.md');
   });
 });

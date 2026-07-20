@@ -2,6 +2,8 @@ export type Route =
   | { page: 'board' }
   | { page: 'run-detail'; featureId: string }
   | { page: 'backlog-detail'; featureId: string }
+  | { page: 'projects' }
+  | { page: 'project-detail'; projectId: string }
   | { page: 'runs' }
   | { page: 'gates' }
   | { page: 'analytics' }
@@ -12,6 +14,8 @@ export function parseHash(hash: string): Route {
   if (h.startsWith('/runs/')) return { page: 'run-detail', featureId: h.slice('/runs/'.length) };
   if (h.startsWith('/backlog/')) return { page: 'backlog-detail', featureId: h.slice('/backlog/'.length) };
   if (h === '/runs') return { page: 'runs' };
+  if (h === '/projects') return { page: 'projects' };
+  if (h.startsWith('/projects/')) return { page: 'project-detail', projectId: h.slice('/projects/'.length) };
   if (h === '/gates') return { page: 'gates' };
   if (h === '/config') return { page: 'config' };
   if (h === '/analytics') return { page: 'analytics' };

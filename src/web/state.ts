@@ -6,15 +6,21 @@ import {
   listPendingStageRequests,
   listRunningTaskRuns,
   listPendingTimeoutApprovalRequests,
+  getProjectStateRevision,
+  listProjectStateSummaries,
+  listRepositoryStateSummaries,
   listRunsForStats,
+  listEpics,
+  type EpicRow,
   type GateRow,
   type StageRequestRow,
   type RunSummary,
   type RunningTaskSummary,
   type StatsRunRow,
 } from '../db/repo.js';
+import { listWorkflowTemplates, listProjectTemplateMappings } from '../db/workflowTemplates.js';
 import { resolveRepo } from '../core/repo.js';
-import { getFeatureCatalog, getBacklogSettings, getPendingFeatures, type FeatureCatalogEntry } from '../ui/catalog.js';
+import { getFeatureCatalog, getBacklogSettings, getPendingFeatures, type WorkItemCatalogEntry } from '../ui/catalog.js';
 import { getRunGroup, sortRunsByGroup } from '../ui/dashboardGroups.js';
 import { resolveRuntimeConfig, ConfigSchema, type Config } from '../config/index.js';
 import { resolveThemePreference } from '../ui/theme/resolve.js';
@@ -23,7 +29,7 @@ import { createSkillRegistry } from '../core/skills/registry.js';
 import type { Skill } from '../core/skills/types.js';
 import { collectEnvironmentInfo } from './environment.js';
 import { logCaughtError } from '../core/events/index.js';
-import type { MsqWebState, ThemeSnapshot, TimeoutApprovalState, TokenStats, UiNotification, WebRuntimeConfig } from './types.js';
+import type { MsqWebState, ProjectSummary, RepositorySummary, ThemeSnapshot, TimeoutApprovalState, TokenStats, UiNotification, WebRuntimeConfig, ErrorEntry, WorkflowTemplateMappings, WorkflowTemplateSummary } from './types.js';
 
 const DASHBOARD_PERIODS: { label: string; days: number | null }[] = [
   { label: 'today', days: 1 },
@@ -31,6 +37,20 @@ const DASHBOARD_PERIODS: { label: string; days: number | null }[] = [
   { label: 'last 30 days', days: 30 },
   { label: 'all time', days: null },
 ];
+
+/** Mutable error buffer collected during a single snapshot build. Populated by
+ * collector functions and flushed by buildMsqWebState. */
+let snapshotErrors: ErrorEntry[] = [];
+
+function pushError(module: string, error: unknown): void {
+  const message = error instanceof Error ? error.message : String(error);
+  snapshotErrors.push({
+    timestamp: new Date().toISOString(),
+    module,
+    message,
+  });
+  logCaughtError(module, error);
+}
 
 function gateToPendingApproval(gate: GateRow): { kind: 'gate'; id: number; featureId: string; repoId: string; prompt: string; createdAt: string } {
   return {
@@ -62,7 +82,7 @@ function collectGates(): MsqWebState['gates'] {
     const stageRequests = listPendingStageRequests().map(stageRequestToPendingApproval);
     return [...gates, ...stageRequests];
   } catch (error) {
-    logCaughtError('web/state.collectGates', error);
+    pushError('web/state.collectGates', error);
     return [];
   }
 }
@@ -71,7 +91,7 @@ function collectRuns(): RunSummary[] {
   try {
     return sortRunsByGroup(listRunsForTui(2000));
   } catch (error) {
-    logCaughtError('web/state.collectRuns', error);
+    pushError('web/state.collectRuns', error);
     return [];
   }
 }
@@ -80,7 +100,7 @@ function collectRunningTasks(): RunningTaskSummary[] {
   try {
     return listRunningTaskRuns(50);
   } catch (error) {
-    logCaughtError('web/state.collectRunningTasks', error);
+    pushError('web/state.collectRunningTasks', error);
     return [];
   }
 }
@@ -100,12 +120,12 @@ function collectTimeoutApprovals(): TimeoutApprovalState[] {
       createdAt: request.createdAt,
     }));
   } catch (error) {
-    logCaughtError('web/state.collectTimeoutApprovals', error);
+    pushError('web/state.collectTimeoutApprovals', error);
     return [];
   }
 }
 
-function collectPendingFeatures(runs: RunSummary[], repoId: string): FeatureCatalogEntry[] {
+function collectPendingFeatures(runs: RunSummary[], repoId: string): WorkItemCatalogEntry[] {
   try {
     const catalog = getFeatureCatalog();
     const doneFeatureIds = listCompletedFeatureIds(repoId);
@@ -116,7 +136,7 @@ function collectPendingFeatures(runs: RunSummary[], repoId: string): FeatureCata
     );
     return getPendingFeatures(catalog, doneFeatureIds, activeFeatureIds);
   } catch (error) {
-    logCaughtError('web/state.collectPendingFeatures', error);
+    pushError('web/state.collectPendingFeatures', error);
     return [];
   }
 }
@@ -136,20 +156,69 @@ function collectDashboardRows(): StatsRunRow[] {
   try {
     return listRunsForStats({ sinceDays: 7 });
   } catch (error) {
-    logCaughtError('web/state.collectDashboardRows', error);
+    pushError('web/state.collectDashboardRows', error);
     return [];
   }
 }
 
 const FALLBACK_ROLE_COLOR = '#e5e7eb';
 
-function normalizeFeatureCatalog(catalog: Record<string, FeatureCatalogEntry>): Record<string, FeatureCatalogEntry> {
+function normalizeFeatureCatalog(catalog: Record<string, WorkItemCatalogEntry>): Record<string, WorkItemCatalogEntry> {
   return Object.fromEntries(
     Object.entries(catalog).map(([key, feature]) => [
       key,
       { ...feature, persistedId: feature.persistedId ?? feature.id },
     ]),
   );
+}
+
+function collectProjectSummaries(): ProjectSummary[] {
+  try {
+    return listProjectStateSummaries().map((project) => ({
+      projectId: project.projectId,
+      name: project.name,
+      position: project.position,
+      description: project.description,
+      revision: project.revision,
+      counts: {
+        epics: project.epicCount,
+        workItems: project.workItemCount,
+        archived: project.archivedCount,
+      },
+      activeRuns: project.activeRuns,
+      tokens: { status: 'ready', totalTokens: project.totalTokens, error: null },
+      archivedAt: project.archivedAt,
+    }));
+  } catch (error) {
+    pushError('web/state.collectProjectSummaries', error);
+    return [];
+  }
+}
+
+/** The state hot path performs no path/Git/tool checks. Those are future lazy,
+ * per-repository enrichments and must never turn into N filesystem walks. */
+function collectRepositorySummaries(): RepositorySummary[] {
+  try {
+    return listRepositoryStateSummaries().map((repository) => ({
+      repoId: repository.repoId,
+      label: basename(repository.path),
+      projectId: repository.projectId,
+      health: 'unchecked' as const,
+      lastCheckedAt: null,
+    }));
+  } catch (error) {
+    pushError('web/state.collectRepositorySummaries', error);
+    return [];
+  }
+}
+
+function collectProjectStateRevision(): number {
+  try {
+    return getProjectStateRevision();
+  } catch (error) {
+    pushError('web/state.collectProjectStateRevision', error);
+    return 0;
+  }
 }
 
 function buildThemeSnapshot(): ThemeSnapshot {
@@ -163,7 +232,7 @@ function buildThemeSnapshot(): ThemeSnapshot {
     ) as Record<ThemeRoleName, string>;
     return { name: resolution.active, roles };
   } catch (error) {
-    logCaughtError('web/state.buildThemeSnapshot', error);
+    pushError('web/state.buildThemeSnapshot', error);
     return {
       name: 'default',
       roles: {
@@ -218,10 +287,57 @@ const CONFIG_CACHE_TTL_MS = 30_000;
 let runtimeConfigCache: { value: WebRuntimeConfig; expiresAt: number } | null = null;
 let skillsCatalogCache: { value: Skill[]; expiresAt: number } | null = null;
 
+// Templates only change through explicit actions, so this cache is invalidated
+// on write rather than expiring on a timer.
+let workflowTemplatesCache: {
+  summaries: WorkflowTemplateSummary[];
+  mappings: WorkflowTemplateMappings;
+} | null = null;
+
 /** Test hook: drop the runtime-config/skills caches. */
 export function resetWebStateCaches(): void {
   invalidateRuntimeConfigCache();
   skillsCatalogCache = null;
+  workflowTemplatesCache = null;
+}
+
+/** Drop cached templates after a template action so the next state reflects it. */
+export function invalidateWorkflowTemplatesCache(): void {
+  workflowTemplatesCache = null;
+}
+
+function collectWorkflowTemplates(): {
+  summaries: WorkflowTemplateSummary[];
+  mappings: WorkflowTemplateMappings;
+} {
+  if (workflowTemplatesCache) return workflowTemplatesCache;
+  let value: { summaries: WorkflowTemplateSummary[]; mappings: WorkflowTemplateMappings };
+  try {
+    const summaries = listWorkflowTemplates({ includeArchived: true }).map((template) => ({
+      templateId: template.templateId,
+      name: template.name,
+      version: template.version,
+      revision: template.revision,
+      builtin: template.builtin,
+      archived: template.archivedAt !== null,
+      scopeProjectId: template.scopeProjectId,
+      // A count is enough to render a picker; the stage list itself is part of
+      // the on-demand definition.
+      stageCount: template.definition.workflow.stages.length,
+    }));
+    const mappings: WorkflowTemplateMappings = {};
+    for (const mapping of listProjectTemplateMappings()) {
+      const forProject = mappings[mapping.projectId] ?? {};
+      forProject[mapping.workItemType] = mapping.templateId;
+      mappings[mapping.projectId] = forProject;
+    }
+    value = { summaries, mappings };
+  } catch (error) {
+    logCaughtError('web/state.collectWorkflowTemplates', error);
+    value = { summaries: [], mappings: {} };
+  }
+  workflowTemplatesCache = value;
+  return value;
 }
 
 /** Drop cached config after a settings write so the next state reflects it immediately. */
@@ -236,7 +352,7 @@ function collectRuntimeConfig(writability: WebRuntimeConfig['writability']): Web
   try {
     config = resolveRuntimeConfig(process.cwd());
   } catch (error) {
-    logCaughtError('web/state.collectRuntimeConfig', error);
+    pushError('web/state.collectRuntimeConfig', error);
     config = ConfigSchema.parse({});
   }
   const value = sanitizeRuntimeConfig(config, writability);
@@ -251,7 +367,7 @@ function collectSkillsCatalog(): Skill[] {
   try {
     value = createSkillRegistry().discover(process.cwd());
   } catch (error) {
-    logCaughtError('web/state.collectSkillsCatalog', error);
+    pushError('web/state.collectSkillsCatalog', error);
     value = [];
   }
   skillsCatalogCache = { value, expiresAt: now + CONFIG_CACHE_TTL_MS };
@@ -259,25 +375,66 @@ function collectSkillsCatalog(): Skill[] {
 }
 
 export function buildMsqWebState(): MsqWebState {
+  snapshotErrors = [];
+
   const repo = resolveRepo();
   const repoLabel = basename(repo.path);
+
   const runs = collectRuns();
   const gates = collectGates();
   const pendingFeatures = collectPendingFeatures(runs, repo.repoId);
+
+  let doneFeatureIds: string[];
+  try {
+    doneFeatureIds = [...listCompletedFeatureIds(repo.repoId)];
+  } catch (error) {
+    pushError('web/state.listCompletedFeatureIds', error);
+    doneFeatureIds = [];
+  }
+
   const runningTasks = collectRunningTasks();
   const timeoutApprovals = collectTimeoutApprovals();
-  const featureCatalog = normalizeFeatureCatalog(getFeatureCatalog());
+
+  let featureCatalog: Record<string, WorkItemCatalogEntry>;
+  try {
+    featureCatalog = normalizeFeatureCatalog(getFeatureCatalog());
+  } catch (error) {
+    pushError('web/state.getFeatureCatalog', error);
+    featureCatalog = {};
+  }
+
   const backlogSettings = getBacklogSettings();
+
   const environment = collectEnvironmentInfo();
+  const projects = collectProjectSummaries();
+  const repositories = collectRepositorySummaries();
+  const { summaries: workflowTemplates, mappings: workflowTemplateMappings } = collectWorkflowTemplates();
+
+  let epics: EpicRow[];
+  try {
+    epics = listEpics();
+  } catch (error) {
+    pushError('web/state.listEpics', error);
+    epics = [];
+  }
+
   const executionRuns = runs.filter((run) => getRunGroup(run.status) === 'execution');
   const doneRuns = runs.filter((run) => run.status === 'done');
   const falhaRunsList = runs.filter((run) => getRunGroup(run.status) === 'canceled');
 
+  const errors = snapshotErrors;
+  snapshotErrors = [];
+
   return {
+    revision: collectProjectStateRevision(),
     repoLabel,
+    projects,
+    repositories,
+    epics,
     runs,
     gates,
     pendingFeatures,
+    doneFeatureIds,
     runningTasks,
     timeoutApprovals,
     featureCatalog,
@@ -301,6 +458,9 @@ export function buildMsqWebState(): MsqWebState {
       configWritable: environment.configWritable,
     }),
     skillsCatalog: collectSkillsCatalog(),
+    workflowTemplates,
+    workflowTemplateMappings,
+    errors,
   };
 }
 

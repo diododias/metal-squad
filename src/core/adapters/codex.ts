@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import { detectStderrLevel, sanitizeToolCallRecord, type SessionHandle, type ToolAdapter, type RunResult, type RunFeatureOptions, type TokenUsage, type ToolCallRecord } from './types.js';
+import { detectStderrLevel, detectSessionLimit, sanitizeToolCallRecord, type SessionHandle, type ToolAdapter, type RunResult, type RunFeatureOptions, type TokenUsage, type ToolCallRecord } from './types.js';
 import type { Effort, Feature } from '../backlog/schema.js';
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
@@ -165,8 +165,17 @@ export const codexAdapter: ToolAdapter = {
   }
 
     if (code !== 0) {
+      const limitMessage = detectSessionLimit(stdout, stderr);
+      if (limitMessage) {
+        return { ok: false, blocked: true, summary: `session limit reached: ${limitMessage}` };
+      }
       const stdoutError = lastCodexError(stdout);
       return { ok: false, summary: stdoutError || stderr.slice(-500) || `exit ${String(code)}` };
+    }
+
+    const limitMessage = detectSessionLimit(stdout, stderr);
+    if (limitMessage) {
+      return { ok: false, blocked: true, summary: `session limit reached: ${limitMessage}` };
     }
 
     const finalMsg = lastAgentMessage(stdout);
