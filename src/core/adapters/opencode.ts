@@ -106,6 +106,8 @@ export const opencodeAdapter: ToolAdapter = {
     let stderr: string;
     const progress = createOpenCodeProgress();
     const seenToolCalls = new Set<string>();
+    const runtime = resolveRuntimeConfig(opts.cwd);
+    const timeoutMs = Math.max(runtime.toolTimeoutMs, invocation.minTimeoutMs);
     const streamParser = createOpenCodeStreamParser(
       (event) => {
         const update = progress.onEvent(event);
@@ -123,13 +125,14 @@ export const opencodeAdapter: ToolAdapter = {
       ({ code, stdout, stderr } = await runCli(invocation.command, args, {
         cwd: opts.cwd,
         env: invocation.env,
+        timeoutMs,
         signal: opts.signal,
-        heartbeatMs: resolveRuntimeConfig(opts.cwd).heartbeatMs,
+        heartbeatMs: runtime.heartbeatMs,
         logLabel: `opencode ${feature.id}`,
         heartbeatSuffix: () => progress.heartbeatSuffix(),
         progressSnapshot: () => progress.heartbeatSuffix(),
         onHeartbeat: (message) => { emitRunOutput(opts.runId, feature, message, 'stderr', 'heartbeat'); },
-        idleThresholdMs: resolveRuntimeConfig(opts.cwd).idleThresholdMs,
+        idleThresholdMs: runtime.idleThresholdMs,
         runId: opts.runId,
         featureId: feature.id,
         tool: feature.tool,

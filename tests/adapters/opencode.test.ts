@@ -15,7 +15,7 @@ const mockCliAbortErrorClass = class CliAbortError extends Error {
 const mockEmit = vi.fn();
 const mockMsqEventBus = { emit: mockEmit };
 const mockParseControlSignal = vi.fn();
-const mockResolveToolInvocation = vi.fn(() => ({ command: 'opencode', baseArgs: [], env: {}, versionCheck: ['--version'] }));
+const mockResolveToolInvocation = vi.fn(() => ({ command: 'opencode', baseArgs: [], env: {}, versionCheck: ['--version'], minTimeoutMs: 0 }));
 
 vi.mock('../../src/core/adapters/spawn.js', () => ({
   runCli: mockRunCli,
@@ -49,7 +49,7 @@ beforeEach(() => {
   mockRunCli.mockReset();
   mockEmit.mockReset();
   mockParseControlSignal.mockReset().mockReturnValue(undefined);
-  mockResolveToolInvocation.mockReturnValue({ command: 'opencode', baseArgs: [], env: {}, versionCheck: ['--version'] });
+  mockResolveToolInvocation.mockReturnValue({ command: 'opencode', baseArgs: [], env: {}, versionCheck: ['--version'], minTimeoutMs: 0 });
 });
 
 describe('opencodeAdapter.effortFlag', () => {
@@ -148,6 +148,28 @@ describe('opencodeAdapter.runFeature', () => {
 
     const [, args] = mockRunCli.mock.calls[0]!;
     expect(args).not.toContain('--model');
+  });
+
+  it('passes timeoutMs as max(toolTimeoutMs, minTimeoutMs) to runCli', async () => {
+    mockResolveToolInvocation.mockReturnValue({ command: 'opencode', baseArgs: [], env: {}, versionCheck: ['--version'], minTimeoutMs: 0 });
+    mockRunCli.mockResolvedValue({ code: 0, stdout: JSON.stringify({ response: 'done' }), stderr: '' });
+
+    const { opencodeAdapter } = await import('../../src/core/adapters/opencode.js');
+    await opencodeAdapter.runFeature(MOCK_FEATURE as never, 'prompt', MOCK_OPTS);
+
+    const [, , options] = mockRunCli.mock.calls[0]!;
+    expect((options as { timeoutMs: number }).timeoutMs).toBe(600_000);
+  });
+
+  it('lets a configured minTimeoutMs floor win over a lower toolTimeoutMs', async () => {
+    mockResolveToolInvocation.mockReturnValue({ command: 'opencode', baseArgs: [], env: {}, versionCheck: ['--version'], minTimeoutMs: 900_000 });
+    mockRunCli.mockResolvedValue({ code: 0, stdout: JSON.stringify({ response: 'done' }), stderr: '' });
+
+    const { opencodeAdapter } = await import('../../src/core/adapters/opencode.js');
+    await opencodeAdapter.runFeature(MOCK_FEATURE as never, 'prompt', MOCK_OPTS);
+
+    const [, , options] = mockRunCli.mock.calls[0]!;
+    expect((options as { timeoutMs: number }).timeoutMs).toBe(900_000);
   });
 
   it('uses --session when resuming a prior opencode session', async () => {

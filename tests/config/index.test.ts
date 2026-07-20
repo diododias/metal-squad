@@ -14,7 +14,7 @@ const DEFAULT_TOOLS = [
   {
     id: 'claude', adapter: 'claude', command: 'claude', baseArgs: [], env: {}, versionCheck: ['--version'],
     capabilities: { model: true, effort: true, thinking: true },
-    thinkingBudget: { low: 4_000, medium: 10_000, high: 24_000 }, minTimeoutMs: 0,
+    thinkingBudget: { low: 4_000, medium: 10_000, high: 24_000 }, minTimeoutMs: 3_600_000,
   },
   {
     id: 'codex', adapter: 'codex', command: 'codex', baseArgs: [], env: {}, versionCheck: ['--version'],

@@ -149,7 +149,7 @@ export const DEFAULT_TOOL_REGISTRY: z.input<typeof ToolRegistryEntrySchema>[] = 
     versionCheck: ['--version'],
     capabilities: { model: true, effort: true, thinking: true },
     thinkingBudget: { low: 4_000, medium: 10_000, high: 24_000 },
-    minTimeoutMs: 0,
+    minTimeoutMs: 3_600_000,
   },
   {
     id: 'codex',
