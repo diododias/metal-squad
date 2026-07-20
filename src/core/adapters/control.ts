@@ -17,7 +17,7 @@ const MAX_LABEL_LENGTH = 60;
 // a rhetorical closing remark in a completed summary as a stuck question.
 const MAX_FALLBACK_QUESTION_LENGTH = 300;
 const CLARIFICATION_QUESTION_PATTERN =
-  /\b(could you|can you|should i|should we|do you want|would you like|which (?:of|one|option)|what (?:should|would)|please (?:clarify|confirm)|i need (?:clarification|your input|to confirm)|need clarification)\b/i;
+  /\b(could you|can you|should i|should we|do you want|would you like|which (?:of|one|option)|what (?:should|would)|please (?:clarify|confirm)|i need (?:clarification|your input|to confirm)|need clarification|voce (?:pode|podia|poderia|quer|queria)|voc[eê] (?:pode|podia|poderia|quer|queria)|(?:devo|devemos|posso|podemos) (?:prosseguir|fazer|criar|abrir|usar|seguir|continuar)|quer que eu (?:faca|fa[cç]a|prossiga|siga)|preciso (?:de |da |de )?clarifica[cç][aã]o|qual (?:devo|devemos|usar)|como (?:devo|devemos) (?:prosseguir|fazer|seguir))\b/i;
 const BLOCKED_FALLBACK_PATTERN =
   /\b(cannot proceed|blocked|dependency not found|unable to continue)\b/i;
 

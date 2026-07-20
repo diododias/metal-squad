@@ -2,10 +2,13 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import type { RunSummary } from '../../src/db/repo.js';
 import WebSocket from 'ws';
 
 const mocks = vi.hoisted(() => ({
   resolveRepo: vi.fn(),
+  resolveRepoAllowlist: vi.fn(),
+  resolveWorkItemExecutionContext: vi.fn(),
   listRunsForTui: vi.fn(),
   listRunHistoryForFeature: vi.fn(),
   getRunSessionStatus: vi.fn(),
@@ -13,7 +16,11 @@ const mocks = vi.hoisted(() => ({
   openGates: vi.fn(),
   listPendingStageRequests: vi.fn(),
   listRunningTaskRuns: vi.fn(),
+  listPendingTimeoutApprovalRequests: vi.fn(),
   listRunsForStats: vi.fn(),
+  getProjectStateRevision: vi.fn(),
+  listProjectStateSummaries: vi.fn(),
+  listRepositoryStateSummaries: vi.fn(),
   getHistoricalTokenStatsForFeatureProfile: vi.fn(),
   resolveGate: vi.fn(),
   listRunOutput: vi.fn(),
@@ -28,12 +35,14 @@ const mocks = vi.hoisted(() => ({
   forceResolveGate: vi.fn(),
   resolveStageRequest: vi.fn(),
   listCompletedFeatureIds: vi.fn(() => new Set()),
+  listEpics: vi.fn(() => []),
   getPendingFeatures: vi.fn(() => []),
   computeRunBreakdown: vi.fn(),
   assertWritableDbPath: vi.fn(),
   updateCatalogFeature: vi.fn(),
   updateCatalogTask: vi.fn(),
   updateCatalogDefaults: vi.fn(),
+  getFeatureIdOwner: vi.fn(),
   loadBacklogFromCatalog: vi.fn(),
   validateBacklogSkills: vi.fn(),
   loadConfig: vi.fn(),
@@ -43,14 +52,60 @@ const mocks = vi.hoisted(() => ({
   saveAppConfigPatch: vi.fn(),
   setSecret: vi.fn(),
   clearSecret: vi.fn(),
+  getSecret: vi.fn().mockResolvedValue(null),
   parseConfig: vi.fn((value) => value),
   spawn: vi.fn(),
   getPipeline: vi.fn(),
+  getRun: vi.fn(),
   getAdapter: vi.fn(),
+  projectService: {
+    create: vi.fn(),
+    update: vi.fn(),
+  },
+  repoLinkService: {
+    link: vi.fn(),
+    move: vi.fn(),
+    unlink: vi.fn(),
+  },
+  epicService: {
+    create: vi.fn(),
+    update: vi.fn(),
+  },
+  workItemService: {
+    create: vi.fn(),
+  },
+  getEpicTemplateTarget: vi.fn(() => ({ projectId: 'project-1', repoPath: '/safe/repo' })),
+  getWorkItemTemplateTarget: vi.fn(() => ({
+    projectId: 'project-1', repoPath: '/safe/repo', type: 'feature' as const, revision: 1,
+  })),
+  isWorkItemPristine: vi.fn(() => true),
+  changeWorkItemType: vi.fn(),
+  resolveTemplate: vi.fn((): {
+    templateId: string; name: string; version: number; origin: string;
+    definition: { workflow: { stages: string[] }; stageSkills: Record<string, string[]> };
+  } => ({
+    templateId: 'builtin:feature-spec-kit',
+    name: 'Feature (Spec Kit)',
+    version: 1,
+    origin: 'builtin',
+    definition: { workflow: { stages: ['plan'] }, stageSkills: { plan: [] } },
+  })),
+  listWorkflowTemplates: vi.fn(() => []),
+  listProjectTemplateMappings: vi.fn(() => []),
+  createWorkflowTemplate: vi.fn(),
+  updateWorkflowTemplate: vi.fn(),
+  duplicateWorkflowTemplate: vi.fn(),
+  archiveWorkflowTemplate: vi.fn(),
+  mapProjectWorkItemTemplate: vi.fn(),
 }));
 
 vi.mock('../../src/core/repo.js', () => ({
   resolveRepo: mocks.resolveRepo,
+  resolveRepoAllowlist: mocks.resolveRepoAllowlist,
+}));
+
+vi.mock('../../src/core/workItemExecutionContext.js', () => ({
+  resolveWorkItemExecutionContext: mocks.resolveWorkItemExecutionContext,
 }));
 
 vi.mock('../../src/db/index.js', () => ({
@@ -58,6 +113,7 @@ vi.mock('../../src/db/index.js', () => ({
 }));
 
 vi.mock('../../src/db/backlogCatalog.js', () => ({
+  getFeatureIdOwner: mocks.getFeatureIdOwner,
   updateCatalogFeature: mocks.updateCatalogFeature,
   updateCatalogTask: mocks.updateCatalogTask,
   updateCatalogDefaults: mocks.updateCatalogDefaults,
@@ -87,6 +143,7 @@ vi.mock('../../src/config/index.js', () => ({
 vi.mock('../../src/security/secrets.js', () => ({
   setSecret: mocks.setSecret,
   clearSecret: mocks.clearSecret,
+  getSecret: mocks.getSecret,
 }));
 
 vi.mock('node:child_process', async () => {
@@ -105,7 +162,11 @@ vi.mock('../../src/db/repo.js', () => ({
   openGates: mocks.openGates,
   listPendingStageRequests: mocks.listPendingStageRequests,
   listRunningTaskRuns: mocks.listRunningTaskRuns,
+  listPendingTimeoutApprovalRequests: mocks.listPendingTimeoutApprovalRequests,
   listRunsForStats: mocks.listRunsForStats,
+  getProjectStateRevision: mocks.getProjectStateRevision,
+  listProjectStateSummaries: mocks.listProjectStateSummaries,
+  listRepositoryStateSummaries: mocks.listRepositoryStateSummaries,
   getHistoricalTokenStatsForFeatureProfile: mocks.getHistoricalTokenStatsForFeatureProfile,
   listRunOutput: mocks.listRunOutput,
   listTaskRunsForRun: mocks.listTaskRunsForRun,
@@ -118,11 +179,41 @@ vi.mock('../../src/db/repo.js', () => ({
   requestFeatureAbort: mocks.requestFeatureAbort,
   forceResolveGate: mocks.forceResolveGate,
   listCompletedFeatureIds: mocks.listCompletedFeatureIds,
+  listEpics: mocks.listEpics,
   getPipeline: mocks.getPipeline,
+  getRun: mocks.getRun,
+  getEpicTemplateTarget: mocks.getEpicTemplateTarget,
+  getWorkItemTemplateTarget: mocks.getWorkItemTemplateTarget,
+  isWorkItemPristine: mocks.isWorkItemPristine,
+  changeWorkItemType: mocks.changeWorkItemType,
+}));
+
+vi.mock('../../src/db/workflowTemplates.js', () => ({
+  resolveTemplate: mocks.resolveTemplate,
+  createWorkflowTemplate: mocks.createWorkflowTemplate,
+  updateWorkflowTemplate: mocks.updateWorkflowTemplate,
+  duplicateWorkflowTemplate: mocks.duplicateWorkflowTemplate,
+  archiveWorkflowTemplate: mocks.archiveWorkflowTemplate,
+  mapProjectWorkItemTemplate: mocks.mapProjectWorkItemTemplate,
+  listWorkflowTemplates: mocks.listWorkflowTemplates,
+  listProjectTemplateMappings: mocks.listProjectTemplateMappings,
 }));
 
 vi.mock('../../src/core/adapters/index.js', () => ({
   getAdapter: mocks.getAdapter,
+}));
+
+vi.mock('../../src/core/projectService.js', () => ({
+  projectService: mocks.projectService,
+  repoLinkService: mocks.repoLinkService,
+}));
+
+vi.mock('../../src/core/epicService.js', () => ({
+  epicService: mocks.epicService,
+}));
+
+vi.mock('../../src/core/workItemService.js', () => ({
+  workItemService: mocks.workItemService,
 }));
 
 vi.mock('../../src/core/stats.js', () => ({
@@ -207,6 +298,39 @@ async function waitForMatchingMessage(
   });
 }
 
+function projectEntity(overrides: Record<string, unknown> = {}): Record<string, unknown> {
+  return {
+    projectId: 'project-1',
+    name: 'Web Project',
+    description: null,
+    position: 0,
+    archivedAt: null,
+    deletedAt: null,
+    revision: 1,
+    createdAt: '2026-07-18T12:00:00.000Z',
+    updatedAt: '2026-07-18T12:00:00.000Z',
+    ...overrides,
+  };
+}
+
+function epicEntity(overrides: Record<string, unknown> = {}): Record<string, unknown> {
+  return {
+    epicId: 'epic-1',
+    projectId: 'project-1',
+    repoId: null,
+    title: 'Web Epic',
+    description: null,
+    status: 'todo',
+    position: 0,
+    archivedAt: null,
+    deletedAt: null,
+    revision: 1,
+    createdAt: '2026-07-18T12:00:00.000Z',
+    updatedAt: '2026-07-18T12:00:00.000Z',
+    ...overrides,
+  };
+}
+
 describe('web server', () => {
   const previousCwd = process.cwd();
   let cwd = '';
@@ -217,11 +341,21 @@ describe('web server', () => {
     cwd = mkdtempSync(join(tmpdir(), 'msq-web-'));
     process.chdir(cwd);
     mocks.resolveRepo.mockReturnValue({ repoId: 'repo-1', path: cwd });
+    mocks.resolveRepoAllowlist.mockImplementation((root: string) => [root]);
+    mocks.resolveWorkItemExecutionContext.mockImplementation((workItemId: string) => ({
+      repoId: 'repo-1', cwd, projectId: 'project-1', epicId: 'epic-1', repoHealth: 'ok', workItemId,
+    }));
+    mocks.getRun.mockImplementation((runId: number) => ({ id: runId, repo_id: 'repo-1', feature_id: 'feat-1' }));
     mocks.listRunsForTui.mockReturnValue([]);
     mocks.openGates.mockReturnValue([]);
     mocks.listPendingStageRequests.mockReturnValue([]);
     mocks.listRunningTaskRuns.mockReturnValue([]);
+    mocks.listPendingTimeoutApprovalRequests.mockReturnValue([]);
     mocks.listRunsForStats.mockReturnValue([]);
+    mocks.listPendingTimeoutApprovalRequests.mockReturnValue([]);
+    mocks.getProjectStateRevision.mockReturnValue(0);
+    mocks.listProjectStateSummaries.mockReturnValue([]);
+    mocks.listRepositoryStateSummaries.mockReturnValue([]);
     mocks.listRunOutput.mockReturnValue([]);
     mocks.listTaskRunsForRun.mockReturnValue([]);
     mocks.listRunEvents.mockReturnValue([]);
@@ -450,6 +584,522 @@ describe('web server', () => {
     });
 
     socket.close();
+  });
+
+  it('returns a create result only to the initiating client and publishes reconciled state', async () => {
+    const { createWebServer } = await import('../../src/web/server.js');
+    const created = projectEntity({ description: 'Created through WebSocket' });
+    mocks.projectService.create.mockReturnValue({ entity: created, revision: 1 });
+
+    server = createWebServer({ host: '127.0.0.1', port: 0, auth: 'token', token: 'secret' });
+    await new Promise<void>((resolve) => server!.server.listen(0, '127.0.0.1', resolve));
+    const address = server!.server.address() as { port: number };
+    const origin = new WebSocket(`ws://127.0.0.1:${address.port}/ws`);
+    const peer = new WebSocket(`ws://127.0.0.1:${address.port}/ws`);
+    await Promise.all([waitForOpen(origin), waitForOpen(peer)]);
+    origin.send(JSON.stringify({ type: 'auth', token: 'secret' }));
+    peer.send(JSON.stringify({ type: 'auth', token: 'secret' }));
+    await Promise.all([waitForSocketMessage(origin), waitForSocketMessage(peer)]);
+
+    let peerReceivedActionResult = false;
+    const onPeerMessage = (data: WebSocket.RawData): void => {
+      if ((JSON.parse(data.toString('utf8')) as { type?: string }).type === 'action:result') peerReceivedActionResult = true;
+    };
+    peer.on('message', onPeerMessage);
+    const resultPromise = waitForMatchingMessage(
+      origin,
+      (message) => message.type === 'action:result' && (message.payload as { requestId?: string }).requestId === 'create-1',
+    );
+    const peerStatePromise = waitForMessageType(peer, 'state:full');
+    origin.send(JSON.stringify({
+      type: 'action:createProject',
+      requestId: 'create-1',
+      name: '  Web Project  ',
+      description: 'Created through WebSocket',
+    }));
+
+    expect(await resultPromise).toEqual({
+      type: 'action:result',
+      payload: { requestId: 'create-1', ok: true, entity: created },
+    });
+    await peerStatePromise;
+    peer.off('message', onPeerMessage);
+    expect(peerReceivedActionResult).toBe(false);
+    expect(mocks.projectService.create).toHaveBeenCalledWith({
+      name: '  Web Project  ',
+      description: 'Created through WebSocket',
+    });
+    origin.close();
+    peer.close();
+  });
+
+  it('rejects invalid Project action payloads before calling the service', async () => {
+    const { createWebServer } = await import('../../src/web/server.js');
+    server = createWebServer({ host: '127.0.0.1', port: 0, auth: 'token', token: 'secret' });
+    await new Promise<void>((resolve) => server!.server.listen(0, '127.0.0.1', resolve));
+    const address = server!.server.address() as { port: number };
+    const socket = new WebSocket(`ws://127.0.0.1:${address.port}/ws`);
+    await waitForOpen(socket);
+    socket.send(JSON.stringify({ type: 'auth', token: 'secret' }));
+    await waitForSocketMessage(socket);
+
+    const rejected = waitForMatchingMessage(socket, (message) => message.type === 'action:result');
+    socket.send(JSON.stringify({
+      type: 'action:updateProject',
+      requestId: 'invalid-1',
+      projectId: 'project-1',
+      expectedRevision: 1,
+      patch: { unexpected: 'not allowed' },
+    }));
+
+    expect(await rejected).toEqual({
+      type: 'action:result',
+      payload: {
+        requestId: 'invalid-1',
+        ok: false,
+        error: { code: 'INVALID_PAYLOAD', message: 'Invalid project action payload.' },
+      },
+    });
+    expect(mocks.projectService.create).not.toHaveBeenCalled();
+    expect(mocks.projectService.update).not.toHaveBeenCalled();
+    socket.close();
+  });
+
+  it('returns a stable revision conflict after a stale Project update', async () => {
+    const { createWebServer } = await import('../../src/web/server.js');
+    const updated = projectEntity({ name: 'Current', revision: 2 });
+    mocks.projectService.update
+      .mockReturnValueOnce({ entity: updated, revision: 2 })
+      .mockImplementationOnce(() => { throw { code: 'REVISION_CONFLICT', message: 'database revision detail' }; });
+
+    server = createWebServer({ host: '127.0.0.1', port: 0, auth: 'token', token: 'secret' });
+    await new Promise<void>((resolve) => server!.server.listen(0, '127.0.0.1', resolve));
+    const address = server!.server.address() as { port: number };
+    const socket = new WebSocket(`ws://127.0.0.1:${address.port}/ws`);
+    await waitForOpen(socket);
+    socket.send(JSON.stringify({ type: 'auth', token: 'secret' }));
+    await waitForSocketMessage(socket);
+
+    const accepted = waitForMatchingMessage(
+      socket,
+      (message) => message.type === 'action:result' && (message.payload as { requestId?: string }).requestId === 'update-1',
+    );
+    socket.send(JSON.stringify({
+      type: 'action:updateProject', requestId: 'update-1', projectId: 'project-1', expectedRevision: 1, patch: { name: 'Current' },
+    }));
+    expect(await accepted).toEqual({
+      type: 'action:result',
+      payload: { requestId: 'update-1', ok: true, entity: updated },
+    });
+
+    const conflict = waitForMatchingMessage(
+      socket,
+      (message) => message.type === 'action:result' && (message.payload as { requestId?: string }).requestId === 'update-2',
+    );
+    socket.send(JSON.stringify({
+      type: 'action:updateProject', requestId: 'update-2', projectId: 'project-1', expectedRevision: 1, patch: { description: 'stale' },
+    }));
+    expect(await conflict).toEqual({
+      type: 'action:result',
+      payload: {
+        requestId: 'update-2',
+        ok: false,
+        error: { code: 'REVISION_CONFLICT', message: 'Project was changed by another request. Refresh and try again.' },
+      },
+    });
+    expect(mocks.projectService.update).toHaveBeenNthCalledWith(1, 'project-1', { name: 'Current' }, 1);
+    expect(mocks.projectService.update).toHaveBeenNthCalledWith(2, 'project-1', { description: 'stale' }, 1);
+    socket.close();
+  });
+
+  it('delegates a confirmed repository link only to the application service and replies only to the originator', async () => {
+    const { createWebServer } = await import('../../src/web/server.js');
+    mocks.repoLinkService.link.mockReturnValue({
+      entity: { repoId: 'repo-2', projectId: 'project-1', path: '/safe/repo', position: 0, createdAt: 'now', updatedAt: 'now' },
+      revision: null,
+    });
+
+    server = createWebServer({ host: '127.0.0.1', port: 0, auth: 'token', token: 'secret', cwd });
+    await new Promise<void>((resolve) => server!.server.listen(0, '127.0.0.1', resolve));
+    const address = server!.server.address() as { port: number };
+    const origin = new WebSocket(`ws://127.0.0.1:${address.port}/ws`);
+    const peer = new WebSocket(`ws://127.0.0.1:${address.port}/ws`);
+    await Promise.all([waitForOpen(origin), waitForOpen(peer)]);
+    origin.send(JSON.stringify({ type: 'auth', token: 'secret' }));
+    peer.send(JSON.stringify({ type: 'auth', token: 'secret' }));
+    await Promise.all([waitForSocketMessage(origin), waitForSocketMessage(peer)]);
+
+    let peerReceivedResult = false;
+    const peerHandler = (data: WebSocket.RawData): void => {
+      if ((JSON.parse(data.toString('utf8')) as { type?: string }).type === 'action:result') peerReceivedResult = true;
+    };
+    peer.on('message', peerHandler);
+    const result = waitForMatchingMessage(
+      origin,
+      (message) => message.type === 'action:result' && (message.payload as { requestId?: string }).requestId === 'link-1',
+    );
+    origin.send(JSON.stringify({ type: 'action:linkRepo', requestId: 'link-1', projectId: 'project-1', path: '/safe/repo', confirm: true }));
+
+    expect(await result).toMatchObject({ payload: { requestId: 'link-1', ok: true, entity: { repoId: 'repo-2' } } });
+    expect(mocks.repoLinkService.link).toHaveBeenCalledWith('project-1', {
+      type: 'action:linkRepo', requestId: 'link-1', projectId: 'project-1', path: '/safe/repo', confirm: true,
+    }, { allowedRoots: [cwd], audit: { actor: 'web', requestId: 'link-1' } });
+    peer.off('message', peerHandler);
+    expect(peerReceivedResult).toBe(false);
+    origin.close();
+    peer.close();
+  });
+
+  it('uses createWorkItem/workItemId as the WebSocket contract and reemits state', async () => {
+    const { createWebServer } = await import('../../src/web/server.js');
+    const workItem = {
+      workItemId: 'F-23456789', epicId: 'epic-1', repoId: 'repo-1', title: 'Web Work Item',
+      description: null, type: 'feature', dependsOn: [], tasks: [], tool: 'codex', effort: 'medium', thinking: 'off',
+      skills: [], workflow: { mode: 'staged', stages: ['plan'], approvals: { channel: 'telegram' }, autoAdvance: false, syncTasksToBacklog: true, sessionPolicy: { mode: 'isolated', alwaysIsolatedStages: [] }, stepGuidance: {}, stagePublishes: {} },
+      autoStart: false, revision: 1, createdAt: '2026-07-18T12:00:00.000Z', updatedAt: '2026-07-18T12:00:00.000Z',
+    };
+    mocks.workItemService.create.mockReturnValue({ entity: workItem, revision: 1 });
+    server = createWebServer({ host: '127.0.0.1', port: 0, auth: 'token', token: 'secret' });
+    await new Promise<void>((resolve) => server!.server.listen(0, '127.0.0.1', resolve));
+    const address = server!.server.address() as { port: number };
+    const socket = new WebSocket(`ws://127.0.0.1:${address.port}/ws`);
+    await waitForOpen(socket);
+    socket.send(JSON.stringify({ type: 'auth', token: 'secret' }));
+    await waitForSocketMessage(socket);
+
+    const result = waitForMatchingMessage(socket, (message) => message.type === 'action:result');
+    socket.send(JSON.stringify({ type: 'action:createWorkItem', requestId: 'work-item-1', epicId: 'epic-1', repoId: 'repo-1', title: 'Web Work Item' }));
+
+    expect(await result).toEqual({ type: 'action:result', payload: { requestId: 'work-item-1', ok: true, workItem, revision: 1 } });
+    expect(mocks.workItemService.create).toHaveBeenCalledWith({
+      epicId: 'epic-1', repoId: 'repo-1', title: 'Web Work Item', type: 'feature', description: undefined, dependsOn: undefined,
+      audit: { actor: 'web', requestId: 'work-item-1' },
+    }, {
+      templateId: 'builtin:feature-spec-kit',
+      templateVersion: 1,
+      origin: 'builtin',
+      definition: { workflow: { stages: ['plan'] }, stageSkills: { plan: [] } },
+    });
+    socket.close();
+  });
+
+  /** Authenticated socket, the preamble every action test below shares. */
+  async function connectAuthenticated(): Promise<WebSocket> {
+    const { createWebServer } = await import('../../src/web/server.js');
+    server = createWebServer({ host: '127.0.0.1', port: 0, auth: 'token', token: 'secret' });
+    await new Promise<void>((resolve) => server!.server.listen(0, '127.0.0.1', resolve));
+    const address = server!.server.address() as { port: number };
+    const socket = new WebSocket(`ws://127.0.0.1:${address.port}/ws`);
+    await waitForOpen(socket);
+    socket.send(JSON.stringify({ type: 'auth', token: 'secret' }));
+    await waitForSocketMessage(socket);
+    return socket;
+  }
+
+  it('resolves the bug template for a bug Work Item and snapshots it at creation', async () => {
+    mocks.resolveTemplate.mockReturnValue({
+      templateId: 'builtin:bug-standard',
+      name: 'Bug (standard)',
+      version: 3,
+      origin: 'project-mapping',
+      definition: { workflow: { stages: ['reproduce', 'fix', 'verify'] }, stageSkills: { fix: ['dev-flow'] } },
+    });
+    mocks.workItemService.create.mockReturnValue({
+      entity: { workItemId: 'F-BUG00001', revision: 1 }, revision: 1,
+    });
+    const socket = await connectAuthenticated();
+
+    const result = waitForMatchingMessage(socket, (message) => message.type === 'action:result');
+    socket.send(JSON.stringify({
+      type: 'action:createWorkItem', requestId: 'work-item-bug', epicId: 'epic-1',
+      repoId: 'repo-1', workItemType: 'bug', title: 'A bug',
+    }));
+
+    expect(await result).toMatchObject({ payload: { requestId: 'work-item-bug', ok: true } });
+    // Template resolution is scoped by Project + type + target repo path.
+    expect(mocks.resolveTemplate).toHaveBeenCalledWith('project-1', 'bug', {
+      repoPath: '/safe/repo', validate: true,
+    });
+    expect(mocks.workItemService.create).toHaveBeenCalledWith(
+      expect.objectContaining({ type: 'bug' }),
+      expect.objectContaining({ templateId: 'builtin:bug-standard', templateVersion: 3, origin: 'project-mapping' }),
+    );
+    socket.close();
+  });
+
+  it('rejects the Work Item before insert when the template fails validation', async () => {
+    mocks.resolveTemplate.mockImplementation(() => {
+      throw Object.assign(new Error('missing skills in /safe/repo: not-installed'), {
+        code: 'WORKFLOW_TEMPLATE_INVALID',
+      });
+    });
+    const socket = await connectAuthenticated();
+
+    const result = waitForMatchingMessage(socket, (message) => message.type === 'action:result');
+    socket.send(JSON.stringify({
+      type: 'action:createWorkItem', requestId: 'work-item-invalid', epicId: 'epic-1',
+      repoId: 'repo-1', workItemType: 'feature', title: 'Doomed',
+    }));
+
+    expect(await result).toMatchObject({ payload: { requestId: 'work-item-invalid', ok: false } });
+    // Nothing may be inserted when resolution failed.
+    expect(mocks.workItemService.create).not.toHaveBeenCalled();
+    socket.close();
+  });
+
+  it('previews a type change without writing anything', async () => {
+    mocks.resolveTemplate.mockReturnValue({
+      templateId: 'builtin:bug-standard',
+      name: 'Bug (standard)',
+      version: 2,
+      origin: 'builtin',
+      definition: { workflow: { stages: ['reproduce', 'fix'] }, stageSkills: {} },
+    });
+    const socket = await connectAuthenticated();
+
+    const result = waitForMatchingMessage(socket, (message) => message.type === 'action:result');
+    socket.send(JSON.stringify({
+      type: 'action:changeWorkItemType', requestId: 'type-preview', workItemId: 'F-AAA00001',
+      workItemType: 'bug', expectedRevision: 1, preview: true,
+    }));
+
+    expect(await result).toMatchObject({
+      payload: {
+        requestId: 'type-preview',
+        ok: true,
+        preview: {
+          workItemId: 'F-AAA00001', fromType: 'feature', toType: 'bug',
+          templateId: 'builtin:bug-standard', templateVersion: 2,
+          stages: ['reproduce', 'fix'],
+        },
+      },
+    });
+    // A preview must never mutate the Work Item.
+    expect(mocks.changeWorkItemType).not.toHaveBeenCalled();
+    socket.close();
+  });
+
+  it('applies a confirmed type change with the resolved snapshot', async () => {
+    mocks.resolveTemplate.mockReturnValue({
+      templateId: 'builtin:bug-standard',
+      name: 'Bug (standard)',
+      version: 2,
+      origin: 'builtin',
+      definition: { workflow: { stages: ['reproduce'] }, stageSkills: {} },
+    });
+    mocks.changeWorkItemType.mockReturnValue({ workItemId: 'F-AAA00001', type: 'bug', revision: 2 });
+    const socket = await connectAuthenticated();
+
+    const result = waitForMatchingMessage(socket, (message) => message.type === 'action:result');
+    socket.send(JSON.stringify({
+      type: 'action:changeWorkItemType', requestId: 'type-apply', workItemId: 'F-AAA00001',
+      workItemType: 'bug', expectedRevision: 1,
+    }));
+
+    expect(await result).toMatchObject({
+      payload: { requestId: 'type-apply', ok: true, revision: 2 },
+    });
+    expect(mocks.changeWorkItemType).toHaveBeenCalledWith(
+      'F-AAA00001', 'bug',
+      expect.objectContaining({ templateId: 'builtin:bug-standard', templateVersion: 2 }),
+      1,
+    );
+    socket.close();
+  });
+
+  it('refuses a type change on a Work Item that already ran', async () => {
+    mocks.isWorkItemPristine.mockReturnValue(false);
+    const socket = await connectAuthenticated();
+
+    const result = waitForMatchingMessage(socket, (message) => message.type === 'action:result');
+    socket.send(JSON.stringify({
+      type: 'action:changeWorkItemType', requestId: 'type-refused', workItemId: 'F-AAA00001',
+      workItemType: 'bug', expectedRevision: 1,
+    }));
+
+    expect(await result).toMatchObject({
+      payload: { requestId: 'type-refused', ok: false, error: { code: 'WORK_ITEM_HAS_HISTORY' } },
+    });
+    expect(mocks.changeWorkItemType).not.toHaveBeenCalled();
+    socket.close();
+  });
+
+  it('refuses a type change when the revision is stale', async () => {
+    const socket = await connectAuthenticated();
+
+    const result = waitForMatchingMessage(socket, (message) => message.type === 'action:result');
+    socket.send(JSON.stringify({
+      type: 'action:changeWorkItemType', requestId: 'type-stale', workItemId: 'F-AAA00001',
+      workItemType: 'bug', expectedRevision: 99,
+    }));
+
+    expect(await result).toMatchObject({
+      payload: { requestId: 'type-stale', ok: false, error: { code: 'REVISION_CONFLICT' } },
+    });
+    expect(mocks.changeWorkItemType).not.toHaveBeenCalled();
+    socket.close();
+  });
+
+  it('creates a workflow template and returns its revision', async () => {
+    mocks.createWorkflowTemplate.mockReturnValue({
+      templateId: 'tpl-1', name: 'Custom', version: 1, revision: 1, builtin: false,
+      archivedAt: null, scopeProjectId: 'project-1',
+      definition: { workflow: { stages: ['plan', 'build'] }, stageSkills: {} },
+    });
+    const socket = await connectAuthenticated();
+
+    const result = waitForMatchingMessage(socket, (message) => message.type === 'action:result');
+    socket.send(JSON.stringify({
+      type: 'action:createWorkflowTemplate', requestId: 'tpl-create-1', projectId: 'project-1',
+      name: 'Custom', definition: { workflow: { stages: ['plan', 'build'] }, stageSkills: {} },
+    }));
+
+    expect(await result).toEqual({
+      type: 'action:result',
+      payload: {
+        requestId: 'tpl-create-1',
+        ok: true,
+        workflowTemplate: {
+          templateId: 'tpl-1', name: 'Custom', version: 1, revision: 1,
+          builtin: false, archived: false, scopeProjectId: 'project-1', stageCount: 2,
+        },
+        revision: 1,
+      },
+    });
+    socket.close();
+  });
+
+  it('surfaces a revision conflict when updating a stale workflow template', async () => {
+    mocks.updateWorkflowTemplate.mockImplementation(() => {
+      throw Object.assign(new Error('Workflow template revision conflict'), { code: 'REVISION_CONFLICT' });
+    });
+    const socket = await connectAuthenticated();
+
+    const result = waitForMatchingMessage(socket, (message) => message.type === 'action:result');
+    socket.send(JSON.stringify({
+      type: 'action:updateWorkflowTemplate', requestId: 'tpl-update-1', templateId: 'tpl-1',
+      expectedRevision: 1, patch: { name: 'Renamed' },
+    }));
+
+    expect(await result).toEqual({
+      type: 'action:result',
+      payload: {
+        requestId: 'tpl-update-1', ok: false,
+        error: { code: 'REVISION_CONFLICT', message: 'Workflow template revision conflict' },
+      },
+    });
+    socket.close();
+  });
+
+  it('refuses to archive a workflow template that a Project still maps', async () => {
+    mocks.archiveWorkflowTemplate.mockImplementation(() => {
+      throw Object.assign(new Error('Workflow template is mapped by 1 Project'), {
+        code: 'WORKFLOW_TEMPLATE_IN_USE',
+      });
+    });
+    const socket = await connectAuthenticated();
+
+    const result = waitForMatchingMessage(socket, (message) => message.type === 'action:result');
+    socket.send(JSON.stringify({
+      type: 'action:archiveWorkflowTemplate', requestId: 'tpl-archive-1', templateId: 'tpl-1',
+    }));
+
+    expect(await result).toMatchObject({
+      payload: { requestId: 'tpl-archive-1', ok: false, error: { code: 'WORKFLOW_TEMPLATE_IN_USE' } },
+    });
+    socket.close();
+  });
+
+  it('maps a template to a Project Work Item type', async () => {
+    const socket = await connectAuthenticated();
+
+    const result = waitForMatchingMessage(socket, (message) => message.type === 'action:result');
+    socket.send(JSON.stringify({
+      type: 'action:setTypeTemplate', requestId: 'tpl-map-1', projectId: 'project-1',
+      workItemType: 'bug', templateId: 'tpl-1',
+    }));
+
+    expect(await result).toEqual({
+      type: 'action:result', payload: { requestId: 'tpl-map-1', ok: true },
+    });
+    expect(mocks.mapProjectWorkItemTemplate).toHaveBeenCalledWith({
+      projectId: 'project-1', workItemType: 'bug', templateId: 'tpl-1',
+      audit: { actor: 'web', requestId: 'tpl-map-1' },
+    });
+    socket.close();
+  });
+
+  it('rejects a template action that omits requestId', async () => {
+    const socket = await connectAuthenticated();
+
+    const result = waitForMatchingMessage(socket, (message) => message.type === 'action:result');
+    socket.send(JSON.stringify({
+      type: 'action:archiveWorkflowTemplate', templateId: 'tpl-1',
+    }));
+
+    expect(await result).toMatchObject({ payload: { ok: false, error: { code: 'INVALID_PAYLOAD' } } });
+    expect(mocks.archiveWorkflowTemplate).not.toHaveBeenCalled();
+    socket.close();
+  });
+
+  it('returns a typed path confirmation error without registering or linking a repository', async () => {
+    const { createWebServer } = await import('../../src/web/server.js');
+    const error = Object.assign(new Error('Explicit confirmation is required before registering a repository path.'), {
+      code: 'REPO_PATH_CONFIRMATION_REQUIRED',
+    });
+    mocks.repoLinkService.link.mockImplementation(() => { throw error; });
+    server = createWebServer({ host: '127.0.0.1', port: 0, auth: 'token', token: 'secret', cwd });
+    await new Promise<void>((resolve) => server!.server.listen(0, '127.0.0.1', resolve));
+    const address = server!.server.address() as { port: number };
+    const socket = new WebSocket(`ws://127.0.0.1:${address.port}/ws`);
+    await waitForOpen(socket);
+    socket.send(JSON.stringify({ type: 'auth', token: 'secret' }));
+    await waitForSocketMessage(socket);
+    const result = waitForMatchingMessage(socket, (message) => message.type === 'action:result');
+    socket.send(JSON.stringify({ type: 'action:linkRepo', requestId: 'link-2', projectId: 'project-1', path: '/safe/repo' }));
+
+    expect(await result).toEqual({
+      type: 'action:result',
+      payload: { requestId: 'link-2', ok: false, error: { code: 'REPO_PATH_CONFIRMATION_REQUIRED', message: 'Explicit confirmation is required before registering a repository path.' } },
+    });
+    expect(mocks.repoLinkService.link).toHaveBeenCalledTimes(1);
+    socket.close();
+  });
+
+  it('delegates move and unlink through the repository service with request audit context', async () => {
+    const { createWebServer } = await import('../../src/web/server.js');
+    mocks.repoLinkService.move.mockReturnValue({ entity: { repoId: 'repo-2', projectId: 'project-2', path: '/safe/repo', position: 0, createdAt: 'now', updatedAt: 'now' }, revision: null });
+    mocks.repoLinkService.unlink.mockReturnValue({ entity: { repoId: 'repo-2', unlinked: true }, revision: null });
+    server = createWebServer({ host: '127.0.0.1', port: 0, auth: 'token', token: 'secret', cwd });
+    await new Promise<void>((resolve) => server!.server.listen(0, '127.0.0.1', resolve));
+    const address = server!.server.address() as { port: number };
+    const socket = new WebSocket(`ws://127.0.0.1:${address.port}/ws`);
+    await waitForOpen(socket);
+    socket.send(JSON.stringify({ type: 'auth', token: 'secret' }));
+    await waitForSocketMessage(socket);
+
+    const moved = waitForMatchingMessage(socket, (message) => message.type === 'action:result' && (message.payload as { requestId?: string }).requestId === 'move-1');
+    socket.send(JSON.stringify({ type: 'action:moveRepo', requestId: 'move-1', repoId: 'repo-2', toProjectId: 'project-2', expectedRevision: 4 }));
+    expect(await moved).toMatchObject({ payload: { ok: true, entity: { projectId: 'project-2' } } });
+    expect(mocks.repoLinkService.move).toHaveBeenCalledWith('repo-2', 'project-2', { audit: { actor: 'web', requestId: 'move-1' } });
+
+    const unlinked = waitForMatchingMessage(socket, (message) => message.type === 'action:result' && (message.payload as { requestId?: string }).requestId === 'unlink-1');
+    socket.send(JSON.stringify({ type: 'action:unlinkRepo', requestId: 'unlink-1', projectId: 'project-2', repoId: 'repo-2' }));
+    expect(await unlinked).toMatchObject({ payload: { ok: true, entity: { repoId: 'repo-2', unlinked: true } } });
+    expect(mocks.repoLinkService.unlink).toHaveBeenCalledWith('repo-2', { projectId: 'project-2', audit: { actor: 'web', requestId: 'unlink-1' } });
+    socket.close();
+  });
+
+  it('rejects Project mutations before authentication', async () => {
+    const { createWebServer } = await import('../../src/web/server.js');
+    server = createWebServer({ host: '127.0.0.1', port: 0, auth: 'token', token: 'secret' });
+    await new Promise<void>((resolve) => server!.server.listen(0, '127.0.0.1', resolve));
+    const address = server!.server.address() as { port: number };
+    const socket = new WebSocket(`ws://127.0.0.1:${address.port}/ws`);
+    await waitForOpen(socket);
+    socket.send(JSON.stringify({ type: 'action:createProject', requestId: 'unauthorized-1', name: 'Nope' }));
+    await waitForClose(socket);
+    expect(mocks.projectService.create).not.toHaveBeenCalled();
   });
 
   it('includes featureCatalog and backlogSettings in full state', async () => {
@@ -1177,7 +1827,7 @@ describe('web server', () => {
     execFileSync('git', ['add', 'tracked.txt'], { cwd, stdio: 'ignore', env: gitEnv });
     execFileSync('git', ['commit', '-m', 'init'], { cwd, stdio: 'ignore', env: gitEnv });
 
-    let currentRun = {
+    let currentRun: RunSummary = {
       runId: 42,
       repoId: 'repo-1',
       featureId: 'feat-1',
@@ -1201,8 +1851,8 @@ describe('web server', () => {
       pendingStageRequestPrompt: null,
       pendingStageRequestCreatedAt: null,
     };
-    let history = [
-      { runId: 42, repoId: 'repo-1', featureId: 'feat-1', tool: 'codex', stage: 'implement', status: 'blocked', startedAt: '2026-07-11T10:00:00.000Z', endedAt: null, totalTokens: 100, pipelineResumeSummary: null },
+    let history: RunSummary[] = [
+      { runId: 42, repoId: 'repo-1', featureId: 'feat-1', tool: 'codex', stage: 'implement', status: 'blocked', startedAt: '2026-07-11T10:00:00.000Z', endedAt: null, totalTokens: 100, pipelineResumeSummary: null } as RunSummary,
     ];
     mocks.listRunsForTui.mockImplementation(() => [currentRun]);
     mocks.listRunHistoryForFeature.mockImplementation(() => history);
@@ -1225,7 +1875,7 @@ describe('web server', () => {
     writeFileSync(join(cwd, 'tracked.txt'), 'base\nchanged\n');
     currentRun = { ...currentRun, status: 'running', gateId: null, pipelineStatus: 'running' };
     history = [
-      { runId: 42, repoId: 'repo-1', featureId: 'feat-1', tool: 'codex', stage: 'implement', status: 'running', startedAt: '2026-07-11T10:00:00.000Z', endedAt: null, totalTokens: 100, pipelineResumeSummary: null },
+      { runId: 42, repoId: 'repo-1', featureId: 'feat-1', tool: 'codex', stage: 'implement', status: 'running', startedAt: '2026-07-11T10:00:00.000Z', endedAt: null, totalTokens: 100, pipelineResumeSummary: null } as RunSummary,
     ];
 
     const stateMessagePromise = waitForMatchingMessage(
@@ -1252,7 +1902,7 @@ describe('web server', () => {
   it('rebroadcasts refreshed state:full after resolveGate actions', async () => {
     const { createWebServer } = await import('../../src/web/server.js');
 
-    let currentRun = {
+    let currentRun: RunSummary = {
       runId: 42,
       repoId: 'repo-1',
       featureId: 'feat-1',
@@ -1305,7 +1955,7 @@ describe('web server', () => {
   it('rebroadcasts refreshed state:full after resolveStageRequest actions', async () => {
     const { createWebServer } = await import('../../src/web/server.js');
 
-    let currentRun = {
+    let currentRun: RunSummary = {
       runId: 42,
       repoId: 'repo-1',
       featureId: 'feat-1',
@@ -1377,8 +2027,8 @@ describe('web server', () => {
     };
     let runs: Array<Record<string, unknown>> = [];
     mocks.getFeatureCatalog.mockReturnValue({ 'feat-1': featureEntry });
-    mocks.getPendingFeatures.mockImplementation((catalog: Record<string, typeof featureEntry>, doneFeatureIds: Set<string>, activeFeatureIds: Set<string>) =>
-      Object.values(catalog).filter((feature) => !doneFeatureIds.has(feature.id) && !activeFeatureIds.has(feature.id)));
+    mocks.getPendingFeatures.mockImplementation(((catalog: Record<string, typeof featureEntry>, doneFeatureIds: Set<string>, activeFeatureIds: Set<string>) =>
+      Object.values(catalog).filter((feature) => !doneFeatureIds.has(feature.id) && !activeFeatureIds.has(feature.id))) as any);
     mocks.loadBacklogFromCatalog.mockReturnValue({
       version: 2,
       repo: 'repo',
@@ -1453,10 +2103,10 @@ describe('web server', () => {
       workflow: { mode: 'staged', stages: ['specify'], approvals: { channel: 'telegram', autoAdvance: false }, syncTasksToBacklog: true, sessionPolicy: { mode: 'isolated', alwaysIsolatedStages: [] } },
     };
     mocks.getFeatureCatalog.mockReturnValue({ 'feat-1': featureEntry });
-    mocks.getPendingFeatures.mockImplementation((catalog: Record<string, typeof featureEntry>, doneFeatureIds: Set<string>, activeFeatureIds: Set<string>) =>
+    mocks.getPendingFeatures.mockImplementation(((catalog: Record<string, typeof featureEntry>, doneFeatureIds: Set<string>, activeFeatureIds: Set<string>) =>
       Object.values(catalog)
         .filter((feature) => !doneFeatureIds.has(feature.id) && !activeFeatureIds.has(feature.id))
-        .map((feature) => ({ ...feature, pendingDependencies: feature.dependsOn.filter((dependency) => !doneFeatureIds.has(dependency)) })));
+        .map((feature) => ({ ...feature, pendingDependencies: feature.dependsOn.filter((dependency) => !doneFeatureIds.has(dependency)) }))) as any);
     mocks.loadBacklogFromCatalog.mockReturnValue({
       version: 2,
       repo: 'repo',

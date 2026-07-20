@@ -52,6 +52,11 @@
 - Harness safety: executor validation uses `msq-develop`, rebuilds first, and does
   not manually implement the target feature or launch a nested runner.
 - UI scope: new UI work targets the web dashboard; TUI-only work is not expanded.
+- Source-of-truth boundary: operational state belongs to SQLite; specs/ADRs
+  express versioned intent; `backlog.yaml` is a non-destructive import seed.
+- Domain vocabulary: Project, Epic, Work Item, and Task are distinct entities;
+  `feature|bug` are Work Item types and Repository defaults are the only parent
+  execution defaults.
 - Any violation is resolved or justified in Complexity Tracking.
 
 ## Project Structure

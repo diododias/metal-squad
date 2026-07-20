@@ -66,7 +66,7 @@ para desenhar as stages.
   seletor de tipo + preview.
 - `src/web/client/components/data/KanbanCard.tsx` — badges de type e template (`:25`, `:75`).
 - `src/web/client/pages/BoardPage.tsx` — `typeFilter` (`:40`).
-- `src/web/client/pages/BacklogItemDetail.tsx` — badges + diff/confirmação de tipo.
+- `src/web/client/pages/BacklogItemDetail.tsx` — componente legado do detalhe do Work Item; badges + diff/confirmação de tipo.
 - `src/web/client/components/navigation/WorkflowStepper.tsx` — reuso no preview (`:22`).
 - `tests/web/*` — loading, fallback, erro, diff, labels, acessibilidade.
 

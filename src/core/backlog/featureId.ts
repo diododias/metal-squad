@@ -79,10 +79,19 @@ export function registerBacklogFeatures(
   occupiedIds: ReadonlySet<string>,
   nextRandomIndex: RandomIndex = randomInt,
   source: FeatureRegistrationSource = 'backlog-yaml',
+  options: { preserveCanonicalIds?: boolean } = {},
 ): FeatureRegistrationBatch {
   const reserved = new Set(occupiedIds);
   const allocated = backlog.epics.map((epic) => epic.features.map((input) => {
-    const id = allocateFeatureId(reserved, nextRandomIndex);
+    if (input.id !== undefined) validateExplicitFeatureId(input.id, 'feature.id');
+    const preservedId = options.preserveCanonicalIds === true && input.id !== undefined && isCanonicalFeatureId(input.id)
+      ? input.id
+      : undefined;
+    const preserve = preservedId !== undefined;
+    const id = preservedId ?? allocateFeatureId(reserved, nextRandomIndex);
+    if (reserved.has(id) && !(preserve && occupiedIds.has(id))) {
+      throw new Error(`Feature ID "${id}" is already occupied.`);
+    }
     reserved.add(id);
     return { input, id };
   }));
@@ -112,8 +121,8 @@ export function registerBacklogFeatures(
       registrations.push({
         feature,
         assigned: true,
-        idKind: 'generated',
-        ...(input.id === undefined ? {} : { previousId: input.id }),
+        idKind: classifyFeatureId(id),
+        ...(input.id === undefined || input.id === id ? {} : { previousId: input.id }),
         source,
       });
       return feature;

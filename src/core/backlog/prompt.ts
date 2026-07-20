@@ -3,7 +3,6 @@ import { relative, resolve } from 'node:path';
 import type { Feature } from './schema.js';
 import type { Skill } from '../skills/types.js';
 import type { DependencyPublication } from '../git/dependencies.js';
-import { logCaughtError } from '../events/logging.js';
 
 export interface PromptBuildOptions {
   maxContextChars?: number;
@@ -34,23 +33,17 @@ function collectContextFiles(absPath: string): string[] {
     .flatMap((entry) => collectContextFiles(resolve(absPath, entry.name)));
 }
 
-function readContextEntry(path: string, cwd: string): string | null {
+/**
+ * Collects the readable file paths reachable from a feature `context:` entry.
+ * Returns only relative paths so the adapter/agent can load them on demand
+ * instead of receiving their contents inlined into the prompt.
+ */
+function listContextPaths(path: string, cwd: string): string[] {
   const abs = resolve(cwd, path);
-  if (!existsSync(abs)) return null;
-
-  const entries = collectContextFiles(abs)
-    .map((file) => {
-      try {
-        const content = readFileSync(file, 'utf8');
-        return `--- ${relative(cwd, file)} ---\n${content}`;
-      } catch (error) {
-        logCaughtError('backlog/prompt.readContextEntry', error);
-        return null;
-      }
-    })
-    .filter((entry): entry is string => entry !== null);
-
-  return entries.length > 0 ? entries.join('\n\n') : null;
+  if (!existsSync(abs)) return [];
+  return collectContextFiles(abs)
+    .map((file) => relative(cwd, file))
+    .filter((rel): rel is string => rel.length > 0);
 }
 
 function buildSpecSection(feature: Feature, cwd: string): string | null {
@@ -69,13 +62,14 @@ function buildSpecSection(feature: Feature, cwd: string): string | null {
 }
 
 function buildContextSection(feature: Feature, cwd: string): string | null {
-  const parts = (feature.context ?? [])
-    .map((file) => {
-      return readContextEntry(file, cwd);
-    })
-    .filter((entry): entry is string => entry !== null);
+  const paths = (feature.context ?? [])
+    .flatMap((file) => listContextPaths(file, cwd));
 
-  return parts.length > 0 ? parts.join('\n\n') : null;
+  if (paths.length === 0) return null;
+  return [
+    'Additional technical context (paths only — load on demand, do not inline their contents unless needed):',
+    ...paths.map((p) => `- ${p}`),
+  ].join('\n');
 }
 
 function buildTasksSection(feature: Feature, cwd: string): string | null {
@@ -85,9 +79,10 @@ function buildTasksSection(feature: Feature, cwd: string): string | null {
     if (task.skills && task.skills.length > 0) lines.push(`Skills: ${task.skills.join(', ')}`);
     if (task.dependsOn.length > 0) lines.push(`Depends on: ${task.dependsOn.join(', ')}`);
 
-    const taskFileContent = readOptionalFile(task.taskFile, cwd);
-    if (taskFileContent && task.taskFile) {
-      lines.push(`--- ${task.taskFile} ---\n${taskFileContent}`);
+    // Task files are referenced by path only; the agent loads them on demand
+    // if and when needed, keeping the prompt lean.
+    if (task.taskFile && existsSync(resolve(cwd, task.taskFile))) {
+      lines.push(`Task file: ${task.taskFile}`);
     }
 
     return lines.join('\n');
@@ -154,7 +149,7 @@ export function buildPrompt(
   const technicalSpecification = [
     `Feature: ${feature.id} — ${feature.title}`,
     specContent,
-    contextContent ? `Additional technical context:\n${contextContent}` : null,
+    contextContent,
     tasksContent ? `Tasks:\n${tasksContent}` : null,
   ].filter((section): section is string => Boolean(section)).join('\n\n');
   const directPrompt = stepGuidance?.prompt?.trim() ? normalizePrompt(stepGuidance.prompt) : null;

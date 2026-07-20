@@ -112,6 +112,7 @@ describe('parseHash', () => {
   it('maps hashes to routes', () => {
     expect(parseHash('')).toEqual({ page: 'board' });
     expect(parseHash('#/board')).toEqual({ page: 'board' });
+    expect(parseHash('#/projects')).toEqual({ page: 'projects' });
     expect(parseHash('#/runs')).toEqual({ page: 'runs' });
     expect(parseHash('#/runs/feat-1')).toEqual({ page: 'run-detail', featureId: 'feat-1' });
     expect(parseHash('#/backlog/feat-2')).toEqual({ page: 'backlog-detail', featureId: 'feat-2' });

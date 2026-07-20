@@ -2,8 +2,70 @@ import { dispatch } from '../notify/manager.js';
 import { msqEventBus } from './bus.js';
 import type { TypedEventBus } from './bus.js';
 import type { MsqEvents } from './types.js';
-import { getPausedPipelineIdForBudget } from '../../db/repo.js';
+import { getPausedPipelineIdForBudget, getRun } from '../../db/repo.js';
 import { classifyBlockedOutcome } from '../orchestrator/autoPilot.js';
+import { resolveRuntimeConfig } from '../../config/index.js';
+import { getAdapter } from '../adapters/index.js';
+import type { Tool } from '../backlog/schema.js';
+
+const SESSION_LIMIT_PREFIX = 'session limit reached:';
+
+function isSessionLimitError(error: string): boolean {
+  return error.toLowerCase().startsWith(SESSION_LIMIT_PREFIX);
+}
+
+function buildSessionLimitMessage(
+  featureId: string,
+  currentTool: Tool,
+  pipelineId: number | null | undefined,
+  cwd: string,
+): {
+  message: string;
+  replyMarkup?: { inline_keyboard: { text: string; callback_data: string }[][] };
+} {
+  const config = resolveRuntimeConfig(cwd);
+  const availableTools = config.tools
+    .filter((entry) => entry.id !== currentTool)
+    .filter((entry) => {
+      try {
+        return getAdapter(entry.id, cwd).isAvailable?.() ?? true;
+      } catch {
+        return false;
+      }
+    })
+    .map((entry) => entry.id);
+
+  const baseLines = [
+    `metal-squad: ${featureId} failed — adapter ${currentTool} hit session limit`,
+    `To continue with another adapter, run:`,
+  ];
+
+  const resumeCommand = pipelineId
+    ? `msq resume ${String(pipelineId)} --tool <adapter>`
+    : `msq resume <pipeline> --tool <adapter>`;
+  baseLines.push(resumeCommand);
+
+  if (availableTools.length > 0) {
+    baseLines.push(`Available tools: ${availableTools.join(', ')}`);
+  }
+
+  const message = baseLines.join('\n');
+
+  if (!pipelineId || availableTools.length === 0) {
+    return { message };
+  }
+
+  const replyMarkup = {
+    inline_keyboard: [
+      availableTools.map((tool) => ({
+        text: `Resume with ${tool}`,
+        callback_data: `resume_override:${String(pipelineId)}:${tool}`,
+      })),
+    ],
+  };
+
+  return { message, replyMarkup };
+}
 
 export function attachEventNotifications(
   eventBus: TypedEventBus<MsqEvents> = msqEventBus,
@@ -154,9 +216,30 @@ export function attachEventNotifications(
         },
       }).catch((error: unknown) => { console.error('[notify] run:blocked dispatch failed:', error); });
     }),
-    eventBus.subscribe('run:failed', ({ featureId, featureName, error }) => {
+    eventBus.subscribe('run:failed', ({ featureId, featureName, tool, error, runId, pipelineId, blocked }) => {
+      const resolvedPipelineId = pipelineId ?? getRun(runId)?.pipeline_id;
+      if (blocked || isSessionLimitError(error)) {
+        const { message, replyMarkup } = buildSessionLimitMessage(
+          featureId,
+          tool,
+          resolvedPipelineId,
+          process.cwd(),
+        );
+        void dispatch('run:failed', message, {
+          featureId,
+          runId,
+          pipelineId: resolvedPipelineId,
+          ...(featureName ? { featureName } : {}),
+          error,
+          ...(replyMarkup ? { reply_markup: replyMarkup } : {}),
+        }).catch((dispatchError: unknown) => { console.error('[notify] run:failed dispatch failed:', dispatchError); });
+        return;
+      }
+
       void dispatch('run:failed', `metal-squad: ${featureId} failed — ${error}`, {
         featureId,
+        runId,
+        pipelineId: resolvedPipelineId,
         ...(featureName ? { featureName } : {}),
         error,
       }).catch((dispatchError: unknown) => { console.error('[notify] run:failed dispatch failed:', dispatchError); });

@@ -40,6 +40,11 @@ export interface KanbanCardRun {
   tasksDone?: number | null;
   prUrl?: string | null;
   prNumber?: number | null;
+  repoLabel?: string | null;
+  workItemType?: string | null;
+  templateId?: string | null;
+  templateVersion?: number | null;
+  repoUnhealthy?: boolean;
 }
 
 export interface KanbanCardProps {
@@ -68,6 +73,7 @@ function buildToolRailCells(run: KanbanCardRun): ToolRailCell[] {
   if (run.tool) cells.push({ key: 'tool', icon: '◷', label: run.tool, title: `tool: ${run.tool}` });
   if (run.model) cells.push({ key: 'model', icon: '⚙', label: toShortModelLabel(run.model), title: `model: ${run.model}` });
   if (run.effort) cells.push({ key: 'effort', icon: '▁▃▅', label: run.effort, title: `effort: ${run.effort}` });
+  if (run.repoLabel) cells.push({ key: 'repo', icon: '⌂', label: run.repoLabel, title: `repository: ${run.repoLabel}` });
   if (run.autoAdvance) cells.push({ key: 'auto', icon: '≫', label: 'auto', title: 'auto-advance', color: 'var(--accent-ok)' });
   return cells;
 }
@@ -107,6 +113,13 @@ export function KanbanCard({ run, selected, onClick }: KanbanCardProps): React.J
           <StatusPill status={run.status} />
         </div>
       </div>
+      {(run.workItemType ?? run.templateId) && (
+        <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', marginBottom: 6 }}>
+          {run.workItemType && <span title={`type: ${run.workItemType}`} style={{ display: 'inline-block', padding: '2px 6px', border: '1px solid var(--border-dim)', borderRadius: 'var(--radius-sm)', fontSize: 'var(--text-2xs)', color: 'var(--text-dim)', textTransform: 'uppercase' }}>{run.workItemType}</span>}
+          {run.templateId && <span title={`workflow template: ${run.templateId}${run.templateVersion != null ? ` v${String(run.templateVersion)}` : ''}`} style={{ display: 'inline-block', padding: '2px 6px', border: '1px solid var(--border-dim)', borderRadius: 'var(--radius-sm)', fontSize: 'var(--text-2xs)', color: 'var(--text-dim)' }}>{run.templateId}{run.templateVersion != null && ` v${String(run.templateVersion)}`}</span>}
+        </div>
+      )}
+      {run.repoUnhealthy && <div title="Repository unavailable" style={{ marginBottom: 6, color: 'var(--accent-danger)', fontSize: 'var(--text-2xs)' }}>repository unavailable — cannot start</div>}
 
       {/* Muted context line below the title: epic truncates on its own line;
         * the feature id never truncates — it wraps to the line below whenever

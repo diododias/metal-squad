@@ -17,6 +17,7 @@ export interface PendingApproval {
   id: number;
   featureId: string;
   repoId: string;
+  integrityIssue?: string;
   prompt: string;
   createdAt: string;
   // Only set when `kind === 'stage'`: the underlying stage_requests row kind
@@ -37,6 +38,7 @@ function gateToApproval(gate: GateRow): PendingApproval {
     id: gate.id,
     featureId: gate.featureId,
     repoId: gate.repoId,
+    integrityIssue: gate.integrityIssue,
     prompt: '',
     createdAt: gate.createdAt,
   };
@@ -48,7 +50,8 @@ function collectApprovals(): PendingApproval[] {
     kind: 'stage',
     id: sr.id,
     featureId: sr.featureId,
-    repoId: '',
+    repoId: sr.repoId ?? '',
+    integrityIssue: sr.integrityIssue,
     prompt: sr.prompt,
     createdAt: sr.createdAt,
   }));
@@ -57,6 +60,8 @@ function collectApprovals(): PendingApproval[] {
 
 export interface UseGatesResult {
   gates: PendingApproval[];
+  /** Non-null when the last poll failed; data on screen may be stale. */
+  error: string | null;
   resolve: ResolveApprovalFn;
   /** F1: force-bypass a gate. Unlike resolve(), this also resumes the
    * associated pipeline when it is paused/blocked on this gate, so a single
@@ -75,12 +80,15 @@ export function useGates(intervalMs = 2000): UseGatesResult {
     }
   });
 
+  const [error, setError] = useState<string | null>(null);
+
   const poll = useCallback((): void => {
     try {
       setGates(collectApprovals());
-    } catch (error) {
-      // DB locked or unavailable — keep stale data
-      logCaughtError('useGates.poll', error);
+      setError(null);
+    } catch (caught) {
+      logCaughtError('useGates.poll', caught);
+      setError(caught instanceof Error ? caught.message : 'Failed to poll gates');
     }
   }, []);
 
@@ -120,13 +128,10 @@ export function useGates(intervalMs = 2000): UseGatesResult {
       poll();
       return result;
     }
-    // Stage approvals already unblock execution as soon as they resolve
-    // (the running pipeline polls stage_requests in-process), so "force" is
-    // the same effective action as a normal advance for this kind.
     resolveStageRequest(approval.id, 'advance');
     poll();
     return { resumedPipelineId: null };
   }, [poll]);
 
-  return { gates, resolve, forceResolve };
+  return { gates, error, resolve, forceResolve };
 }

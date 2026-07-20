@@ -3,7 +3,7 @@ import { listCompletedFeatureIds } from '../../db/repo.js';
 import { msqEventBus, logCaughtError } from '../../core/events/index.js';
 import { resolveRepo } from '../../core/repo.js';
 
-export function useCompletedFeatures(intervalMs = 2000): Set<string> {
+export function useCompletedFeatures(intervalMs = 2000): { doneFeatureIds: Set<string>; error: string | null } {
   const repoId = resolveRepo().repoId;
   const [doneFeatureIds, setDoneFeatureIds] = useState<Set<string>>(() => {
     try {
@@ -14,13 +14,16 @@ export function useCompletedFeatures(intervalMs = 2000): Set<string> {
     }
   });
 
+  const [error, setError] = useState<string | null>(null);
+
   useEffect(() => {
     const refresh = (): void => {
       try {
         setDoneFeatureIds(listCompletedFeatureIds(repoId));
-      } catch (error) {
-        // DB locked or unavailable — keep stale data
-        logCaughtError('useCompletedFeatures.refresh', error);
+        setError(null);
+      } catch (caught) {
+        logCaughtError('useCompletedFeatures.refresh', caught);
+        setError(caught instanceof Error ? caught.message : 'Failed to refresh completed features');
       }
     };
 
@@ -36,5 +39,5 @@ export function useCompletedFeatures(intervalMs = 2000): Set<string> {
     };
   }, [intervalMs, repoId]);
 
-  return doneFeatureIds;
+  return { doneFeatureIds, error };
 }

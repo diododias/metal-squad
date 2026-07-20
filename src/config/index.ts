@@ -8,6 +8,8 @@ import { AdapterSchema, EffortSchema, ThinkingSchema, ToolSchema } from '../core
 import { getCatalogMeta, updateCatalogDefaults } from '../db/backlogCatalog.js';
 import { resolveRepo } from '../core/repo.js';
 import { logCaughtError } from '../core/events/logging.js';
+import { configureLogger, type LogLevel } from '../core/logger/index.js';
+import { dateBasedLogPath } from '../core/logger/transports.js';
 
 export const CONFIG_DIR = join(homedir(), '.config', 'metal-squad');
 export const DATA_DIR = join(homedir(), '.local', 'share', 'metal-squad');
@@ -85,6 +87,17 @@ const NotificationsConfig = z.object({
   channels: z.array(NotificationChannelConfig).default([]),
   events: z.array(z.enum(NOTIFICABLE_EVENTS)).default(DEFAULT_NOTIFICATION_EVENTS),
 });
+
+const LoggingConfig = z.object({
+  level: z.enum(['error', 'warn', 'info', 'debug']).default('info'),
+  file: z.union([z.string(), z.literal('auto'), z.literal('none')]).default('auto'),
+  retentionDays: z.number().int().min(1).max(90).default(7),
+});
+
+export function applyLoggingConfig(level: LogLevel, file: string): void {
+  const logFilePath = file === 'none' ? undefined : file === 'auto' ? dateBasedLogPath(DATA_DIR) : file;
+  configureLogger({ level, logFilePath });
+}
 
 const BudgetConfig = z.object({
   alertAtPercent: z.number().int().min(0).max(100).default(80),
@@ -189,6 +202,7 @@ const RuntimeConfigOverrideSchema = z.object({
   budget: BudgetConfig.partial().optional(),
   web: WebConfig.partial().optional(),
   integration: IntegrationConfig.partial().optional(),
+  logging: LoggingConfig.partial().optional(),
 });
 
 export const REPO_CONFIG_PATH = '.msq/config.yaml';
@@ -206,6 +220,7 @@ export const ConfigSchema = z.object({
   web: WebConfig.default({}),
   integration: IntegrationConfig.default({}),
   tools: ToolRegistrySchema.default(DEFAULT_TOOL_REGISTRY),
+  logging: LoggingConfig.default({}),
 });
 export type Config = z.infer<typeof ConfigSchema>;
 export interface AppConfigPatch extends Omit<Partial<Config>, 'notifications' | 'budget' | 'web' | 'integration'> {
@@ -381,8 +396,13 @@ export function saveAppConfigPatch(patch: AppConfigPatch): Config {
 
 /** Creates config.json with defaults on first run. No-op if the file already exists. */
 export function initConfig(): void {
-  if (existsSync(CONFIG_PATH)) return;
+  if (existsSync(CONFIG_PATH)) {
+    const cfg = loadConfig();
+    applyLoggingConfig(cfg.logging.level, cfg.logging.file);
+    return;
+  }
   saveConfig(ConfigSchema.parse({}));
+  applyLoggingConfig('info', 'auto');
 }
 
 export function resolveDbPath(): string {
@@ -519,6 +539,12 @@ export function mergeRuntimeConfig(base: Config, overlay: RuntimeConfigOverride 
           ...overlay.integration,
         }
       : base.integration,
+    logging: overlay.logging
+      ? {
+          ...base.logging,
+          ...overlay.logging,
+        }
+      : base.logging,
   });
 }
 

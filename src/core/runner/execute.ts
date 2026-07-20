@@ -3,7 +3,7 @@ import { resolve, dirname, join } from 'node:path';
 import { spawn } from 'node:child_process';
 import type { Backlog, Effort, Feature, OnFail, Tool } from '../backlog/schema.js';
 import type { DeclaredPublication, PublishEvidence, RunFeatureOptions, RunResult } from '../adapters/types.js';
-import { topoOrder, selectStartableFeaturePlan } from '../orchestrator/graph.js';
+import { assertNoCrossRepositoryDependencies, topoOrder, selectStartableFeaturePlan } from '../orchestrator/graph.js';
 import { schedule } from '../orchestrator/scheduler.js';
 import {
   classifyBlockedOutcome,
@@ -14,7 +14,6 @@ import {
   shouldEvaluateNextCandidate,
 } from '../orchestrator/autoPilot.js';
 import type { AutoPilotOutcomeKind } from '../events/types.js';
-import { logCaughtError } from '../events/logging.js';
 import { getAdapter } from '../adapters/index.js';
 import { resolveRepo } from '../repo.js';
 import {
@@ -49,7 +48,7 @@ import {
   type PipelineWorkflowRevisions,
   type StageRequestRow,
 } from '../../db/repo.js';
-import { getCatalogFeature } from '../../db/backlogCatalog.js';
+import { getCatalogFeature, getFeatureIdOwner } from '../../db/backlogCatalog.js';
 import { dispatch } from '../notify/manager.js';
 import { startTelegramPoller, stopTelegramPoller } from '../notify/telegram-poller.js';
 import { resolveRuntimeConfig } from '../../config/index.js';
@@ -70,6 +69,7 @@ import {
   attachDefaultEventLogger,
   attachEventNotifications,
   attachRunPersistence,
+  logCaughtError,
   msqEventBus,
 } from '../events/index.js';
 import { loadBudgetState, saveBudgetState } from '../../db/repo.js';
@@ -188,6 +188,7 @@ export async function executeBacklog(
   const repoStageSkills = backlog.version === 2 ? backlog.defaults.stageSkills : {};
   const effectiveStageSkills = collectEffectiveStageSkills(repoStageSkills);
   const completedFeatureIds = listCompletedFeatureIds(repoId);
+  assertNoCrossRepositoryDependencies(backlog, repoId, getFeatureIdOwner);
 
   const resolvedPlan = opts.featureId
     ? ((): Feature[] => {
@@ -243,6 +244,20 @@ export async function executeBacklog(
   const detachLogger = attachDefaultEventLogger();
   const detachNotifications = attachEventNotifications();
   startTelegramPoller();
+
+  // Process-level surface so any unhandled promise rejection or stray throw
+  // inside an async subscriber (notification dispatch, persistence write,
+  // telemetry) is captured with a labeled `console.error` instead of dying
+  // silently — the runner process keeps running otherwise, hiding the failure
+  // from anyone tailing the logs. Removed in the `finally` block below.
+  const handleUnhandledRejection = (reason: unknown): void => {
+    logCaughtError('unhandledRejection', reason);
+  };
+  const handleUncaughtException = (error: Error): void => {
+    logCaughtError('uncaughtException', error);
+  };
+  process.on('unhandledRejection', handleUnhandledRejection);
+  process.on('uncaughtException', handleUncaughtException);
 
   const handleGlobalBudgetViolation = (violation: BudgetViolation, feature: Feature): void => {
     if (budgetPauseTriggered) return;
@@ -420,13 +435,15 @@ export async function executeBacklog(
               endedAt: new Date().toISOString(),
             });
           }
-          msqEventBus.emit('run:blocked', {
-            runId,
-            featureId: feature.id,
-            tool: feature.tool,
-            reason: 'needs_input',
-            summary: res.summary,
-          });
+          // Intentionally NOT emitting `run:blocked` here: that event routes
+          // to the generic "needs human intervention" Telegram handler which
+          // strips the question prompt and the discrete options. Routing a
+          // needs_input must go through `createStageRequest('input', ...)`,
+          // which emits `stage:request-created` and lets the stage:input
+          // notification deliver the actual prompt + options buttons. The
+          // caller (single-stage loop or staged stage loop) is responsible
+          // for creating that stage request so exactly one Telegram message
+          // carries the question.
           activeRunIds.delete(runId);
           return { runId, res: { ...res, ok: false } };
         }
@@ -473,6 +490,7 @@ export async function executeBacklog(
             tool: feature.tool,
             error: res.summary,
             kind: 'aborted',
+            pipelineId,
           });
           activeRunIds.delete(runId);
           return { runId, res };
@@ -563,6 +581,8 @@ export async function executeBacklog(
           tool: feature.tool,
           error: res.summary,
           kind: 'execution',
+          pipelineId,
+          blocked: res.blocked,
         });
       }
       activeRunIds.delete(runId);
@@ -586,6 +606,7 @@ export async function executeBacklog(
         tool: feature.tool,
         error: message,
         kind: 'execution',
+        pipelineId,
       });
       activeRunIds.delete(runId);
       throw err;
@@ -634,7 +655,11 @@ export async function executeBacklog(
     }
     const controller = new AbortController();
     activeControllers.set(feature.id, controller);
-    const dependencyFetchFailure = fetchDependencyBranches(dependencyPublications, opts.cwd);
+    const dependencyFetch = fetchDependencyBranches(dependencyPublications, opts.cwd);
+    const dependencyFetchFailure = dependencyFetch.failure;
+    // A dependency whose PR was merged resolves to its base branch, so the
+    // prompt and stacking base must use the ref that still exists.
+    const resolvedPublications = dependencyFetch.publications;
     if (dependencyFetchFailure) {
       const runId = createRun(repoId, feature.id, feature.tool, { pipelineId });
       lastRunIdByFeature.set(feature.id, runId);
@@ -669,7 +694,7 @@ export async function executeBacklog(
           effectiveStageSkills,
           repoStageSkills,
           controller.signal,
-          dependencyPublications,
+          resolvedPublications,
         );
       } finally {
         activeControllers.delete(feature.id);
@@ -677,15 +702,68 @@ export async function executeBacklog(
     }
 
     const skills = registry.resolve(feature.skills ?? [], opts.cwd);
-    const prompt = buildPrompt(feature, skills, opts.cwd, {
+    const basePrompt = buildPrompt(feature, skills, opts.cwd, {
       maxContextChars: config.promptContextCharLimit,
-      dependencyPublications,
+      dependencyPublications: resolvedPublications,
       baseBranch: config.integration.baseBranch,
     });
+    // The single-stage / scheduler path used to ship without the communication
+    // protocol in the prompt — only the staged loop appended it via
+    // buildStagePrompt. Inline it here so EVERY session is born with the
+    // contract, matching the staged behavior and shrinking reliance on the
+    // post-hoc reinforcement turn.
+    const promptWithProtocol = `${basePrompt}\n\n---\n\n${COMMUNICATION_PROTOCOL}`;
     try {
         const singleStage = feature.workflow.stages[0];
-        const { res } = await executeStageRun(feature, prompt, singleStage, controller.signal);
-      return res;
+        // Mirror the staged loop: if the agent asks a question
+        // (MSQ_INPUT_REQUIRED), route it through `createStageRequest` so the
+        // human receives the actual prompt + options buttons in Telegram via
+        // stage:input — NOT the generic "needs human intervention" message
+        // that the old single-stage path implicitly fell back to. Resume the
+        // same adapter session with the human's answer inlined and retry,
+        // reusing the same sessionPolicy decision the staged loop uses.
+        const stageInputs: string[] = [];
+        let nextSession: RunFeatureOptions['session'] | undefined;
+        // Bounded retry: if the agent keeps asking questions, the human can
+        // keep answering; cap the count so a pathological loop cannot run
+        // forever against a misbehaving adapter.
+        const MAX_INPUT_ROUNDS = 8;
+        for (let round = 0; round <= MAX_INPUT_ROUNDS; round += 1) {
+          const prompt = stageInputs.length === 0
+            ? promptWithProtocol
+            : `${promptWithProtocol}\n\n---\n\nAdmin inputs already collected:\n- ${stageInputs.join('\n- ')}`;
+          const { runId, res } = await executeStageRun(feature, prompt, singleStage, controller.signal, nextSession);
+          if (res.control?.type !== 'needs_input') return res;
+          // Stage request routes the question to the operator via stage:input
+          // (notifications.ts) with the OPTIONS buttons when present.
+          const stageLabel = singleStage ?? 'single';
+          const requestId = createStageRequest(
+            pipelineId,
+            feature.id,
+            stageLabel,
+            'input',
+            res.control.prompt,
+            { runId, options: res.control.options },
+          );
+          const response = await waitForStageRequestResponse(requestId, 2_000);
+          stageInputs.push(response);
+          const retryPlan = decideStageTransition({
+            policy: feature.workflow.sessionPolicy,
+            telemetry: getRunContextTelemetry(runId),
+            nextStage: stageLabel,
+            expectedTool: resolvePrimaryTool(
+              feature,
+              opts.resumeOverride?.featureId === feature.id ? opts.resumeOverride : undefined,
+            ),
+            previousSession: res.session,
+          });
+          nextSession = retryPlan.session.mode === 'resume' ? retryPlan.session : undefined;
+        }
+        // Exceeded input rounds — give up rather than spin forever.
+        return {
+          ok: false,
+          summary: 'agent kept asking MSQ_INPUT_REQUIRED after the bound of retry rounds',
+        };
     } finally {
       activeControllers.delete(feature.id);
     }
@@ -893,7 +971,13 @@ export async function executeBacklog(
     finishPipeline(pipelineId, pipelineStatus);
     const msg = err instanceof Error ? err.message : String(err);
     if (!msg.startsWith('Feature ')) {
-      void dispatch('run:failed', `metal-squad: execution stopped — ${msg}`).catch(() => { /* ignore dispatch errors */ });
+      void dispatch('run:failed', `metal-squad: execution stopped — ${msg}`).catch((dispatchError: unknown) => {
+        // Notification dispatch failures (unconfigured channel, network drop,
+        // credential rotation) should never vanish — the original error is
+        // rethrown on the next line, but the operator may never see *why* the
+        // notification didn't arrive. Log it with a distinct label.
+        logCaughtError('runner.notify.run:failed', dispatchError);
+      });
     }
     throw err;
   } finally {
@@ -904,6 +988,8 @@ export async function executeBacklog(
     detachPersistence();
     process.removeListener('SIGINT', handleSignal);
     process.removeListener('SIGTERM', handleSignal);
+    process.off('unhandledRejection', handleUnhandledRejection);
+    process.off('uncaughtException', handleUncaughtException);
   }
 }
 
@@ -1371,18 +1457,22 @@ export function applyPublishGate(
   const verification = verify(opts.cwd, allowedBases);
   const declared = declaredPublicationEvidence(result.control.publication);
   const observed = verification.evidence;
+  // baseBranch is deliberately excluded from this comparison: verify() already
+  // confirms observed.baseBranch is one of allowedBases (H29), so an agent
+  // declaring a different-but-still-allowed base (e.g. the backlog dependency
+  // branch instead of the base gh actually used) is not a fabricated
+  // publication and must not fail a genuinely verified PR.
   const matchesDeclaration = observed.branch === declared.branch
-    && observed.baseBranch === declared.baseBranch
     && observed.prNumber === declared.prNumber
     && observed.prUrl === declared.prUrl;
   const evidence = {
     ...declared,
+    baseBranch: observed.baseBranch,
     commitSha: observed.commitSha,
     remoteBranch: observed.remoteBranch,
   };
   const diverged = !matchesDeclaration && (
     (observed.branch !== null && observed.branch !== declared.branch)
-    || observed.baseBranch !== declared.baseBranch
     || (observed.prNumber !== null && observed.prNumber !== declared.prNumber)
     || (observed.prUrl !== null && observed.prUrl !== declared.prUrl)
   );

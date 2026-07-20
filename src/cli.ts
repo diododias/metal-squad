@@ -11,7 +11,11 @@ import { registerConfig } from './commands/config.js';
 import { registerUi } from './commands/ui.js';
 import { registerWeb } from './commands/web.js';
 import { registerDaemon } from './commands/daemon.js';
+import { registerProjects } from './commands/projects.js';
+import { registerEpics } from './commands/epics.js';
+import { registerWorkItems } from './commands/workItems.js';
 import { initConfig } from './config/index.js';
+import { setLogLevel } from './core/logger/index.js';
 
 export async function run(argv: string[]): Promise<void> {
   initConfig();
@@ -21,7 +25,18 @@ export async function run(argv: string[]): Promise<void> {
   program
     .name('msq')
     .description('metal-squad — orquestrador de pipelines spec-kit com IA')
-    .version('0.0.1');
+    .version('0.0.1')
+    .option('--verbose', 'Enable verbose logging (INFO level)')
+    .option('--debug', 'Enable debug logging (DEBUG level)');
+
+  program.hook('preAction', () => {
+    const opts = program.opts<{ debug?: boolean; verbose?: boolean }>();
+    if (opts.debug) {
+      setLogLevel('debug');
+    } else if (opts.verbose) {
+      setLogLevel('info');
+    }
+  });
 
   registerInit(program);
   registerBacklog(program);
@@ -35,6 +50,9 @@ export async function run(argv: string[]): Promise<void> {
   registerUi(program);
   registerWeb(program);
   registerDaemon(program);
+  registerProjects(program);
+  registerEpics(program);
+  registerWorkItems(program);
 
   await program.parseAsync(argv);
 }

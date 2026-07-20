@@ -88,8 +88,11 @@ vez de criar um caminho paralelo.
   precisem aparecer no runtime exigem o fluxo de publicação/carregamento
   definido nas rules, não apenas a edição do YAML.
 - Mantenha os prompts independentes de adapter: skills aparecem como comandos
-  slash (`/nome`), a especificação técnica é íntegra e a resposta administrativa
-  preenchida vem por último.
+  slash (`/nome`), a especificação técnica (`feature.spec` + `feature.specFile`)
+  é íntegra e a resposta administrativa preenchida vem por último. Arquivos de
+  contexto (`feature.context`) e `task.taskFile` entram no prompt apenas como
+  caminhos (`- ctx/foo.ts`, `Task file: tasks/t1.md`); o adapter/agente decide
+  se e quando carregar seu conteúdo sob demanda.
 - Centralize regras compartilhadas (especialmente workflow, skills, spawn e
   persistência). Não replique precedence, SQL ou parsing em cada command/UI.
 - Para bugs reais revelados durante validação, registre o aprendizado no

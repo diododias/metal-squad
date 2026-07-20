@@ -6,11 +6,13 @@ import { spawn, execFileSync } from 'node:child_process';
 import { WebSocketServer, type WebSocket } from 'ws';
 import type { MsqEvents } from '../core/events/types.js';
 import { msqEventBus, logCaughtError } from '../core/events/index.js';
+import { startTelegramPoller, stopTelegramPoller } from '../core/notify/telegram-poller.js';
 import { assertWritableDbPath } from '../db/index.js';
 import {
   abortPipeline,
   forceResolveGate,
   getPipeline,
+  getRun,
   listCompletedFeatureIds,
   listRunEvents,
   listRunHistoryForFeature,
@@ -24,30 +26,60 @@ import {
   resolveGate,
   resolveStageRequest,
   resumePipeline,
+  getEpicTemplateTarget,
+  getWorkItemTemplateTarget,
+  isWorkItemPristine,
+  changeWorkItemType,
+  type WorkItemTemplateSnapshot,
 } from '../db/repo.js';
+import { RevisionConflictError, WorkItemHasHistoryError } from '../db/errors.js';
 import { getAdapter } from '../core/adapters/index.js';
 import { computeRunBreakdown } from '../core/stats.js';
-import { resolveRepo } from '../core/repo.js';
+import { resolveRepo, resolveRepoAllowlist } from '../core/repo.js';
+import { resolveWorkItemExecutionContext } from '../core/workItemExecutionContext.js';
 import { loadBacklogFromCatalog } from '../core/backlog/load.js';
-import { selectStartableFeaturePlan } from '../core/orchestrator/graph.js';
+import { assertNoCrossRepositoryDependencies, selectStartableFeaturePlan } from '../core/orchestrator/graph.js';
 import { validateBacklogSkills } from '../core/skills/index.js';
 import { ConfigSchema, loadConfig, resolveRuntimeConfig, saveAppConfigPatch, saveConfig, saveNotificationsPatch, type NotificationsPatch, type ToolRegistryEntry } from '../config/index.js';
 import { assertConfiguredNotificationChannel } from '../core/notify/manager.js';
 import { clearSecret, setSecret } from '../security/secrets.js';
-import { updateCatalogFeature, updateCatalogTask, updateCatalogDefaults, type FeaturePatch, type CatalogDefaultsPatch } from '../db/backlogCatalog.js';
+import { getFeatureIdOwner, updateCatalogFeature, updateCatalogTask, updateCatalogDefaults, type FeaturePatch, type CatalogDefaultsPatch } from '../db/backlogCatalog.js';
 import type { Feature, Task } from '../core/backlog/schema.js';
-import { buildMsqWebState, appendNotification, resetWebStateCaches } from './state.js';
+import { epicService } from '../core/epicService.js';
+import { workItemService } from '../core/workItemService.js';
+import { projectService, repoLinkService } from '../core/projectService.js';
+import { buildMsqWebState, appendNotification, resetWebStateCaches, invalidateWorkflowTemplatesCache } from './state.js';
 import { createWebAuth, isAllowedHostHeader, isAllowedOrigin, timingSafeEqualStrings } from './auth.js';
+import { EpicActionMessageSchema, ProjectActionMessageSchema, RepositoryActionMessageSchema, WorkItemActionMessageSchema, WorkflowTemplateActionMessageSchema, WorkItemTypeChangeMessageSchema, ResolveWorkflowTemplateMessageSchema } from './schemas.js';
+import {
+  archiveWorkflowTemplate,
+  createWorkflowTemplate,
+  duplicateWorkflowTemplate,
+  mapProjectWorkItemTemplate,
+  resolveTemplate,
+  updateWorkflowTemplate,
+  type WorkflowTemplate,
+} from '../db/workflowTemplates.js';
 import type {
   AppConfigPatch,
+  EpicActionError,
+  EpicActionResult,
   FeatureConfigPatch,
   FeatureConfigSaveIssue,
   FeatureConfigSaveResult,
   BudgetConfigPatch,
   ProjectDefaultsPatch,
+  ProjectActionError,
+  ProjectActionResult,
+  RepositoryActionResult,
   RunChangesPayload,
   SecretPatch,
   TaskConfigPatch,
+  UiNotification,
+  WorkItemActionError,
+  WorkItemActionResult,
+  MsqWorkItemType,
+  ResolveWorkflowTemplateResult,
   WebSocketClientMessage,
   WebSocketServerMessage,
 } from './types.js';
@@ -222,6 +254,30 @@ function computeRunChanges(runId: number, cwd: string): RunChangesPayload {
   return { runId, branch, remoteUrl, files, notApplicableReason: null };
 }
 
+function computeRunChangesForWorkItem(runId: number): RunChangesPayload {
+  const run = getRun(runId);
+  if (!run) {
+    return { runId, branch: null, remoteUrl: null, files: [], notApplicableReason: 'Run was not found.' };
+  }
+  try {
+    const context = resolveWorkItemExecutionContext(run.feature_id);
+    if (context.repoId !== run.repo_id) {
+      return {
+        runId,
+        branch: null,
+        remoteUrl: null,
+        files: [],
+        notApplicableReason: 'Run repository no longer matches its Work Item repository.',
+      };
+    }
+    return computeRunChanges(runId, context.cwd);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    logCaughtError('web/server.computeRunChangesForWorkItem', error);
+    return { runId, branch: null, remoteUrl: null, files: [], notApplicableReason: message };
+  }
+}
+
 const BROADCAST_EVENTS: (keyof MsqEvents)[] = [
   'run:start',
   'run:status',
@@ -248,6 +304,80 @@ export interface RunningWebServer {
   wss: WebSocketServer;
   url: string;
   close: () => Promise<void>;
+}
+
+/**
+ * Maps a high-signal broadcast event into a {@link UiNotification} so the web
+ * dashboard can surface it as a toast without diffing raw event payloads. The
+ * notification survives across `reconcileWebState` rebuilds because
+ * `buildCurrentState` preserves `latestState.notifications`.
+ *
+ * Returns `null` for events that are either too noisy (every `run:output`
+ * line) or already adequately covered by the receiving component (e.g. status
+ * diffs that flow into the run detail view).
+ */
+function buildEventNotification(
+  event: keyof MsqEvents,
+  payload: MsqEvents[keyof MsqEvents],
+): UiNotification | null {
+  const now = new Date().toISOString();
+  const id = `${String(Date.now())}-${String(Math.random()).slice(2, 8)}`;
+  if (event === 'ui:info') {
+    const message = (payload as { message?: string }).message ?? '';
+    if (!message) return null;
+    return { id, type: 'info', tone: 'info', event, message, createdAt: now };
+  }
+  if (event === 'ui:notice') {
+    const message = (payload as { message?: string }).message ?? '';
+    if (!message) return null;
+    return { id, type: 'notice', tone: 'warn', event, message, createdAt: now };
+  }
+  if (event === 'run:done') {
+    const p = payload as { featureId?: string; result?: { summary?: string } };
+    const featureId = p.featureId ?? 'feature';
+    const summary = p.result?.summary ?? 'done';
+    return { id, type: 'info', tone: 'ok', event, message: `${featureId} done — ${summary}`, createdAt: now };
+  }
+  if (event === 'run:failed') {
+    const p = payload as { featureId?: string; error?: string; kind?: string };
+    const featureId = p.featureId ?? 'feature';
+    const error = p.error ?? 'unknown error';
+    const kindLabel = p.kind === 'aborted' ? ' (aborted)' : '';
+    return { id, type: 'notice', tone: 'danger', event, message: `${featureId} failed${kindLabel} — ${error}`, createdAt: now };
+  }
+  if (event === 'run:blocked') {
+    const p = payload as { featureId?: string; code?: string; reason?: string; summary?: string };
+    const featureId = p.featureId ?? 'feature';
+    const detail = p.code ?? p.reason ?? 'blocked';
+    return { id, type: 'notice', tone: 'warn', event, message: `${featureId} blocked (${detail}) — ${p.summary ?? ''}`.trim(), createdAt: now };
+  }
+  if (event === 'gate:created') {
+    const p = payload as { gateId?: number; featureId?: string };
+    const featureId = p.featureId ?? 'feature';
+    return { id, type: 'notice', tone: 'warn', event, message: `${featureId} — gate awaiting decision`, createdAt: now };
+  }
+  if (event === 'stage:request-created') {
+    const p = payload as { featureId?: string; stage?: string; kind?: string };
+    const featureId = p.featureId ?? 'feature';
+    const stageLabel = p.stage ? ` · ${p.stage}` : '';
+    const action = p.kind === 'input' ? 'needs input' : 'awaiting approval';
+    return { id, type: 'notice', tone: 'warn', event, message: `${featureId}${stageLabel} — ${action}`, createdAt: now };
+  }
+  if (event === 'budget:alert') {
+    const p = payload as { percent?: number; spent?: number; limit?: number };
+    return {
+      id, type: 'notice', tone: 'warn', event,
+      message: `Budget ${String(p.percent ?? '?')}% reached (${String(p.spent ?? '?')}/${String(p.limit ?? '?')})`,
+      createdAt: now,
+    };
+  }
+  if (event === 'timeout:approval-created') {
+    const p = payload as { featureId?: string; stage?: string };
+    const featureId = p.featureId ?? 'feature';
+    const stageLabel = p.stage ? ` · ${p.stage}` : '';
+    return { id, type: 'notice', tone: 'warn', event, message: `${featureId}${stageLabel} — timed out (retry or keep blocked?)`, createdAt: now };
+  }
+  return null;
 }
 
 export function createWebServer(options: {
@@ -330,8 +460,8 @@ export function createWebServer(options: {
 
   function sendRunHistory(client: Client, featureId: string, force = false): void {
     try {
-      const { repoId } = resolveRepo(cwd);
-      const payload = { featureId, runs: listRunHistoryForFeature(repoId, featureId) };
+      const context = resolveWorkItemExecutionContext(featureId);
+      const payload = { featureId, runs: listRunHistoryForFeature(context.repoId, featureId) };
       const signature = JSON.stringify(payload);
       if (!force && client.historyPayloadSignatures.get(featureId) === signature) return;
       client.historyPayloadSignatures.set(featureId, signature);
@@ -342,20 +472,20 @@ export function createWebServer(options: {
     }
   }
 
-  function sendRunChanges(client: Client, runId: number, featureCwd: string, force = false): void {
-    const payload = computeRunChanges(runId, featureCwd);
+  function sendRunChanges(client: Client, runId: number, force = false): void {
+    const payload = computeRunChangesForWorkItem(runId);
     const signature = JSON.stringify(payload);
     if (!force && client.changesPayloadSignatures.get(runId) === signature) return;
     client.changesPayloadSignatures.set(runId, signature);
     sendTo(client, { type: 'run:changes', payload });
   }
 
-  function refreshSubscribedViews(featureCwd: string): void {
+  function refreshSubscribedViews(_featureCwd: string): void {
     for (const client of clients.values()) {
       if (!client.authenticated || client.socket.readyState !== 1 /* OPEN */) continue;
       for (const runId of client.detailSubscriptions) sendRunDetail(client, runId);
       for (const featureId of client.historySubscriptions) sendRunHistory(client, featureId);
-      for (const runId of client.changesSubscriptions) sendRunChanges(client, runId, featureCwd);
+      for (const runId of client.changesSubscriptions) sendRunChanges(client, runId);
     }
   }
 
@@ -396,18 +526,19 @@ export function createWebServer(options: {
       } else {
         broadcast({ type: event, payload });
       }
-      if (event === 'ui:info' || event === 'ui:notice') {
-        const message =
-          typeof payload === 'object' && 'message' in payload && typeof payload.message === 'string'
-            ? payload.message
-            : '';
-        latestState = appendNotification(latestState, {
-          id: `${String(Date.now())}-${String(Math.random())}`,
-          type: event === 'ui:info' ? 'info' : 'notice',
-          message,
-          createdAt: new Date().toISOString(),
-        });
+      // Surface a toast-tier notification for high-signal events. Append to
+      // `latestState.notifications` so the next reconcile/state:full captures
+      // it; the client diffs seen IDs (see App.tsx) to render toasts.
+      const notification = buildEventNotification(event, payload);
+      if (notification) {
+        latestState = appendNotification(latestState, notification);
         latestStateSignature = JSON.stringify(latestState);
+      }
+      if (event === 'ui:info' || event === 'ui:notice') {
+        // `appendNotification` above already captured the message; the explicit
+        // state:full broadcast below used to live here, but reconcileWebState
+        // (further down) now does that for any non-output, non-budget event —
+        // including these — so the duplicate broadcast is dropped.
         broadcast({ type: 'state:full', payload: latestState });
         return;
       }
@@ -461,6 +592,8 @@ export function createWebServer(options: {
     res.writeHead(200, { 'Content-Type': file.contentType });
     res.end(file.body);
   }
+
+  startTelegramPoller();
 
   const httpServer = createServer((req, res) => {
     void handleRequest(req, res);
@@ -556,7 +689,7 @@ export function createWebServer(options: {
         }
         const runId = Number(changesMatch[1]);
         res.writeHead(200, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify(computeRunChanges(runId, cwd)));
+        res.end(JSON.stringify(computeRunChangesForWorkItem(runId)));
         return;
       }
 
@@ -704,6 +837,66 @@ export function createWebServer(options: {
     featureCwd: string,
   ): Promise<void> {
     switch (message.type) {
+      case 'action:createProject':
+      case 'action:updateProject': {
+        const result = handleProjectAction(message);
+        sendTo(client, result);
+        if (result.payload.ok) {
+          // Projects are intentionally not projected into MsqWebState until
+          // PRJ-07. Force this publication so current clients still reconcile
+          // after a successful mutation.
+          reconcileWebState(featureCwd, { forceBroadcast: true });
+        }
+        break;
+      }
+      case 'action:linkRepo':
+      case 'action:moveRepo':
+      case 'action:unlinkRepo': {
+        const result = handleRepositoryAction(message, featureCwd);
+        sendTo(client, result);
+        if (result.payload.ok) reconcileWebState(featureCwd, { forceBroadcast: true });
+        break;
+      }
+      case 'action:createEpic':
+      case 'action:updateEpic': {
+        const result = handleEpicAction(message);
+        sendTo(client, result);
+        if (result.payload.ok) reconcileWebState(featureCwd, { forceBroadcast: true });
+        break;
+      }
+      case 'action:createWorkItem': {
+        const result = handleWorkItemAction(message);
+        sendTo(client, result);
+        if (result.payload.ok) reconcileWebState(featureCwd, { forceBroadcast: true });
+        break;
+      }
+      case 'action:resolveWorkflowTemplate': {
+        const result = handleResolveWorkflowTemplate(message);
+        sendTo(client, result);
+        break;
+      }
+      case 'action:changeWorkItemType': {
+        const result = handleWorkItemTypeChange(message);
+        sendTo(client, result);
+        // A preview writes nothing, so only a confirmed change rebroadcasts.
+        if (result.type === 'action:result' && result.payload.ok && 'workItem' in result.payload) {
+          reconcileWebState(featureCwd, { forceBroadcast: true });
+        }
+        break;
+      }
+      case 'action:createWorkflowTemplate':
+      case 'action:updateWorkflowTemplate':
+      case 'action:duplicateWorkflowTemplate':
+      case 'action:archiveWorkflowTemplate':
+      case 'action:setTypeTemplate': {
+        const result = handleWorkflowTemplateAction(message);
+        sendTo(client, result);
+        if (result.type === 'action:result' && result.payload.ok) {
+          invalidateWorkflowTemplatesCache();
+          reconcileWebState(featureCwd, { forceBroadcast: true });
+        }
+        break;
+      }
       case 'action:startFeature': {
         startFeature(message.featureId, featureCwd);
         reconcileWebState(featureCwd);
@@ -849,7 +1042,7 @@ export function createWebServer(options: {
       }
       case 'subscribe:runChanges': {
         client.changesSubscriptions.add(message.runId);
-        sendRunChanges(client, message.runId, featureCwd, true);
+        sendRunChanges(client, message.runId, true);
         break;
       }
       case 'unsubscribe:runChanges': {
@@ -860,6 +1053,376 @@ export function createWebServer(options: {
       default: {
         break;
       }
+    }
+  }
+
+  function actionResultRequestId(message: unknown): string {
+    if (typeof message !== 'object' || message === null) return '';
+    const requestId = (message as { requestId?: unknown }).requestId;
+    return typeof requestId === 'string' ? requestId : '';
+  }
+
+  function projectActionError(error: unknown): ProjectActionError {
+    const code = typeof error === 'object' && error !== null
+      ? (error as { code?: unknown }).code
+      : undefined;
+    if (code === 'PROJECT_NOT_FOUND') {
+      return { code, message: 'Project was not found.' };
+    }
+    if (code === 'REVISION_CONFLICT') {
+      return { code, message: 'Project was changed by another request. Refresh and try again.' };
+    }
+    return { code: 'PROJECT_ACTION_FAILED', message: 'Could not save project.' };
+  }
+
+  function handleProjectAction(message: unknown): ProjectActionResult {
+    const parsed = ProjectActionMessageSchema.safeParse(message);
+    if (!parsed.success) {
+      return {
+        type: 'action:result',
+        payload: {
+          requestId: actionResultRequestId(message),
+          ok: false,
+          error: { code: 'INVALID_PAYLOAD', message: 'Invalid project action payload.' },
+        },
+      };
+    }
+
+    try {
+      const serviceResult = parsed.data.type === 'action:createProject'
+        ? projectService.create({ name: parsed.data.name, description: parsed.data.description })
+        : projectService.update(parsed.data.projectId, parsed.data.patch, parsed.data.expectedRevision);
+      return {
+        type: 'action:result',
+        payload: { requestId: parsed.data.requestId, ok: true, entity: serviceResult.entity },
+      };
+    } catch (error) {
+      return {
+        type: 'action:result',
+        payload: {
+          requestId: parsed.data.requestId,
+          ok: false,
+          error: projectActionError(error),
+        },
+      };
+    }
+  }
+
+  function repositoryActionError(error: unknown): ProjectActionError {
+    const code = typeof error === 'object' && error !== null
+      ? (error as { code?: unknown }).code
+      : undefined;
+    if (code === 'PROJECT_NOT_FOUND' || code === 'REPO_NOT_FOUND' || code === 'REPO_NOT_LINKED_TO_PROJECT' || code === 'REPO_ALREADY_LINKED' || code === 'REPO_IN_USE'
+      || code === 'REPO_PATH_CONFIRMATION_REQUIRED' || code === 'REPO_PATH_NOT_FOUND' || code === 'REPO_PATH_NOT_DIRECTORY' || code === 'REPO_PATH_NOT_ALLOWED') {
+      return { code, message: error instanceof Error ? error.message : 'Repository action failed.' };
+    }
+    return { code: 'PROJECT_ACTION_FAILED', message: 'Could not change repository links.' };
+  }
+
+  function handleRepositoryAction(message: unknown, featureCwd: string): RepositoryActionResult {
+    const parsed = RepositoryActionMessageSchema.safeParse(message);
+    if (!parsed.success) {
+      return {
+        type: 'action:result',
+        payload: { requestId: actionResultRequestId(message), ok: false, error: { code: 'INVALID_PAYLOAD', message: 'Invalid repository action payload.' } },
+      };
+    }
+    const audit = { actor: 'web', requestId: parsed.data.requestId };
+    try {
+      switch (parsed.data.type) {
+        case 'action:linkRepo': {
+          const result = repoLinkService.link(parsed.data.projectId, parsed.data, {
+            allowedRoots: resolveRepoAllowlist(featureCwd), audit,
+          });
+          return { type: 'action:result', payload: { requestId: parsed.data.requestId, ok: true, entity: result.entity } };
+        }
+        case 'action:moveRepo': {
+          const result = repoLinkService.move(parsed.data.repoId, parsed.data.toProjectId, { audit });
+          return { type: 'action:result', payload: { requestId: parsed.data.requestId, ok: true, entity: result.entity } };
+        }
+        case 'action:unlinkRepo': {
+          const result = repoLinkService.unlink(parsed.data.repoId, { projectId: parsed.data.projectId, audit });
+          return { type: 'action:result', payload: { requestId: parsed.data.requestId, ok: true, entity: result.entity } };
+        }
+        default: {
+          throw new Error('Unsupported repository action.');
+        }
+      }
+    } catch (error) {
+      return { type: 'action:result', payload: { requestId: parsed.data.requestId, ok: false, error: repositoryActionError(error) } };
+    }
+  }
+
+  function epicActionError(error: unknown): EpicActionError {
+    const code = typeof error === 'object' && error !== null
+      ? (error as { code?: unknown }).code
+      : undefined;
+    if (code === 'PROJECT_NOT_FOUND' || code === 'REVISION_CONFLICT') {
+      return { code, message: error instanceof Error ? error.message : 'Epic action failed.' };
+    }
+    return { code: 'EPIC_ACTION_FAILED', message: 'Could not save epic.' };
+  }
+
+  function handleEpicAction(message: unknown): EpicActionResult {
+    const parsed = EpicActionMessageSchema.safeParse(message);
+    if (!parsed.success) {
+      return {
+        type: 'action:result',
+        payload: { requestId: actionResultRequestId(message), ok: false, error: { code: 'INVALID_PAYLOAD', message: 'Invalid epic action payload.' } },
+      };
+    }
+    try {
+      const serviceResult = parsed.data.type === 'action:createEpic'
+        ? epicService.create({ projectId: parsed.data.projectId, title: parsed.data.title, description: parsed.data.description, audit: { actor: 'web', requestId: parsed.data.requestId } })
+        : epicService.update(parsed.data.epicId, parsed.data.patch, parsed.data.expectedRevision, { audit: { actor: 'web', requestId: parsed.data.requestId } });
+      return {
+        type: 'action:result',
+        payload: { requestId: parsed.data.requestId, ok: true, entity: serviceResult.entity },
+      };
+    } catch (error) {
+      return {
+        type: 'action:result',
+        payload: { requestId: parsed.data.requestId, ok: false, error: epicActionError(error) },
+      };
+    }
+  }
+
+  function workItemActionError(error: unknown): WorkItemActionError {
+    const code = typeof error === 'object' && error !== null ? (error as { code?: unknown }).code : undefined;
+    if (code === 'EPIC_NOT_FOUND' || code === 'REPOSITORY_NOT_IN_PROJECT' || code === 'REPOSITORY_UNAVAILABLE'
+      || code === 'DEPENDENCY_NOT_FOUND' || code === 'CROSS_REPOSITORY_DEPENDENCY' || code === 'DEPENDENCY_CYCLE'
+      // Type-change and template-resolution failures reuse this mapper; their
+      // messages are actionable, so they are passed through verbatim.
+      || code === 'WORK_ITEM_NOT_FOUND' || code === 'WORK_ITEM_HAS_HISTORY' || code === 'REVISION_CONFLICT'
+      || code === 'WORKFLOW_TEMPLATE_NOT_FOUND' || code === 'WORKFLOW_TEMPLATE_INVALID') {
+      return { code, message: error instanceof Error ? error.message : 'Could not create Work Item.' };
+    }
+    return { code: 'WORK_ITEM_ACTION_FAILED', message: 'Could not create Work Item.' };
+  }
+
+  function workflowTemplateActionError(error: unknown): { code: string; message: string } {
+    const code = typeof error === 'object' && error !== null ? (error as { code?: unknown }).code : undefined;
+    if (code === 'WORKFLOW_TEMPLATE_NOT_FOUND' || code === 'WORKFLOW_TEMPLATE_INVALID'
+      || code === 'WORKFLOW_TEMPLATE_IN_USE' || code === 'WORKFLOW_TEMPLATE_ARCHIVED'
+      || code === 'WORKFLOW_TEMPLATE_IMMUTABLE' || code === 'WORKFLOW_TEMPLATE_SCOPE_MISMATCH'
+      || code === 'REVISION_CONFLICT' || code === 'PROJECT_NOT_FOUND') {
+      return { code, message: error instanceof Error ? error.message : 'Workflow template action failed.' };
+    }
+    return { code: 'WORKFLOW_TEMPLATE_ACTION_FAILED', message: 'Workflow template action failed.' };
+  }
+
+  /** Template CRUD + Project/type mapping. Every branch returns the template's
+   * current `revision` so the client can send `expectedRevision` on the next
+   * write. */
+  function handleWorkflowTemplateAction(message: unknown): WebSocketServerMessage {
+    const parsed = WorkflowTemplateActionMessageSchema.safeParse(message);
+    if (!parsed.success) {
+      return { type: 'action:result', payload: { requestId: actionResultRequestId(message), ok: false, error: { code: 'INVALID_PAYLOAD', message: 'Invalid workflow template action payload.' } } };
+    }
+    const audit = { actor: 'web', requestId: parsed.data.requestId };
+    try {
+      switch (parsed.data.type) {
+        case 'action:createWorkflowTemplate': {
+          const template = createWorkflowTemplate({
+            projectId: parsed.data.projectId,
+            name: parsed.data.name,
+            definition: parsed.data.definition,
+            audit,
+          });
+          return templateActionOk(parsed.data.requestId, template);
+        }
+        case 'action:updateWorkflowTemplate': {
+          const template = updateWorkflowTemplate(
+            parsed.data.templateId,
+            parsed.data.patch,
+            parsed.data.expectedRevision,
+            { audit },
+          );
+          return templateActionOk(parsed.data.requestId, template);
+        }
+        case 'action:duplicateWorkflowTemplate': {
+          const template = duplicateWorkflowTemplate(parsed.data.templateId, {
+            projectId: parsed.data.projectId,
+            ...(parsed.data.name === undefined ? {} : { name: parsed.data.name }),
+            audit,
+          });
+          return templateActionOk(parsed.data.requestId, template);
+        }
+        case 'action:archiveWorkflowTemplate': {
+          const template = archiveWorkflowTemplate(parsed.data.templateId, { audit });
+          return templateActionOk(parsed.data.requestId, template);
+        }
+        case 'action:setTypeTemplate': {
+          mapProjectWorkItemTemplate({
+            projectId: parsed.data.projectId,
+            workItemType: parsed.data.workItemType,
+            templateId: parsed.data.templateId,
+            audit,
+          });
+          return { type: 'action:result', payload: { requestId: parsed.data.requestId, ok: true } };
+        }
+      }
+    } catch (error) {
+      return { type: 'action:result', payload: { requestId: parsed.data.requestId, ok: false, error: workflowTemplateActionError(error) } };
+    }
+  }
+
+  function templateActionOk(requestId: string, template: WorkflowTemplate): WebSocketServerMessage {
+    return {
+      type: 'action:result',
+      payload: {
+        requestId,
+        ok: true,
+        workflowTemplate: {
+          templateId: template.templateId,
+          name: template.name,
+          version: template.version,
+          revision: template.revision,
+          builtin: template.builtin,
+          archived: template.archivedAt !== null,
+          scopeProjectId: template.scopeProjectId,
+          stageCount: template.definition.workflow.stages.length,
+        },
+        revision: template.revision,
+      },
+    };
+  }
+
+  /**
+   * Resolves the template for a Work Item about to be created.
+   *
+   * Runs before the write transaction so template/skill failures surface as a
+   * rejected action instead of an orphaned row. Skill validation is scoped to
+   * the *target repo* because repo-scoped skills differ per checkout.
+   */
+  function resolveSnapshotForWorkItem(
+    epicId: string,
+    repoId: string,
+    workItemType: MsqWorkItemType,
+  ): WorkItemTemplateSnapshot {
+    const target = getEpicTemplateTarget(epicId, repoId);
+    const resolved = resolveTemplate(target.projectId, workItemType, {
+      repoPath: target.repoPath,
+      validate: true,
+    });
+    return {
+      templateId: resolved.templateId,
+      templateVersion: resolved.version,
+      origin: resolved.origin,
+      definition: resolved.definition,
+    };
+  }
+
+  /**
+   * Read-only preview for the Work Item creation form: resolves the template
+   * from the same inputs `action:createWorkItem` will use (epic + repo +
+   * type), including skill validation against the target repo, without
+   * creating anything. The client gates its submit button on this succeeding.
+   */
+  function handleResolveWorkflowTemplate(message: unknown): ResolveWorkflowTemplateResult {
+    const parsed = ResolveWorkflowTemplateMessageSchema.safeParse(message);
+    if (!parsed.success) {
+      return { type: 'action:result', payload: { requestId: actionResultRequestId(message), ok: false, error: { code: 'INVALID_PAYLOAD', message: 'Invalid template preview payload.' } } };
+    }
+    const { requestId, epicId, repoId, workItemType } = parsed.data;
+    try {
+      const snapshot = resolveSnapshotForWorkItem(epicId, repoId, workItemType);
+      return {
+        type: 'action:result',
+        payload: {
+          requestId,
+          ok: true,
+          preview: {
+            templateId: snapshot.templateId,
+            templateVersion: snapshot.templateVersion,
+            origin: snapshot.origin,
+            stages: [...snapshot.definition.workflow.stages],
+          },
+        },
+      };
+    } catch (error) {
+      return { type: 'action:result', payload: { requestId, ok: false, error: workItemActionError(error) } };
+    }
+  }
+
+  /**
+   * Two-phase type change. `preview` resolves the target template and reports
+   * the stages without writing; the confirming call re-checks `expectedRevision`
+   * and swaps the snapshot atomically. Items with run history are refused.
+   */
+  function handleWorkItemTypeChange(message: unknown): WebSocketServerMessage {
+    const parsed = WorkItemTypeChangeMessageSchema.safeParse(message);
+    if (!parsed.success) {
+      return { type: 'action:result', payload: { requestId: actionResultRequestId(message), ok: false, error: { code: 'INVALID_PAYLOAD', message: 'Invalid Work Item type change payload.' } } };
+    }
+    const { requestId, workItemId, workItemType, expectedRevision, preview } = parsed.data;
+    try {
+      const target = getWorkItemTemplateTarget(workItemId);
+      if (target.revision !== expectedRevision) {
+        throw new RevisionConflictError(workItemId, expectedRevision, target.revision, 'Work Item');
+      }
+      if (!isWorkItemPristine(workItemId)) {
+        throw new WorkItemHasHistoryError(workItemId, 1);
+      }
+      const resolved = resolveTemplate(target.projectId, workItemType, {
+        repoPath: target.repoPath,
+        validate: true,
+      });
+      if (preview) {
+        return {
+          type: 'action:result',
+          payload: {
+            requestId,
+            ok: true,
+            preview: {
+              workItemId,
+              fromType: target.type,
+              toType: workItemType,
+              templateId: resolved.templateId,
+              templateVersion: resolved.version,
+              stages: [...resolved.definition.workflow.stages],
+            },
+          },
+        };
+      }
+      const workItem = changeWorkItemType(workItemId, workItemType, {
+        templateId: resolved.templateId,
+        templateVersion: resolved.version,
+        origin: resolved.origin,
+        definition: resolved.definition,
+      }, expectedRevision);
+      return { type: 'action:result', payload: { requestId, ok: true, workItem, revision: workItem.revision } };
+    } catch (error) {
+      return { type: 'action:result', payload: { requestId, ok: false, error: workItemActionError(error) } };
+    }
+  }
+
+  function handleWorkItemAction(message: unknown): WorkItemActionResult {
+    const parsed = WorkItemActionMessageSchema.safeParse(message);
+    if (!parsed.success) {
+      return { type: 'action:result', payload: { requestId: actionResultRequestId(message), ok: false, error: { code: 'INVALID_PAYLOAD', message: 'Invalid Work Item action payload.' } } };
+    }
+    try {
+      // Resolve and validate before the insert: a template that is invalid or
+      // references skills missing from the target repo must fail without
+      // leaving a half-created Work Item behind.
+      const snapshot = resolveSnapshotForWorkItem(
+        parsed.data.epicId,
+        parsed.data.repoId,
+        parsed.data.workItemType,
+      );
+      const result = workItemService.create({
+        epicId: parsed.data.epicId,
+        repoId: parsed.data.repoId,
+        title: parsed.data.title,
+        type: parsed.data.workItemType,
+        description: parsed.data.description,
+        dependsOn: parsed.data.dependsOn,
+        audit: { actor: 'web', requestId: parsed.data.requestId },
+      }, snapshot);
+      return { type: 'action:result', payload: { requestId: parsed.data.requestId, ok: true, workItem: result.entity, revision: result.revision ?? result.entity.revision } };
+    } catch (error) {
+      return { type: 'action:result', payload: { requestId: parsed.data.requestId, ok: false, error: workItemActionError(error) } };
     }
   }
 
@@ -899,16 +1462,18 @@ export function createWebServer(options: {
 
   function startFeature(
     featureId: string,
-    featureCwd: string,
+    _featureCwd: string,
   ): void {
+    let context: ReturnType<typeof resolveWorkItemExecutionContext>;
     try {
       console.log(`[startFeature] featureId=${featureId}`);
       assertWritableDbPath();
-      resolveRuntimeConfig(featureCwd);
-      const repo = resolveRepo(featureCwd);
-      const backlog = loadBacklogFromCatalog(repo.repoId, featureCwd);
-      validateBacklogSkills(backlog, featureCwd);
-      const plan = selectStartableFeaturePlan(backlog, featureId, listCompletedFeatureIds(repo.repoId));
+      context = resolveWorkItemExecutionContext(featureId);
+      resolveRuntimeConfig(context.cwd);
+      const backlog = loadBacklogFromCatalog(context.repoId, context.cwd);
+      validateBacklogSkills(backlog, context.cwd);
+      assertNoCrossRepositoryDependencies(backlog, context.repoId, getFeatureIdOwner);
+      const plan = selectStartableFeaturePlan(backlog, featureId, listCompletedFeatureIds(context.repoId));
       if (plan.pendingDependencies.length > 0) {
         throw new Error(`pending dependencies: ${plan.pendingDependencies.join(', ')}. Complete them before starting ${featureId}.`);
       }
@@ -933,7 +1498,7 @@ export function createWebServer(options: {
       {
         detached: true,
         stdio: 'ignore',
-        cwd: featureCwd,
+        cwd: context.cwd,
       },
     );
     child.once('error', (error) => {
@@ -1031,15 +1596,15 @@ export function createWebServer(options: {
     return [{ message: error instanceof Error ? error.message : String(error) }];
   }
 
-  function updateFeatureConfig(featureId: string, patch: FeatureConfigPatch, featureCwd: string): FeatureConfigSaveResult {
+  function updateFeatureConfig(featureId: string, patch: FeatureConfigPatch, _featureCwd: string): FeatureConfigSaveResult {
     try {
       console.log(`[updateFeatureConfig] featureId=${featureId}, patch=`, patch);
       assertWritableDbPath();
       if (patch.workflow?.approvals?.channel !== undefined) {
         assertConfiguredNotificationChannel(patch.workflow.approvals.channel);
       }
-      const { repoId } = resolveRepo(featureCwd);
-      updateCatalogFeature(repoId, featureId, toFeaturePatch(patch));
+      const context = resolveWorkItemExecutionContext(featureId);
+      updateCatalogFeature(context.repoId, featureId, toFeaturePatch(patch));
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       const stack = error instanceof Error ? error.stack : undefined;
@@ -1054,7 +1619,7 @@ export function createWebServer(options: {
     try {
       console.log(`[updateTaskConfig] featureId=${featureId}, taskId=${taskId}, patch=`, patch);
       assertWritableDbPath();
-      resolveRepo(featureCwd);
+      resolveWorkItemExecutionContext(featureId);
       updateCatalogTask(featureId, taskId, patch as Partial<Task>);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
@@ -1075,6 +1640,9 @@ export function createWebServer(options: {
       if (patch.workflow?.approvals?.channel !== undefined) {
         assertConfiguredNotificationChannel(patch.workflow.approvals.channel);
       }
+      // The legacy Settings wire message has no Work Item selector. Runtime
+      // execution itself never uses this ambient compatibility path; starts
+      // and item-level changes resolve their persisted Work Item context.
       const { repoId } = resolveRepo(featureCwd);
       updateCatalogDefaults(repoId, patch as CatalogDefaultsPatch);
     } catch (error) {
@@ -1196,6 +1764,7 @@ export function createWebServer(options: {
       clearInterval(outputPollInterval);
       clearInterval(reconcilePollInterval);
       outputUnsubscribe();
+      stopTelegramPoller();
       for (const unsubscribe of eventUnsubscribers) unsubscribe();
       for (const client of clients.values()) {
         client.socket.terminate();

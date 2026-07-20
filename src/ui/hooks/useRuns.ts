@@ -10,7 +10,7 @@ import {
 import { msqEventBus, logCaughtError } from '../../core/events/index.js';
 import { resolveRepo } from '../../core/repo.js';
 
-export function useRuns(intervalMs = 2000): RunSummary[] {
+export function useRuns(intervalMs = 2000): { runs: RunSummary[]; error: string | null } {
   const repoId = resolveRepo().repoId;
   const [runs, setRuns] = useState<RunSummary[]>(() => {
     try {
@@ -21,13 +21,16 @@ export function useRuns(intervalMs = 2000): RunSummary[] {
     }
   });
 
+  const [error, setError] = useState<string | null>(null);
+
   useEffect(() => {
     const refresh = (): void => {
       try {
         setRuns(listRunsForTui(50, repoId));
-      } catch (error) {
-        // DB locked or unavailable — keep stale data
-        logCaughtError('useRuns.refresh', error);
+        setError(null);
+      } catch (caught) {
+        logCaughtError('useRuns.refresh', caught);
+        setError(caught instanceof Error ? caught.message : 'Failed to refresh runs');
       }
     };
 
@@ -49,10 +52,10 @@ export function useRuns(intervalMs = 2000): RunSummary[] {
     };
   }, [intervalMs, repoId]);
 
-  return runs;
+  return { runs, error };
 }
 
-export function useTaskRuns(runId: number | null): TaskRun[] {
+export function useTaskRuns(runId: number | null): { taskRuns: TaskRun[]; error: string | null } {
   const [taskRuns, setTaskRuns] = useState<TaskRun[]>(() => {
     if (runId === null) return [];
     try {
@@ -63,14 +66,18 @@ export function useTaskRuns(runId: number | null): TaskRun[] {
     }
   });
 
+  const [error, setError] = useState<string | null>(null);
+
   useEffect(() => {
     if (runId === null) {
       setTaskRuns([]);
+      setError(null);
       return;
     }
 
     try {
       setTaskRuns(listTaskRunsForRun(runId));
+      setError(null);
     } catch (error) {
       logCaughtError('useTaskRuns.onRunIdChange', error);
       setTaskRuns([]);
@@ -79,9 +86,10 @@ export function useTaskRuns(runId: number | null): TaskRun[] {
     const refresh = (): void => {
       try {
         setTaskRuns(listTaskRunsForRun(runId));
-      } catch (error) {
-        // DB locked or unavailable — keep stale data
-        logCaughtError('useTaskRuns.refresh', error);
+        setError(null);
+      } catch (caught) {
+        logCaughtError('useTaskRuns.refresh', caught);
+        setError(caught instanceof Error ? caught.message : 'Failed to refresh task runs');
       }
     };
 
@@ -134,12 +142,10 @@ export function useTaskRuns(runId: number | null): TaskRun[] {
     };
   }, [runId]);
 
-  return taskRuns;
+  return { taskRuns, error };
 }
 
-// C3: cross-run in-progress task feed for the main dashboard (as opposed to
-// useTaskRuns above, which is scoped to a single selected run).
-export function useRunningTasks(intervalMs = 2000): RunningTaskSummary[] {
+export function useRunningTasks(intervalMs = 2000): { runningTasks: RunningTaskSummary[]; error: string | null } {
   const [runningTasks, setRunningTasks] = useState<RunningTaskSummary[]>(() => {
     try {
       return listRunningTaskRuns(20);
@@ -149,13 +155,16 @@ export function useRunningTasks(intervalMs = 2000): RunningTaskSummary[] {
     }
   });
 
+  const [error, setError] = useState<string | null>(null);
+
   useEffect(() => {
     const refresh = (): void => {
       try {
         setRunningTasks(listRunningTaskRuns(20));
-      } catch (error) {
-        // DB locked or unavailable — keep stale data
-        logCaughtError('useRunningTasks.refresh', error);
+        setError(null);
+      } catch (caught) {
+        logCaughtError('useRunningTasks.refresh', caught);
+        setError(caught instanceof Error ? caught.message : 'Failed to refresh running tasks');
       }
     };
 
@@ -174,5 +183,5 @@ export function useRunningTasks(intervalMs = 2000): RunningTaskSummary[] {
     };
   }, [intervalMs]);
 
-  return runningTasks;
+  return { runningTasks, error };
 }

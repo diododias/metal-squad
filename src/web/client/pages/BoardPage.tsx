@@ -4,6 +4,8 @@ import { formatElapsed } from '../lib/format.js';
 import { PageHeader } from '../PageHeader.js';
 import type { MsqWebState } from '../../types.js';
 import type { RunSummary } from '../../../db/repo.js';
+import { useActiveProject } from '../hooks/useActiveProject.js';
+import { scopedFeatures, scopedRuns } from '../lib/scope.js';
 
 export interface BoardPageProps {
   state: MsqWebState;
@@ -38,20 +40,27 @@ interface Column {
 export function BoardPage({ state, isMobile, onOpenRun, onOpenBacklogItem }: BoardPageProps): React.JSX.Element {
   const [query, setQuery] = useState('');
   const [toolFilter, setToolFilter] = useState('all');
+  const [epicFilter, setEpicFilter] = useState('all');
+  const [typeFilter, setTypeFilter] = useState('all');
+  const { activeProjectId } = useActiveProject();
+  const projectFeatures = scopedFeatures(state, activeProjectId, Object.values(state.featureCatalog));
+  const projectRuns = scopedRuns(state, activeProjectId);
+  const projectRepoCount = new Set(projectFeatures.map((feature) => feature.repoId).filter(Boolean)).size;
+  const repositories = 'repositories' in state ? state.repositories : [];
 
   const q = query.trim().toLowerCase();
   const matches = (title: string | null | undefined, id: string): boolean =>
     !q || (title ?? '').toLowerCase().includes(q) || id.toLowerCase().includes(q);
   const byTool = (r: RunSummary): boolean => toolFilter === 'all' || r.tool === toolFilter;
   const matchesRun = (r: RunSummary): boolean =>
-    matches(state.featureCatalog[r.featureId]?.title, r.featureId) && byTool(r);
+    matches(state.featureCatalog[r.featureId]?.title, r.featureId) && byTool(r) && (epicFilter === 'all' || state.featureCatalog[r.featureId]?.epicId === epicFilter) && (typeFilter === 'all' || state.featureCatalog[r.featureId]?.workItemType === typeFilter);
 
-  const todo = state.pendingFeatures.filter((f) => matches(f.title, f.id) && (toolFilter === 'all' || f.tool === toolFilter));
+  const todo = scopedFeatures(state, activeProjectId, state.pendingFeatures).filter((f) => matches(f.title, f.id) && (toolFilter === 'all' || f.tool === toolFilter) && (epicFilter === 'all' || f.epicId === epicFilter) && (typeFilter === 'all' || f.workItemType === typeFilter));
 
   const columns: Column[] = [
-    { key: 'progress', label: 'IN PROGRESS / BLOCKED', items: state.runs.filter((r) => (r.status === 'running' || r.status === 'blocked') && matchesRun(r)), empty: 'No active runs' },
-    { key: 'done', label: 'DONE', items: state.runs.filter((r) => r.status === 'done' && matchesRun(r)), empty: 'No completed runs' },
-    { key: 'failed', label: 'FALHA / CANCELED', items: state.runs.filter((r) => (r.status === 'failed' || r.status === 'aborted') && matchesRun(r)), empty: 'No failed runs' },
+    { key: 'progress', label: 'IN PROGRESS / BLOCKED', items: projectRuns.filter((r) => (r.status === 'running' || r.status === 'blocked') && matchesRun(r)), empty: 'No active runs' },
+    { key: 'done', label: 'DONE', items: projectRuns.filter((r) => r.status === 'done' && matchesRun(r)), empty: 'No completed runs' },
+    { key: 'failed', label: 'FALHA / CANCELED', items: projectRuns.filter((r) => (r.status === 'failed' || r.status === 'aborted') && matchesRun(r)), empty: 'No failed runs' },
   ];
 
   return (
@@ -76,6 +85,17 @@ export function BoardPage({ state, isMobile, onOpenRun, onOpenBacklogItem }: Boa
                 minWidth: 140,
               }}
             />
+            <select
+              value={epicFilter}
+              onChange={(e) => { setEpicFilter(e.target.value); }}
+              style={{ background: 'var(--bg-sunken)', border: '1px solid var(--border-dim)', borderRadius: 'var(--radius-sm)', color: 'var(--text-primary)', padding: '7px 10px' }}
+            >
+              <option value="all">all epics</option>
+              {Array.from(projectFeatures.reduce((epics, feature) => { if (feature.epicId) epics.set(feature.epicId, feature.epicTitle ?? feature.epicId); return epics; }, new Map<string, string>()).entries()).map(([id, title]) => <option key={id} value={id}>{title}</option>)}
+            </select>
+            <select value={typeFilter} onChange={(e) => { setTypeFilter(e.target.value); }} style={{ background: 'var(--bg-sunken)', border: '1px solid var(--border-dim)', borderRadius: 'var(--radius-sm)', color: 'var(--text-primary)', padding: '7px 10px' }}>
+              <option value="all">all types</option><option value="feature">feature</option><option value="bug">bug</option>
+            </select>
             <select
               value={toolFilter}
               onChange={(e) => { setToolFilter(e.target.value); }}
@@ -145,6 +165,9 @@ export function BoardPage({ state, isMobile, onOpenRun, onOpenBacklogItem }: Boa
                       model: f.model,
                       effort: f.effort,
                       autoAdvance: f.workflow.autoAdvance,
+                      repoLabel: projectRepoCount > 1 ? f.repoLabel : null, workItemType: f.workItemType,
+                      templateId: f.templateId, templateVersion: f.templateVersion,
+                      repoUnhealthy: repositories.find((repo) => repo.repoId === f.repoId)?.health === 'unavailable',
                     }}
                   />
                 </div>
@@ -202,6 +225,10 @@ export function BoardPage({ state, isMobile, onOpenRun, onOpenBacklogItem }: Boa
                         tokens: r.totalTokens,
                         prUrl: r.prUrl,
                         prNumber: r.prNumber,
+                        repoLabel: projectRepoCount > 1 ? state.featureCatalog[r.featureId]?.repoLabel : null,
+                        workItemType: state.featureCatalog[r.featureId]?.workItemType,
+                        templateId: state.featureCatalog[r.featureId]?.templateId,
+                        templateVersion: state.featureCatalog[r.featureId]?.templateVersion,
                       }}
                     />
                   </div>

@@ -1,5 +1,26 @@
-import { existsSync } from 'node:fs';
+import { randomUUID } from 'node:crypto';
+import { existsSync, statSync } from 'node:fs';
 import { getDb, withTransaction } from './index.js';
+import {
+  EpicNotFoundError,
+  CrossRepositoryDependencyError,
+  DependencyCycleError,
+  DependencyNotFoundError,
+  ProjectNotFoundError,
+  RepositoryNotInProjectError,
+  RepositoryUnavailableError,
+  RepoAlreadyLinkedError,
+  RepoInUseError,
+  RepoNotLinkedToProjectError,
+  RevisionConflictError,
+  WorkItemHasHistoryError,
+  WorkItemNotFoundError,
+} from './errors.js';
+import { listOccupiedFeatureIds } from './backlogCatalog.js';
+import { allocateFeatureId } from '../core/backlog/featureId.js';
+import { DefaultsSchema, FeatureSchema, type Defaults, type Feature, type WorkItem, type WorkflowTemplateDefinition } from '../core/backlog/schema.js';
+import type { TemplateOrigin, WorkItemType } from './workflowTemplates.js';
+import { topoOrder } from '../core/orchestrator/graph.js';
 import { sanitizeToolCallRecord, type PublishEvidence, type SessionStatusSnapshot, type TokenUsage, type ToolCallRecord } from '../core/adapters/types.js';
 import { resolveDbPath } from '../config/index.js';
 import { msqEventBus, logCaughtError } from '../core/events/index.js';
@@ -14,6 +35,7 @@ import type {
 } from '../core/events/types.js';
 import { resolveContextWindow } from '../core/tasks/blocks.js';
 import type { Tool, Workflow } from '../core/backlog/schema.js';
+import { EpicSchema, type EpicStatus } from '../core/backlog/schema.js';
 import type {
   SessionContextTelemetrySnapshot,
   StageTransitionDecision,
@@ -27,6 +49,832 @@ export function registerRepo(repoId: string, path: string): void {
        ON CONFLICT(repo_id) DO UPDATE SET path = excluded.path`,
     )
     .run(repoId, path);
+}
+
+export interface RegisteredRepoRow {
+  repoId: string;
+  path: string;
+}
+
+export function getRegisteredRepo(repoId: string): RegisteredRepoRow | null {
+  if (!hasDbFile()) return null;
+  return (getDb('readonly').prepare(
+    `SELECT repo_id AS repoId, path FROM repos WHERE repo_id = ?`,
+  ).get(repoId) as RegisteredRepoRow | undefined) ?? null;
+}
+
+export interface AuditContext {
+  actor?: string;
+  requestId?: string;
+}
+
+export interface ProjectRow {
+  projectId: string;
+  name: string;
+  description: string | null;
+  position: number;
+  archivedAt: string | null;
+  deletedAt: string | null;
+  revision: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface CreateProjectInput {
+  name: string;
+  description?: string | null;
+  position?: number;
+  audit?: AuditContext;
+}
+
+export interface UpdateProjectPatch {
+  name?: string;
+  description?: string | null;
+  position?: number;
+}
+
+export interface ProjectQueryOptions {
+  includeArchived?: boolean;
+  includeDeleted?: boolean;
+}
+
+export interface ProjectRepoRow {
+  repoId: string;
+  projectId: string;
+  path: string;
+  position: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ProjectCounts {
+  projectId: string;
+  repoCount: number;
+  epicCount: number;
+  workItemCount: number;
+}
+
+/** Read-model row for the global web state. Keep aggregation SQL in the DB
+ * layer instead of letting the WebSocket projection own persistence details. */
+export interface ProjectStateSummaryRow {
+  projectId: string;
+  name: string;
+  position: number;
+  description: string | null;
+  revision: number;
+  archivedAt: string | null;
+  epicCount: number;
+  workItemCount: number;
+  archivedCount: number;
+  activeRuns: number;
+  totalTokens: number;
+}
+
+/** Repository metadata for the global state. Path remains server-side. */
+export interface RepositoryStateSummaryRow {
+  repoId: string;
+  projectId: string | null;
+  path: string;
+}
+
+export interface EpicRow {
+  epicId: string;
+  projectId: string;
+  repoId: string | null;
+  title: string;
+  description: string | null;
+  status: EpicStatus;
+  position: number;
+  archivedAt: string | null;
+  deletedAt: string | null;
+  revision: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface CreateEpicInput {
+  projectId: string;
+  title: string;
+  description?: string | null;
+  audit?: AuditContext;
+}
+
+export interface UpdateEpicPatch {
+  title?: string;
+  description?: string | null;
+  status?: EpicStatus;
+  position?: number;
+}
+
+/** Public Work Item contract. `workItemId` deliberately hides the legacy
+ * `backlog_features.feature_id` storage name at every new boundary. */
+export interface WorkItemRow extends Omit<WorkItem, 'id'> {
+  workItemId: string;
+  epicId: string;
+  repoId: string;
+  type: WorkItemType;
+  revision: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface CreateWorkItemInput {
+  epicId: string;
+  repoId: string;
+  title: string;
+  type?: WorkItemType;
+  description?: string | null;
+  dependsOn?: string[];
+  audit?: AuditContext;
+}
+
+/**
+ * The template materialised into a Work Item at creation time.
+ *
+ * Callers resolve this *before* opening the write transaction so an invalid
+ * template or a missing skill fails without leaving an orphaned row behind.
+ */
+export interface WorkItemTemplateSnapshot {
+  templateId: string;
+  templateVersion: number;
+  origin: TemplateOrigin;
+  definition: WorkflowTemplateDefinition;
+}
+
+/** Minimal persisted ownership data needed before a Work Item can touch the
+ * filesystem. The caller deliberately owns path canonicalization and access
+ * checks so DB reads stay cheap and side-effect free. */
+export interface WorkItemExecutionTarget {
+  workItemId: string;
+  repoId: string;
+  repoPath: string;
+  projectId: string;
+  epicId: string;
+}
+
+type ProjectRepoLinkRow = Omit<ProjectRepoRow, 'path'>;
+
+const PROJECT_SELECT = `
+  SELECT project_id AS projectId, name, description, position,
+         archived_at AS archivedAt, deleted_at AS deletedAt,
+         revision, created_at AS createdAt, updated_at AS updatedAt
+    FROM projects`;
+
+const PROJECT_REPO_SELECT = `
+  SELECT pr.repo_id AS repoId, pr.project_id AS projectId, r.path,
+         pr.position, pr.created_at AS createdAt, pr.updated_at AS updatedAt
+    FROM project_repos pr
+    JOIN repos r ON r.repo_id = pr.repo_id`;
+
+const PROJECT_REPO_LINK_SELECT = `
+  SELECT repo_id AS repoId, project_id AS projectId, position,
+         created_at AS createdAt, updated_at AS updatedAt
+    FROM project_repos`;
+
+const EPIC_SELECT = `
+  SELECT epic_id AS epicId, project_id AS projectId, repo_id AS repoId,
+         title, description, status, position, archived_at AS archivedAt,
+         deleted_at AS deletedAt, revision, updated_at AS updatedAt,
+         updated_at AS createdAt
+    FROM backlog_epics`;
+
+export function createProject(input: CreateProjectInput): ProjectRow {
+  return withTransaction((database) => {
+    const projectId = randomUUID();
+    const position = input.position ?? nextProjectPosition(database);
+    database.prepare(
+      `INSERT INTO projects (project_id, name, description, position, revision)
+       VALUES (?, ?, ?, ?, 1)`,
+    ).run(projectId, input.name, input.description ?? null, position);
+    const project = getProjectFromDatabase(database, projectId);
+    if (!project) throw new ProjectNotFoundError(projectId);
+    recordAuditEvent(database, input.audit, 'project', projectId, 'create', null, project);
+    return project;
+  });
+}
+
+export function getProject(projectId: string, options: ProjectQueryOptions = {}): ProjectRow | null {
+  if (!hasDbFile()) return null;
+  const where = projectVisibilityWhere(options);
+  return (getDb('readonly').prepare(`${PROJECT_SELECT} WHERE project_id = ?${where}`).get(projectId) as ProjectRow | undefined) ?? null;
+}
+
+export function listProjects(options: ProjectQueryOptions = {}): ProjectRow[] {
+  if (!hasDbFile()) return [];
+  return getDb('readonly')
+    .prepare(`${PROJECT_SELECT} WHERE 1 = 1${projectVisibilityWhere(options)} ORDER BY position ASC, created_at ASC`)
+    .all() as ProjectRow[];
+}
+
+export function createEpic(input: CreateEpicInput): EpicRow {
+  return withTransaction((database) => {
+    assertProjectExists(database, input.projectId);
+    const epicId = randomUUID();
+    const position = nextEpicPosition(database, input.projectId);
+    const entity = epicEntity({ epicId, title: input.title, description: input.description ?? null, status: 'todo' });
+    database.prepare(
+      `INSERT INTO backlog_epics
+         (epic_id, project_id, repo_id, title, description, status, position, data_json, revision)
+       VALUES (?, ?, NULL, ?, ?, ?, ?, ?, 1)`,
+    ).run(epicId, input.projectId, entity.title, input.description ?? null, entity.status, position, JSON.stringify(entity));
+    const epic = getEpicFromDatabase(database, epicId);
+    if (!epic) throw new EpicNotFoundError(epicId);
+    recordAuditEvent(database, input.audit, 'epic', epicId, 'create', null, epic);
+    return epic;
+  });
+}
+
+export function getEpic(epicId: string): EpicRow | null {
+  if (!hasDbFile()) return null;
+  return (getDb('readonly').prepare(`${EPIC_SELECT} WHERE epic_id = ? AND archived_at IS NULL AND deleted_at IS NULL`).get(epicId) as EpicRow | undefined) ?? null;
+}
+
+export function listEpics(projectId?: string): EpicRow[] {
+  if (!hasDbFile()) return [];
+  const query = projectId
+    ? `${EPIC_SELECT} WHERE project_id = ? AND archived_at IS NULL AND deleted_at IS NULL ORDER BY position ASC, updated_at ASC`
+    : `${EPIC_SELECT} WHERE archived_at IS NULL AND deleted_at IS NULL ORDER BY position ASC, updated_at ASC`;
+  return (projectId ? getDb('readonly').prepare(query).all(projectId) : getDb('readonly').prepare(query).all()) as EpicRow[];
+}
+
+export function updateEpic(epicId: string, patch: UpdateEpicPatch, expectedRevision: number, options: { audit?: AuditContext } = {}): EpicRow {
+  return withTransaction((database) => {
+    const before = getEpicFromDatabase(database, epicId);
+    if (!before) throw new EpicNotFoundError(epicId);
+    if (before.revision !== expectedRevision) throw new RevisionConflictError(epicId, expectedRevision, before.revision, 'Epic');
+    const entity = epicEntity({
+      epicId,
+      title: patch.title ?? before.title,
+      description: patch.description === undefined ? before.description : patch.description,
+      status: patch.status ?? before.status,
+    });
+    const position = patch.position ?? before.position;
+    const result = database.prepare(
+      `UPDATE backlog_epics
+          SET title = ?, description = ?, status = ?, position = ?, data_json = ?,
+              revision = revision + 1, updated_at = datetime('now')
+        WHERE epic_id = ? AND revision = ?`,
+    ).run(entity.title, entity.description, entity.status, position, JSON.stringify(entity), epicId, expectedRevision);
+    if (result.changes !== 1) {
+      const current = getEpicFromDatabase(database, epicId);
+      throw new RevisionConflictError(epicId, expectedRevision, current?.revision ?? before.revision, 'Epic');
+    }
+    const after = getEpicFromDatabase(database, epicId);
+    if (!after) throw new EpicNotFoundError(epicId);
+    recordAuditEvent(database, options.audit, 'epic', epicId, 'update', before, after);
+    return after;
+  });
+}
+
+/** Compatibility adapter for the legacy catalog table. It snapshots the
+ * repository defaults at creation time and writes both normalized columns and
+ * `data_json` inside the same transaction as the audit event. */
+export function createWorkItem(
+  input: CreateWorkItemInput,
+  snapshot?: WorkItemTemplateSnapshot,
+): WorkItemRow {
+  return withTransaction((database) => {
+    const epic = getEpicFromDatabase(database, input.epicId);
+    if (!epic) throw new EpicNotFoundError(input.epicId);
+
+    const repository = database.prepare(
+      `SELECT r.path, pr.project_id AS projectId
+         FROM repos r LEFT JOIN project_repos pr ON pr.repo_id = r.repo_id
+        WHERE r.repo_id = ?`,
+    ).get(input.repoId) as { path: string; projectId: string | null } | undefined;
+    if (repository?.projectId !== epic.projectId) {
+      throw new RepositoryNotInProjectError(input.repoId, epic.projectId);
+    }
+    if (!isRepositoryUsable(repository.path)) throw new RepositoryUnavailableError(input.repoId);
+
+    const dependsOn = [...new Set(input.dependsOn ?? [])];
+    const dependencyRows = dependsOn.map((workItemId) => {
+      const row = database.prepare(
+        `SELECT feature_id AS featureId, repo_id AS repoId FROM backlog_features WHERE feature_id = ?`,
+      ).get(workItemId) as { featureId: string; repoId: string } | undefined;
+      if (!row) throw new DependencyNotFoundError(workItemId);
+      if (row.repoId !== input.repoId) throw new CrossRepositoryDependencyError(workItemId, row.repoId);
+      return row;
+    });
+    void dependencyRows;
+
+    const defaults = getRepositoryDefaults(database, input.repoId);
+    const reserved = listOccupiedFeatureIds(database);
+    const workItemId = allocateFeatureId(reserved);
+    const feature = FeatureSchema.parse({
+      id: workItemId,
+      title: input.title,
+      dependsOn,
+      tasks: [],
+      tool: defaults.tool,
+      ...(defaults.model === undefined ? {} : { model: defaults.model }),
+      effort: defaults.effort,
+      thinking: defaults.thinking,
+      skills: defaults.skills,
+      // The template snapshot pins the workflow; Repository defaults only
+      // supply it when no template was resolved (legacy/import callers).
+      workflow: snapshot?.definition.workflow ?? defaults.workflow,
+      ...(defaults.maxTokens === undefined ? {} : { maxTokens: defaults.maxTokens }),
+      autoStart: false,
+    });
+    assertNoWorkItemCycle(database, input.repoId, input.epicId, feature);
+
+    const description = input.description ?? null;
+    // Snapshot is materialised here and never rewritten: a later template
+    // update bumps `version` but leaves this `data_json` byte for byte intact.
+    const data = {
+      ...feature,
+      type: input.type ?? 'feature',
+      ...(description === null ? {} : { description }),
+      ...(snapshot === undefined ? {} : {
+        stageSkills: snapshot.definition.stageSkills,
+        templateId: snapshot.templateId,
+        templateVersion: snapshot.templateVersion,
+        templateOrigin: snapshot.origin,
+      }),
+    };
+    const position = (database.prepare(
+      `SELECT COALESCE(MAX(position), -1) + 1 AS position FROM backlog_features WHERE epic_id = ?`,
+    ).get(input.epicId) as { position: number }).position;
+    database.prepare(
+      `INSERT INTO backlog_features
+         (feature_id, epic_id, repo_id, title, description, depends_on, spec_file, position, data_json, revision, archived_at, deleted_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, NULL, ?, ?, 1, NULL, NULL, datetime('now'))`,
+    ).run(workItemId, input.epicId, input.repoId, feature.title, description, JSON.stringify(dependsOn), position, JSON.stringify(data));
+    const workItem = getWorkItemFromDatabase(database, workItemId);
+    if (!workItem) throw new Error(`Work Item was not created: ${workItemId}`);
+    recordAuditEvent(database, input.audit, 'work_item', workItemId, 'create', null, workItem);
+    return workItem;
+  });
+}
+
+/**
+ * Project + repo path for a not-yet-created Work Item, used to resolve its
+ * template before the insert. Mirrors the repo∈Project check in
+ * `createWorkItem` so an invalid target is rejected identically either way.
+ */
+export function getEpicTemplateTarget(
+  epicId: string,
+  repoId: string,
+): { projectId: string; repoPath: string } {
+  const row = getDb('readonly').prepare(
+    `SELECT e.project_id AS projectId, r.path AS repoPath, pr.project_id AS repoProjectId
+       FROM backlog_epics e
+       JOIN repos r ON r.repo_id = ?
+       LEFT JOIN project_repos pr ON pr.repo_id = r.repo_id
+      WHERE e.epic_id = ?`,
+  ).get(repoId, epicId) as { projectId: string; repoPath: string; repoProjectId: string | null } | undefined;
+  if (!row) throw new EpicNotFoundError(epicId);
+  if (row.repoProjectId !== row.projectId) throw new RepositoryNotInProjectError(repoId, row.projectId);
+  return { projectId: row.projectId, repoPath: row.repoPath };
+}
+
+/** Project + repo path for an existing Work Item, used to re-resolve its
+ * template when the type changes. */
+export function getWorkItemTemplateTarget(
+  workItemId: string,
+): { projectId: string; repoPath: string; type: WorkItemType; revision: number } {
+  const row = getDb('readonly').prepare(
+    `SELECT e.project_id AS projectId, r.path AS repoPath, f.data_json AS dataJson, f.revision
+       FROM backlog_features f
+       JOIN backlog_epics e ON e.epic_id = f.epic_id
+       JOIN repos r ON r.repo_id = f.repo_id
+      WHERE f.feature_id = ? AND f.archived_at IS NULL AND f.deleted_at IS NULL`,
+  ).get(workItemId) as { projectId: string; repoPath: string; dataJson: string; revision: number } | undefined;
+  if (!row) throw new WorkItemNotFoundError(workItemId);
+  const stored = JSON.parse(row.dataJson) as Record<string, unknown>;
+  return {
+    projectId: row.projectId,
+    repoPath: row.repoPath,
+    type: stored.type === 'bug' ? 'bug' : 'feature',
+    revision: row.revision,
+  };
+}
+
+/**
+ * True when the Work Item has never been executed.
+ *
+ * Only a pristine item may change type: once a run exists, its transcripts and
+ * gates are tied to the workflow that produced them, so swapping the snapshot
+ * would leave that history describing stages the item no longer has.
+ */
+export function isWorkItemPristine(workItemId: string): boolean {
+  const row = getDb('readonly').prepare(
+    `SELECT COUNT(*) AS runCount FROM runs WHERE feature_id = ?`,
+  ).get(workItemId) as { runCount: number };
+  return row.runCount === 0;
+}
+
+/**
+ * Re-materialises a pristine Work Item onto a new type's template snapshot.
+ *
+ * Atomic by construction: the type, the workflow and the whole snapshot move
+ * together in one transaction, so the item is never left describing one type
+ * with another type's stages.
+ */
+export function changeWorkItemType(
+  workItemId: string,
+  type: WorkItemType,
+  snapshot: WorkItemTemplateSnapshot,
+  expectedRevision: number,
+): WorkItemRow {
+  return withTransaction((database) => {
+    const before = getWorkItemFromDatabase(database, workItemId);
+    if (!before) throw new WorkItemNotFoundError(workItemId);
+    if (before.revision !== expectedRevision) {
+      throw new RevisionConflictError(workItemId, expectedRevision, before.revision, 'Work Item');
+    }
+    const runCount = (database.prepare(
+      `SELECT COUNT(*) AS runCount FROM runs WHERE feature_id = ?`,
+    ).get(workItemId) as { runCount: number }).runCount;
+    if (runCount > 0) throw new WorkItemHasHistoryError(workItemId, runCount);
+
+    const stored = JSON.parse((database.prepare(
+      `SELECT data_json AS dataJson FROM backlog_features WHERE feature_id = ?`,
+    ).get(workItemId) as { dataJson: string }).dataJson) as Record<string, unknown>;
+
+    const data = {
+      ...stored,
+      type,
+      workflow: snapshot.definition.workflow,
+      stageSkills: snapshot.definition.stageSkills,
+      templateId: snapshot.templateId,
+      templateVersion: snapshot.templateVersion,
+      templateOrigin: snapshot.origin,
+    };
+    database.prepare(
+      `UPDATE backlog_features
+          SET data_json = ?, revision = revision + 1, updated_at = datetime('now')
+        WHERE feature_id = ?`,
+    ).run(JSON.stringify(data), workItemId);
+
+    const after = getWorkItemFromDatabase(database, workItemId);
+    if (!after) throw new WorkItemNotFoundError(workItemId);
+    return after;
+  });
+}
+
+/** Finds the persisted repo/project ownership for a live Work Item. */
+export function getWorkItemExecutionTarget(workItemId: string): WorkItemExecutionTarget | null {
+  if (!hasDbFile()) return null;
+  return (getDb('readonly').prepare(
+    `SELECT f.feature_id AS workItemId, f.repo_id AS repoId, r.path AS repoPath,
+            e.project_id AS projectId, f.epic_id AS epicId
+       FROM backlog_features f
+       JOIN backlog_epics e ON e.epic_id = f.epic_id
+       JOIN repos r ON r.repo_id = f.repo_id
+      WHERE f.feature_id = ? AND f.archived_at IS NULL AND f.deleted_at IS NULL`,
+  ).get(workItemId) as WorkItemExecutionTarget | undefined) ?? null;
+}
+
+export function updateProject(
+  projectId: string,
+  patch: UpdateProjectPatch,
+  expectedRevision: number,
+  options: { audit?: AuditContext } = {},
+): ProjectRow {
+  return withTransaction((database) => {
+    const before = getProjectFromDatabase(database, projectId);
+    if (!before) throw new ProjectNotFoundError(projectId);
+    if (before.revision !== expectedRevision) {
+      throw new RevisionConflictError(projectId, expectedRevision, before.revision);
+    }
+
+    const name = patch.name ?? before.name;
+    const description = patch.description === undefined ? before.description : patch.description;
+    const position = patch.position ?? before.position;
+    const result = database.prepare(
+      `UPDATE projects
+          SET name = ?, description = ?, position = ?, revision = revision + 1,
+              updated_at = datetime('now')
+        WHERE project_id = ? AND revision = ?`,
+    ).run(name, description, position, projectId, expectedRevision);
+    if (result.changes !== 1) {
+      const current = getProjectFromDatabase(database, projectId);
+      throw new RevisionConflictError(projectId, expectedRevision, current?.revision ?? before.revision);
+    }
+    const after = getProjectFromDatabase(database, projectId);
+    if (!after) throw new ProjectNotFoundError(projectId);
+    recordAuditEvent(database, options.audit, 'project', projectId, 'update', before, after);
+    return after;
+  });
+}
+
+export function listProjectRepos(projectId: string): ProjectRepoRow[] {
+  if (!hasDbFile()) return [];
+  return getDb('readonly')
+    .prepare(`${PROJECT_REPO_SELECT} WHERE pr.project_id = ? ORDER BY pr.position ASC, pr.created_at ASC`)
+    .all(projectId) as ProjectRepoRow[];
+}
+
+export function linkRepo(
+  projectId: string,
+  repoId: string,
+  options: { audit?: AuditContext; position?: number } = {},
+): ProjectRepoRow {
+  return withTransaction((database) => {
+    assertProjectExists(database, projectId);
+    const existing = getProjectRepoLink(database, repoId);
+    if (existing) throw new RepoAlreadyLinkedError(repoId, existing.projectId);
+    const position = options.position ?? nextProjectRepoPosition(database, projectId);
+    try {
+      database.prepare(
+        `INSERT INTO project_repos (repo_id, project_id, position) VALUES (?, ?, ?)`,
+      ).run(repoId, projectId, position);
+    } catch (error) {
+      // The preflight above gives a useful error in the common case. This
+      // second check closes the race when another connection links the repo
+      // between that read and the unique-key insert.
+      const concurrentLink = getProjectRepoLink(database, repoId);
+      if (concurrentLink) throw new RepoAlreadyLinkedError(repoId, concurrentLink.projectId);
+      throw error;
+    }
+    const after = getProjectRepo(database, repoId);
+    if (!after) throw new Error(`Repository link was not created for ${repoId}`);
+    recordAuditEvent(database, options.audit, 'project_repo', repoId, 'link', null, after);
+    return after;
+  });
+}
+
+export function moveRepo(
+  repoId: string,
+  toProjectId: string,
+  options: { audit?: AuditContext; position?: number } = {},
+): ProjectRepoRow | null {
+  return withTransaction((database) => {
+    assertProjectExists(database, toProjectId);
+    const before = getProjectRepoLink(database, repoId);
+    if (!before) return null;
+    if (before.projectId === toProjectId) return getProjectRepo(database, repoId);
+    assertRepoHasNoWorkItems(database, repoId, before.projectId);
+    const position = options.position ?? nextProjectRepoPosition(database, toProjectId);
+    database.prepare(
+      `UPDATE project_repos
+          SET project_id = ?, position = ?, updated_at = datetime('now')
+        WHERE repo_id = ?`,
+    ).run(toProjectId, position, repoId);
+    const after = getProjectRepo(database, repoId);
+    if (!after) throw new Error(`Repository link was not moved for ${repoId}`);
+    recordAuditEvent(database, options.audit, 'project_repo', repoId, 'move', before, after);
+    return after;
+  });
+}
+
+export function unlinkRepo(
+  repoId: string,
+  options: { audit?: AuditContext; projectId?: string } = {},
+): boolean {
+  return withTransaction((database) => {
+    const before = getProjectRepoLink(database, repoId);
+    if (!before) return false;
+    if (options.projectId !== undefined && before.projectId !== options.projectId) {
+      throw new RepoNotLinkedToProjectError(repoId, options.projectId);
+    }
+    assertRepoHasNoWorkItems(database, repoId, before.projectId);
+    database.prepare(`DELETE FROM project_repos WHERE repo_id = ?`).run(repoId);
+    recordAuditEvent(database, options.audit, 'project_repo', repoId, 'unlink', before, null);
+    return true;
+  });
+}
+
+export function getProjectCounts(projectId: string): ProjectCounts | null {
+  if (!hasDbFile()) return null;
+  return (getDb('readonly').prepare(projectCountsSql('WHERE p.project_id = ?')).get(projectId) as ProjectCounts | undefined) ?? null;
+}
+
+export function listProjectCounts(options: ProjectQueryOptions = {}): ProjectCounts[] {
+  if (!hasDbFile()) return [];
+  return getDb('readonly')
+    .prepare(`${projectCountsSql(`WHERE 1 = 1${projectVisibilityWhere(options)}`)} ORDER BY p.position ASC, p.created_at ASC`)
+    .all() as ProjectCounts[];
+}
+
+/** Active Project summaries for the state-push read model. */
+export function listProjectStateSummaries(): ProjectStateSummaryRow[] {
+  if (!hasDbFile()) return [];
+  return getDb('readonly').prepare(`
+    SELECT p.project_id AS projectId, p.name, p.position, p.description, p.revision,
+           p.archived_at AS archivedAt,
+           (SELECT COUNT(*) FROM backlog_epics e
+             WHERE e.project_id = p.project_id AND e.archived_at IS NULL AND e.deleted_at IS NULL) AS epicCount,
+           (SELECT COUNT(*) FROM backlog_features f JOIN backlog_epics e ON e.epic_id = f.epic_id
+             WHERE e.project_id = p.project_id AND f.archived_at IS NULL AND f.deleted_at IS NULL) AS workItemCount,
+           ((SELECT COUNT(*) FROM backlog_epics e
+              WHERE e.project_id = p.project_id AND e.archived_at IS NOT NULL)
+            + (SELECT COUNT(*) FROM backlog_features f JOIN backlog_epics e ON e.epic_id = f.epic_id
+              WHERE e.project_id = p.project_id AND f.archived_at IS NOT NULL)) AS archivedCount,
+           (SELECT COUNT(*) FROM runs r WHERE r.project_id = p.project_id AND r.status = 'running') AS activeRuns,
+           (SELECT COALESCE(SUM(COALESCE(r.total_tokens, 0)), 0) FROM runs r
+             WHERE r.project_id = p.project_id) AS totalTokens
+      FROM projects p
+     WHERE p.archived_at IS NULL AND p.deleted_at IS NULL
+     ORDER BY p.position ASC, p.created_at ASC
+  `).all() as ProjectStateSummaryRow[];
+}
+
+/** Every registered repository, including unlinked rows. No filesystem health
+ * check is performed in this hot query. */
+export function listRepositoryStateSummaries(): RepositoryStateSummaryRow[] {
+  if (!hasDbFile()) return [];
+  return getDb('readonly').prepare(`
+    SELECT r.repo_id AS repoId, pr.project_id AS projectId, r.path
+      FROM repos r
+      LEFT JOIN project_repos pr ON pr.repo_id = r.repo_id
+      LEFT JOIN projects p ON p.project_id = pr.project_id
+     WHERE p.deleted_at IS NULL OR p.project_id IS NULL
+     ORDER BY r.created_at ASC, r.repo_id ASC
+  `).all() as RepositoryStateSummaryRow[];
+}
+
+/** Monotonic state revision: Project/repository mutations record audit events
+ * in the same transaction, so consumers can detect concurrent mutations. */
+export function getProjectStateRevision(): number {
+  if (!hasDbFile()) return 0;
+  return (getDb('readonly').prepare(`SELECT COALESCE(MAX(id), 0) AS revision FROM audit_events`).get() as { revision: number }).revision;
+}
+
+function projectCountsSql(where: string): string {
+  return `
+    SELECT p.project_id AS projectId,
+           (SELECT COUNT(*) FROM project_repos pr WHERE pr.project_id = p.project_id) AS repoCount,
+           (SELECT COUNT(*) FROM backlog_epics e WHERE e.project_id = p.project_id) AS epicCount,
+           (SELECT COUNT(*)
+              FROM backlog_features f
+              JOIN backlog_epics e ON e.epic_id = f.epic_id
+             WHERE e.project_id = p.project_id AND f.deleted_at IS NULL) AS workItemCount
+      FROM projects p
+      ${where}`;
+}
+
+function projectVisibilityWhere(options: ProjectQueryOptions): string {
+  return `${options.includeArchived ? '' : ' AND archived_at IS NULL'}${options.includeDeleted ? '' : ' AND deleted_at IS NULL'}`;
+}
+
+function getProjectFromDatabase(database: ReturnType<typeof getDb>, projectId: string): ProjectRow | null {
+  return (database.prepare(`${PROJECT_SELECT} WHERE project_id = ?`).get(projectId) as ProjectRow | undefined) ?? null;
+}
+
+function getEpicFromDatabase(database: ReturnType<typeof getDb>, epicId: string): EpicRow | null {
+  return (database.prepare(`${EPIC_SELECT} WHERE epic_id = ?`).get(epicId) as EpicRow | undefined) ?? null;
+}
+
+function getWorkItemFromDatabase(database: ReturnType<typeof getDb>, workItemId: string): WorkItemRow | null {
+  const row = database.prepare(
+    `SELECT feature_id AS workItemId, epic_id AS epicId, repo_id AS repoId, title,
+            description, depends_on AS dependsOn, data_json AS dataJson, revision,
+            updated_at AS updatedAt
+       FROM backlog_features
+      WHERE feature_id = ? AND archived_at IS NULL AND deleted_at IS NULL`,
+  ).get(workItemId) as {
+    workItemId: string;
+    epicId: string;
+    repoId: string;
+    title: string;
+    description: string | null;
+    dependsOn: string;
+    dataJson: string;
+    revision: number;
+    updatedAt: string;
+  } | undefined;
+  if (!row) return null;
+  const stored = JSON.parse(row.dataJson) as Record<string, unknown>;
+  const feature = FeatureSchema.parse(stored);
+  return {
+    ...feature,
+    workItemId: row.workItemId,
+    epicId: row.epicId,
+    repoId: row.repoId,
+    // Persisted type wins; legacy rows written before PRJ-22 have no `type`.
+    type: stored.type === 'bug' ? 'bug' : 'feature',
+    description: row.description ?? (typeof stored.description === 'string' ? stored.description : undefined),
+    revision: row.revision,
+    createdAt: row.updatedAt,
+    updatedAt: row.updatedAt,
+  };
+}
+
+function getRepositoryDefaults(database: ReturnType<typeof getDb>, repoId: string): Defaults {
+  const row = database.prepare(
+    `SELECT defaults_json AS defaultsJson FROM backlog_catalog_meta WHERE repo_id = ?`,
+  ).get(repoId) as { defaultsJson: string } | undefined;
+  return DefaultsSchema.parse(row ? JSON.parse(row.defaultsJson) : {});
+}
+
+function isRepositoryUsable(path: string): boolean {
+  try {
+    return existsSync(path) && statSync(path).isDirectory();
+  } catch (error) {
+    logCaughtError('db/repo.isRepositoryUsable', error);
+    return false;
+  }
+}
+
+function assertNoWorkItemCycle(
+  database: ReturnType<typeof getDb>,
+  repoId: string,
+  epicId: string,
+  candidate: Feature,
+): void {
+  const rows = database.prepare(
+    `SELECT epic_id AS epicId, data_json AS dataJson
+       FROM backlog_features
+      WHERE repo_id = ? AND archived_at IS NULL AND deleted_at IS NULL`,
+  ).all(repoId) as { epicId: string; dataJson: string }[];
+  const byEpic = new Map<string, Feature[]>();
+  for (const row of rows) {
+    const features = byEpic.get(row.epicId) ?? [];
+    features.push(FeatureSchema.parse(JSON.parse(row.dataJson)));
+    byEpic.set(row.epicId, features);
+  }
+  const candidateEpic = byEpic.get(epicId) ?? [];
+  candidateEpic.push(candidate);
+  byEpic.set(epicId, candidateEpic);
+  try {
+    topoOrder({
+      version: 2,
+      repo: repoId,
+      defaults: DefaultsSchema.parse({}),
+      epics: [...byEpic.entries()].map(([id, features]) => ({ id, title: id, status: 'todo' as const, features })),
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    throw new DependencyCycleError(message);
+  }
+}
+
+function epicEntity(input: { epicId: string; title: string; description: string | null; status: EpicStatus }): Record<string, unknown> {
+  return EpicSchema.parse({
+    id: input.epicId,
+    title: input.title,
+    ...(input.description === null ? {} : { description: input.description }),
+    status: input.status,
+    features: [],
+  });
+}
+
+function getProjectRepoLink(database: ReturnType<typeof getDb>, repoId: string): ProjectRepoLinkRow | null {
+  return (database.prepare(`${PROJECT_REPO_LINK_SELECT} WHERE repo_id = ?`).get(repoId) as ProjectRepoLinkRow | undefined) ?? null;
+}
+
+function getProjectRepo(database: ReturnType<typeof getDb>, repoId: string): ProjectRepoRow | null {
+  return (database.prepare(`${PROJECT_REPO_SELECT} WHERE pr.repo_id = ?`).get(repoId) as ProjectRepoRow | undefined) ?? null;
+}
+
+function assertProjectExists(database: ReturnType<typeof getDb>, projectId: string): void {
+  if (!getProjectFromDatabase(database, projectId)) throw new ProjectNotFoundError(projectId);
+}
+
+function assertRepoHasNoWorkItems(database: ReturnType<typeof getDb>, repoId: string, projectId: string): void {
+  const row = database.prepare(
+    `SELECT 1
+       FROM backlog_features f
+       JOIN backlog_epics e ON e.epic_id = f.epic_id
+      WHERE f.repo_id = ? AND e.project_id = ? AND f.deleted_at IS NULL
+      LIMIT 1`,
+  ).get(repoId, projectId) as { 1: number } | undefined;
+  if (row) throw new RepoInUseError(repoId);
+}
+
+function nextProjectPosition(database: ReturnType<typeof getDb>): number {
+  const row = database.prepare(`SELECT COALESCE(MAX(position), -1) + 1 AS position FROM projects`).get() as { position: number };
+  return row.position;
+}
+
+function nextProjectRepoPosition(database: ReturnType<typeof getDb>, projectId: string): number {
+  const row = database.prepare(
+    `SELECT COALESCE(MAX(position), -1) + 1 AS position FROM project_repos WHERE project_id = ?`,
+  ).get(projectId) as { position: number };
+  return row.position;
+}
+
+function nextEpicPosition(database: ReturnType<typeof getDb>, projectId: string): number {
+  const row = database.prepare(
+    `SELECT COALESCE(MAX(position), -1) + 1 AS position FROM backlog_epics WHERE project_id = ?`,
+  ).get(projectId) as { position: number };
+  return row.position;
+}
+
+function recordAuditEvent(
+  database: ReturnType<typeof getDb>,
+  context: AuditContext | undefined,
+  entityKind: string,
+  entityId: string,
+  action: string,
+  before: unknown,
+  after: unknown,
+): void {
+  database.prepare(
+    `INSERT INTO audit_events (request_id, actor, entity_kind, entity_id, action, before_json, after_json)
+     VALUES (?, ?, ?, ?, ?, ?, ?)`,
+  ).run(
+    context?.requestId ?? randomUUID(),
+    context?.actor ?? 'system',
+    entityKind,
+    entityId,
+    action,
+    before === null ? null : JSON.stringify(before),
+    after === null ? null : JSON.stringify(after),
+  );
 }
 
 export type FeatureTopicAssociationState = 'creating' | 'active' | 'invalid' | 'error';
@@ -193,10 +1041,10 @@ export function createRun(
 ): number {
   const info = getDb('readwrite')
     .prepare(
-      `INSERT INTO runs (repo_id, feature_id, tool, pipeline_id, stage)
-       VALUES (?, ?, ?, ?, ?)`,
+      `INSERT INTO runs (repo_id, project_id, feature_id, tool, pipeline_id, stage)
+       VALUES (?, (SELECT project_id FROM project_repos WHERE repo_id = ?), ?, ?, ?, ?)`,
     )
-    .run(repoId, featureId, tool, opts.pipelineId ?? null, opts.stage ?? null);
+    .run(repoId, repoId, featureId, tool, opts.pipelineId ?? null, opts.stage ?? null);
   const runId = Number(info.lastInsertRowid);
   recordRunEvent(runId, 'started', opts.stage ? { stage: opts.stage } : undefined);
   return runId;
@@ -277,7 +1125,11 @@ export function getLatestPublishedRunForFeature(
          r.started_at AS startedAt
        FROM runs r
        WHERE r.repo_id = ? AND r.feature_id = ? AND r.pr_url IS NOT NULL
-       ORDER BY r.started_at DESC
+       ${runColumns.has('publish_verified')
+         // A verified publication outranks a merely recent one: a run that
+         // timed out before verification must not become the stacking base.
+         ? `ORDER BY COALESCE(r.publish_verified, 0) DESC, r.started_at DESC`
+         : `ORDER BY r.started_at DESC`}
        LIMIT 1`,
     )
     .get(repoId, featureId) as PublishedRunRow | undefined;
@@ -680,10 +1532,20 @@ export function getRun(runId: number): RunRow | null {
     .get(runId) as RunRow | undefined) ?? null;
 }
 
+export function getLatestRunForPipeline(pipelineId: number): RunRow | null {
+  if (!hasDbFile()) return null;
+  return (getDb('readonly')
+    .prepare(`SELECT * FROM runs WHERE pipeline_id = ? ORDER BY id DESC LIMIT 1`)
+    .get(pipelineId) as RunRow | undefined) ?? null;
+}
+
 // T002: RunSummary interface
 export interface RunSummary {
   runId: number;
   repoId: string;
+  /** Immutable Project snapshot captured when the run was created. */
+  projectId?: string | null;
+  integrityIssue?: string;
   featureId: string;
   tool: 'claude' | 'codex' | 'opencode';
   pipelineId: number | null;
@@ -747,10 +1609,18 @@ function getRunColumnProjection(
 }
 
 // T003: listRunsForTui — most recent run per feature per repo (US2 deduplication via CTE)
-export function listRunsForTui(limit = 50, repoId?: string): RunSummary[] {
+export interface ProjectScope {
+  projectId?: string;
+}
+
+export function listRunsForTui(limit = 50, repoId?: string, scope: ProjectScope = {}): RunSummary[] {
   if (!hasDbFile()) return [];
-  const repoFilter = repoId ? 'WHERE repo_id = ?' : '';
-  const params = repoId ? [repoId, limit] : [limit];
+  const filters: string[] = [];
+  const params: (string | number)[] = [];
+  if (repoId) { filters.push('repo_id = ?'); params.push(repoId); }
+  if (scope.projectId) { filters.push('project_id = ?'); params.push(scope.projectId); }
+  const repoFilter = filters.length > 0 ? `WHERE ${filters.join(' AND ')}` : '';
+  params.push(limit);
   const db = getDb('readonly');
   const runColumns = new Set(
     (db.prepare(`PRAGMA table_info(runs)`).all() as { name?: string }[])
@@ -810,6 +1680,7 @@ export function listRunsForTui(limit = 50, repoId?: string): RunSummary[] {
        SELECT
          r.id          AS runId,
          r.repo_id     AS repoId,
+         r.project_id  AS projectId,
          r.feature_id  AS featureId,
          r.tool,
          r.pipeline_id AS pipelineId,
@@ -885,7 +1756,10 @@ export function listRunsForTui(limit = 50, repoId?: string): RunSummary[] {
        LIMIT ?`,
     )
     .all(...params) as RunSummary[];
-  for (const row of rows) row.pendingStageRequestOptions = decodeStageRequestOptions(row.pendingStageRequestOptions) ?? null;
+  for (const row of rows) {
+    row.pendingStageRequestOptions = decodeStageRequestOptions(row.pendingStageRequestOptions) ?? null;
+    if (!row.projectId) row.integrityIssue = 'Run has no Project snapshot.';
+  }
   return rows;
 }
 
@@ -965,8 +1839,13 @@ export function listRunHistoryForFeature(repoId: string, featureId: string, limi
 // follows the same policy the scheduler already applies when writing done_json:
 // a feature counts as done if it completed per its retry/onFail policy, not
 // strictly if the underlying run succeeded (see execute.ts shouldCountAsDone).
-export function listCompletedFeatureIds(repoId: string): Set<string> {
+export function listCompletedFeatureIds(repoId?: string, scope: ProjectScope = {}): Set<string> {
   if (!hasDbFile()) return new Set();
+  const clauses: string[] = [];
+  const params: string[] = [];
+  if (repoId) { clauses.push('repo_id = ?'); params.push(repoId); }
+  if (scope.projectId) { clauses.push('project_id = ?'); params.push(scope.projectId); }
+  const where = clauses.length > 0 ? `WHERE ${clauses.join(' AND ')}` : '';
   const rows = getDb('readonly')
     .prepare(
       `SELECT
@@ -989,9 +1868,9 @@ export function listCompletedFeatureIds(repoId: string): Set<string> {
          updated_at AS updatedAt,
          ended_at AS endedAt
        FROM pipelines
-       WHERE repo_id = ?`,
+       ${where}`,
     )
-    .all(repoId) as PipelineRow[];
+    .all(...params) as PipelineRow[];
   const done = new Set<string>();
   for (const row of rows) {
     for (const featureId of getPipelineSnapshot(row).done) done.add(featureId);
@@ -1066,6 +1945,8 @@ export interface GateRow {
   runId: number;
   featureId: string;
   repoId: string;
+  projectId?: string | null;
+  integrityIssue?: string;
   createdAt: string;
   resolvedAt: string | null;
   decision: GateDecision | null;
@@ -1084,23 +1965,21 @@ export function getGate(id: number): GateRow | null {
 }
 
 // T005: openGates — SELECT WHERE resolved_at IS NULL, ORDER BY created_at ASC
-export function openGates(): GateRow[] {
+export function openGates(scope: ProjectScope = {}): GateRow[] {
   if (!hasDbFile()) return [];
-  return getDb('readonly')
+  const rows = getDb('readonly')
     .prepare(
       `SELECT
-         id,
-         run_id    AS runId,
-         feature_id AS featureId,
-         repo_id   AS repoId,
-         created_at AS createdAt,
-         resolved_at AS resolvedAt,
-         decision
-       FROM gates
-       WHERE resolved_at IS NULL
-       ORDER BY created_at ASC`,
+         g.id, g.run_id AS runId, g.feature_id AS featureId, g.repo_id AS repoId,
+         r.project_id AS projectId, g.created_at AS createdAt, g.resolved_at AS resolvedAt, g.decision
+       FROM gates g
+       LEFT JOIN runs r ON r.id = g.run_id
+       WHERE g.resolved_at IS NULL${scope.projectId ? ' AND r.project_id = ?' : ''}
+       ORDER BY g.created_at ASC`,
     )
-    .all() as GateRow[];
+    .all(...(scope.projectId ? [scope.projectId] : [])) as GateRow[];
+  for (const row of rows) if (!row.projectId) row.integrityIssue = 'Gate has no resolvable Project snapshot.';
+  return rows;
 }
 
 // T006: resolveGate — sets resolved_at + decision atomically, no-op if already resolved
@@ -1233,6 +2112,32 @@ export function recordRunEvent(
     .run(runId, event, metadata ? JSON.stringify(metadata) : null);
 }
 
+export function recordCallbackProcessed(
+  callbackId: string,
+  action: string,
+  payload?: Record<string, unknown>,
+): boolean {
+  if (!hasDbFile()) return true;
+  try {
+    const result = getDb('readwrite')
+      .prepare(
+        `INSERT OR IGNORE INTO processed_callback_queries (callback_id, action, payload) VALUES (?, ?, ?)`,
+      )
+      .run(callbackId, action, payload ? JSON.stringify(payload) : null);
+    return result.changes > 0;
+  } catch (error) {
+    logCaughtError('db/repo.recordCallbackProcessed', error);
+    return false;
+  }
+}
+
+export function isCallbackProcessed(callbackId: string): boolean {
+  if (!hasDbFile()) return false;
+  return getDb('readonly')
+    .prepare(`SELECT 1 FROM processed_callback_queries WHERE callback_id = ?`)
+    .get(callbackId) !== undefined;
+}
+
 export function listRunEvents(runId: number): RunEventRow[] {
   if (!hasDbFile()) return [];
   const rows = getDb('readonly')
@@ -1262,6 +2167,8 @@ function safeJsonParse(value: string): Record<string, unknown> | null {
 export interface StatsRunRow {
   id: number;
   repoId: string;
+  projectId?: string | null;
+  integrityIssue?: string;
   featureId: string;
   tool: string;
   status: string;
@@ -1278,6 +2185,7 @@ export interface StatsRunRow {
 export interface StatsFilters {
   sinceDays?: number;
   repoId?: string;
+  projectId?: string;
   tool?: string;
 }
 
@@ -1293,12 +2201,16 @@ export function listRunsForStats(filters: StatsFilters = {}): StatsRunRow[] {
     clauses.push('r.repo_id = ?');
     params.push(filters.repoId);
   }
+  if (filters.projectId) {
+    clauses.push('r.project_id = ?');
+    params.push(filters.projectId);
+  }
   if (filters.tool) {
     clauses.push('r.tool = ?');
     params.push(filters.tool);
   }
   const where = clauses.length > 0 ? `WHERE ${clauses.join(' AND ')}` : '';
-  return getDb('readonly')
+  const rows = getDb('readonly')
     .prepare(
       `WITH latest_usage AS (
          SELECT u.run_id AS runId, u.input, u.cached_input AS cachedInput, u.output, u.total
@@ -1312,6 +2224,7 @@ export function listRunsForStats(filters: StatsFilters = {}): StatsRunRow[] {
        SELECT
          r.id,
          r.repo_id AS repoId,
+         r.project_id AS projectId,
          r.feature_id AS featureId,
          r.tool,
          r.status,
@@ -1329,6 +2242,8 @@ export function listRunsForStats(filters: StatsFilters = {}): StatsRunRow[] {
        ORDER BY r.id DESC`,
     )
     .all(...params) as StatsRunRow[];
+  for (const row of rows) if (!row.projectId) row.integrityIssue = 'Run has no Project snapshot.';
+  return rows;
 }
 
 // F34 item 5c: historical average/median total_tokens among completed runs
@@ -1580,6 +2495,9 @@ export interface StageRequestRow {
   pipelineId: number;
   runId: number | null;
   featureId: string;
+  repoId?: string | null;
+  projectId?: string | null;
+  integrityIssue?: string;
   stage: string;
   kind: StageRequestKind;
   prompt: string;
@@ -1719,10 +2637,11 @@ export function createPipeline(
   const info = getDb('readwrite')
     .prepare(
       `INSERT INTO pipelines
-         (repo_id, feature_id, auto_advance, cwd, plan_json, done_json, pending_json, active_json, aborted_json, workflow_snapshot_json, resume_summary)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         (repo_id, project_id, feature_id, auto_advance, cwd, plan_json, done_json, pending_json, active_json, aborted_json, workflow_snapshot_json, resume_summary)
+       VALUES (?, (SELECT project_id FROM project_repos WHERE repo_id = ?), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     )
     .run(
+      repoId,
       repoId,
       featureId,
       autoAdvance ? 1 : 0,
@@ -2088,30 +3007,24 @@ export function getStageRequest(id: number): StageRequestRow | null {
   return row;
 }
 
-export function listPendingStageRequests(): StageRequestRow[] {
+export function listPendingStageRequests(scope: ProjectScope = {}): StageRequestRow[] {
   if (!hasDbFile()) return [];
   const rows = getDb('readonly')
     .prepare(
       `SELECT
-         id,
-         pipeline_id AS pipelineId,
-         run_id AS runId,
-         feature_id AS featureId,
-         stage,
-         kind,
-         prompt,
-         options,
-         status,
-         response,
-         source,
-         created_at AS createdAt,
-         resolved_at AS resolvedAt
-       FROM stage_requests
-       WHERE status = 'pending'
-       ORDER BY id ASC`,
+         sr.id, sr.pipeline_id AS pipelineId, sr.run_id AS runId, sr.feature_id AS featureId,
+         p.repo_id AS repoId, p.project_id AS projectId, sr.stage, sr.kind, sr.prompt, sr.options,
+         sr.status, sr.response, sr.source, sr.created_at AS createdAt, sr.resolved_at AS resolvedAt
+       FROM stage_requests sr
+       LEFT JOIN pipelines p ON p.id = sr.pipeline_id
+       WHERE sr.status = 'pending'${scope.projectId ? ' AND p.project_id = ?' : ''}
+       ORDER BY sr.id ASC`,
     )
-    .all() as StageRequestRow[];
-  for (const row of rows) row.options = decodeStageRequestOptions(row.options);
+    .all(...(scope.projectId ? [scope.projectId] : [])) as StageRequestRow[];
+  for (const row of rows) {
+    row.options = decodeStageRequestOptions(row.options);
+    if (!row.repoId || !row.projectId) row.integrityIssue = 'Stage request has no resolvable repository or Project snapshot.';
+  }
   return rows;
 }
 

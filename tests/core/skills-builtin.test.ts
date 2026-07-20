@@ -4,18 +4,19 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
 beforeEach(() => { vi.resetModules(); });
 
 describe('BUILTIN_SKILLS', () => {
-  it('exports an array with implement, review, test, decompose entries', async () => {
+  it('exports an array with implement, review, test, decompose, bug-reproduce entries', async () => {
     const { BUILTIN_SKILLS } = await import('../../src/core/skills/builtin.js');
     const names = BUILTIN_SKILLS.map((s) => s.name);
     expect(names).toContain('implement');
     expect(names).toContain('review');
     expect(names).toContain('test');
     expect(names).toContain('decompose');
+    expect(names).toContain('bug-reproduce');
   });
 
-  it('has exactly 4 builtin skills', async () => {
+  it('has exactly 5 builtin skills', async () => {
     const { BUILTIN_SKILLS } = await import('../../src/core/skills/builtin.js');
-    expect(BUILTIN_SKILLS).toHaveLength(4);
+    expect(BUILTIN_SKILLS).toHaveLength(5);
   });
 
   it('all skills have source = builtin', async () => {

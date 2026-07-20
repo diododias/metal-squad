@@ -48,7 +48,7 @@ const backlogSettings = {
   },
 } as BacklogSettings;
 
-function mount(): { container: HTMLElement; rerender: (feature: FeatureCatalogEntry, onSaveConfig: ReturnType<typeof vi.fn>, workflowSaveResult?: FeatureConfigSaveResult) => void } {
+function mount(): { container: HTMLElement; rerender: (feature: FeatureCatalogEntry, onSaveConfig: ReturnType<typeof vi.fn>, workflowSaveResult?: FeatureConfigSaveResult, doneFeatureIds?: Set<string>, failedFeatureIds?: Set<string>) => void } {
   const container = document.createElement('div');
   document.body.append(container);
   const root = createRoot(container);
@@ -56,9 +56,9 @@ function mount(): { container: HTMLElement; rerender: (feature: FeatureCatalogEn
 
   return {
     container,
-    rerender(feature, onSaveConfig, workflowSaveResult) {
+    rerender(feature, onSaveConfig, workflowSaveResult, doneFeatureIds, failedFeatureIds) {
       act(() => {
-        root.render(<FeatureConfigDetail feature={feature} backlogSettings={backlogSettings} onSaveConfig={onSaveConfig} workflowSaveResult={workflowSaveResult} />);
+        root.render(<FeatureConfigDetail feature={feature} backlogSettings={backlogSettings} onSaveConfig={onSaveConfig} workflowSaveResult={workflowSaveResult} doneFeatureIds={doneFeatureIds} failedFeatureIds={failedFeatureIds} />);
       });
     },
   };
@@ -357,6 +357,53 @@ describe('FeatureConfigDetail workflow card', () => {
     act(() => { dispatchChange(workflowControl(view.container, 'workflow-mode'), 'single'); });
     act(() => { workflowSaveButton(view.container)?.click(); });
     expect(onSaveConfig).toHaveBeenCalledWith({ workflow: { mode: 'single' } });
+  });
+});
+
+describe('FeatureConfigDetail dependency status display', () => {
+  it('shows "none" when feature has no dependsOn', () => {
+    const onSaveConfig = vi.fn();
+    const view = mount();
+    view.rerender(makeFeature({ dependsOn: [] }), onSaveConfig);
+    expect(view.container.textContent).toContain('none');
+  });
+
+  it('shows done dependencies with green color', () => {
+    const onSaveConfig = vi.fn();
+    const view = mount();
+    view.rerender(makeFeature({ dependsOn: ['dep-a'] }), onSaveConfig, undefined, new Set(['dep-a']));
+    const tags = view.container.querySelectorAll('span');
+    const depTag = Array.from(tags).find(tag => tag.textContent === 'dep-a');
+    expect(depTag).toBeTruthy();
+    expect(depTag?.style.backgroundColor).toBe('var(--accent-ok)');
+  });
+
+  it('shows pending dependencies with yellow color', () => {
+    const onSaveConfig = vi.fn();
+    const view = mount();
+    view.rerender(makeFeature({ dependsOn: ['dep-a', 'dep-b'] }), onSaveConfig, undefined, new Set(['dep-a']));
+    const tags = view.container.querySelectorAll('span');
+    const depTag = Array.from(tags).find(tag => tag.textContent === 'dep-b');
+    expect(depTag).toBeTruthy();
+    expect(depTag?.style.backgroundColor).toBe('var(--accent-warn)');
+  });
+
+  it('shows failed dependencies with red color', () => {
+    const onSaveConfig = vi.fn();
+    const view = mount();
+    view.rerender(makeFeature({ dependsOn: ['dep-a'] }), onSaveConfig, undefined, new Set(), new Set(['dep-a']));
+    const tags = view.container.querySelectorAll('span');
+    const depTag = Array.from(tags).find(tag => tag.textContent === 'dep-a');
+    expect(depTag).toBeTruthy();
+    expect(depTag?.style.backgroundColor).toBe('var(--accent-fail)');
+  });
+
+  it('shows all dependencies as pending when none are done', () => {
+    const onSaveConfig = vi.fn();
+    const view = mount();
+    view.rerender(makeFeature({ dependsOn: ['dep-a', 'dep-b'] }), onSaveConfig, undefined, new Set());
+    expect(view.container.textContent).toContain('dep-a');
+    expect(view.container.textContent).toContain('dep-b');
   });
 });
 

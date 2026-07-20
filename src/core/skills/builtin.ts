@@ -50,6 +50,30 @@ export const BUILTIN_SKILLS: Skill[] = [
     },
   },
   {
+    name: 'bug-reproduce',
+    source: 'builtin',
+    promptTemplate: [
+      'Reproduce the bug reported in {{featureId}} ({{featureTitle}}) before changing any code.',
+      '{{summary}}',
+      '{{spec}}',
+      '{{context}}',
+      '{{tasks}}',
+      [
+        'Reproduction contract (mandatory):',
+        '- Establish the smallest deterministic way to observe the defect.',
+        '- Prefer a failing automated test over manual steps; add it when one does not exist.',
+        '- Record the observed behaviour and the expected behaviour side by side.',
+        '- Do not implement the fix in this stage; stop once the failure is reproducible.',
+        'If the bug cannot be reproduced, report that explicitly instead of guessing at a fix.',
+      ].join('\n'),
+    ].join('\n\n'),
+    metadata: {
+      description: 'Reproduce a reported bug deterministically before any fix.',
+      inputs: ['summary', 'specFile', 'context', 'tasks'],
+      outputs: ['reproduction'],
+    },
+  },
+  {
     name: 'decompose',
     source: 'builtin',
     promptTemplate: [
