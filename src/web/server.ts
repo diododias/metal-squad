@@ -31,6 +31,9 @@ import {
   isWorkItemPristine,
   changeWorkItemType,
   type WorkItemTemplateSnapshot,
+  type ProjectRow,
+  type EpicRow,
+  type WorkItemRow,
 } from '../db/repo.js';
 import { RevisionConflictError, WorkItemHasHistoryError } from '../db/errors.js';
 import { getAdapter } from '../core/adapters/index.js';
@@ -50,7 +53,7 @@ import { workItemService } from '../core/workItemService.js';
 import { projectService, repoLinkService } from '../core/projectService.js';
 import { buildMsqWebState, appendNotification, resetWebStateCaches, invalidateWorkflowTemplatesCache } from './state.js';
 import { createWebAuth, isAllowedHostHeader, isAllowedOrigin, timingSafeEqualStrings } from './auth.js';
-import { EpicActionMessageSchema, ProjectActionMessageSchema, RepositoryActionMessageSchema, WorkItemActionMessageSchema, WorkflowTemplateActionMessageSchema, WorkItemTypeChangeMessageSchema, ResolveWorkflowTemplateMessageSchema } from './schemas.js';
+import { EpicActionMessageSchema, LifecycleActionMessageSchema, ProjectActionMessageSchema, RepositoryActionMessageSchema, WorkItemActionMessageSchema, WorkflowTemplateActionMessageSchema, WorkItemTypeChangeMessageSchema, ResolveWorkflowTemplateMessageSchema } from './schemas.js';
 import {
   archiveWorkflowTemplate,
   createWorkflowTemplate,
@@ -64,6 +67,8 @@ import type {
   AppConfigPatch,
   EpicActionError,
   EpicActionResult,
+  LifecycleActionError,
+  LifecycleActionResult,
   FeatureConfigPatch,
   FeatureConfigSaveIssue,
   FeatureConfigSaveResult,
@@ -870,6 +875,20 @@ export function createWebServer(options: {
         if (result.payload.ok) reconcileWebState(featureCwd, { forceBroadcast: true });
         break;
       }
+      case 'action:archiveProject':
+      case 'action:deleteProject':
+      case 'action:restoreArchivedProject':
+      case 'action:archiveEpic':
+      case 'action:deleteEpic':
+      case 'action:restoreArchivedEpic':
+      case 'action:archiveWorkItem':
+      case 'action:deleteWorkItem':
+      case 'action:restoreArchivedWorkItem': {
+        const result = handleLifecycleAction(message);
+        sendTo(client, result);
+        if (result.payload.ok) reconcileWebState(featureCwd, { forceBroadcast: true });
+        break;
+      }
       case 'action:resolveWorkflowTemplate': {
         const result = handleResolveWorkflowTemplate(message);
         sendTo(client, result);
@@ -1423,6 +1442,47 @@ export function createWebServer(options: {
       return { type: 'action:result', payload: { requestId: parsed.data.requestId, ok: true, workItem: result.entity, revision: result.revision ?? result.entity.revision } };
     } catch (error) {
       return { type: 'action:result', payload: { requestId: parsed.data.requestId, ok: false, error: workItemActionError(error) } };
+    }
+  }
+
+  /** Maps a lifecycle policy failure onto a stable action-error code. The four
+   * policy codes plus the shared REVISION_CONFLICT / NOT_FOUND codes pass
+   * through verbatim; anything else collapses to a generic failure. */
+  function lifecycleActionError(error: unknown): LifecycleActionError {
+    const code = typeof error === 'object' && error !== null ? (error as { code?: unknown }).code : undefined;
+    if (code === 'ENTITY_RUNNING' || code === 'ENTITY_HAS_HISTORY' || code === 'ENTITY_IN_USE' || code === 'ANCESTOR_ARCHIVED'
+      || code === 'REVISION_CONFLICT' || code === 'PROJECT_NOT_FOUND' || code === 'EPIC_NOT_FOUND' || code === 'WORK_ITEM_NOT_FOUND') {
+      return { code, message: error instanceof Error ? error.message : 'Lifecycle action failed.' };
+    }
+    return { code: 'PROJECT_ACTION_FAILED', message: 'Lifecycle action failed.' };
+  }
+
+  /** Single WS entry point for archive / delete / restoreArchive across the
+   * three levels (PRJ-17). The policy engine runs inside the repo-layer write
+   * transaction, so this handler only routes and shapes the result. */
+  function handleLifecycleAction(message: unknown): LifecycleActionResult {
+    const parsed = LifecycleActionMessageSchema.safeParse(message);
+    if (!parsed.success) {
+      return { type: 'action:result', payload: { requestId: actionResultRequestId(message), ok: false, error: { code: 'INVALID_PAYLOAD', message: 'Invalid lifecycle action payload.' } } };
+    }
+    const data = parsed.data;
+    const audit = { actor: 'web', requestId: data.requestId };
+    try {
+      let entity: ProjectRow | EpicRow | WorkItemRow;
+      switch (data.type) {
+        case 'action:archiveProject': entity = projectService.archive(data.projectId, data.expectedRevision, { audit }).entity; break;
+        case 'action:deleteProject': entity = projectService.delete(data.projectId, data.expectedRevision, { audit }).entity; break;
+        case 'action:restoreArchivedProject': entity = projectService.restoreArchive(data.projectId, data.expectedRevision, { audit }).entity; break;
+        case 'action:archiveEpic': entity = epicService.archive(data.epicId, data.expectedRevision, { audit }).entity; break;
+        case 'action:deleteEpic': entity = epicService.delete(data.epicId, data.expectedRevision, { audit }).entity; break;
+        case 'action:restoreArchivedEpic': entity = epicService.restoreArchive(data.epicId, data.expectedRevision, { audit }).entity; break;
+        case 'action:archiveWorkItem': entity = workItemService.archive(data.workItemId, data.expectedRevision, { audit }).entity; break;
+        case 'action:deleteWorkItem': entity = workItemService.delete(data.workItemId, data.expectedRevision, { audit }).entity; break;
+        case 'action:restoreArchivedWorkItem': entity = workItemService.restoreArchive(data.workItemId, data.expectedRevision, { audit }).entity; break;
+      }
+      return { type: 'action:result', payload: { requestId: data.requestId, ok: true, entity, revision: entity.revision } };
+    } catch (error) {
+      return { type: 'action:result', payload: { requestId: data.requestId, ok: false, error: lifecycleActionError(error) } };
     }
   }
 

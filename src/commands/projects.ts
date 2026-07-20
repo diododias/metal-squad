@@ -43,6 +43,21 @@ export function registerProjects(program: Command): void {
       } catch (error) { rethrowDomainError(error, opts.format); }
     });
 
+  projects.command('archive <projectId>').option('--expected-revision <revision>').option('--format <format>', 'text | json', 'text')
+    .action((projectId: string, opts: ProjectOptions) => {
+      try { printDomainOutput(projectService.archive(projectId, parseRevision(opts.expectedRevision), { audit: { actor: 'cli' } }), opts.format); } catch (error) { rethrowDomainError(error, opts.format); }
+    });
+
+  projects.command('delete <projectId>').option('--expected-revision <revision>').option('--format <format>', 'text | json', 'text')
+    .action((projectId: string, opts: ProjectOptions) => {
+      try { printDomainOutput(projectService.delete(projectId, parseRevision(opts.expectedRevision), { audit: { actor: 'cli' } }), opts.format); } catch (error) { rethrowDomainError(error, opts.format); }
+    });
+
+  projects.command('restore <projectId>').option('--expected-revision <revision>').option('--format <format>', 'text | json', 'text')
+    .action((projectId: string, opts: ProjectOptions) => {
+      try { printDomainOutput(projectService.restoreArchive(projectId, parseRevision(opts.expectedRevision), { audit: { actor: 'cli' } }), opts.format); } catch (error) { rethrowDomainError(error, opts.format); }
+    });
+
   const repos = projects.command('repos').description('Gerencia vinculos entre Project e repositorio');
   repos.command('link <projectId>').option('--repo-id <repoId>').option('--path <path>').option('--format <format>', 'text | json', 'text')
     .action((projectId: string, opts: ProjectOptions) => {

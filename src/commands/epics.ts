@@ -36,4 +36,16 @@ export function registerEpics(program: Command): void {
         printDomainOutput(epicService.update(epicId, { title: opts.title, description: opts.description, status: opts.status, position: optionalPosition(opts.position) }, parseRevision(opts.expectedRevision)), opts.format);
       } catch (error) { rethrowDomainError(error, opts.format); }
     });
+  epics.command('archive <epicId>').option('--expected-revision <revision>').option('--format <format>', 'text | json', 'text')
+    .action((epicId: string, opts: EpicOptions) => {
+      try { printDomainOutput(epicService.archive(epicId, parseRevision(opts.expectedRevision), { audit: { actor: 'cli' } }), opts.format); } catch (error) { rethrowDomainError(error, opts.format); }
+    });
+  epics.command('delete <epicId>').option('--expected-revision <revision>').option('--format <format>', 'text | json', 'text')
+    .action((epicId: string, opts: EpicOptions) => {
+      try { printDomainOutput(epicService.delete(epicId, parseRevision(opts.expectedRevision), { audit: { actor: 'cli' } }), opts.format); } catch (error) { rethrowDomainError(error, opts.format); }
+    });
+  epics.command('restore <epicId>').option('--expected-revision <revision>').option('--format <format>', 'text | json', 'text')
+    .action((epicId: string, opts: EpicOptions) => {
+      try { printDomainOutput(epicService.restoreArchive(epicId, parseRevision(opts.expectedRevision), { audit: { actor: 'cli' } }), opts.format); } catch (error) { rethrowDomainError(error, opts.format); }
+    });
 }

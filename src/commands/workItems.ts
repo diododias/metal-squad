@@ -1,6 +1,6 @@
 import type { Command } from 'commander';
 import { workItemService } from '../core/workItemService.js';
-import { printDomainOutput, rethrowDomainError } from './domainOutput.js';
+import { parseRevision, printDomainOutput, rethrowDomainError } from './domainOutput.js';
 
 interface WorkItemOptions {
   epic?: string;
@@ -8,6 +8,7 @@ interface WorkItemOptions {
   title?: string;
   description?: string;
   dependsOn?: string[];
+  expectedRevision?: string;
   format?: string;
 }
 
@@ -34,6 +35,21 @@ export function registerWorkItems(program: Command): void {
           audit: { actor: 'cli' },
         }), opts.format);
       } catch (error) { rethrowDomainError(error, opts.format); }
+    });
+
+  workItems.command('archive <workItemId>').option('--expected-revision <revision>').option('--format <format>', 'text | json', 'text')
+    .action((workItemId: string, opts: WorkItemOptions) => {
+      try { printDomainOutput(workItemService.archive(workItemId, parseRevision(opts.expectedRevision), { audit: { actor: 'cli' } }), opts.format); } catch (error) { rethrowDomainError(error, opts.format); }
+    });
+
+  workItems.command('delete <workItemId>').option('--expected-revision <revision>').option('--format <format>', 'text | json', 'text')
+    .action((workItemId: string, opts: WorkItemOptions) => {
+      try { printDomainOutput(workItemService.delete(workItemId, parseRevision(opts.expectedRevision), { audit: { actor: 'cli' } }), opts.format); } catch (error) { rethrowDomainError(error, opts.format); }
+    });
+
+  workItems.command('restore <workItemId>').option('--expected-revision <revision>').option('--format <format>', 'text | json', 'text')
+    .action((workItemId: string, opts: WorkItemOptions) => {
+      try { printDomainOutput(workItemService.restoreArchive(workItemId, parseRevision(opts.expectedRevision), { audit: { actor: 'cli' } }), opts.format); } catch (error) { rethrowDomainError(error, opts.format); }
     });
 }
 
