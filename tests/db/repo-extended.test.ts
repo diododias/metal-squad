@@ -104,6 +104,51 @@ describe('finishRun', () => {
   });
 });
 
+describe('upsertRunSessionStatus', () => {
+  const baseSnapshot = {
+    runId: 7,
+    featureId: 'feat-timeout',
+    tool: 'claude' as const,
+    startedAt: '2026-07-20T12:30:26.000Z',
+    updatedAt: '2026-07-20T12:40:26.000Z',
+    elapsedMs: 600_000,
+    lastOutputAt: '2026-07-20T12:40:26.000Z',
+    idleMs: null,
+    reason: null,
+    terminal: true,
+  };
+
+  it('does not force the legacy status to failed on timed_out, leaving finishRun as the source of truth (H31)', async () => {
+    const { upsertRunSessionStatus } = await import('../../src/db/repo.js');
+    upsertRunSessionStatus({ ...baseSnapshot, status: 'timed_out', reason: 'claude exceeded timeout after 600000ms' });
+
+    const params = mockRun.mock.calls[0]!;
+    // legacyStatus is bound twice (the CASE WHEN guard and the SET value).
+    expect(params[8]).toBeNull();
+    expect(params[9]).toBeNull();
+  });
+
+  it('still maps failed to the legacy failed status', async () => {
+    const { upsertRunSessionStatus } = await import('../../src/db/repo.js');
+    upsertRunSessionStatus({ ...baseSnapshot, status: 'failed', reason: 'boom' });
+
+    const params = mockRun.mock.calls[0]!;
+    expect(params[8]).toBe('failed');
+    expect(params[9]).toBe('failed');
+  });
+
+  it('still maps completed to done and interrupted to aborted', async () => {
+    const { upsertRunSessionStatus } = await import('../../src/db/repo.js');
+
+    upsertRunSessionStatus({ ...baseSnapshot, status: 'completed' });
+    expect(mockRun.mock.calls[0]![8]).toBe('done');
+
+    mockRun.mockClear();
+    upsertRunSessionStatus({ ...baseSnapshot, status: 'interrupted', reason: 'claude aborted manually' });
+    expect(mockRun.mock.calls[0]![8]).toBe('aborted');
+  });
+});
+
 describe('cleanupStaleRuns', () => {
   it('returns number of changes', async () => {
     mockRun.mockReturnValueOnce({ changes: 3, lastInsertRowid: 0 });
