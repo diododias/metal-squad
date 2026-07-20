@@ -453,6 +453,86 @@ describe('claude adapter', () => {
     expect(failed.error).toBe('"permission denied"');
   });
 
+  it('handles a realistic interleaved stream of multiple tool_use/tool_result pairs in order', async () => {
+    // Mirrors the real Claude stream-json shape: the assistant can emit several
+    // tool_use blocks in one message, and several tool_result blocks arrive
+    // together in a single user message. The test asserts that each tool call
+    // reaches its terminal phase in the right order — this is the exact
+    // scenario that produced the F-4HGA24AJ regression where every card
+    // stayed blue.
+    const lines: string[] = [
+      JSON.stringify({
+        type: 'assistant',
+        message: {
+          id: 'msg_1',
+          content: [
+            { type: 'tool_use', id: 'toolu_a', name: 'Read', input: { file_path: '/repo/a.ts' } },
+            { type: 'tool_use', id: 'toolu_b', name: 'Bash', input: { cmd: 'ls' } },
+          ],
+          usage: { input_tokens: 100, output_tokens: 20 },
+        },
+      }),
+      JSON.stringify({
+        type: 'user',
+        message: {
+          role: 'user',
+          content: [
+            { type: 'tool_result', tool_use_id: 'toolu_a', content: 'aaaa', is_error: false },
+            { type: 'tool_result', tool_use_id: 'toolu_b', content: 'file1\nfile2', is_error: false },
+          ],
+        },
+      }),
+      JSON.stringify({
+        type: 'assistant',
+        message: {
+          id: 'msg_2',
+          content: [
+            { type: 'text', text: 'agora vou tentar uma bash que falha' },
+            { type: 'tool_use', id: 'toolu_c', name: 'Bash', input: { cmd: 'false' } },
+          ],
+          usage: { input_tokens: 150, output_tokens: 30 },
+        },
+      }),
+      JSON.stringify({
+        type: 'user',
+        message: {
+          role: 'user',
+          content: [
+            { type: 'tool_result', tool_use_id: 'toolu_c', content: 'non-zero exit', is_error: true },
+          ],
+        },
+      }),
+    ];
+    mockRunCli.mockImplementation(async (_bin, _args, opts) => {
+      for (const line of lines) opts.onStdoutLine?.(line);
+      return { code: 0, stdout: JSON.stringify({ type: 'result', subtype: 'success', result: 'done' }), stderr: '' };
+    });
+    const { claudeAdapter } = await import('../../src/core/adapters/claude.js');
+
+    await claudeAdapter.runFeature(
+      { id: 'feat-1', title: 'F', tool: 'claude', effort: 'medium', dependsOn: [], tasks: [] },
+      'PROMPT',
+      { cwd: '/repo', runId: 10 },
+    );
+
+    const emits = mockEventEmit.mock.calls.filter((c) => c[0] === 'tool:call') as Array<[string, { id: string; phase: string }]>;
+    // emitToolCall only synthesizes a synthetic `started` for a terminal
+    // phase when the `tool_use` was never seen — since the assistant message
+    // pre-registers both toolu_a and toolu_b in the `seen` set, the matching
+    // tool_result blocks just transition them straight to `completed`. The
+    // total is 6 emits: 2 started (msg_1) + 2 completed (user 1) + 1 started
+    // (msg_2 toolu_c) + 1 failed (user 2 toolu_c).
+    const transitions = emits.map(([, payload]) => [payload.id, payload.phase] as const);
+    expect(transitions).toEqual([
+      ['toolu_a', 'started'],
+      ['toolu_b', 'started'],
+      ['toolu_a', 'completed'],
+      ['toolu_b', 'completed'],
+      ['toolu_c', 'started'],
+      ['toolu_c', 'failed'],
+    ]);
+  });
+
   it('passes --print as boolean flag and prompt as positional arg after --', async () => {
     mockRunCli.mockResolvedValue({ code: 0, stdout: JSON.stringify({ result: 'ok' }), stderr: '' });
     const { claudeAdapter } = await import('../../src/core/adapters/claude.js');
