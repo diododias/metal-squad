@@ -303,6 +303,8 @@ export function App(): React.JSX.Element {
           { send({ type: 'action:updateTaskConfig', featureId, taskId, patch }); }
         }
         onOpenRun={openRun}
+        send={send}
+        actionResults={projectActionResults}
       />
     );
   } else if (route.page === 'gates') {

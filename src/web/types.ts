@@ -7,6 +7,26 @@ import type { RunBreakdown } from '../core/stats.js';
 import type { ThemeRoleName } from '../ui/theme/types.js';
 import type { AppConfigPatch as ConfigAppConfigPatch, Config, NotificationChannelConfig, NotificationsPatch, ToolRegistryEntry } from '../config/index.js';
 import type { Skill } from '../core/skills/types.js';
+import type { WorkItemType as MsqWorkItemType } from '../db/workflowTemplates.js';
+
+export type { MsqWorkItemType };
+
+/** Client-facing shape of a workflow template: enough to render a picker or
+ * badge without shipping the full stage/skill definition. */
+export interface WorkflowTemplateSummary {
+  templateId: string;
+  name: string;
+  version: number;
+  revision: number;
+  builtin: boolean;
+  archived: boolean;
+  scopeProjectId: string | null;
+  stageCount: number;
+}
+
+/** Project -> Work Item type -> mapped templateId, as consumed by the type
+ * preview/picker on the client. */
+export type WorkflowTemplateMappings = Record<string, Partial<Record<MsqWorkItemType, string>>>;
 
 export interface TokenStats {
   status: 'loading' | 'ready' | 'error';
@@ -149,6 +169,10 @@ export interface MsqWebState {
   /** Config page (Skills sub-tab) — discovered skills with precedence
    * already applied (repo > global > external > builtin), read-only. */
   skillsCatalog: Skill[];
+  /** Workflow Templates catalog (PRJ-23/24) and the Project -> type mapping
+   * used to resolve which template a new Work Item gets. */
+  workflowTemplates: WorkflowTemplateSummary[];
+  workflowTemplateMappings: WorkflowTemplateMappings;
   /** Collector errors since the last snapshot — empty when all collectors succeeded. */
   errors: ErrorEntry[];
 }
@@ -361,6 +385,20 @@ export type WorkItemTypeChangeResult =
   | { type: 'action:result'; payload: { requestId: string; ok: true; workItem: WorkItemRow; revision: number } }
   | { type: 'action:result'; payload: { requestId: string; ok: false; error: WorkItemActionError } };
 
+/** What the Work Item creation form shows before `action:createWorkItem`: the
+ * template a new Work Item of this type/epic/repo would get. Identical shape
+ * to the snapshot `action:createWorkItem` will persist (PRJ-24). */
+export interface WorkflowTemplatePreview {
+  templateId: string;
+  templateVersion: number;
+  origin: 'project-mapping' | 'builtin';
+  stages: string[];
+}
+
+export type ResolveWorkflowTemplateResult =
+  | { type: 'action:result'; payload: { requestId: string; ok: true; preview: WorkflowTemplatePreview } }
+  | { type: 'action:result'; payload: { requestId: string; ok: false; error: WorkItemActionError } };
+
 export type WebSocketClientMessage =
   | { type: 'auth'; token: string }
   | {
@@ -383,6 +421,7 @@ export type WebSocketClientMessage =
   | { type: 'action:unlinkRepo'; requestId: string; projectId: string; repoId: string }
   | { type: 'action:createEpic'; requestId: string; projectId: string; title: string; description?: string | null }
   | { type: 'action:createWorkItem'; requestId: string; epicId: string; repoId: string; workItemType?: MsqWorkItemType; title: string; description?: string | null; dependsOn?: string[] }
+  | { type: 'action:resolveWorkflowTemplate'; requestId: string; epicId: string; repoId: string; workItemType: MsqWorkItemType }
   | { type: 'action:createWorkflowTemplate'; requestId: string; projectId: string; name: string; definition: unknown }
   | { type: 'action:updateWorkflowTemplate'; requestId: string; templateId: string; expectedRevision: number; patch: { name?: string; definition?: unknown } }
   | { type: 'action:duplicateWorkflowTemplate'; requestId: string; templateId: string; projectId: string; name?: string }
@@ -435,6 +474,7 @@ export type WebSocketServerMessage =
   | WorkItemActionResult
   | WorkflowTemplateActionResult
   | WorkItemTypeChangeResult
+  | ResolveWorkflowTemplateResult
   | { type: 'run:detail'; payload: { runId: number; taskRuns: TaskRun[]; breakdown: RunBreakdown | null; sessionStatus: SessionStatusSnapshot | null; statusHistory: SessionStatusSnapshot[]; toolCalls: ToolCallRecord[] } }
   | { type: 'run:history'; payload: { featureId: string; runs: RunHistoryEntry[] } }
   | { type: 'run:changes'; payload: RunChangesPayload }

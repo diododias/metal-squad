@@ -336,6 +336,23 @@ export function mapProjectWorkItemTemplate(input: {
   });
 }
 
+
+export interface ProjectTemplateMapping {
+  projectId: string;
+  workItemType: WorkItemType;
+  templateId: string;
+}
+
+export function listProjectTemplateMappings(): ProjectTemplateMapping[] {
+  const database = getDb();
+  return database
+    .prepare(
+      `SELECT project_id AS projectId, work_item_type AS workItemType, template_id AS templateId
+         FROM project_work_item_templates`,
+    )
+    .all() as ProjectTemplateMapping[];
+}
+
 /**
  * Deterministic template resolution.
  *

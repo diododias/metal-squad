@@ -29,7 +29,7 @@ import { createSkillRegistry } from '../core/skills/registry.js';
 import type { Skill } from '../core/skills/types.js';
 import { collectEnvironmentInfo } from './environment.js';
 import { logCaughtError } from '../core/events/index.js';
-import type { MsqWebState, ProjectSummary, RepositorySummary, ThemeSnapshot, TimeoutApprovalState, TokenStats, UiNotification, WebRuntimeConfig, ErrorEntry } from './types.js';
+import type { MsqWebState, ProjectSummary, RepositorySummary, ThemeSnapshot, TimeoutApprovalState, TokenStats, UiNotification, WebRuntimeConfig, ErrorEntry, WorkflowTemplateSummary, WorkflowTemplateMappings } from './types.js';
 
 const DASHBOARD_PERIODS: { label: string; days: number | null }[] = [
   { label: 'today', days: 1 },
@@ -417,6 +417,8 @@ export function buildMsqWebState(): MsqWebState {
     epics = [];
   }
 
+  const { summaries: workflowTemplates, mappings: workflowTemplateMappings } = collectWorkflowTemplates();
+
   const executionRuns = runs.filter((run) => getRunGroup(run.status) === 'execution');
   const doneRuns = runs.filter((run) => run.status === 'done');
   const falhaRunsList = runs.filter((run) => getRunGroup(run.status) === 'canceled');
@@ -457,6 +459,8 @@ export function buildMsqWebState(): MsqWebState {
       configWritable: environment.configWritable,
     }),
     skillsCatalog: collectSkillsCatalog(),
+    workflowTemplates,
+    workflowTemplateMappings,
     errors,
   };
 }
