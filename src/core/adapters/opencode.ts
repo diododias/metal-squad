@@ -148,6 +148,9 @@ export const opencodeAdapter: ToolAdapter = {
       if (isCliTimeoutError(error)) {
         const usage = this.parseUsage?.(error.stdout) ?? undefined;
         if (usage) emitUsage(opts.runId, feature, usage);
+        const partialEvents = extractOpenCodeEvents(error.stdout);
+        const partialJson = safeJson<OpenCodeResponse>(error.stdout) ?? partialEvents[partialEvents.length - 1] ?? null;
+        const session = buildOpenCodeSessionHandle(partialEvents, partialJson, opts, opts.runId);
         return {
           ok: false,
           summary: `timeout após ${String(Math.round(error.runtimeMs / 1000))}s`,
@@ -157,6 +160,7 @@ export const opencodeAdapter: ToolAdapter = {
             runtimeMs: error.runtimeMs,
             ...(error.lastProgress ? { lastProgress: sanitizeTimeoutProgress(error.lastProgress) } : {}),
           },
+          ...(session ? { session } : {}),
         };
       }
       if (error instanceof CliAbortError) {

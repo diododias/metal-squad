@@ -217,7 +217,9 @@ function migrate(d: Database.Database): void {
       session_last_output_at TEXT,
       session_idle_ms INTEGER,
       session_reason TEXT,
-      session_terminal INTEGER NOT NULL DEFAULT 0
+      session_terminal INTEGER NOT NULL DEFAULT 0,
+      adapter_session_tool TEXT,
+      adapter_session_id TEXT
     );
 
     CREATE TABLE IF NOT EXISTS token_usage (
@@ -629,6 +631,8 @@ function migrate(d: Database.Database): void {
     ['session_idle_ms', `ALTER TABLE runs ADD COLUMN session_idle_ms INTEGER`],
     ['session_reason', `ALTER TABLE runs ADD COLUMN session_reason TEXT`],
     ['session_terminal', `ALTER TABLE runs ADD COLUMN session_terminal INTEGER NOT NULL DEFAULT 0`],
+    ['adapter_session_tool', `ALTER TABLE runs ADD COLUMN adapter_session_tool TEXT`],
+    ['adapter_session_id', `ALTER TABLE runs ADD COLUMN adapter_session_id TEXT`],
   ];
   for (const [name, sql] of sessionColumns) {
     if (!runColumns.some((column) => column.name === name)) {

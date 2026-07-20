@@ -127,6 +127,63 @@ describe('codexAdapter timeout observability', () => {
     });
   });
 
+  it('captures the thread id from the partial transcript on timeout so a later resume can continue it', async () => {
+    const transcript = [
+      JSON.stringify({ type: 'thread.started', thread_id: 'thread-timeout-1' }),
+      JSON.stringify({
+        type: 'item.completed',
+        item: { type: 'agent_message', text: 'Ainda trabalhando...' },
+      }),
+    ].join('\n');
+
+    mockRunCli.mockRejectedValue(
+      new MockCliTimeoutError('codex', 600_000, 605_000, transcript, ''),
+    );
+
+    const { codexAdapter } = await import('../../src/core/adapters/codex.js');
+    const result = await codexAdapter.runFeature({
+      id: 'feat-02',
+      title: 'Feature',
+      tool: 'codex',
+      effort: 'medium',
+      dependsOn: [],
+      tasks: [],
+    }, 'prompt', { cwd: '/repo', runId: 7 });
+
+    expect(result.ok).toBe(false);
+    expect(result.session).toEqual({
+      tool: 'codex',
+      sessionId: 'thread-timeout-1',
+      capturedFromRunId: 7,
+      capturedAt: expect.any(String),
+    });
+  });
+
+  it('falls back to the already-resumed session id on timeout when the partial transcript has no thread id yet', async () => {
+    mockRunCli.mockRejectedValue(
+      new MockCliTimeoutError('codex', 600_000, 605_000, '', ''),
+    );
+
+    const { codexAdapter } = await import('../../src/core/adapters/codex.js');
+    const result = await codexAdapter.runFeature({
+      id: 'feat-02',
+      title: 'Feature',
+      tool: 'codex',
+      effort: 'medium',
+      dependsOn: [],
+      tasks: [],
+    }, 'prompt', {
+      cwd: '/repo',
+      runId: 7,
+      session: {
+        mode: 'resume',
+        handle: { tool: 'codex', sessionId: 'thread-already-resumed', capturedFromRunId: 3, capturedAt: '2026-07-19T00:00:00Z' },
+      },
+    });
+
+    expect(result.session?.sessionId).toBe('thread-already-resumed');
+  });
+
   it('summarizes completed command executions instead of opaque item ids', async () => {
     mockRunCli.mockImplementation(async (_bin, _args, opts) => {
       opts.onStdoutLine?.(JSON.stringify({

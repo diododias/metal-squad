@@ -104,6 +104,45 @@ describe('finishRun', () => {
   });
 });
 
+describe('updateRunSessionHandle', () => {
+  it('calls prepare+run with tool, sessionId and runId', async () => {
+    const { updateRunSessionHandle } = await import('../../src/db/repo.js');
+    updateRunSessionHandle(5, {
+      tool: 'claude',
+      sessionId: 'session-abc',
+      capturedFromRunId: 5,
+      capturedAt: '2026-07-20T00:00:00.000Z',
+    });
+    expect(mockRun.mock.calls[0]).toContain('claude');
+    expect(mockRun.mock.calls[0]).toContain('session-abc');
+    expect(mockRun.mock.calls[0]).toContain(5);
+  });
+});
+
+describe('getLatestRunSessionHandle', () => {
+  it('returns null when no run has a persisted adapter session', async () => {
+    mockGet.mockReturnValueOnce(undefined);
+    const { getLatestRunSessionHandle } = await import('../../src/db/repo.js');
+    const result = getLatestRunSessionHandle(3, 'feat-1', 'implement');
+    expect(result).toBeNull();
+    expect(mockGet.mock.calls[0]).toContain(3);
+    expect(mockGet.mock.calls[0]).toContain('feat-1');
+    expect(mockGet.mock.calls[0]).toContain('implement');
+  });
+
+  it('reconstructs a SessionHandle from the latest matching run', async () => {
+    mockGet.mockReturnValueOnce({ id: 42, tool: 'claude', sessionId: 'session-abc' });
+    const { getLatestRunSessionHandle } = await import('../../src/db/repo.js');
+    const result = getLatestRunSessionHandle(3, 'feat-1', 'implement');
+    expect(result).toEqual({
+      tool: 'claude',
+      sessionId: 'session-abc',
+      capturedFromRunId: 42,
+      capturedAt: expect.any(String),
+    });
+  });
+});
+
 describe('upsertRunSessionStatus', () => {
   const baseSnapshot = {
     runId: 7,

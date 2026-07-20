@@ -669,6 +669,54 @@ describe('claude adapter', () => {
       total: 13,
     });
   });
+
+  it('returns a session handle on timeout so a later resume can continue the same claude session', async () => {
+    const { CliTimeoutError } = await import('../../src/core/adapters/spawn.js');
+    mockRunCli.mockRejectedValue(
+      new CliTimeoutError('claude', 600_000, 605_000, '', ''),
+    );
+    const { claudeAdapter } = await import('../../src/core/adapters/claude.js');
+
+    const result = await claudeAdapter.runFeature(
+      { id: 'feat-1', title: 'Feature', tool: 'claude', effort: 'medium', dependsOn: [], tasks: [] },
+      'PROMPT',
+      { cwd: '/repo', runId: 5 },
+    );
+
+    expect(result.ok).toBe(false);
+    expect(result.session?.tool).toBe('claude');
+    expect(result.session?.capturedFromRunId).toBe(5);
+    expect(result.session?.sessionId).toEqual(expect.any(String));
+    expect(result.session?.sessionId.length).toBeGreaterThan(0);
+  });
+
+  it('preserves the already-resumed session id on timeout instead of starting a new one', async () => {
+    const { CliTimeoutError } = await import('../../src/core/adapters/spawn.js');
+    mockRunCli.mockRejectedValue(
+      new CliTimeoutError('claude', 600_000, 605_000, '', ''),
+    );
+    const { claudeAdapter } = await import('../../src/core/adapters/claude.js');
+
+    const result = await claudeAdapter.runFeature(
+      { id: 'feat-1', title: 'Feature', tool: 'claude', effort: 'medium', dependsOn: [], tasks: [] },
+      'PROMPT',
+      {
+        cwd: '/repo',
+        runId: 5,
+        session: {
+          mode: 'resume',
+          handle: {
+            tool: 'claude',
+            sessionId: 'session-already-resumed',
+            capturedFromRunId: 1,
+            capturedAt: '2026-07-19T00:00:00Z',
+          },
+        },
+      },
+    );
+
+    expect(result.session?.sessionId).toBe('session-already-resumed');
+  });
 });
 
 describe('opencode adapter', () => {

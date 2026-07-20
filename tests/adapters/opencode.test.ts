@@ -215,6 +215,53 @@ describe('opencodeAdapter.runFeature', () => {
     expect(result.summary).toContain('30s');
   });
 
+  it('captures the session id from the partial stdout on timeout so a later resume can continue it', async () => {
+    mockRunCli.mockRejectedValue(Object.assign(new Error('timeout'), {
+      name: 'CliTimeoutError',
+      stdout: JSON.stringify({ sessionID: 'ses_timeout_1' }),
+      stderr: '',
+      timeoutMs: 600_000,
+      runtimeMs: 605_000,
+    }));
+
+    const { opencodeAdapter } = await import('../../src/core/adapters/opencode.js');
+    const result = await opencodeAdapter.runFeature(MOCK_FEATURE as never, 'prompt', MOCK_OPTS);
+
+    expect(result.ok).toBe(false);
+    expect(result.session).toEqual({
+      tool: 'opencode',
+      sessionId: 'ses_timeout_1',
+      capturedFromRunId: MOCK_OPTS.runId,
+      capturedAt: expect.any(String),
+    });
+  });
+
+  it('falls back to the already-resumed session id on timeout when the partial stdout has no session id yet', async () => {
+    mockRunCli.mockRejectedValue(Object.assign(new Error('timeout'), {
+      name: 'CliTimeoutError',
+      stdout: '',
+      stderr: '',
+      timeoutMs: 600_000,
+      runtimeMs: 605_000,
+    }));
+
+    const { opencodeAdapter } = await import('../../src/core/adapters/opencode.js');
+    const result = await opencodeAdapter.runFeature(MOCK_FEATURE as never, 'prompt', {
+      ...MOCK_OPTS,
+      session: {
+        mode: 'resume',
+        handle: {
+          tool: 'opencode',
+          sessionId: 'ses_already_resumed',
+          capturedFromRunId: 1,
+          capturedAt: '2026-07-19T00:00:00Z',
+        },
+      },
+    });
+
+    expect(result.session?.sessionId).toBe('ses_already_resumed');
+  });
+
   it('re-throws non-abort errors', async () => {
     mockRunCli.mockRejectedValue(new Error('unexpected error'));
 
