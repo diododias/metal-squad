@@ -65,15 +65,37 @@ describe('resolveDependencyPublications', () => {
   });
 });
 
+function publication(overrides: Record<string, unknown> = {}) {
+  return {
+    featureId: 'feat-a',
+    prNumber: 1,
+    prUrl: 'u/a',
+    branchName: 'feat/a',
+    remoteBranch: 'origin/feat/a',
+    baseBranch: 'develop',
+    ...overrides,
+  };
+}
+
+function forgeStub(view: { state?: string; baseRefName?: string }, available = true) {
+  return {
+    available: () => available,
+    viewPullRequest: vi.fn(() => ({ ok: true as const, value: null })),
+    viewPullRequestByNumber: vi.fn(() => ({ ok: true as const, value: view })),
+  };
+}
+
 describe('fetchDependencyBranches', () => {
   it('fetches each published dependency from its remote ref in the agent cwd', async () => {
     const { fetchDependencyBranches } = await import('../../src/core/git/dependencies.js');
 
-    expect(fetchDependencyBranches([
-      { featureId: 'feat-a', prNumber: 1, prUrl: 'u/a', branchName: 'feat/a', remoteBranch: 'upstream/stack/a' },
-      { featureId: 'feat-b', prNumber: 2, prUrl: 'u/b', branchName: 'feat/b', remoteBranch: null },
-    ], '/agent/repo')).toBeNull();
+    const outcome = fetchDependencyBranches([
+      publication({ featureId: 'feat-a', remoteBranch: 'upstream/stack/a' }),
+      publication({ featureId: 'feat-b', branchName: 'feat/b', remoteBranch: null }),
+    ], '/agent/repo');
 
+    expect(outcome.failure).toBeNull();
+    expect(outcome.publications.map((p) => p.featureId)).toEqual(['feat-a', 'feat-b']);
     expect(mockExecFileSync).toHaveBeenNthCalledWith(1, 'git', ['fetch', 'upstream', 'stack/a'], expect.objectContaining({ cwd: '/agent/repo' }));
     expect(mockExecFileSync).toHaveBeenNthCalledWith(2, 'git', ['fetch', 'origin', 'feat/b'], expect.objectContaining({ cwd: '/agent/repo' }));
   });
@@ -84,17 +106,74 @@ describe('fetchDependencyBranches', () => {
     });
     const { fetchDependencyBranches } = await import('../../src/core/git/dependencies.js');
 
-    expect(fetchDependencyBranches([
-      { featureId: 'feat-a', prNumber: 1, prUrl: 'u/a', branchName: 'feat/a', remoteBranch: 'origin/feat/a' },
-      { featureId: 'feat-b', prNumber: 2, prUrl: 'u/b', branchName: 'feat/b', remoteBranch: 'origin/feat/b' },
-    ], '/agent/repo')).toEqual({ featureId: 'feat-a', remote: 'origin', ref: 'feat/a' });
+    const outcome = fetchDependencyBranches([
+      publication({ featureId: 'feat-a' }),
+      publication({ featureId: 'feat-b', branchName: 'feat/b', remoteBranch: 'origin/feat/b' }),
+    ], '/agent/repo', forgeStub({ state: 'OPEN' }));
+
+    expect(outcome.failure).toEqual({ featureId: 'feat-a', remote: 'origin', ref: 'feat/a' });
+    expect(outcome.publications).toEqual([]);
     expect(mockExecFileSync).toHaveBeenCalledTimes(1);
+  });
+
+  it('falls back to the base branch when the dependency PR was already merged', async () => {
+    // The forge deletes the head branch on merge, so the original ref can never
+    // be fetched again; the merged work lives in the base branch.
+    mockExecFileSync.mockImplementationOnce(() => {
+      throw new Error('couldn\'t find remote ref feat/a');
+    });
+    const { fetchDependencyBranches } = await import('../../src/core/git/dependencies.js');
+
+    const outcome = fetchDependencyBranches(
+      [publication()],
+      '/agent/repo',
+      forgeStub({ state: 'MERGED', baseRefName: 'develop' }),
+    );
+
+    expect(outcome.failure).toBeNull();
+    expect(outcome.publications[0]).toMatchObject({
+      featureId: 'feat-a',
+      branchName: 'develop',
+      remoteBranch: 'origin/develop',
+      mergedInto: 'develop',
+    });
+    expect(mockExecFileSync).toHaveBeenNthCalledWith(2, 'git', ['fetch', 'origin', 'develop'], expect.objectContaining({ cwd: '/agent/repo' }));
+  });
+
+  it('still blocks when the branch is gone and the PR is not merged', async () => {
+    mockExecFileSync.mockImplementationOnce(() => {
+      throw new Error('remote not found');
+    });
+    const { fetchDependencyBranches } = await import('../../src/core/git/dependencies.js');
+
+    const outcome = fetchDependencyBranches(
+      [publication()],
+      '/agent/repo',
+      forgeStub({ state: 'CLOSED', baseRefName: 'develop' }),
+    );
+
+    expect(outcome.failure).toEqual({ featureId: 'feat-a', remote: 'origin', ref: 'feat/a' });
+  });
+
+  it('blocks when the base branch fallback is itself unfetchable', async () => {
+    mockExecFileSync.mockImplementation(() => {
+      throw new Error('remote not found');
+    });
+    const { fetchDependencyBranches } = await import('../../src/core/git/dependencies.js');
+
+    const outcome = fetchDependencyBranches(
+      [publication()],
+      '/agent/repo',
+      forgeStub({ state: 'MERGED', baseRefName: 'develop' }),
+    );
+
+    expect(outcome.failure).toEqual({ featureId: 'feat-a', remote: 'origin', ref: 'feat/a' });
   });
 
   it('does not invoke git for logical dependencies without publications', async () => {
     const { fetchDependencyBranches } = await import('../../src/core/git/dependencies.js');
 
-    expect(fetchDependencyBranches([], '/agent/repo')).toBeNull();
+    expect(fetchDependencyBranches([], '/agent/repo')).toEqual({ failure: null, publications: [] });
     expect(mockExecFileSync).not.toHaveBeenCalled();
   });
 });
