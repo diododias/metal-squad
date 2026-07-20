@@ -52,6 +52,7 @@ const mocks = vi.hoisted(() => ({
   saveAppConfigPatch: vi.fn(),
   setSecret: vi.fn(),
   clearSecret: vi.fn(),
+  getSecret: vi.fn().mockResolvedValue(null),
   parseConfig: vi.fn((value) => value),
   spawn: vi.fn(),
   getPipeline: vi.fn(),
@@ -142,6 +143,7 @@ vi.mock('../../src/config/index.js', () => ({
 vi.mock('../../src/security/secrets.js', () => ({
   setSecret: mocks.setSecret,
   clearSecret: mocks.clearSecret,
+  getSecret: mocks.getSecret,
 }));
 
 vi.mock('node:child_process', async () => {
