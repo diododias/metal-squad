@@ -1457,18 +1457,22 @@ export function applyPublishGate(
   const verification = verify(opts.cwd, allowedBases);
   const declared = declaredPublicationEvidence(result.control.publication);
   const observed = verification.evidence;
+  // baseBranch is deliberately excluded from this comparison: verify() already
+  // confirms observed.baseBranch is one of allowedBases (H29), so an agent
+  // declaring a different-but-still-allowed base (e.g. the backlog dependency
+  // branch instead of the base gh actually used) is not a fabricated
+  // publication and must not fail a genuinely verified PR.
   const matchesDeclaration = observed.branch === declared.branch
-    && observed.baseBranch === declared.baseBranch
     && observed.prNumber === declared.prNumber
     && observed.prUrl === declared.prUrl;
   const evidence = {
     ...declared,
+    baseBranch: observed.baseBranch,
     commitSha: observed.commitSha,
     remoteBranch: observed.remoteBranch,
   };
   const diverged = !matchesDeclaration && (
     (observed.branch !== null && observed.branch !== declared.branch)
-    || observed.baseBranch !== declared.baseBranch
     || (observed.prNumber !== null && observed.prNumber !== declared.prNumber)
     || (observed.prUrl !== null && observed.prUrl !== declared.prUrl)
   );

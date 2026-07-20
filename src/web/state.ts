@@ -29,7 +29,7 @@ import { createSkillRegistry } from '../core/skills/registry.js';
 import type { Skill } from '../core/skills/types.js';
 import { collectEnvironmentInfo } from './environment.js';
 import { logCaughtError } from '../core/events/index.js';
-import type { MsqWebState, ProjectSummary, RepositorySummary, ThemeSnapshot, TimeoutApprovalState, TokenStats, UiNotification, WebRuntimeConfig, ErrorEntry, WorkflowTemplateSummary, WorkflowTemplateMappings } from './types.js';
+import type { MsqWebState, ProjectSummary, RepositorySummary, ThemeSnapshot, TimeoutApprovalState, TokenStats, UiNotification, WebRuntimeConfig, ErrorEntry, WorkflowTemplateMappings, WorkflowTemplateSummary } from './types.js';
 
 const DASHBOARD_PERIODS: { label: string; days: number | null }[] = [
   { label: 'today', days: 1 },
@@ -408,6 +408,7 @@ export function buildMsqWebState(): MsqWebState {
   const environment = collectEnvironmentInfo();
   const projects = collectProjectSummaries();
   const repositories = collectRepositorySummaries();
+  const { summaries: workflowTemplates, mappings: workflowTemplateMappings } = collectWorkflowTemplates();
 
   let epics: EpicRow[];
   try {
@@ -416,8 +417,6 @@ export function buildMsqWebState(): MsqWebState {
     pushError('web/state.listEpics', error);
     epics = [];
   }
-
-  const { summaries: workflowTemplates, mappings: workflowTemplateMappings } = collectWorkflowTemplates();
 
   const executionRuns = runs.filter((run) => getRunGroup(run.status) === 'execution');
   const doneRuns = runs.filter((run) => run.status === 'done');
