@@ -126,4 +126,90 @@ describe('portability harness contract', () => {
     });
     expect(gated.summary).toContain('GitHub CLI is unavailable');
   });
+
+  it('does not fail a verified publication just because the declared base differs from the actual PR base (H29)', async () => {
+    const { applyPublishGate } = await import('../../src/core/runner/execute.js');
+    const verified: PublishVerification = {
+      ok: true,
+      status: 'done',
+      summary: 'publish verified on feat/prj25-work-item-type-ui (https://github.com/example/repo/pull/221).',
+      evidence: {
+        branch: 'feat/prj25-work-item-type-ui',
+        baseBranch: 'develop',
+        commitSha: 'abc1234',
+        remoteBranch: 'origin/feat/prj25-work-item-type-ui',
+        prNumber: 221,
+        prUrl: 'https://github.com/example/repo/pull/221',
+      },
+    };
+
+    const gated = applyPublishGate(
+      {
+        ok: true,
+        summary: 'implementation complete',
+        control: {
+          type: 'done',
+          summary: 'implementation complete',
+          publication: {
+            prUrl: 'https://github.com/example/repo/pull/221',
+            prNumber: 221,
+            base: 'feat/prj24-work-item-templates-ws',
+            head: 'feat/prj25-work-item-type-ui',
+          },
+        },
+      },
+      { publishes: true, cwd: repoDirectory, dependencyBranches: ['feat/prj24-work-item-templates-ws'], baseBranch: 'develop' },
+      () => verified,
+    );
+
+    expect(gated).toMatchObject({
+      ok: true,
+      publishVerified: true,
+      publishValidationFailed: false,
+      publishEvidence: { baseBranch: 'develop', prNumber: 221, prUrl: 'https://github.com/example/repo/pull/221' },
+    });
+  });
+
+  it('still fails when the declared PR number does not match the verified pull request (H29)', async () => {
+    const { applyPublishGate } = await import('../../src/core/runner/execute.js');
+    const verified: PublishVerification = {
+      ok: true,
+      status: 'done',
+      summary: 'publish verified on feat/example (https://github.com/example/repo/pull/19).',
+      evidence: {
+        branch: 'feat/example',
+        baseBranch: 'main',
+        commitSha: 'abc1234',
+        remoteBranch: 'origin/feat/example',
+        prNumber: 19,
+        prUrl: 'https://github.com/example/repo/pull/19',
+      },
+    };
+
+    const gated = applyPublishGate(
+      {
+        ok: true,
+        summary: 'implementation complete',
+        control: {
+          type: 'done',
+          summary: 'implementation complete',
+          publication: {
+            prUrl: 'https://github.com/example/repo/pull/999',
+            prNumber: 999,
+            base: 'main',
+            head: 'feat/example',
+          },
+        },
+      },
+      { publishes: true, cwd: repoDirectory, dependencyBranches: [], baseBranch: 'main' },
+      () => verified,
+    );
+
+    expect(gated).toMatchObject({
+      ok: false,
+      publishValidationFailed: true,
+      publishVerificationStatus: 'blocked',
+    });
+    expect(gated.summary).toContain('declared publication does not match verified publication');
+  });
 });
