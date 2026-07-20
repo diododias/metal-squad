@@ -493,35 +493,69 @@ describe('executeBacklog failure persistence', () => {
     expect(mockIsDescendantOfBase).toHaveBeenCalledWith('/repo', 'develop');
   });
 
-  it('blocks a successful run when HEAD does not descend from the configured base', async () => {
-    mockRunFeature.mockResolvedValue({ ok: true, summary: 'completed on the wrong branch' });
+  it('keeps a verified publish as done, only as a note, when HEAD does not descend from the configured base', async () => {
+    mockRunFeature.mockImplementation(async () => ({
+      ok: true,
+      summary: 'implemented and published',
+      control: {
+        type: 'done',
+        summary: 'implemented and published',
+        publication: {
+          prUrl: 'https://example/pr/1',
+          prNumber: 1,
+          base: 'develop',
+          head: 'feat/test',
+        },
+      },
+    }));
     mockIsDescendantOfBase.mockReturnValue(false);
 
     const { executeBacklog } = await import('../../src/core/runner/execute.js');
 
     await expect(
       executeBacklog(createPublishStageBacklog(), { cwd: '/repo', concurrency: 1 }),
-    ).rejects.toThrow('MSQ_BLOCKED: validation_failed');
+    ).resolves.toBeUndefined();
 
-    expect(mockFinishRun).toHaveBeenCalledWith(7, 'blocked', expect.stringContaining('HEAD does not descend from the declared base develop.'));
-    expect(mockEventEmit).toHaveBeenCalledWith('run:blocked', expect.objectContaining({
-      runId: 7,
-      featureId: 'feat-implement',
-      reason: 'gate',
+    expect(mockFinishRun).toHaveBeenCalledWith(
+      7,
+      'done',
+      expect.stringContaining('HEAD does not descend from the declared base develop.'),
+    );
+    expect(mockUpdateRunPublishState).toHaveBeenNthCalledWith(2, 7, expect.objectContaining({
+      verified: true,
+      error: expect.stringContaining('HEAD does not descend from the declared base develop.'),
     }));
+    expect(mockEventEmit).not.toHaveBeenCalledWith('run:blocked', expect.anything());
   });
 
-  it('blocks a successful run when Git cannot verify the configured base', async () => {
-    mockRunFeature.mockResolvedValue({ ok: true, summary: 'completed' });
+  it('keeps a verified publish as done, only as a note, when Git cannot verify the configured base', async () => {
+    mockRunFeature.mockImplementation(async () => ({
+      ok: true,
+      summary: 'implemented and published',
+      control: {
+        type: 'done',
+        summary: 'implemented and published',
+        publication: {
+          prUrl: 'https://example/pr/1',
+          prNumber: 1,
+          base: 'develop',
+          head: 'feat/test',
+        },
+      },
+    }));
     mockIsDescendantOfBase.mockReturnValue(null);
 
     const { executeBacklog } = await import('../../src/core/runner/execute.js');
 
     await expect(
       executeBacklog(createPublishStageBacklog(), { cwd: '/repo', concurrency: 1 }),
-    ).rejects.toThrow('MSQ_BLOCKED: validation_failed');
+    ).resolves.toBeUndefined();
 
-    expect(mockFinishRun).toHaveBeenCalledWith(7, 'blocked', expect.stringContaining('could not verify whether HEAD descends from the declared base develop.'));
+    expect(mockFinishRun).toHaveBeenCalledWith(
+      7,
+      'done',
+      expect.stringContaining('could not verify whether HEAD descends from the declared base develop.'),
+    );
   });
 
   it('reconciles against the recommended published dependency branch before the configured base', async () => {

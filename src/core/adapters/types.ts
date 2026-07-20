@@ -188,6 +188,8 @@ export interface RunResult {
   publishVerificationStatus?: 'blocked' | 'failed';
   /** True when the agent-declared PR and the independently observed PR disagree. */
   publishValidationFailed?: boolean;
+  /** Non-blocking caveat about an already-verified publication (e.g. local base-ancestry check was inconclusive). */
+  publishNote?: string;
   timeout?: TimeoutResult;
 }
 
