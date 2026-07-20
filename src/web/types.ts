@@ -7,6 +7,29 @@ import type { RunBreakdown } from '../core/stats.js';
 import type { ThemeRoleName } from '../ui/theme/types.js';
 import type { AppConfigPatch as ConfigAppConfigPatch, Config, NotificationChannelConfig, NotificationsPatch, ToolRegistryEntry } from '../config/index.js';
 import type { Skill } from '../core/skills/types.js';
+import type { WorkItemType as MsqWorkItemType } from '../db/workflowTemplates.js';
+
+export type { MsqWorkItemType };
+
+/** Client-facing shape of a workflow template: enough to render a picker or
+ * badge without shipping the full stage/skill definition. Mirrors the projection
+ * in `web/state.collectWorkflowTemplates`; keep in sync. */
+export interface WorkflowTemplateSummary {
+  templateId: string;
+  name: string;
+  version: number;
+  revision: number;
+  builtin: boolean;
+  archived: boolean;
+  scopeProjectId: string | null;
+  stageCount: number;
+}
+
+/** Project -> Work Item type -> templateId. Projects without an explicit mapping
+ * resolve to the builtin for the type (see `resolveTemplate`); this map is the
+ * cache of explicit bindings only, used by the web state to drive the type
+ * preview/picker on the client. */
+export type WorkflowTemplateMappings = Record<string, Partial<Record<MsqWorkItemType, string>>>;
 
 export interface TokenStats {
   status: 'loading' | 'ready' | 'error';
@@ -149,6 +172,15 @@ export interface MsqWebState {
   /** Config page (Skills sub-tab) — discovered skills with precedence
    * already applied (repo > global > external > builtin), read-only. */
   skillsCatalog: Skill[];
+  /** Project Templates page — list of templates available to any project, with
+   * the lightweight summary shape (no full definition). The full definition is
+   * fetched on demand when the user opens a template. */
+  workflowTemplates: WorkflowTemplateSummary[];
+  /** Project Templates page — `projectId -> workItemType -> templateId` cache of
+   * explicit Project bindings. Projects without a mapping resolve to the
+   * builtin for the type (see `resolveTemplate`); this map drives the type
+   * preview/picker on the client. */
+  workflowTemplateMappings: WorkflowTemplateMappings;
   /** Collector errors since the last snapshot — empty when all collectors succeeded. */
   errors: ErrorEntry[];
 }
