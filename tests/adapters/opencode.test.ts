@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 const mockRunCli = vi.fn();
+const mockExecFileSync = vi.fn();
 const mockCliAbortErrorClass = class CliAbortError extends Error {
   constructor(
     public readonly stdout: string,
@@ -12,15 +13,47 @@ const mockCliAbortErrorClass = class CliAbortError extends Error {
   }
 };
 
+class MockCliTimeoutError extends Error {
+  readonly stdout: string;
+  readonly stderr: string;
+  readonly timeoutMs: number;
+  readonly runtimeMs: number;
+  readonly lastProgress?: string;
+
+  constructor(
+    bin: string,
+    timeoutMs: number,
+    runtimeMs: number,
+    stdout: string,
+    stderr: string,
+    lastProgress?: string,
+  ) {
+    super(`${bin} excedeu timeout (${String(timeoutMs)}ms)`);
+    this.name = 'CliTimeoutError';
+    this.stdout = stdout;
+    this.stderr = stderr;
+    this.timeoutMs = timeoutMs;
+    this.runtimeMs = runtimeMs;
+    if (lastProgress !== undefined) this.lastProgress = lastProgress;
+  }
+}
+
 const mockEmit = vi.fn();
 const mockMsqEventBus = { emit: mockEmit };
 const mockParseControlSignal = vi.fn();
-const mockResolveToolInvocation = vi.fn(() => ({ command: 'opencode', baseArgs: [], env: {}, versionCheck: ['--version'], minTimeoutMs: 0 }));
+const mockResolveToolInvocation = vi.fn(() => ({
+  command: 'opencode',
+  baseArgs: [],
+  env: {},
+  versionCheck: ['--version'],
+  minTimeoutMs: 1_800_000,
+}));
 
 vi.mock('../../src/core/adapters/spawn.js', () => ({
   runCli: mockRunCli,
   resolveToolInvocation: mockResolveToolInvocation,
   CliAbortError: mockCliAbortErrorClass,
+  CliTimeoutError: MockCliTimeoutError,
 }));
 vi.mock('../../src/core/events/index.js', () => ({
   msqEventBus: mockMsqEventBus,
@@ -28,6 +61,9 @@ vi.mock('../../src/core/events/index.js', () => ({
 }));
 vi.mock('../../src/core/adapters/control.js', () => ({
   parseControlSignal: mockParseControlSignal,
+}));
+vi.mock('node:child_process', () => ({
+  execFileSync: mockExecFileSync,
 }));
 
 const MOCK_FEATURE = {
@@ -48,8 +84,15 @@ beforeEach(() => {
   vi.resetModules();
   mockRunCli.mockReset();
   mockEmit.mockReset();
+  mockExecFileSync.mockReset();
   mockParseControlSignal.mockReset().mockReturnValue(undefined);
-  mockResolveToolInvocation.mockReturnValue({ command: 'opencode', baseArgs: [], env: {}, versionCheck: ['--version'], minTimeoutMs: 0 });
+  mockResolveToolInvocation.mockReturnValue({
+    command: 'opencode',
+    baseArgs: [],
+    env: {},
+    versionCheck: ['--version'],
+    minTimeoutMs: 1_800_000,
+  });
 });
 
 describe('opencodeAdapter.effortFlag', () => {
@@ -151,18 +194,30 @@ describe('opencodeAdapter.runFeature', () => {
   });
 
   it('passes timeoutMs as max(toolTimeoutMs, minTimeoutMs) to runCli', async () => {
-    mockResolveToolInvocation.mockReturnValue({ command: 'opencode', baseArgs: [], env: {}, versionCheck: ['--version'], minTimeoutMs: 0 });
+    mockResolveToolInvocation.mockReturnValue({
+      command: 'opencode',
+      baseArgs: [],
+      env: {},
+      versionCheck: ['--version'],
+      minTimeoutMs: 1_800_000,
+    });
     mockRunCli.mockResolvedValue({ code: 0, stdout: JSON.stringify({ response: 'done' }), stderr: '' });
 
     const { opencodeAdapter } = await import('../../src/core/adapters/opencode.js');
     await opencodeAdapter.runFeature(MOCK_FEATURE as never, 'prompt', MOCK_OPTS);
 
     const [, , options] = mockRunCli.mock.calls[0]!;
-    expect((options as { timeoutMs: number }).timeoutMs).toBe(600_000);
+    expect((options as { timeoutMs: number }).timeoutMs).toBe(1_800_000);
   });
 
   it('lets a configured minTimeoutMs floor win over a lower toolTimeoutMs', async () => {
-    mockResolveToolInvocation.mockReturnValue({ command: 'opencode', baseArgs: [], env: {}, versionCheck: ['--version'], minTimeoutMs: 900_000 });
+    mockResolveToolInvocation.mockReturnValue({
+      command: 'opencode',
+      baseArgs: [],
+      env: {},
+      versionCheck: ['--version'],
+      minTimeoutMs: 900_000,
+    });
     mockRunCli.mockResolvedValue({ code: 0, stdout: JSON.stringify({ response: 'done' }), stderr: '' });
 
     const { opencodeAdapter } = await import('../../src/core/adapters/opencode.js');
@@ -170,6 +225,44 @@ describe('opencodeAdapter.runFeature', () => {
 
     const [, , options] = mockRunCli.mock.calls[0]!;
     expect((options as { timeoutMs: number }).timeoutMs).toBe(900_000);
+  });
+
+  it('returns timeout summary with last agent message, touched files and parsed usage', async () => {
+    const transcript = [
+      JSON.stringify({ part: { type: 'text', text: 'Implementando adapter partial agora.' } }),
+      JSON.stringify({ usage: { input: 100, cached_input_tokens: 20, output: 40 } }),
+    ].join('\n');
+
+    mockRunCli.mockRejectedValue(
+      new MockCliTimeoutError('opencode', 600_000, 605_000, transcript, ''),
+    );
+    mockExecFileSync.mockReturnValue(
+      ' M src/core/adapters/opencode.ts\n?? tests/adapters/opencode.test.ts\n',
+    );
+
+    const { opencodeAdapter } = await import('../../src/core/adapters/opencode.js');
+    const result = await opencodeAdapter.runFeature(MOCK_FEATURE as never, 'prompt', MOCK_OPTS);
+
+    expect(result.ok).toBe(false);
+    expect(result.summary).toContain('timeout após 605s');
+    expect(result.summary).toContain('última mensagem do agente: Implementando adapter partial agora.');
+    expect(result.summary).toContain(
+      'arquivos tocados: src/core/adapters/opencode.ts, tests/adapters/opencode.test.ts',
+    );
+    expect(result.usage).toEqual({ input: 100, cachedInput: 20, output: 40, total: 160 });
+    expect(result.timeout).toEqual({
+      timeoutMs: 600_000,
+      runtimeMs: 605_000,
+    });
+    expect(mockEmit).toHaveBeenCalledWith('tokens:update', {
+      runId: 1,
+      featureId: 'feat-1',
+      tool: 'opencode',
+      input: 100,
+      cachedInput: 20,
+      output: 40,
+      total: 160,
+    });
   });
 
   it('uses --session when resuming a prior opencode session', async () => {
@@ -196,11 +289,13 @@ describe('opencodeAdapter.runFeature', () => {
 
   it('returns ok=false with stderr when exit code != 0', async () => {
     mockRunCli.mockResolvedValue({ code: 1, stdout: '', stderr: 'fatal error from tool' });
+    mockExecFileSync.mockReturnValue('');
 
     const { opencodeAdapter } = await import('../../src/core/adapters/opencode.js');
     const result = await opencodeAdapter.runFeature(MOCK_FEATURE as never, 'prompt', MOCK_OPTS);
 
     expect(result.ok).toBe(false);
+    expect(result.summary).toContain('exit 1');
     expect(result.summary).toContain('fatal error from tool');
   });
 
@@ -352,12 +447,14 @@ describe('opencodeAdapter.runFeature', () => {
 
   it('uses exit code in summary when stderr is empty and code != 0', async () => {
     mockRunCli.mockResolvedValue({ code: 2, stdout: '', stderr: '' });
+    mockExecFileSync.mockReturnValue('');
 
     const { opencodeAdapter } = await import('../../src/core/adapters/opencode.js');
     const result = await opencodeAdapter.runFeature(MOCK_FEATURE as never, 'prompt', MOCK_OPTS);
 
     expect(result.ok).toBe(false);
     expect(result.summary).toContain('exit 2');
+    expect(result.summary).toContain('sem saída útil capturada');
   });
 });
 

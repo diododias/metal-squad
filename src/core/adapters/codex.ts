@@ -8,6 +8,13 @@ import { resolveRuntimeConfig } from '../../config/index.js';
 import { CliAbortError, CliTimeoutError, resolveToolInvocation, runCli } from './spawn.js';
 import { msqEventBus } from '../events/index.js';
 import { parseControlSignal } from './control.js';
+import {
+  detectTouchedFiles,
+  formatTimeoutSummary,
+  normalizeSnippet,
+  sanitizeTimeoutProgress,
+  summarizePartialOutput,
+} from './partial.js';
 
 interface CodexEvent {
   type?: string;
@@ -136,13 +143,21 @@ export const codexAdapter: ToolAdapter = {
       }));
     } catch (error) {
       if (error instanceof CliTimeoutError) {
-        const touchedFiles = detectTouchedFiles(opts.cwd);
-        const partial = summarizePartialOutput(error.stdout, error.stderr, touchedFiles);
+        const partial = summarizePartialOutput(
+          error.stdout,
+          error.stderr,
+          detectTouchedFiles(opts.cwd),
+          {
+            lastAgentMessage: lastAgentMessage(error.stdout),
+            lastError: lastCodexError(error.stdout),
+            agentMessageMaxLen: 160,
+          },
+        );
         const usage = this.parseUsage?.(error.stdout) ?? undefined;
         if (usage) emitUsage(opts.runId, feature, usage);
         return {
           ok: false,
-          summary: `timeout após ${String(Math.round(error.runtimeMs / 1000))}s. ${partial}`,
+          summary: formatTimeoutSummary(error.runtimeMs, partial),
           usage,
           timeout: {
             timeoutMs: error.timeoutMs,
@@ -212,13 +227,6 @@ function resolveGitWritableArgs(cwd: string): string[] {
   return existsSync(gitDir) ? ['--add-dir', gitDir] : [];
 }
 
-function sanitizeTimeoutProgress(value: string): string {
-  return value.split('').filter((char) => {
-    const code = char.charCodeAt(0);
-    return code >= 32 && code !== 127;
-  }).join('').replace(/\s+/g, ' ').trim().slice(0, 500);
-}
-
 function lastAgentMessage(transcript: string): string {
   let msg = '';
   for (const line of transcript.split('\n')) {
@@ -266,34 +274,6 @@ function extractCodexThreadId(transcript: string): string | null {
   return threadId;
 }
 
-function summarizePartialOutput(stdout: string, stderr: string, touchedFiles: string[]): string {
-  const touchedSummary = formatTouchedFiles(touchedFiles);
-  const finalMsg = lastAgentMessage(stdout);
-  if (finalMsg) {
-    return touchedSummary
-      ? `última mensagem do agente: ${finalMsg.slice(0, 160)}. ${touchedSummary}`
-      : `última mensagem do agente: ${finalMsg.slice(0, 160)}`;
-  }
-
-  const stdoutError = lastCodexError(stdout);
-  if (stdoutError) {
-    return touchedSummary ? `erro final: ${stdoutError}. ${touchedSummary}` : `erro final: ${stdoutError}`;
-  }
-
-  const stderrTail = stderr.trim().slice(-160);
-  if (stderrTail) {
-    return touchedSummary ? `stderr final: ${stderrTail}. ${touchedSummary}` : `stderr final: ${stderrTail}`;
-  }
-
-  const stdoutTail = stdout.trim().slice(-160);
-  if (stdoutTail) {
-    return touchedSummary ? `stdout final: ${stdoutTail}. ${touchedSummary}` : `stdout final: ${stdoutTail}`;
-  }
-
-  if (touchedSummary) return touchedSummary;
-  return 'sem saída útil capturada.';
-}
-
 function safeJson<T>(s: string): T | null { // eslint-disable-line @typescript-eslint/no-unnecessary-type-parameters
   try {
     return JSON.parse(s) as T;
@@ -301,41 +281,6 @@ function safeJson<T>(s: string): T | null { // eslint-disable-line @typescript-e
     logCaughtError('adapters/codex.safeJson', error);
     return null;
   }
-}
-
-function detectTouchedFiles(cwd: string): string[] {
-  try {
-    const output = execFileSync(
-      'git',
-      ['status', '--short', '--untracked-files=all'],
-      { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] },
-    );
-    return output
-      .split('\n')
-      .map((line) => parseGitStatusPath(line))
-      .filter((path): path is string => Boolean(path));
-  } catch (error) {
-    logCaughtError('adapters/codex.detectTouchedFiles', error);
-    return [];
-  }
-}
-
-function parseGitStatusPath(line: string): string | null {
-  const trimmed = line.trim();
-  if (!trimmed) return null;
-  const statusPayload = line.slice(3).trim();
-  if (!statusPayload) return trimmed;
-  const renamed = statusPayload.split(' -> ');
-  return renamed[renamed.length - 1] ?? statusPayload;
-}
-
-function formatTouchedFiles(files: string[]): string {
-  if (files.length === 0) return '';
-  const shown = files.slice(0, 5).join(', ');
-  const remaining = files.length - Math.min(files.length, 5);
-  return remaining > 0
-    ? `arquivos tocados: ${shown} (+${String(remaining)})`
-    : `arquivos tocados: ${shown}`;
 }
 
 interface ProgressUpdate {
@@ -455,10 +400,6 @@ function emitToolCall(opts: RunFeatureOptions, feature: Feature, partial: Omit<T
   if (record.phase !== 'started' && !seen.has(record.id)) emit({ ...record, phase: 'started', completedAt: null });
   seen.add(record.id);
   emit(record);
-}
-
-function normalizeSnippet(text: unknown): string {
-  return String(text ?? '').replace(/\s+/g, ' ').trim(); // eslint-disable-line @typescript-eslint/no-base-to-string
 }
 
 function deriveCodexToolName(evt: CodexEvent): string | null {

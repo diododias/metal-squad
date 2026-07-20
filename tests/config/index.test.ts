@@ -24,7 +24,7 @@ const DEFAULT_TOOLS = [
   {
     id: 'opencode', adapter: 'opencode', command: 'opencode', baseArgs: [], env: {}, versionCheck: ['--version'],
     capabilities: { model: true, effort: false, thinking: false },
-    thinkingBudget: { low: 0, medium: 0, high: 0 }, minTimeoutMs: 0,
+    thinkingBudget: { low: 0, medium: 0, high: 0 }, minTimeoutMs: 1_800_000,
   },
 ];
 

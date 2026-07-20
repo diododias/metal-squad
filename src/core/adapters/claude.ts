@@ -7,6 +7,13 @@ import { logCaughtError } from '../events/logging.js';
 import { msqEventBus } from '../events/index.js';
 import { parseControlSignal } from './control.js';
 import { resolveRuntimeConfig } from '../../config/index.js';
+import {
+  detectTouchedFiles,
+  formatTimeoutSummary,
+  normalizeSnippet,
+  sanitizeTimeoutProgress,
+  summarizePartialOutput,
+} from './partial.js';
 
 type ContentBlock =
   | { type: 'text'; text: string }
@@ -116,13 +123,17 @@ export const claudeAdapter: ToolAdapter = {
       }));
     } catch (error) {
       if (error instanceof CliTimeoutError) {
-        const touchedFiles = detectTouchedFiles(opts.cwd);
-        const partial = summarizePartialOutput(error.stdout, error.stderr, touchedFiles);
+        const partial = summarizePartialOutput(
+          error.stdout,
+          error.stderr,
+          detectTouchedFiles(opts.cwd),
+          { lastAgentMessage: lastAgentMessage(error.stdout) },
+        );
         const usage = this.parseUsage?.(error.stdout) ?? undefined;
         if (usage) emitUsage(opts.runId, feature, usage);
         return {
           ok: false,
-          summary: `timeout após ${String(Math.round(error.runtimeMs / 1000))}s. ${partial}`,
+          summary: formatTimeoutSummary(error.runtimeMs, partial),
           usage,
           timeout: {
             timeoutMs: error.timeoutMs,
@@ -149,7 +160,12 @@ export const claudeAdapter: ToolAdapter = {
       if (limitMessage) {
         return { ok: false, blocked: true, summary: `session limit reached: ${limitMessage}` };
       }
-      const partial = summarizePartialOutput(stdout, stderr, detectTouchedFiles(opts.cwd));
+      const partial = summarizePartialOutput(
+        stdout,
+        stderr,
+        detectTouchedFiles(opts.cwd),
+        { lastAgentMessage: lastAgentMessage(stdout) },
+      );
       return { ok: false, summary: `exit ${String(code)}. ${partial}` };
     }
 
@@ -182,13 +198,6 @@ export const claudeAdapter: ToolAdapter = {
     return { input, cachedInput, output, total: input + cachedInput + output };
   },
 };
-
-function sanitizeTimeoutProgress(value: string): string {
-  return value.split('').filter((char) => {
-    const code = char.charCodeAt(0);
-    return code >= 32 && code !== 127;
-  }).join('').replace(/\s+/g, ' ').trim().slice(0, 500);
-}
 
 function safeJson<T>(s: string): T | null { // eslint-disable-line @typescript-eslint/no-unnecessary-type-parameters
   try {
@@ -233,68 +242,6 @@ function buildClaudeSessionHandle(
 
 function lastAgentMessage(transcript: string): string {
   return normalizeSnippet(findResultEvent(transcript)?.result ?? '');
-}
-
-function summarizePartialOutput(stdout: string, stderr: string, touchedFiles: string[]): string {
-  const touchedSummary = formatTouchedFiles(touchedFiles);
-  const finalMsg = lastAgentMessage(stdout);
-  if (finalMsg) {
-    return touchedSummary
-      ? `última mensagem do agente: ${finalMsg}. ${touchedSummary}`
-      : `última mensagem do agente: ${finalMsg}`;
-  }
-
-  const stderrTail = normalizeSnippet(stderr);
-  if (stderrTail) {
-    return touchedSummary ? `stderr final: ${stderrTail}. ${touchedSummary}` : `stderr final: ${stderrTail}`;
-  }
-
-  const stdoutTail = normalizeSnippet(stdout);
-  if (stdoutTail) {
-    return touchedSummary ? `stdout final: ${stdoutTail}. ${touchedSummary}` : `stdout final: ${stdoutTail}`;
-  }
-
-  if (touchedSummary) return touchedSummary;
-  return 'sem saída útil capturada.';
-}
-
-function detectTouchedFiles(cwd: string): string[] {
-  try {
-    const output = execFileSync(
-      'git',
-      ['status', '--short', '--untracked-files=all'],
-      { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] },
-    );
-    return output
-      .split('\n')
-      .map((line) => parseGitStatusPath(line))
-      .filter((path): path is string => Boolean(path));
-  } catch (error) {
-    logCaughtError('adapters/claude.detectTouchedFiles', error);
-    return [];
-  }
-}
-
-function parseGitStatusPath(line: string): string | null {
-  const trimmed = line.trim();
-  if (!trimmed) return null;
-  const statusPayload = line.slice(3).trim();
-  if (!statusPayload) return trimmed;
-  const renamed = statusPayload.split(' -> ');
-  return renamed[renamed.length - 1] ?? statusPayload;
-}
-
-function formatTouchedFiles(files: string[]): string {
-  if (files.length === 0) return '';
-  const shown = files.slice(0, 5).join(', ');
-  const remaining = files.length - Math.min(files.length, 5);
-  return remaining > 0
-    ? `arquivos tocados: ${shown} (+${String(remaining)})`
-    : `arquivos tocados: ${shown}`;
-}
-
-function normalizeSnippet(text: string): string {
-  return text.replace(/\s+/g, ' ').trim();
 }
 
 interface ProgressUpdate {

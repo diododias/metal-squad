@@ -171,7 +171,7 @@ export const DEFAULT_TOOL_REGISTRY: z.input<typeof ToolRegistryEntrySchema>[] = 
     versionCheck: ['--version'],
     capabilities: { model: true, effort: false, thinking: false },
     thinkingBudget: { low: 0, medium: 0, high: 0 },
-    minTimeoutMs: 0,
+    minTimeoutMs: 1_800_000,
   },
 ];
 

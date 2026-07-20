@@ -729,7 +729,7 @@ describe('opencode adapter', () => {
         'test-prompt',
         { cwd: '/repo', runId: 6 },
       ),
-    ).resolves.toEqual({ ok: false, summary: 'bad' });
+    ).resolves.toEqual({ ok: false, summary: 'exit 2. stderr final: bad' });
   });
 
   it('parses usage from multiple json shapes', async () => {

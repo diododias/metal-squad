@@ -1,10 +1,17 @@
 import { execFileSync } from 'node:child_process';
 import { detectStderrLevel, detectSessionLimit, sanitizeToolCallRecord, type SessionHandle, type ToolAdapter, type RunResult, type RunFeatureOptions, type TokenUsage, type ToolCallRecord } from './types.js';
 import type { Effort, Feature } from '../backlog/schema.js';
-import { CliAbortError, resolveToolInvocation, runCli } from './spawn.js';
+import { CliAbortError, CliTimeoutError, resolveToolInvocation, runCli } from './spawn.js';
 import { msqEventBus, logCaughtError } from '../events/index.js';
 import { parseControlSignal } from './control.js';
 import { resolveRuntimeConfig } from '../../config/index.js';
+import {
+  detectTouchedFiles,
+  formatTimeoutSummary,
+  normalizeSnippet,
+  sanitizeTimeoutProgress,
+  summarizePartialOutput,
+} from './partial.js';
 
 interface OpenCodeUsage {
   input?: number;
@@ -145,12 +152,19 @@ export const opencodeAdapter: ToolAdapter = {
         },
       }));
     } catch (error) {
-      if (isCliTimeoutError(error)) {
+      if (error instanceof CliTimeoutError) {
+        const events = extractOpenCodeEvents(error.stdout);
+        const partial = summarizePartialOutput(
+          error.stdout,
+          error.stderr,
+          detectTouchedFiles(opts.cwd),
+          { lastAgentMessage: getOpenCodeFinalText(events), agentMessageMaxLen: 160 },
+        );
         const usage = this.parseUsage?.(error.stdout) ?? undefined;
         if (usage) emitUsage(opts.runId, feature, usage);
         return {
           ok: false,
-          summary: `timeout após ${String(Math.round(error.runtimeMs / 1000))}s`,
+          summary: formatTimeoutSummary(error.runtimeMs, partial),
           usage,
           timeout: {
             timeoutMs: error.timeoutMs,
@@ -177,8 +191,15 @@ export const opencodeAdapter: ToolAdapter = {
       if (limitMessage) {
         return { ok: false, blocked: true, summary: `session limit reached: ${limitMessage}` };
       }
-      const errorSummary = stderr.slice(-500) || `exit ${String(code)}`;
-      console.error(`[opencode adapter] exit ${String(code)}: ${errorSummary}`);
+      const events = extractOpenCodeEvents(stdout);
+      const partial = summarizePartialOutput(
+        stdout,
+        stderr,
+        detectTouchedFiles(opts.cwd),
+        { lastAgentMessage: getOpenCodeFinalText(events), agentMessageMaxLen: 160 },
+      );
+      const errorSummary = `exit ${String(code)}. ${partial}`;
+      console.error(`[opencode adapter] ${errorSummary}`);
       return { ok: false, summary: errorSummary };
     }
 
@@ -231,25 +252,6 @@ export const opencodeAdapter: ToolAdapter = {
   },
 };
 
-function sanitizeTimeoutProgress(value: string): string {
-  return value.split('').filter((char) => {
-    const code = char.charCodeAt(0);
-    return code >= 32 && code !== 127;
-  }).join('').replace(/\s+/g, ' ').trim().slice(0, 500);
-}
-
-function isCliTimeoutError(error: unknown): error is {
-  stdout: string;
-  stderr: string;
-  timeoutMs: number;
-  runtimeMs: number;
-  lastProgress?: string;
-} {
-  return error instanceof Error
-    && error.name === 'CliTimeoutError'
-    && typeof (error as Error & { timeoutMs?: unknown }).timeoutMs === 'number';
-}
-
 function safeJson<T>(s: string): T | null { // eslint-disable-line @typescript-eslint/no-unnecessary-type-parameters
   try {
     return JSON.parse(s) as T;
@@ -257,10 +259,6 @@ function safeJson<T>(s: string): T | null { // eslint-disable-line @typescript-e
     logCaughtError('adapters/opencode.safeJson', error);
     return null;
   }
-}
-
-function normalizeSnippet(text: string): string {
-  return text.replace(/\s+/g, ' ').trim();
 }
 
 function pickTextSnippet(...values: unknown[]): string {
