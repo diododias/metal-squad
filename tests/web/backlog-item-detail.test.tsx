@@ -452,3 +452,139 @@ describe('BacklogItemDetail Work Item type change', () => {
     expect(html).not.toContain('change to bug');
   });
 });
+
+describe('BacklogItemDetail spec markdown editor', () => {
+  function stateWithSpec(description: string | null): MsqWebState {
+    return baseState({
+      featureCatalog: {
+        'feat-1': {
+          id: 'feat-1',
+          title: 'Feature One',
+          description,
+          repoId: 'repo-1',
+          projectId: null,
+          repoLabel: null,
+          tool: 'claude',
+          effort: 'medium',
+          skills: [],
+          dependsOn: [],
+          pendingDependencies: [],
+          workItemType: 'feature',
+          workflow: {
+            mode: 'staged',
+            stages: ['specify'],
+            approvals: { channel: 'telegram', autoAdvance: false },
+            autoAdvance: false,
+            syncTasksToBacklog: true,
+            sessionPolicy: { mode: 'isolated', alwaysIsolatedStages: [] },
+            stepGuidance: {},
+          },
+        },
+      },
+    } as unknown as Partial<MsqWebState>);
+  }
+
+  function renderInteractive(state: MsqWebState): { container: HTMLDivElement; findButton: (text: string) => HTMLButtonElement; findTextarea: () => HTMLTextAreaElement; findPreview: () => HTMLElement | null } {
+    const container = document.createElement('div');
+    document.body.append(container);
+    const root = createRoot(container);
+    roots.push(root);
+    act(() => {
+      root.render(
+        <ActiveProjectContext.Provider value={{ activeProjectId: null, activeProject: null, setActiveProject: () => undefined, selectionInvalidated: false }}>
+          <BacklogItemDetail
+            state={state}
+            featureId="feat-1"
+            runHistories={{}}
+            onSubscribeHistory={() => () => undefined}
+            onBack={() => undefined}
+            onStart={() => undefined}
+            onSaveConfig={() => undefined}
+            onSaveTaskConfig={() => undefined}
+            onOpenRun={() => undefined}
+            send={() => undefined}
+            actionResults={{}}
+          />
+        </ActiveProjectContext.Provider>,
+      );
+    });
+    return {
+      container,
+      findButton: (text: string) => {
+        const button = Array.from(container.querySelectorAll('button')).find((candidate) => candidate.textContent === text);
+        if (!button) throw new Error(`Could not find button with text "${text}"`);
+        return button as HTMLButtonElement;
+      },
+      findTextarea: () => {
+        const textarea = container.querySelector('textarea[aria-label="Feature specification"]');
+        if (!textarea) throw new Error('Could not find the spec textarea');
+        return textarea as HTMLTextAreaElement;
+      },
+      findPreview: () => container.querySelector('[data-testid="spec-preview"]') as HTMLElement | null,
+    };
+  }
+
+  it('renders the spec as markdown in the preview tab and reflects unsaved edits', () => {
+    const { container, findButton, findTextarea, findPreview } = renderInteractive(
+      stateWithSpec('# Goal\n\nA paragraph with **bold** and `inline` code.'),
+    );
+
+    expect(findPreview()).toBeNull();
+    expect(findTextarea().value).toBe('# Goal\n\nA paragraph with **bold** and `inline` code.');
+
+    act(() => { findButton('Preview').click(); });
+    const preview = findPreview();
+    expect(preview).not.toBeNull();
+    expect(preview?.textContent).toContain('Goal');
+    expect(preview?.querySelector('h1')?.textContent).toBe('Goal');
+    expect(preview?.querySelector('strong')?.textContent).toBe('bold');
+    expect(preview?.querySelector('code')?.textContent).toBe('inline');
+    expect(preview?.textContent).not.toContain('previewing unsaved changes');
+  });
+
+  it('previews unsaved draft changes with the dirty banner, and the save button enables only when dirty', () => {
+    const { container, findButton, findTextarea, findPreview } = renderInteractive(stateWithSpec('initial spec'));
+    const saveButton = findButton('save spec');
+    expect(saveButton.disabled).toBe(true);
+
+    act(() => {
+      const textarea = findTextarea();
+      const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')?.set;
+      setter?.call(textarea, '## new spec\n\n- [ ] task one');
+      textarea.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    expect(saveButton.disabled).toBe(false);
+
+    act(() => { findButton('Preview').click(); });
+    const preview = findPreview();
+    expect(preview?.querySelector('h2')?.textContent).toBe('new spec');
+    expect(preview?.querySelector('input[type="checkbox"]')).not.toBeNull();
+    expect(preview?.textContent).toContain('previewing unsaved changes');
+  });
+
+  it('renders GFM tables and code blocks in the preview', () => {
+    const markdown = [
+      '| col | value |',
+      '| --- | --- |',
+      '| foo | 1 |',
+      '',
+      '```ts',
+      'const x: number = 1;',
+      '```',
+    ].join('\n');
+    const { findButton, findPreview } = renderInteractive(stateWithSpec(markdown));
+    act(() => { findButton('Preview').click(); });
+    const preview = findPreview();
+    expect(preview?.querySelector('table')).not.toBeNull();
+    expect(preview?.querySelector('th')?.textContent).toBe('col');
+    expect(preview?.querySelector('pre code')?.textContent).toContain('const x');
+    expect(preview?.querySelector('pre code')?.className).toContain('language-ts');
+  });
+
+  it('shows an empty-state message when there is no spec', () => {
+    const { findButton, findPreview } = renderInteractive(stateWithSpec(null));
+    act(() => { findButton('Preview').click(); });
+    const preview = findPreview();
+    expect(preview?.textContent).toContain('Nothing to preview yet');
+  });
+});
