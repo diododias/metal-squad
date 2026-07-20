@@ -378,6 +378,81 @@ describe('claude adapter', () => {
     }));
   });
 
+  it('transitions tool calls from started to completed when a tool_result user event arrives', async () => {
+    const toolUseId = 'toolu_01abc';
+    const assistant = JSON.stringify({
+      type: 'assistant',
+      message: {
+        content: [{ type: 'tool_use', id: toolUseId, name: 'Read', input: { file_path: '/repo/x.ts' } }],
+      },
+    });
+    const userResult = JSON.stringify({
+      type: 'user',
+      message: {
+        content: [{ type: 'tool_result', tool_use_id: toolUseId, content: 'line1\nline2', is_error: false }],
+      },
+    });
+    const resultLine = JSON.stringify({ type: 'result', subtype: 'success', result: 'done' });
+    mockRunCli.mockImplementation(async (_bin, _args, opts) => {
+      opts.onStdoutLine?.(assistant);
+      opts.onStdoutLine?.(userResult);
+      return { code: 0, stdout: resultLine, stderr: '' };
+    });
+    const { claudeAdapter } = await import('../../src/core/adapters/claude.js');
+
+    await claudeAdapter.runFeature(
+      { id: 'feat-1', title: 'F', tool: 'claude', effort: 'medium', dependsOn: [], tasks: [] },
+      'PROMPT',
+      { cwd: '/repo', runId: 8 },
+    );
+
+    const toolCallEmits = mockEventEmit.mock.calls.filter((c) => c[0] === 'tool:call') as Array<[string, { id: string; phase: string; output: string | null; error: string | null; completedAt: string | null }]>;
+    expect(toolCallEmits.map(([, payload]) => [payload.id, payload.phase])).toEqual([
+      [toolUseId, 'started'],
+      [toolUseId, 'completed'],
+    ]);
+    const completed = toolCallEmits[1]![1];
+    expect(completed.output).toBe('"line1\\nline2"');
+    expect(completed.error).toBeNull();
+    expect(completed.completedAt).not.toBeNull();
+  });
+
+  it('transitions tool calls to failed when a tool_result is_error true', async () => {
+    const toolUseId = 'toolu_fail';
+    const assistant = JSON.stringify({
+      type: 'assistant',
+      message: {
+        content: [{ type: 'tool_use', id: toolUseId, name: 'Bash', input: { cmd: 'exit 1' } }],
+      },
+    });
+    const userResult = JSON.stringify({
+      type: 'user',
+      message: {
+        content: [{ type: 'tool_result', tool_use_id: toolUseId, content: 'permission denied', is_error: true }],
+      },
+    });
+    mockRunCli.mockImplementation(async (_bin, _args, opts) => {
+      opts.onStdoutLine?.(assistant);
+      opts.onStdoutLine?.(userResult);
+      return { code: 0, stdout: JSON.stringify({ type: 'result', subtype: 'success', result: 'done' }), stderr: '' };
+    });
+    const { claudeAdapter } = await import('../../src/core/adapters/claude.js');
+
+    await claudeAdapter.runFeature(
+      { id: 'feat-1', title: 'F', tool: 'claude', effort: 'medium', dependsOn: [], tasks: [] },
+      'PROMPT',
+      { cwd: '/repo', runId: 9 },
+    );
+
+    const toolCallEmits = mockEventEmit.mock.calls.filter((c) => c[0] === 'tool:call') as Array<[string, { id: string; phase: string; error: string | null }]>;
+    expect(toolCallEmits.map(([, payload]) => [payload.id, payload.phase])).toEqual([
+      [toolUseId, 'started'],
+      [toolUseId, 'failed'],
+    ]);
+    const failed = toolCallEmits[1]![1];
+    expect(failed.error).toBe('"permission denied"');
+  });
+
   it('passes --print as boolean flag and prompt as positional arg after --', async () => {
     mockRunCli.mockResolvedValue({ code: 0, stdout: JSON.stringify({ result: 'ok' }), stderr: '' });
     const { claudeAdapter } = await import('../../src/core/adapters/claude.js');
