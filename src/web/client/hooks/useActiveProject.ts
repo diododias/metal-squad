@@ -30,10 +30,16 @@ export function resolveActiveProjectId(projects: ProjectSummary[], savedProjectI
   return orderedProjects(projects)[0]?.projectId ?? null;
 }
 
+function logStorageError(action: string, error: unknown): void {
+  const message = error instanceof Error ? error.message : String(error);
+  console.warn(`[useActiveProject.${action}] localStorage unavailable: ${message}`);
+}
+
 function readStoredProjectId(): string | null {
   try {
     return window.localStorage.getItem(ACTIVE_PROJECT_STORAGE_KEY);
-  } catch {
+  } catch (error) {
+    logStorageError('read', error);
     return null;
   }
 }
@@ -42,8 +48,8 @@ function persistProjectId(projectId: string | null): void {
   try {
     if (projectId === null) window.localStorage.removeItem(ACTIVE_PROJECT_STORAGE_KEY);
     else window.localStorage.setItem(ACTIVE_PROJECT_STORAGE_KEY, projectId);
-  } catch {
-    // Storage can be disabled; selection remains local to this mounted client.
+  } catch (error) {
+    logStorageError('write', error);
   }
 }
 

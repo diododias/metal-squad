@@ -4,6 +4,8 @@ const mockParseAsync = vi.fn();
 const mockName = vi.fn();
 const mockDescription = vi.fn();
 const mockVersion = vi.fn();
+const mockHook = vi.fn();
+const mockOpts = vi.fn(() => ({}));
 const mockRegisterInit = vi.fn();
 const mockRegisterRun = vi.fn();
 const mockRegisterResume = vi.fn();
@@ -18,6 +20,8 @@ class MockCommand {
   name = mockName.mockReturnThis();
   description = mockDescription.mockReturnThis();
   version = mockVersion.mockReturnThis();
+  hook = mockHook.mockReturnThis();
+  opts = mockOpts;
   parseAsync = mockParseAsync;
   command = mockCommandCreate.mockReturnThis();
   option = mockCommandOption.mockReturnThis();
