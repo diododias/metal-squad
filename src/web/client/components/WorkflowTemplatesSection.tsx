@@ -46,6 +46,12 @@ interface ValidationState {
   error?: string;
 }
 
+interface ArchiveBlockedState {
+  templateId: string;
+  templateName: string;
+  mappings: { projectId: string; workItemType: string }[];
+}
+
 /**
  * Project Templates: builtins read-only + duplicable, CRUD of custom
  * templates, `feature|bug -> template` mapping, and a repo×skill validation
@@ -66,8 +72,10 @@ export function WorkflowTemplatesSection({ state, projectId, send, actionResults
   const [saveRequestId, setSaveRequestId] = useState<string | null>(null);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [conflict, setConflict] = useState(false);
+  const [archiveBlocked, setArchiveBlocked] = useState<ArchiveBlockedState | null>(null);
   const [newTemplateName, setNewTemplateName] = useState('');
   const handledRequests = React.useRef(new Set<string>());
+  const pendingArchive = React.useRef<{ templateId: string; name: string } | null>(null);
 
   const selected = templates.find((t) => t.templateId === selectedId) ?? null;
 
@@ -121,10 +129,17 @@ export function WorkflowTemplatesSection({ state, projectId, send, actionResults
     } else if ('error' in result.payload) {
       if (result.payload.error.code === 'REVISION_CONFLICT') {
         setConflict(true);
+      } else if (result.payload.error.code === 'WORKFLOW_TEMPLATE_IN_USE' && pendingArchive.current) {
+        setArchiveBlocked({
+          templateId: pendingArchive.current.templateId,
+          templateName: pendingArchive.current.name,
+          mappings: result.payload.error.mappings ?? [],
+        });
       } else {
         setSaveError(result.payload.error.message);
       }
     }
+    pendingArchive.current = null;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [actionResults, saveRequestId]);
 
@@ -177,8 +192,10 @@ export function WorkflowTemplatesSection({ state, projectId, send, actionResults
 
   function archiveTemplate(template: WorkflowTemplateSummary): void {
     const id = requestId('tpl-archive');
+    pendingArchive.current = { templateId: template.templateId, name: template.name };
     setSaveRequestId(id);
     setSaveError(null);
+    setArchiveBlocked(null);
     send({ type: 'action:archiveWorkflowTemplate', requestId: id, templateId: template.templateId });
   }
 
@@ -208,6 +225,11 @@ export function WorkflowTemplatesSection({ state, projectId, send, actionResults
     if (!templateId) return;
     const id = requestId('tpl-map');
     send({ type: 'action:setTypeTemplate', requestId: id, projectId, workItemType, templateId });
+    setArchiveBlocked((current) => {
+      if (!current) return current;
+      const remaining = current.mappings.filter((m) => m.workItemType !== workItemType);
+      return remaining.length === 0 ? null : { ...current, mappings: remaining };
+    });
   }
 
   const activeTemplates = templates.filter((t) => !t.archived);
@@ -255,6 +277,34 @@ export function WorkflowTemplatesSection({ state, projectId, send, actionResults
         </div>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
           {templates.length === 0 && <p style={muted}>No templates yet.</p>}
+          {archiveBlocked && (
+            <div role="alert" style={{ padding: 10, border: '1px solid var(--accent-warn)', borderRadius: 'var(--radius-sm)', background: 'var(--bg-sunken)' }}>
+              <p style={{ margin: '0 0 6px', fontSize: 'var(--text-xs)', color: 'var(--accent-warn)' }}>
+                &quot;{archiveBlocked.templateName}&quot; is mapped by {archiveBlocked.mappings.length} Work Item type(s) and must be reassociated before archiving.
+              </p>
+              <div style={{ display: 'grid', gap: 8 }}>
+                {archiveBlocked.mappings.map((mapping) => (
+                  <div key={mapping.workItemType} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <span style={{ minWidth: 70, color: 'var(--text-dim)', fontSize: 'var(--text-xs)' }}>{mapping.workItemType}</span>
+                    <select
+                      aria-label={`Reassign template for ${mapping.workItemType}`}
+                      defaultValue="__choose__"
+                      onChange={(e) => {
+                        if (e.target.value === '__choose__') return;
+                        setTypeMapping(mapping.workItemType as MsqWorkItemType, e.target.value);
+                      }}
+                      style={{ ...control, flex: 1 }}
+                    >
+                      <option value="__choose__" disabled>choose a replacement…</option>
+                      {activeTemplates.filter((t) => t.templateId !== archiveBlocked.templateId).map((t) => (
+                        <option key={t.templateId} value={t.templateId}>{t.name}</option>
+                      ))}
+                    </select>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
           {templates.map((template) => (
             <div
               key={template.templateId}
@@ -289,9 +339,10 @@ export function WorkflowTemplatesSection({ state, projectId, send, actionResults
           <h2 style={heading}>{selected.builtin ? `${selected.name} (read-only)` : `Edit — ${selected.name}`}</h2>
           {definition?.error && <p role="alert" style={{ color: 'var(--accent-danger)', fontSize: 'var(--text-xs)' }}>{definition.error}</p>}
           {!definition?.draft && !definition?.error && <p style={muted}>Loading definition…</p>}
-          {definition?.draft && (
+          {definition?.draft && definition.baseline && (
             <TemplateEditorPanel
               draft={definition.draft}
+              baseline={definition.baseline}
               selected={selected}
               saveError={saveError}
               conflict={conflict}
@@ -310,10 +361,11 @@ export function WorkflowTemplatesSection({ state, projectId, send, actionResults
 }
 
 function TemplateEditorPanel({
-  draft, selected, saveError, conflict, validation, hasDraftChanges,
+  draft, baseline, selected, saveError, conflict, validation, hasDraftChanges,
   onChangeDraft, onSave, onValidate, onReloadAfterConflict,
 }: {
   draft: WorkflowTemplateDraft;
+  baseline: WorkflowTemplateDraft;
   selected: WorkflowTemplateSummary;
   saveError: string | null;
   conflict: boolean;
@@ -324,6 +376,7 @@ function TemplateEditorPanel({
   onValidate: (draft: WorkflowTemplateDraft, templateId: string) => void;
   onReloadAfterConflict: () => void;
 }): React.JSX.Element {
+  const diff = hasDraftChanges ? diffTemplateDrafts(baseline, draft) : null;
   return (
     <>
       <WorkflowTemplateEditor draft={draft} readOnly={selected.builtin} onChange={onChangeDraft} />
@@ -334,6 +387,16 @@ function TemplateEditorPanel({
             validate against active repos
           </Button>
           <span style={muted}>version {selected.version} · updating only affects new Work Items — existing snapshots stay pinned</span>
+        </div>
+      )}
+      {diff && diff.length > 0 && (
+        <div style={{ marginTop: 8, padding: 10, border: '1px solid var(--border-dim)', borderRadius: 'var(--radius-sm)', background: 'var(--bg-sunken)' }}>
+          <div style={{ fontSize: 'var(--text-2xs)', color: 'var(--text-faint)', marginBottom: 6 }}>
+            changes since v{selected.version}
+          </div>
+          <ul style={{ margin: 0, paddingLeft: 16, fontSize: 'var(--text-xs)', color: 'var(--text-dim)' }}>
+            {diff.map((line) => <li key={line}>{line}</li>)}
+          </ul>
         </div>
       )}
       {saveError && <p role="alert" style={{ color: 'var(--accent-danger)', fontSize: 'var(--text-xs)', marginTop: 8 }}>{saveError}</p>}
@@ -368,4 +431,31 @@ function TemplateEditorPanel({
       )}
     </>
   );
+}
+
+/** Human-readable diff lines between the loaded baseline and the current
+ * draft, shown next to the version notice before save (PRJ-26). */
+function diffTemplateDrafts(baseline: WorkflowTemplateDraft, draft: WorkflowTemplateDraft): string[] {
+  const lines: string[] = [];
+  if (baseline.name !== draft.name) lines.push(`name: "${baseline.name}" → "${draft.name}"`);
+
+  const addedStages = draft.stages.filter((stage) => !baseline.stages.includes(stage));
+  const removedStages = baseline.stages.filter((stage) => !draft.stages.includes(stage));
+  for (const stage of addedStages) lines.push(`+ step "${stage}"`);
+  for (const stage of removedStages) lines.push(`- step "${stage}"`);
+  if (addedStages.length === 0 && removedStages.length === 0
+    && JSON.stringify(baseline.stages) !== JSON.stringify(draft.stages)) {
+    lines.push(`reordered steps: [${baseline.stages.join(', ')}] → [${draft.stages.join(', ')}]`);
+  }
+
+  const stageNames = new Set([...Object.keys(baseline.stageSkills), ...Object.keys(draft.stageSkills)]);
+  for (const stage of stageNames) {
+    const before = baseline.stageSkills[stage] ?? [];
+    const after = draft.stageSkills[stage] ?? [];
+    const addedSkills = after.filter((skill) => !before.includes(skill));
+    const removedSkills = before.filter((skill) => !after.includes(skill));
+    for (const skill of addedSkills) lines.push(`+ skill "${skill}" on ${stage}`);
+    for (const skill of removedSkills) lines.push(`- skill "${skill}" on ${stage}`);
+  }
+  return lines;
 }

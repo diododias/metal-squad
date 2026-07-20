@@ -187,6 +187,46 @@ describe('WorkflowTemplatesSection CRUD', () => {
     }));
   });
 
+  it('blocks archiving a mapped template and offers explicit reassociation', () => {
+    const { container, send, rerender } = mount();
+    const mapped = customTemplate();
+    const other = customTemplate({ templateId: 'tpl-custom-2', name: 'Other Template' });
+    let results: Record<string, ActionResult> = {};
+    const state = baseState({ workflowTemplates: [mapped, other] });
+    rerender(state, results);
+
+    const archiveButton = [...container.querySelectorAll('button')].find((b) => b.textContent === 'archive')!;
+    act(() => { archiveButton.click(); });
+
+    const archiveCall = send.mock.calls.find((c) => (c[0] as { type: string }).type === 'action:archiveWorkflowTemplate')!;
+    const requestId = (archiveCall[0] as { requestId: string }).requestId;
+    results = {
+      [requestId]: actionResult(requestId, {
+        ok: false,
+        error: {
+          code: 'WORKFLOW_TEMPLATE_IN_USE',
+          message: 'Workflow template tpl-custom-1 is mapped by 1 Work Item type(s) and must be reassociated before archiving',
+          mappings: [{ projectId: 'proj-1', workItemType: 'feature' }],
+        },
+      }),
+    };
+    rerender(state, results);
+
+    expect(container.textContent).toContain('is mapped by 1 Work Item type(s)');
+    const reassignSelect = container.querySelector('select[aria-label="Reassign template for feature"]') as HTMLSelectElement;
+    expect(reassignSelect).toBeTruthy();
+
+    act(() => { dispatchChange(reassignSelect, 'tpl-custom-2'); });
+
+    expect(send).toHaveBeenCalledWith(expect.objectContaining({
+      type: 'action:setTypeTemplate',
+      projectId: 'proj-1',
+      workItemType: 'feature',
+      templateId: 'tpl-custom-2',
+    }));
+    expect(container.textContent).not.toContain('is mapped by 1 Work Item type(s)');
+  });
+
   it('fetches the full definition when a template is opened', () => {
     const { container, send, rerender } = mount();
     rerender(baseState({ workflowTemplates: [customTemplate()] }));
@@ -240,6 +280,33 @@ describe('WorkflowTemplatesSection editor: diff/version + save gating', () => {
         definition: { workflow: { stages: ['specify', 'implement', 'validate'] }, stageSkills: {} },
       }),
     }));
+  });
+
+  it('shows an added/removed step diff against the loaded baseline once the draft changes', () => {
+    const { container, send, rerender } = mount();
+    const state = baseState({ workflowTemplates: [customTemplate()] });
+    rerender(state);
+
+    const openButton = [...container.querySelectorAll('button')].find((b) => b.textContent === 'Custom Template')!;
+    act(() => { openButton.click(); });
+    const fetchId = (send.mock.calls.find((c) => (c[0] as { type: string }).type === 'action:getWorkflowTemplateDefinition')![0] as { requestId: string }).requestId;
+    rerender(state, {
+      [fetchId]: actionResult(fetchId, {
+        ok: true,
+        templateId: 'tpl-custom-1',
+        definition: { workflow: { stages: ['specify', 'implement'] }, stageSkills: { specify: ['spec-kit'] } },
+      }),
+    });
+
+    expect(container.textContent).not.toContain('changes since v1');
+
+    const newStepInput = container.querySelector('input[aria-label="new step name"]') as HTMLInputElement;
+    act(() => { dispatchChange(newStepInput, 'validate'); });
+    const addStepButton = [...container.querySelectorAll('button')].find((b) => b.textContent === 'add step')!;
+    act(() => { addStepButton.click(); });
+
+    expect(container.textContent).toContain('changes since v1');
+    expect(container.textContent).toContain('+ step "validate"');
   });
 
   it('shows the current version and "only new Work Items" notice next to save controls', () => {

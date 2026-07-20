@@ -1210,13 +1210,16 @@ export function createWebServer(options: {
     return { code: 'WORK_ITEM_ACTION_FAILED', message: 'Could not create Work Item.' };
   }
 
-  function workflowTemplateActionError(error: unknown): { code: string; message: string } {
+  function workflowTemplateActionError(error: unknown): { code: string; message: string; mappings?: { projectId: string; workItemType: string }[] } {
     const code = typeof error === 'object' && error !== null ? (error as { code?: unknown }).code : undefined;
     if (code === 'WORKFLOW_TEMPLATE_NOT_FOUND' || code === 'WORKFLOW_TEMPLATE_INVALID'
       || code === 'WORKFLOW_TEMPLATE_IN_USE' || code === 'WORKFLOW_TEMPLATE_ARCHIVED'
       || code === 'WORKFLOW_TEMPLATE_IMMUTABLE' || code === 'WORKFLOW_TEMPLATE_SCOPE_MISMATCH'
       || code === 'REVISION_CONFLICT' || code === 'PROJECT_NOT_FOUND') {
-      return { code, message: error instanceof Error ? error.message : 'Workflow template action failed.' };
+      const mappings = code === 'WORKFLOW_TEMPLATE_IN_USE'
+        ? (error as { mappings?: { projectId: string; workItemType: string }[] }).mappings
+        : undefined;
+      return { code, message: error instanceof Error ? error.message : 'Workflow template action failed.', ...(mappings ? { mappings } : {}) };
     }
     return { code: 'WORKFLOW_TEMPLATE_ACTION_FAILED', message: 'Workflow template action failed.' };
   }

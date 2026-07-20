@@ -370,6 +370,9 @@ export type WorkItemActionResult =
 export interface WorkflowTemplateActionError {
   code: string;
   message: string;
+  /** Present only for `WORKFLOW_TEMPLATE_IN_USE`: the type mappings blocking
+   * archive, so the UI can offer explicit reassociation instead of a dead end. */
+  mappings?: { projectId: string; workItemType: string }[];
 }
 
 export type WorkflowTemplateActionResult =
