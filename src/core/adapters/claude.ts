@@ -72,6 +72,8 @@ export const claudeAdapter: ToolAdapter = {
     let stderr: string;
     const progress = createClaudeProgress();
     const seenToolCalls = new Set<string>();
+    const runtime = resolveRuntimeConfig(opts.cwd);
+    const timeoutMs = Math.max(runtime.toolTimeoutMs, invocation.minTimeoutMs);
 
     msqEventBus.emit('task:started', {
       runId: opts.runId,
@@ -84,8 +86,9 @@ export const claudeAdapter: ToolAdapter = {
       ({ code, stdout, stderr } = await runCli(invocation.command, args, {
         cwd: opts.cwd,
         env: { ...invocation.env, MAX_THINKING_TOKENS: String(maxThinkingTokens) },
-        idleThresholdMs: resolveRuntimeConfig(opts.cwd).idleThresholdMs,
-        heartbeatMs: resolveRuntimeConfig(opts.cwd).heartbeatMs,
+        timeoutMs,
+        idleThresholdMs: runtime.idleThresholdMs,
+        heartbeatMs: runtime.heartbeatMs,
         runId: opts.runId,
         featureId: feature.id,
         tool: feature.tool,

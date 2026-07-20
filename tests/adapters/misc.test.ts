@@ -251,6 +251,50 @@ describe('claude adapter', () => {
     );
   });
 
+  it('passes timeoutMs as max(toolTimeoutMs, minTimeoutMs) to runCli, respecting the claude registry floor', async () => {
+    mockResolveRuntimeConfig.mockReturnValue({
+      toolTimeoutMs: 600_000,
+      idleThresholdMs: 30_000,
+      tools: DEFAULT_TOOLS,
+    });
+    mockRunCli.mockResolvedValue({ code: 0, stdout: '', stderr: '' });
+    const { claudeAdapter } = await import('../../src/core/adapters/claude.js');
+
+    await claudeAdapter.runFeature(
+      { id: 'feat-1', title: 'Feature', tool: 'claude', effort: 'medium', dependsOn: [], tasks: [] },
+      'PROMPT',
+      { cwd: '/repo', runId: 1 },
+    );
+
+    expect(mockRunCli).toHaveBeenCalledWith(
+      'claude',
+      expect.any(Array),
+      expect.objectContaining({ timeoutMs: 3_600_000 }),
+    );
+  });
+
+  it('lets a repo-configured toolTimeoutMs above the claude floor win', async () => {
+    mockResolveRuntimeConfig.mockReturnValue({
+      toolTimeoutMs: 7_200_000,
+      idleThresholdMs: 30_000,
+      tools: DEFAULT_TOOLS,
+    });
+    mockRunCli.mockResolvedValue({ code: 0, stdout: '', stderr: '' });
+    const { claudeAdapter } = await import('../../src/core/adapters/claude.js');
+
+    await claudeAdapter.runFeature(
+      { id: 'feat-1', title: 'Feature', tool: 'claude', effort: 'medium', dependsOn: [], tasks: [] },
+      'PROMPT',
+      { cwd: '/repo', runId: 1 },
+    );
+
+    expect(mockRunCli).toHaveBeenCalledWith(
+      'claude',
+      expect.any(Array),
+      expect.objectContaining({ timeoutMs: 7_200_000 }),
+    );
+  });
+
   it('handles malformed JSON and max-turn errors', async () => {
     const { claudeAdapter } = await import('../../src/core/adapters/claude.js');
 
