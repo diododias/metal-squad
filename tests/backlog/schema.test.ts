@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { BacklogInputSchema, BacklogSchema, BacklogV1Schema, BacklogV2Schema, createRegisteredToolSchema, dependencyType, EpicSchema, FallbackAlternativeSchema, RetrySchema, stackDependencies } from '../../src/core/backlog/schema.js';
+import { BacklogInputSchema, BacklogSchema, BacklogV1Schema, BacklogV2Schema, createRegisteredToolSchema, dependencyType, EpicSchema, FallbackAlternativeSchema, FeatureInputSchema, FeatureSchema, RetrySchema, stackDependencies, WorkItemTypeSchema } from '../../src/core/backlog/schema.js';
 import { stagePublishesResolved } from '../../src/core/workflow/stagePublishes.js';
 
 const V1_YAML_OBJ = {
@@ -447,6 +447,53 @@ describe('BacklogV2Schema', () => {
         fallback: [],
       });
     }
+  });
+});
+
+describe('WorkItemTypeSchema / Feature.type', () => {
+  const baseFeature = {
+    id: 'feat-1',
+    title: 'Feature',
+    tool: 'claude' as const,
+    effort: 'medium' as const,
+    thinking: 'off' as const,
+    dependsOn: [],
+    tasks: [],
+  };
+
+  it('accepts only feature and bug', () => {
+    expect(WorkItemTypeSchema.safeParse('feature').success).toBe(true);
+    expect(WorkItemTypeSchema.safeParse('bug').success).toBe(true);
+    expect(WorkItemTypeSchema.safeParse('hotfix').success).toBe(false);
+  });
+
+  it('defaults FeatureSchema.type to "feature" when omitted', () => {
+    const result = FeatureSchema.safeParse(baseFeature);
+    expect(result.success).toBe(true);
+    if (result.success) expect(result.data.type).toBe('feature');
+  });
+
+  it('parses an explicit "bug" type on FeatureSchema', () => {
+    const result = FeatureSchema.safeParse({ ...baseFeature, type: 'bug' });
+    expect(result.success).toBe(true);
+    if (result.success) expect(result.data.type).toBe('bug');
+  });
+
+  it('rejects an invalid type value on FeatureSchema', () => {
+    const result = FeatureSchema.safeParse({ ...baseFeature, type: 'hotfix' });
+    expect(result.success).toBe(false);
+  });
+
+  it('leaves FeatureInputSchema.type undefined when omitted from YAML input', () => {
+    const result = FeatureInputSchema.safeParse({ title: 'Feature' });
+    expect(result.success).toBe(true);
+    if (result.success) expect(result.data.type).toBeUndefined();
+  });
+
+  it('parses an explicit type on FeatureInputSchema', () => {
+    const result = FeatureInputSchema.safeParse({ title: 'Feature', type: 'bug' });
+    expect(result.success).toBe(true);
+    if (result.success) expect(result.data.type).toBe('bug');
   });
 });
 

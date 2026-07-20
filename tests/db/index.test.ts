@@ -191,3 +191,113 @@ describe('projects schema (PRJ-01)', () => {
     expect(schemaTwice).toEqual(schemaOnce);
   });
 });
+
+describe('backlog_features.type column (PRJ-22)', () => {
+  let directory = '';
+  let previousDbPath: string | undefined;
+  let resetDb: () => void = () => {};
+
+  beforeEach(() => {
+    vi.resetModules();
+    previousDbPath = process.env['MSQ_DB_PATH'];
+    directory = mkdtempSync(join(tmpdir(), 'msq-workitem-type-'));
+    process.env['MSQ_DB_PATH'] = join(directory, 'app.db');
+  });
+
+  afterEach(() => {
+    resetDb();
+    if (previousDbPath === undefined) delete process.env['MSQ_DB_PATH'];
+    else process.env['MSQ_DB_PATH'] = previousDbPath;
+    rmSync(directory, { recursive: true, force: true });
+  });
+
+  it('adds a type column defaulting to feature for legacy rows', async () => {
+    const { getDb, resetDb: reset } = await import('../../src/db/index.js');
+    resetDb = reset;
+    const db = getDb('readwrite');
+
+    db.prepare(`INSERT INTO repos (repo_id, path) VALUES ('r1', '/tmp/r1')`).run();
+    db.prepare(
+      `INSERT INTO backlog_epics (epic_id, repo_id, title, position, data_json) VALUES ('e1', 'r1', 'Epic', 0, '{}')`,
+    ).run();
+    db.prepare(
+      `INSERT INTO backlog_features (feature_id, epic_id, repo_id, title, position, data_json) VALUES ('f1', 'e1', 'r1', 'Feature', 0, '{}')`,
+    ).run();
+
+    const row = db.prepare(`SELECT type FROM backlog_features WHERE feature_id = 'f1'`).get() as { type: string };
+    expect(row.type).toBe('feature');
+  });
+
+  it('is idempotent: reapplying migrate() twice keeps a single type column', async () => {
+    const { getDb, resetDb: reset } = await import('../../src/db/index.js');
+    resetDb = reset;
+    const db = getDb('readwrite');
+
+    reset();
+    const dbAgain = getDb('readwrite');
+    const columns = (dbAgain.prepare(`PRAGMA table_info(backlog_features)`).all() as { name: string }[])
+      .filter((column) => column.name === 'type');
+    expect(columns).toHaveLength(1);
+  });
+});
+
+describe('rebuildBacklogFeaturesTypeCheck (PRJ-22)', () => {
+  let directory = '';
+  let previousDbPath: string | undefined;
+  let resetDb: () => void = () => {};
+
+  beforeEach(() => {
+    vi.resetModules();
+    previousDbPath = process.env['MSQ_DB_PATH'];
+    directory = mkdtempSync(join(tmpdir(), 'msq-workitem-type-rebuild-'));
+    process.env['MSQ_DB_PATH'] = join(directory, 'app.db');
+  });
+
+  afterEach(() => {
+    resetDb();
+    if (previousDbPath === undefined) delete process.env['MSQ_DB_PATH'];
+    else process.env['MSQ_DB_PATH'] = previousDbPath;
+    rmSync(directory, { recursive: true, force: true });
+  });
+
+  it('rebuilds backlog_features with a CHECK constraint and preserves rows', async () => {
+    const { getDb, resetDb: reset } = await import('../../src/db/index.js');
+    const { rebuildBacklogFeaturesTypeCheck } = await import('../../src/db/backfill.js');
+    resetDb = reset;
+    const db = getDb('readwrite');
+
+    db.prepare(`INSERT INTO repos (repo_id, path) VALUES ('r1', '/tmp/r1')`).run();
+    db.prepare(
+      `INSERT INTO backlog_epics (epic_id, repo_id, title, position, data_json) VALUES ('e1', 'r1', 'Epic', 0, '{}')`,
+    ).run();
+    db.prepare(
+      `INSERT INTO backlog_features (feature_id, epic_id, repo_id, title, type, position, data_json) VALUES ('f1', 'e1', 'r1', 'Feature', 'bug', 0, '{}')`,
+    ).run();
+
+    const result = rebuildBacklogFeaturesTypeCheck(db);
+    expect(result.rebuilt).toBe(true);
+
+    const row = db.prepare(`SELECT type FROM backlog_features WHERE feature_id = 'f1'`).get() as { type: string };
+    expect(row.type).toBe('bug');
+
+    expect(() =>
+      db.prepare(`UPDATE backlog_features SET type = 'hotfix' WHERE feature_id = 'f1'`).run(),
+    ).toThrow(/CHECK constraint failed/);
+
+    const fkViolations = db.prepare('PRAGMA foreign_key_check').all();
+    expect(fkViolations).toEqual([]);
+  });
+
+  it('is idempotent: a second call is a no-op once the CHECK constraint exists', async () => {
+    const { getDb, resetDb: reset } = await import('../../src/db/index.js');
+    const { rebuildBacklogFeaturesTypeCheck } = await import('../../src/db/backfill.js');
+    resetDb = reset;
+    const db = getDb('readwrite');
+
+    const first = rebuildBacklogFeaturesTypeCheck(db);
+    expect(first.rebuilt).toBe(true);
+
+    const second = rebuildBacklogFeaturesTypeCheck(db);
+    expect(second.rebuilt).toBe(false);
+  });
+});

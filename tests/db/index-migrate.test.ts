@@ -137,6 +137,7 @@ describe('getDb migration — column checks', () => {
     ];
     pragmaBacklogFeaturesColumns = [
       { name: 'description' }, { name: 'deleted_at' }, { name: 'revision' },
+      { name: 'type' },
     ];
 
     const { getDb } = await import('../../src/db/index.js');
