@@ -63,6 +63,7 @@ const mocks = vi.hoisted(() => ({
     update: vi.fn(),
   },
   repoLinkService: {
+    list: vi.fn(() => []),
     link: vi.fn(),
     move: vi.fn(),
     unlink: vi.fn(),
@@ -991,10 +992,11 @@ describe('web server', () => {
     socket.close();
   });
 
-  it('refuses to archive a workflow template that a Project still maps', async () => {
+  it('refuses to archive a workflow template that a Project still maps, and reports which mappings block it', async () => {
     mocks.archiveWorkflowTemplate.mockImplementation(() => {
       throw Object.assign(new Error('Workflow template is mapped by 1 Project'), {
         code: 'WORKFLOW_TEMPLATE_IN_USE',
+        mappings: [{ projectId: 'proj-1', workItemType: 'feature' }],
       });
     });
     const socket = await connectAuthenticated();
@@ -1005,7 +1007,11 @@ describe('web server', () => {
     }));
 
     expect(await result).toMatchObject({
-      payload: { requestId: 'tpl-archive-1', ok: false, error: { code: 'WORKFLOW_TEMPLATE_IN_USE' } },
+      payload: {
+        requestId: 'tpl-archive-1',
+        ok: false,
+        error: { code: 'WORKFLOW_TEMPLATE_IN_USE', mappings: [{ projectId: 'proj-1', workItemType: 'feature' }] },
+      },
     });
     socket.close();
   });

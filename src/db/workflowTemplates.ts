@@ -119,6 +119,40 @@ export function validateTemplateDefinition(
   return parsed.data;
 }
 
+export interface RepoSkillValidation {
+  repoId: string;
+  repoPath: string;
+  missing: string[];
+}
+
+/**
+ * Structural validation plus a per-repo skill-existence matrix, used by the
+ * web UI to show exactly which repo is missing which skill before a template
+ * is saved/mapped (PRJ-26) — unlike `validateTemplateDefinition`, this never
+ * throws on a missing skill: every target repo is checked and reported.
+ */
+export function validateTemplateAgainstRepos(
+  definition: unknown,
+  repos: { repoId: string; repoPath: string }[],
+): { definition: WorkflowTemplateDefinition; matrix: RepoSkillValidation[] } {
+  const parsed = WorkflowTemplateDefinitionSchema.safeParse(definition);
+  if (!parsed.success) {
+    throw new WorkflowTemplateInvalidError(
+      parsed.error.issues.map((issue) => `${issue.path.join('.') || '<root>'}: ${issue.message}`),
+    );
+  }
+
+  const names = [...new Set(Object.values(parsed.data.stageSkills).flat())];
+  const registry = createSkillRegistry();
+  const matrix = repos.map(({ repoId, repoPath }) => ({
+    repoId,
+    repoPath,
+    missing: registry.validate(names, repoPath).missing,
+  }));
+
+  return { definition: parsed.data, matrix };
+}
+
 export function getWorkflowTemplate(templateId: string): WorkflowTemplate | null {
   if (!hasDbFile()) return null;
   const row = getDb('readonly')
