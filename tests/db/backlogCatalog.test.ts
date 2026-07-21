@@ -323,6 +323,37 @@ describe('backlogCatalog upsert/diff/load', () => {
     expect(listWorkItemsByScope({ repoId: 'repo-1' })[0]?.integrityIssue).toContain('not linked');
   });
 
+  // PRJ-19: the `/archived` page filters by `lifecycle: 'archived'`, which
+  // also matches a Work Item whose own row is still active but whose Epic is
+  // archived — descendants of an archived ancestor are consultable, just
+  // hidden from the default (active) listing.
+  it('scopes Work Items to the archived lifecycle, including descendants of an archived Epic', async () => {
+    const { upsertBacklogCatalog, listWorkItemsByScope, countWorkItemsByScope } = await setup({ migrated: true });
+    const { archiveWorkItem, archiveEpic } = await import('../../src/db/repo.js');
+    upsertBacklogCatalog(makeBacklog({
+      epics: [{
+        ...makeBacklog().epics[0]!,
+        features: [
+          { ...makeBacklog().epics[0]!.features[0]!, id: 'feat-1' },
+          { ...makeBacklog().epics[0]!.features[0]!, id: 'feat-2' },
+        ],
+      }],
+    }), 'repo-1');
+
+    expect(listWorkItemsByScope({ lifecycle: 'archived' })).toHaveLength(0);
+    expect(countWorkItemsByScope({ lifecycle: 'archived' })).toBe(0);
+
+    archiveWorkItem('feat-1', 1);
+    expect(listWorkItemsByScope({ lifecycle: 'archived' })).toMatchObject([{ featureId: 'feat-1', archivedAt: expect.any(String) }]);
+    expect(countWorkItemsByScope({ lifecycle: 'archived' })).toBe(1);
+
+    archiveEpic('epic-1', 1);
+    const archived = listWorkItemsByScope({ lifecycle: 'archived' });
+    expect(archived.map((entry) => entry.featureId).sort()).toEqual(['feat-1', 'feat-2']);
+    expect(countWorkItemsByScope({ lifecycle: 'archived' })).toBe(2);
+    expect(listWorkItemsByScope({ lifecycle: 'active' })).toHaveLength(0);
+  });
+
   it('keeps historical runs in their Project snapshot after a repository moves', async () => {
     const { db } = await setup({ migrated: true });
     const { createProject, moveRepo, createRun, listRunsForStats } = await import('../../src/db/repo.js');
