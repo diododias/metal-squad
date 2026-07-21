@@ -28,7 +28,7 @@ export function ProjectDetailPage({ state, projectId, send, actionResults, onBac
   return <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
     <PageHeader
       title={project.name}
-      breadcrumb={<button onClick={onBack} style={linkStyle}>Projects</button>}
+      breadcrumb={[{ label: 'Projects', href: '/projects' }]}
       actions={<div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
         <Button variant="primary" size="sm" disabled title="Epic creation moves to a modal in an upcoming release">+ Novo Épico</Button>
         <LifecycleActions
@@ -122,7 +122,6 @@ function EpicRow({ epic, state, projectId, send, actionResults }: {
 const heading: React.CSSProperties = { margin: '0 0 10px', fontFamily: 'var(--font-display)', fontWeight: 400 };
 const muted: React.CSSProperties = { color: 'var(--text-dim)', margin: '4px 0' };
 const tags: React.CSSProperties = { display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 10 };
-const linkStyle: React.CSSProperties = { background: 'none', border: 0, color: 'var(--accent-info)', padding: 0, cursor: 'pointer' };
 const rowStyle: React.CSSProperties = {
   border: '1px solid var(--border-dim)',
   borderRadius: 'var(--radius-sm)',
