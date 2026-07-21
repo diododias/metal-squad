@@ -99,7 +99,7 @@ Breadcrumb sempre visível: `Projects › {Projeto} › {Épico}`.
 
 ## 6. Gap — o que precisa ser desenvolvido
 
-1. **Rota de detalhe do Épico** — `routes.ts` não tem `/projects/:id/epics/:epicId`; criar rota + página `EpicDetailPage`.
+1. ~~**Rota de detalhe do Épico**~~ — **entregue (PF-01)**: rota `/projects/:projectId/epics/:epicId` + página `EpicDetailPage` com resumo (progresso derivado + status manual), linhas de Work Item clicáveis/navegáveis por teclado e paginação; breadcrumb provisório `Projects › {Projeto}` até PF-03.
 2. **Lista de Épicos com filtros** — refazer corpo do `ProjectDetailPage`: linhas clicáveis, filtro por status (manual + derivado), busca, ordenação.
 3. **Modal de criação de Épico** — extrair form atual para modal; hoje é inline.
 4. **Modal de criação de Feature** — extrair form + preview de template para modal com épico pré-selecionado.
