@@ -190,9 +190,10 @@ export const claudeAdapter: ToolAdapter = {
   parseUsage(transcript: string): TokenUsage | null {
     const evt = findResultEvent(transcript);
     if (!evt?.usage) return null;
-    const totalInput = evt.usage.input_tokens ?? 0;
+    // In `result` events, `input_tokens` is already the non-cached new input;
+    // `cache_read_input_tokens` is session-cumulative cached reads.
+    const input = evt.usage.input_tokens ?? 0;
     const cachedInput = evt.usage.cache_read_input_tokens ?? 0;
-    const input = totalInput - cachedInput;
     const output = evt.usage.output_tokens ?? 0;
     return { input, cachedInput, output, total: input + cachedInput + output };
   },
@@ -398,9 +399,10 @@ function parseClaudeLine(line: string, stageSkills: Record<string, string[]>): P
 
   if (evt.type === 'result') {
     if (!evt.usage) return [];
-    const totalInput = evt.usage.input_tokens ?? 0;
+    // `result` event: `input_tokens` = new (non-cached) input only;
+    // `cache_read_input_tokens` = session-cumulative cached reads.
+    const input = evt.usage.input_tokens ?? 0;
     const cachedInput = evt.usage.cache_read_input_tokens ?? 0;
-    const input = totalInput - cachedInput;
     const output = evt.usage.output_tokens ?? 0;
     if (input === 0 && cachedInput === 0 && output === 0) return [];
     return [{ usage: { input, cachedInput, output, total: input + cachedInput + output }, usageTotal: true }];
