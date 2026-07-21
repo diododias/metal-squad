@@ -1558,6 +1558,7 @@ export function createWebServer(options: {
         case 'action:archiveWorkItem': entity = workItemService.archive(data.workItemId, data.expectedRevision, { audit }).entity; break;
         case 'action:deleteWorkItem': entity = workItemService.delete(data.workItemId, data.expectedRevision, { audit }).entity; break;
         case 'action:restoreArchivedWorkItem': entity = workItemService.restoreArchive(data.workItemId, data.expectedRevision, { audit }).entity; break;
+        default: data satisfies never; throw new Error('Unknown lifecycle action type');
       }
       return { type: 'action:result', payload: { requestId: data.requestId, ok: true, entity, revision: entity.revision } };
     } catch (error) {

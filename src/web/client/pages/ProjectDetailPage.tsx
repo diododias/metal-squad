@@ -38,6 +38,9 @@ export function ProjectDetailPage({ state, projectId, send, actionResults, onBac
     result?: { stages: string[]; templateId: string; templateVersion: number; origin: string } | { error: string };
   } | null>(null);
   const handledPreviewResults = React.useRef(new Set<string>());
+  const [epicRequestId, setEpicRequestId] = useState<string | null>(null);
+  const [epicError, setEpicError] = useState<string>();
+  const handledEpicResults = React.useRef(new Set<string>());
   const [createRequestId, setCreateRequestId] = useState<string | null>(null);
   const handledCreateResults = React.useRef(new Set<string>());
 
@@ -66,6 +69,20 @@ export function ProjectDetailPage({ state, projectId, send, actionResults, onBac
   }, [actionResults, preview]);
 
   React.useEffect(() => {
+    if (!epicRequestId || handledEpicResults.current.has(epicRequestId)) return;
+    const result = actionResults[epicRequestId];
+    if (!result) return;
+    handledEpicResults.current.add(epicRequestId);
+    setEpicRequestId(null);
+    if (result.payload.ok) {
+      setEpicTitle('');
+      setEpicError(undefined);
+    } else if ('error' in result.payload) {
+      setEpicError((result.payload as { error: { message: string } }).error.message);
+    }
+  }, [actionResults, epicRequestId]);
+
+  React.useEffect(() => {
     if (!createRequestId || handledCreateResults.current.has(createRequestId)) return;
     const result = actionResults[createRequestId];
     if (!result) return;
@@ -81,7 +98,14 @@ export function ProjectDetailPage({ state, projectId, send, actionResults, onBac
   }, [actionResults, createRequestId]);
 
   if (!project) return <div style={{ padding: 24 }}><p>Project not found or no longer active.</p><Button onClick={onBack}>back to Projects</Button></div>;
-  const createEpic = (): void => { if (epicTitle.trim()) send({ type: 'action:createEpic', requestId: requestId('epic'), projectId, title: epicTitle.trim() }); };
+  const createEpic = (): void => {
+    const title = epicTitle.trim();
+    if (!title) return;
+    const id = requestId('epic');
+    setEpicRequestId(id);
+    setEpicError(undefined);
+    send({ type: 'action:createEpic', requestId: id, projectId, title });
+  };
   const previewReady = preview?.epicId === epicId && preview.repoId === repoId && preview.workItemType === workItemType;
   const previewResult = previewReady ? preview.result : undefined;
   const previewValid = previewResult != null && 'stages' in previewResult;
@@ -108,7 +132,7 @@ export function ProjectDetailPage({ state, projectId, send, actionResults, onBac
     <main style={{ overflow: 'auto', padding: 20, display: 'grid', gap: 16 }}>
       <Card><p style={{ margin: 0, color: 'var(--text-dim)' }}>{project.description ?? 'No project description.'}</p><div style={tags}><Tag>{repos.length} repos</Tag><Tag>{project.counts.epics} Epics</Tag><Tag>{project.counts.workItems} Work Items</Tag><StatusPill status={project.activeRuns ? 'running' : 'aborted'} label={`${project.activeRuns} active runs`} spinner={false} /></div></Card>
       <Card><h2 style={heading}>Repositories</h2>{repos.length ? <div style={tags}>{repos.map((repo) => <Tag key={repo.repoId}>{repo.label} · {repo.health}</Tag>)}</div> : <p style={muted}>No repository is linked. You can still create Epics; Work Items require a target repository.</p>}</Card>
-      <Card><h2 style={heading}>Create Epic</h2><EditableTextField id="new-epic-title" label="Title" value={epicTitle} initialValue="" onChange={setEpicTitle} /><Button variant="primary" size="sm" onClick={createEpic}>create Epic</Button></Card>
+      <Card><h2 style={heading}>Create Epic</h2><EditableTextField id="new-epic-title" label="Title" value={epicTitle} initialValue="" onChange={setEpicTitle} disabled={Boolean(epicRequestId)} />{epicError && <p role="alert" style={{ margin: 0, color: 'var(--accent-danger)', fontSize: 'var(--text-xs)' }}>{epicError}</p>}<Button variant="primary" size="sm" disabled={Boolean(epicRequestId)} onClick={createEpic}>{epicRequestId ? 'creating…' : 'create Epic'}</Button></Card>
       <Card>
         <h2 style={heading}>Create Work Item</h2>
         {repos.length === 0 ? <p style={muted}>Link a repository before creating a Work Item. The server rejects targets outside this Project.</p> : <div style={{ display: 'grid', gap: 10 }}>
