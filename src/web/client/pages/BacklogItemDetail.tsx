@@ -7,6 +7,7 @@ import { Tabs } from '../components/navigation/Tabs.js';
 import { MarkdownView } from '../components/MarkdownView.js';
 import { PageHeader, type PageHeaderProps } from '../PageHeader.js';
 import { useActiveProject } from '../hooks/useActiveProject.js';
+import { startEligibility } from '../lib/startEligibility.js';
 import type { MsqWebState, FeatureConfigPatch, FeatureConfigSaveResult, TaskConfigPatch, WebSocketClientMessage, WebSocketServerMessage, MsqWorkItemType } from '../../types.js';
 import type { RunHistoryEntry } from '../../../db/repo.js';
 
@@ -61,10 +62,14 @@ export function BacklogItemDetail({
       failedFeatureIds.add(run.featureId);
     }
   }
-  const blockedByDependencies = feature?.dependsOn.filter((dep) => !doneFeatureIds.has(dep)) ?? [];
   const repositories = 'repositories' in state ? state.repositories : [];
-  const repoUnhealthy = repositories.find((repo) => repo.repoId === feature?.repoId)?.health === 'unavailable';
-  const canStart = blockedByDependencies.length === 0 && !repoUnhealthy;
+  const eligibility = startEligibility({
+    dependsOn: feature?.dependsOn ?? [],
+    repoId: feature?.repoId,
+    integrityIssue: feature?.integrityIssue,
+    doneFeatureIds,
+    repositories,
+  });
   const { activeProjectId, setActiveProject } = useActiveProject();
   const itemProjectId = feature?.projectId ?? null;
   const projects = 'projects' in state ? state.projects : [];
@@ -154,14 +159,8 @@ export function BacklogItemDetail({
             <Button
               variant="primary"
               size="sm"
-              disabled={!canStart}
-              title={
-                repoUnhealthy
-                  ? 'Repository unavailable — cannot start.'
-                  : blockedByDependencies.length > 0
-                    ? `Pending dependencies: ${blockedByDependencies.join(', ')}`
-                    : 'Start feature'
-              }
+              disabled={!eligibility.canStart}
+              title={eligibility.reason ?? 'Start feature'}
               onClick={() => { onStart(featureId); }}
             >
               start feature
