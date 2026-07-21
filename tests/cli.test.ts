@@ -25,6 +25,7 @@ class MockCommand {
   parseAsync = mockParseAsync;
   command = mockCommandCreate.mockReturnThis();
   option = mockCommandOption.mockReturnThis();
+  requiredOption = mockCommandOption.mockReturnThis();
   action = mockCommandAction.mockReturnThis();
 }
 

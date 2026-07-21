@@ -14,6 +14,7 @@ import { registerDaemon } from './commands/daemon.js';
 import { registerProjects } from './commands/projects.js';
 import { registerEpics } from './commands/epics.js';
 import { registerWorkItems } from './commands/workItems.js';
+import { registerDb } from './commands/db.js';
 import { initConfig } from './config/index.js';
 import { setLogLevel } from './core/logger/index.js';
 
@@ -53,6 +54,7 @@ export async function run(argv: string[]): Promise<void> {
   registerProjects(program);
   registerEpics(program);
   registerWorkItems(program);
+  registerDb(program);
 
   await program.parseAsync(argv);
 }

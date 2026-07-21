@@ -131,6 +131,17 @@ export interface LoadedBacklog {
   registrations: FeatureRegistrationResult[];
 }
 
+/**
+ * Reads just enough of a backlog asset to route it to the right parser
+ * (v1/v2 `BacklogInputSchema` vs. the v3 Project-scoped shape, PRJ-20)
+ * without fully validating either shape yet.
+ */
+export function peekBacklogVersion(path = BACKLOG_FILE, cwd = process.cwd()): { raw: unknown; version: unknown } {
+  const absPath = isAbsolute(path) ? path : resolve(cwd, path);
+  const raw: unknown = parse(readFileSync(absPath, 'utf8'));
+  return { raw, version: isRecord(raw) ? raw.version : undefined };
+}
+
 export function loadBacklogWithRegistration(path = BACKLOG_FILE, cwd = process.cwd()): LoadedBacklog {
   const absPath = isAbsolute(path) ? path : resolve(cwd, path);
   const root = dirname(absPath);
