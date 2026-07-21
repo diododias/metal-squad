@@ -124,7 +124,7 @@ export function EpicEditor({ epic, completedWorkItems, totalWorkItems, send, act
       <div style={{ flex: '1 1 260px' }}>
         <EditableTextField id={`epic-${epic.epicId}-title`} label="Title" value={draft.title} initialValue={epic.title} disabled={Boolean(draft.pendingRequestId)} onChange={(value) => { update({ title: value }); }} />
       </div>
-      <StatusPill status={draft.status === 'done' ? 'done' : draft.status === 'in_progress' ? 'running' : 'aborted'} label={`manual: ${draft.status}`} spinner={false} />
+      <StatusPill status={draft.status === 'done' ? 'done' : draft.status === 'in_progress' ? 'running' : 'not_started'} label={`manual: ${draft.status}`} spinner={false} />
     </div>
     <EditableTextField id={`epic-${epic.epicId}-description`} label="Description" value={draft.description} initialValue={epic.description ?? ''} disabled={Boolean(draft.pendingRequestId)} placeholder="No description" onChange={(value) => { update({ description: value }); }} />
     <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) minmax(0, 1fr)', gap: 10 }}>

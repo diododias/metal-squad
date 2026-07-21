@@ -109,7 +109,7 @@ export function ProjectDetailPage({ state, projectId, send, actionResults, onBac
           <Tag>{repos.length} repos</Tag>
           <Tag>{project.counts.epics} Epics</Tag>
           <Tag>{project.counts.workItems} Work Items</Tag>
-          <StatusPill status={project.activeRuns ? 'running' : 'aborted'} label={`${String(project.activeRuns)} active runs`} spinner={false} />
+          <StatusPill status={project.activeRuns ? 'running' : 'not_started'} label={`${String(project.activeRuns)} active runs`} spinner={false} />
         </div>
       </Card>
       <Card><RepositoriesSection project={project} repositories={state.repositories} actionResults={actionResults} send={send} /></Card>
@@ -220,7 +220,7 @@ function EpicRow({ epic, state, projectId, send, actionResults, onToast, progres
         onKeyDown={(event) => { event.stopPropagation(); }}
       >
         {derivedStatus !== null && derivedStatus !== epic.status && <Tag>derived: {derivedStatus}</Tag>}
-        <StatusPill status={epic.status === 'done' ? 'done' : epic.status === 'in_progress' ? 'running' : 'aborted'} label={`manual: ${epic.status}`} spinner={false} />
+        <StatusPill status={epic.status === 'done' ? 'done' : epic.status === 'in_progress' ? 'running' : 'not_started'} label={`manual: ${epic.status}`} spinner={false} />
         <LifecycleActions kind="epic" id={epic.epicId} name={epic.title} revision={epic.revision} allowed={state.lifecycle?.[`epic:${epic.epicId}`]} send={send} actionResults={actionResults} onToast={onToast} />
       </div>
     </div>
