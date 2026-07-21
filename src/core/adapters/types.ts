@@ -8,10 +8,18 @@ const SESSION_LIMIT_PATTERNS: RegExp[] = [
   /quota exceeded/i,
 ];
 
+// A real limit/quota error is always the last thing the CLI prints before
+// exiting. Scanning the whole transcript false-positives on incidental
+// mentions buried in earlier tool output (e.g. a `git log` result quoting a
+// commit message that happens to contain "session limit" — see H33). Only
+// the tail of the closing output can plausibly be a genuine error.
+const SESSION_LIMIT_TAIL_CHARS = 50;
+
 export function detectSessionLimit(stdout: string, stderr: string): string | null {
-  const combined = `${stdout}\n${stderr}`;
+  const combined = `${stdout}\n${stderr}`.trimEnd();
+  const tail = combined.slice(-SESSION_LIMIT_TAIL_CHARS);
   for (const pattern of SESSION_LIMIT_PATTERNS) {
-    const match = pattern.exec(combined);
+    const match = pattern.exec(tail);
     if (match) return match[0];
   }
   return null;
