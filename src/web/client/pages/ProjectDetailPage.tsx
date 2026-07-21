@@ -9,6 +9,7 @@ import { CreateWorkItemModal } from '../components/project/CreateWorkItemModal.j
 import { EditProjectModal } from '../components/project/EditProjectModal.js';
 import { RepositoriesSection } from '../components/project/RepositoriesSection.js';
 import { WorkflowTemplatesSection } from '../components/WorkflowTemplatesSection.js';
+import { Tabs } from '../components/navigation/Tabs.js';
 import { ProgressBar } from '../components/data/ProgressBar.js';
 import { PageHeader } from '../PageHeader.js';
 import type { EpicRow as EpicRowData } from '../../../db/repo.js';
@@ -63,6 +64,14 @@ export function ProjectDetailPage({ state, projectId, send, actionResults, archi
 
   useEffect(() => { setPage(0); }, [query, statusFilter, order]);
 
+  const [activeTab, setActiveTab] = useState<string>(() =>
+    new URLSearchParams(window.location.hash.split('?')[1] ?? '').get('tab') === 'templates' ? 'templates' : 'epics');
+  const selectTab = (id: string): void => {
+    setActiveTab(id);
+    const base = (window.location.hash.split('?')[0] ?? '').replace(/^#/, '') || `/projects/${projectId}`;
+    window.location.hash = id === 'templates' ? `${base}?tab=templates` : base;
+  };
+
   const [showArchived, setShowArchived] = useState(false);
   const [archivedRequestId, setArchivedRequestId] = useState<string | null>(null);
   useEffect(() => {
@@ -84,7 +93,7 @@ export function ProjectDetailPage({ state, projectId, send, actionResults, archi
     <PageHeader
       title={project.name}
       breadcrumb={[{ label: 'Projects', href: '/projects' }]}
-      filters={<div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center' }}>
+      filters={activeTab === 'epics' && <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center' }}>
         <input
           value={query}
           onChange={(event) => { setQuery(event.target.value); }}
@@ -124,7 +133,12 @@ export function ProjectDetailPage({ state, projectId, send, actionResults, archi
       </div>}
     />
     <main style={{ overflow: 'auto', padding: 20, display: 'grid', gap: 16 }}>
-      <Card>
+      <Tabs
+        tabs={[{ id: 'epics', label: 'Epics' }, { id: 'templates', label: 'Templates' }]}
+        activeId={activeTab}
+        onSelect={selectTab}
+      />
+      {activeTab === 'epics' && <><Card>
         <p style={{ margin: 0, color: 'var(--text-dim)' }}>{project.description ?? 'No project description.'}</p>
         <div style={tags}>
           <Tag>{repos.length} repos</Tag>
@@ -158,8 +172,8 @@ export function ProjectDetailPage({ state, projectId, send, actionResults, archi
             <LifecycleActions kind="epic" id={entry.id} name={entry.title} revision={entry.revision} allowed={entry.allowed} send={send} actionResults={actionResults} onToast={onToast} />
           </div>)}
         </div>}
-      </section>
-      <section><h2 style={heading}>Workflow Templates</h2><WorkflowTemplatesSection state={state} projectId={projectId} send={send} actionResults={actionResults} /></section>
+      </section></>}
+      {activeTab === 'templates' && <section><h2 style={heading}>Workflow Templates</h2><WorkflowTemplatesSection state={state} projectId={projectId} send={send} actionResults={actionResults} /></section>}
     </main>
     <CreateEpicModal
       open={showCreateEpic}
