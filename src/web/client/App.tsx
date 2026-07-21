@@ -18,6 +18,7 @@ import { AnalyticsPage } from './pages/AnalyticsPage.js';
 import { ConfigPage } from './pages/ConfigPage.js';
 import { ProjectsPage } from './pages/ProjectsPage.js';
 import { ProjectDetailPage } from './pages/ProjectDetailPage.js';
+import { EpicDetailPage } from './pages/EpicDetailPage.js';
 import { ArchivedPage } from './pages/ArchivedPage.js';
 import type { MsqWebState, WebSocketServerMessage, FeatureConfigPatch, FeatureConfigSaveResult, TaskConfigPatch } from '../types.js';
 import type { RunHistoryEntry, TaskRun } from '../../db/repo.js';
@@ -323,6 +324,18 @@ export function App(): React.JSX.Element {
     page = state && <ProjectsPage state={state} send={send} actionResults={projectActionResults} />;
   } else if (route.page === 'project-detail') {
     page = state && <ProjectDetailPage state={state} projectId={route.projectId} send={send} actionResults={projectActionResults} onBack={() => { navigate('/projects'); }} />;
+  } else if (route.page === 'epic-detail') {
+    page = state && (
+      <EpicDetailPage
+        state={state}
+        projectId={route.projectId}
+        epicId={route.epicId}
+        send={send}
+        actionResults={projectActionResults}
+        onBack={() => { navigate(`/projects/${route.projectId}`); }}
+        onOpenBacklogItem={openBacklogItem}
+      />
+    );
   } else if (route.page === 'archived') {
     page = state && (
       <ArchivedPage
