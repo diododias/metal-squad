@@ -30,6 +30,13 @@ import {
   getWorkItemTemplateTarget,
   isWorkItemPristine,
   changeWorkItemType,
+  listArchivedProjects,
+  countArchivedProjects,
+  listArchivedEpics,
+  countArchivedEpics,
+  listAuditEvents,
+  projectLifecycleActions,
+  getProject,
   type WorkItemTemplateSnapshot,
   type ProjectRow,
   type EpicRow,
@@ -46,14 +53,14 @@ import { validateBacklogSkills } from '../core/skills/index.js';
 import { ConfigSchema, loadConfig, resolveRuntimeConfig, saveAppConfigPatch, saveConfig, saveNotificationsPatch, type NotificationsPatch, type ToolRegistryEntry } from '../config/index.js';
 import { assertConfiguredNotificationChannel } from '../core/notify/manager.js';
 import { clearSecret, setSecret } from '../security/secrets.js';
-import { getFeatureIdOwner, updateCatalogFeature, updateCatalogTask, updateCatalogDefaults, type FeaturePatch, type CatalogDefaultsPatch } from '../db/backlogCatalog.js';
+import { getFeatureIdOwner, updateCatalogFeature, updateCatalogTask, updateCatalogDefaults, listWorkItemsByScope, countWorkItemsByScope, type FeaturePatch, type CatalogDefaultsPatch } from '../db/backlogCatalog.js';
 import type { Feature, Task } from '../core/backlog/schema.js';
 import { epicService } from '../core/epicService.js';
 import { workItemService } from '../core/workItemService.js';
 import { projectService, repoLinkService } from '../core/projectService.js';
 import { buildMsqWebState, appendNotification, resetWebStateCaches, invalidateWorkflowTemplatesCache } from './state.js';
 import { createWebAuth, isAllowedHostHeader, isAllowedOrigin, timingSafeEqualStrings } from './auth.js';
-import { EpicActionMessageSchema, LifecycleActionMessageSchema, ProjectActionMessageSchema, RepositoryActionMessageSchema, WorkItemActionMessageSchema, WorkflowTemplateActionMessageSchema, WorkItemTypeChangeMessageSchema, ResolveWorkflowTemplateMessageSchema, WorkflowTemplateDefinitionMessageSchema, ValidateWorkflowTemplateMessageSchema } from './schemas.js';
+import { EpicActionMessageSchema, LifecycleActionMessageSchema, ProjectActionMessageSchema, RepositoryActionMessageSchema, WorkItemActionMessageSchema, WorkflowTemplateActionMessageSchema, WorkItemTypeChangeMessageSchema, ResolveWorkflowTemplateMessageSchema, WorkflowTemplateDefinitionMessageSchema, ValidateWorkflowTemplateMessageSchema, ArchivedQueryMessageSchema, AuditTrailQueryMessageSchema } from './schemas.js';
 import {
   archiveWorkflowTemplate,
   createWorkflowTemplate,
@@ -66,7 +73,12 @@ import {
   type WorkflowTemplate,
 } from '../db/workflowTemplates.js';
 import type {
+  AllowedLifecycle,
   AppConfigPatch,
+  ArchivedEntry,
+  ArchivedQueryResult,
+  AuditTimelineEntry,
+  AuditTrailQueryResult,
   EpicActionError,
   EpicActionResult,
   LifecycleActionError,
@@ -94,6 +106,14 @@ import type {
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 const STATIC_DIR = join(__dirname, 'static');
+
+/** Defensive fallback for an archived-listing row whose lifecycle projection
+ * lookup somehow misses (should not happen: every listed id is fed straight
+ * into `projectLifecycleActions`). Offers nothing rather than guessing. */
+const DEFAULT_ALLOWED_LIFECYCLE: AllowedLifecycle = {
+  state: 'pristine', archived: true, deleted: false, archive: false, delete: false,
+  cancel: false, restore: false, blockedReason: 'Lifecycle state unavailable.',
+};
 
 interface HeartbeatWebSocket extends WebSocket {
   isAlive: boolean;
@@ -891,6 +911,14 @@ export function createWebServer(options: {
         if (result.payload.ok) reconcileWebState(featureCwd, { forceBroadcast: true });
         break;
       }
+      case 'action:queryArchived': {
+        sendTo(client, handleQueryArchived(message));
+        break;
+      }
+      case 'action:queryAuditTrail': {
+        sendTo(client, handleQueryAuditTrail(message));
+        break;
+      }
       case 'action:resolveWorkflowTemplate': {
         const result = handleResolveWorkflowTemplate(message);
         sendTo(client, result);
@@ -1495,11 +1523,13 @@ export function createWebServer(options: {
   }
 
   /** Maps a lifecycle policy failure onto a stable action-error code. The four
-   * policy codes plus the shared REVISION_CONFLICT / NOT_FOUND codes pass
-   * through verbatim; anything else collapses to a generic failure. */
+   * policy codes, the Work Item restore integrity code (PRJ-19), plus the
+   * shared REVISION_CONFLICT / NOT_FOUND codes pass through verbatim; anything
+   * else collapses to a generic failure. */
   function lifecycleActionError(error: unknown): LifecycleActionError {
     const code = typeof error === 'object' && error !== null ? (error as { code?: unknown }).code : undefined;
     if (code === 'ENTITY_RUNNING' || code === 'ENTITY_HAS_HISTORY' || code === 'ENTITY_IN_USE' || code === 'ANCESTOR_ARCHIVED'
+      || code === 'REPOSITORY_NOT_IN_PROJECT'
       || code === 'REVISION_CONFLICT' || code === 'PROJECT_NOT_FOUND' || code === 'EPIC_NOT_FOUND' || code === 'WORK_ITEM_NOT_FOUND') {
       return { code, message: error instanceof Error ? error.message : 'Lifecycle action failed.' };
     }
@@ -1533,6 +1563,89 @@ export function createWebServer(options: {
       return { type: 'action:result', payload: { requestId: data.requestId, ok: true, entity, revision: entity.revision } };
     } catch (error) {
       return { type: 'action:result', payload: { requestId: data.requestId, ok: false, error: lifecycleActionError(error) } };
+    }
+  }
+
+
+  /** Paginated `/archived` listing across Project/Epic/Work Item (PRJ-19).
+   * Archived-only by construction — tombstoned (deleted) entities never
+   * surface here, only through the audit trail. Each item carries the same
+   * `AllowedLifecycle` projection the live pages use, so Restore reuses
+   * `LifecycleActions` unmodified. */
+  function handleQueryArchived(message: unknown): ArchivedQueryResult {
+    const parsed = ArchivedQueryMessageSchema.safeParse(message);
+    if (!parsed.success) {
+      return { type: 'action:archivedResult', payload: { requestId: actionResultRequestId(message), ok: false, error: { message: 'Invalid archived query payload.' } } };
+    }
+    const { requestId, filters, limit, offset } = parsed.data;
+    try {
+      const projects = (!filters.kind || filters.kind === 'project') && !filters.epicId && !filters.repoId
+        ? listArchivedProjects({ limit, offset }) : [];
+      const epics = (!filters.kind || filters.kind === 'epic') && !filters.epicId && !filters.repoId
+        ? listArchivedEpics({ limit, offset, projectId: filters.projectId }) : [];
+      const workItemScope = { lifecycle: 'archived' as const, projectId: filters.projectId, epicId: filters.epicId, repoId: filters.repoId };
+      const workItems = (!filters.kind || filters.kind === 'work_item')
+        ? listWorkItemsByScope({ ...workItemScope, limit, offset }) : [];
+
+      const lifecycleByKey = projectLifecycleActions([
+        ...projects.map((project) => ({ kind: 'project' as const, id: project.projectId })),
+        ...epics.map((epic) => ({ kind: 'epic' as const, id: epic.epicId })),
+        ...workItems.map((entry) => ({ kind: 'work_item' as const, id: entry.featureId })),
+      ]);
+      const projectNameCache = new Map<string, string>();
+      const projectName = (id: string): string => {
+        const cached = projectNameCache.get(id);
+        if (cached !== undefined) return cached;
+        const name = getProject(id, { includeArchived: true, includeDeleted: true })?.name ?? id;
+        projectNameCache.set(id, name);
+        return name;
+      };
+
+      const items: ArchivedEntry[] = [
+        ...projects.map((project): ArchivedEntry => ({
+          kind: 'project', id: project.projectId, title: project.name, parentLabel: null, parentId: null,
+          repoLabel: null, workItemType: null, archivedAt: project.archivedAt ?? project.updatedAt,
+          revision: project.revision, allowed: lifecycleByKey[`project:${project.projectId}`] ?? DEFAULT_ALLOWED_LIFECYCLE,
+        })),
+        ...epics.map((epic): ArchivedEntry => ({
+          kind: 'epic', id: epic.epicId, title: epic.title, parentLabel: projectName(epic.projectId), parentId: epic.projectId,
+          repoLabel: null, workItemType: null, archivedAt: epic.archivedAt ?? epic.updatedAt,
+          revision: epic.revision, allowed: lifecycleByKey[`epic:${epic.epicId}`] ?? DEFAULT_ALLOWED_LIFECYCLE,
+        })),
+        ...workItems.map((entry): ArchivedEntry => ({
+          kind: 'work_item', id: entry.featureId, title: entry.title, parentLabel: entry.epicTitle, parentId: entry.epicId,
+          repoLabel: entry.repoLabel, workItemType: entry.workItemType, archivedAt: entry.archivedAt ?? '',
+          revision: entry.revision, allowed: lifecycleByKey[`work_item:${entry.featureId}`] ?? DEFAULT_ALLOWED_LIFECYCLE,
+        })),
+      ];
+
+      const total = ((!filters.kind || filters.kind === 'project') ? countArchivedProjects() : 0)
+        + ((!filters.kind || filters.kind === 'epic') ? countArchivedEpics(filters.projectId) : 0)
+        + ((!filters.kind || filters.kind === 'work_item') ? countWorkItemsByScope(workItemScope) : 0);
+
+      return { type: 'action:archivedResult', payload: { requestId, ok: true, items, total, limit, offset } };
+    } catch (error) {
+      logCaughtError('web/server.handleQueryArchived', error);
+      return { type: 'action:archivedResult', payload: { requestId, ok: false, error: { message: error instanceof Error ? error.message : 'Archived query failed.' } } };
+    }
+  }
+
+  /** Audit timeline for a single entity (PRJ-19), most recent first. */
+  function handleQueryAuditTrail(message: unknown): AuditTrailQueryResult {
+    const parsed = AuditTrailQueryMessageSchema.safeParse(message);
+    if (!parsed.success) {
+      return { type: 'action:auditTrailResult', payload: { requestId: actionResultRequestId(message), ok: false, error: { message: 'Invalid audit trail query payload.' } } };
+    }
+    const { requestId, entityKind, entityId } = parsed.data;
+    try {
+      const events: AuditTimelineEntry[] = listAuditEvents(entityKind, entityId).map((event) => ({
+        id: event.id, actor: event.actor, action: event.action,
+        beforeJson: event.beforeJson, afterJson: event.afterJson, createdAt: event.createdAt,
+      }));
+      return { type: 'action:auditTrailResult', payload: { requestId, ok: true, entityKind, entityId, events } };
+    } catch (error) {
+      logCaughtError('web/server.handleQueryAuditTrail', error);
+      return { type: 'action:auditTrailResult', payload: { requestId, ok: false, error: { message: error instanceof Error ? error.message : 'Audit trail query failed.' } } };
     }
   }
 

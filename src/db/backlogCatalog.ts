@@ -9,6 +9,7 @@ import {
   FeatureSchema,
   TaskSchema,
   type BacklogV2,
+  type BacklogV3,
   type Budget,
   type Defaults,
   type Epic,
@@ -164,6 +165,9 @@ export interface WorkItemCatalogEntry {
   dataJson: string;
   workItemType: WorkItemType;
   revision: number;
+  /** Own archive timestamp, or the ancestor Epic's when the Work Item itself is
+   * not archived but its Epic is — `lifecycleWhere('archived')` matches either. */
+  archivedAt: string | null;
   integrityIssue?: string;
 }
 
@@ -208,7 +212,8 @@ export function listWorkItemsByScope(scope: WorkItemScope = {}): WorkItemCatalog
   const rows = db.prepare(
     `SELECT f.feature_id AS featureId, f.epic_id AS epicId, f.repo_id AS featureRepoId,
             e.project_id AS projectId, pr.repo_id AS linkedRepoId, pr.project_id AS linkedProjectId, r.path AS repoPath,
-            e.title AS epicTitle, f.title, f.type AS workItemType, f.revision, f.position, f.data_json AS dataJson
+            e.title AS epicTitle, f.title, f.type AS workItemType, f.revision, f.position, f.data_json AS dataJson,
+            COALESCE(f.archived_at, e.archived_at) AS archivedAt
        FROM backlog_features f
        JOIN backlog_epics e ON e.epic_id = f.epic_id
        LEFT JOIN project_repos pr ON pr.repo_id = f.repo_id
@@ -217,7 +222,7 @@ export function listWorkItemsByScope(scope: WorkItemScope = {}): WorkItemCatalog
       ORDER BY e.position ASC, f.position ASC, f.feature_id ASC${pagination}`,
   ).all(...params) as {
     featureId: string; epicId: string; featureRepoId: string; projectId: string | null;
-    linkedRepoId: string | null; linkedProjectId: string | null; repoPath: string | null; epicTitle: string; title: string; workItemType: WorkItemType; revision: number; position: number; dataJson: string;
+    linkedRepoId: string | null; linkedProjectId: string | null; repoPath: string | null; epicTitle: string; title: string; workItemType: WorkItemType; revision: number; position: number; dataJson: string; archivedAt: string | null;
   }[];
   return rows.map((row) => {
     const issues: string[] = [];
@@ -238,9 +243,30 @@ export function listWorkItemsByScope(scope: WorkItemScope = {}): WorkItemCatalog
       dataJson: row.dataJson,
       workItemType: row.workItemType,
       revision: row.revision,
+      archivedAt: row.archivedAt,
       ...(issues.length > 0 ? { integrityIssue: issues.join(' ') } : {}),
     };
   });
+}
+
+/** Total count for the same scope `listWorkItemsByScope` filters by, ignoring
+ * `limit`/`offset` — drives pagination on the `/archived` page (PRJ-19). */
+export function countWorkItemsByScope(scope: Omit<WorkItemScope, 'limit' | 'offset'> = {}): number {
+  const db = getReadonlyDbOrNull();
+  if (!db) return 0;
+  const lifecycle = scope.lifecycle ?? 'active';
+  const clauses = [lifecycleWhere(lifecycle)];
+  const params: string[] = [];
+  if (scope.projectId) { clauses.push('e.project_id = ?'); params.push(scope.projectId); }
+  if (scope.epicId) { clauses.push('f.epic_id = ?'); params.push(scope.epicId); }
+  if (scope.repoId) { clauses.push('f.repo_id = ?'); params.push(scope.repoId); }
+  const row = db.prepare(
+    `SELECT COUNT(*) AS count
+       FROM backlog_features f
+       JOIN backlog_epics e ON e.epic_id = f.epic_id
+      WHERE ${clauses.join(' AND ')}`,
+  ).get(...params) as { count: number };
+  return row.count;
 }
 
 export function countByScope(scope: Pick<WorkItemScope, 'projectId'> = {}): ScopeCounts {
@@ -516,6 +542,147 @@ export function diffBacklogCatalog(backlog: BacklogV2, repoId: string): BacklogC
   }
 
   return diff;
+}
+
+export interface BacklogSeedPlanV3 {
+  mode: 'seed-v3';
+  projectId: string;
+  /** repoId -> local path, resolved by the caller (registered repo or
+   * explicit `--repo-map`) before planning. Unresolved repos referenced by
+   * the asset are reported as `invalid` items, never silently skipped. */
+  repoPaths: Record<string, string>;
+  items: SeedPlanItem[];
+}
+
+/**
+ * Project-scoped seed plan for the v3 asset (PRJ-20). Mirrors `planBacklogSeed`'s
+ * created/unchanged/conflict/invalid semantics per item, but resolves against
+ * the target Project's Epics/Work Items across every repo the asset touches
+ * instead of a single repo. Never mutates the DB.
+ */
+export function planBacklogSeedV3(asset: BacklogV3, projectId: string, repoPaths: Record<string, string>): BacklogSeedPlanV3 {
+  const db = getReadonlyDbOrNull();
+  const items: SeedPlanItem[] = [];
+
+  const project = db?.prepare(`SELECT project_id, name FROM projects WHERE project_id = ? AND deleted_at IS NULL`)
+    .get(projectId) as { project_id: string; name: string } | undefined;
+  items.push({
+    kind: 'catalog',
+    id: projectId,
+    status: project ? 'unchanged' : 'created',
+  });
+
+  const linkedRepoIds = new Set(
+    db ? (db.prepare(`SELECT repo_id FROM project_repos WHERE project_id = ?`).all(projectId) as { repo_id: string }[]).map((r) => r.repo_id) : [],
+  );
+  for (const repo of asset.repositories) {
+    const hasPath = Boolean(repoPaths[repo.repoId]);
+    const linkedElsewhere = db?.prepare(`SELECT project_id FROM project_repos WHERE repo_id = ?`).get(repo.repoId) as { project_id: string } | undefined;
+    if (!hasPath) {
+      items.push({ kind: 'catalog', id: `repo:${repo.repoId}`, status: 'invalid', reason: `Repository "${repo.repoId}" has no local path mapping. Use --repo-map ${repo.repoId}=<path>.` });
+      continue;
+    }
+    if (linkedElsewhere && linkedElsewhere.project_id !== projectId) {
+      items.push({ kind: 'catalog', id: `repo:${repo.repoId}`, status: 'invalid', reason: `Repository "${repo.repoId}" is already linked to Project "${linkedElsewhere.project_id}".` });
+      continue;
+    }
+    items.push({ kind: 'catalog', id: `repo:${repo.repoId}`, status: linkedRepoIds.has(repo.repoId) ? 'unchanged' : 'created' });
+  }
+
+  const existingEpics = new Map(
+    db
+      ? (db.prepare(`SELECT epic_id, data_json FROM backlog_epics WHERE project_id = ?`).all(projectId) as { epic_id: string; data_json: string }[])
+          .map((row) => [row.epic_id, JSON.parse(row.data_json) as Record<string, unknown>])
+      : [],
+  );
+  for (const epic of asset.epics) {
+    const stored = existingEpics.get(epic.id);
+    const incoming = { id: epic.id, title: epic.title, description: epic.description, status: epic.status };
+    const conflict = stored && firstJsonDifference(stored, incoming);
+    items.push({
+      kind: 'epic', id: epic.id,
+      status: !stored ? 'created' : conflict ? 'conflict' : 'unchanged',
+      ...(conflict ? { conflict } : {}),
+    });
+  }
+
+  const existingFeatures = new Map(
+    db
+      ? (db.prepare(`SELECT feature_id, repo_id, data_json FROM backlog_features`).all() as { feature_id: string; repo_id: string; data_json: string }[])
+          .map((row) => [row.feature_id, { repoId: row.repo_id, feature: JSON.parse(row.data_json) as Record<string, unknown> }])
+      : [],
+  );
+  const assetRepoIds = new Set(asset.repositories.map((repo) => repo.repoId));
+  for (const workItem of asset.workItems) {
+    if (!assetRepoIds.has(workItem.repoId)) {
+      items.push({ kind: 'feature', id: workItem.id, status: 'invalid', reason: `Work Item references repoId "${workItem.repoId}" not present in repositories[].` });
+      continue;
+    }
+    const owner = existingFeatures.get(workItem.id);
+    if (owner && owner.repoId !== workItem.repoId) {
+      items.push({ kind: 'feature', id: workItem.id, status: 'invalid', reason: `Work Item ID belongs to repository "${owner.repoId}".` });
+      continue;
+    }
+    const { epicId: _epicId, repoId: _repoId, position: _position, archivedAt: _archivedAt, ...normalized } = workItem;
+    const conflict = owner && firstJsonDifference(owner.feature, normalized);
+    items.push({
+      kind: 'feature', id: workItem.id,
+      status: !owner ? 'created' : conflict ? 'conflict' : 'unchanged',
+      ...(conflict ? { conflict } : {}),
+    });
+  }
+
+  return { mode: 'seed-v3', projectId, repoPaths, items };
+}
+
+/**
+ * Applies a `BacklogSeedPlanV3`. Only `created` items are written; `unchanged`,
+ * `conflict` and `invalid` items are left untouched — the DB is never
+ * silently overwritten. Repos are registered/linked before Epics/Work Items
+ * so foreign keys resolve inside the same transaction.
+ */
+export function applyBacklogSeedV3(asset: BacklogV3, plan: BacklogSeedPlanV3): void {
+  const db = getDb('readwrite');
+  const created = new Set(plan.items.filter((item) => item.status === 'created').map((item) => `${item.kind}:${item.id}`));
+
+  db.transaction(() => {
+    if (created.has(`catalog:${plan.projectId}`)) {
+      db.prepare(
+        `INSERT INTO projects (project_id, name, description, position, revision) VALUES (?, ?, ?, ?, 1)`,
+      ).run(plan.projectId, asset.project.name, asset.project.description ?? null, asset.project.position);
+    }
+
+    for (const repo of asset.repositories) {
+      if (!created.has(`catalog:repo:${repo.repoId}`)) continue;
+      const path = plan.repoPaths[repo.repoId];
+      if (!path) continue;
+      db.prepare(`INSERT INTO repos (repo_id, path) VALUES (?, ?) ON CONFLICT(repo_id) DO UPDATE SET path = excluded.path`).run(repo.repoId, path);
+      db.prepare(`INSERT INTO project_repos (repo_id, project_id, position) VALUES (?, ?, (SELECT COALESCE(MAX(position), -1) + 1 FROM project_repos WHERE project_id = ?))`).run(repo.repoId, plan.projectId, plan.projectId);
+    }
+
+    const insertEpic = db.prepare(
+      `INSERT INTO backlog_epics (epic_id, project_id, repo_id, title, description, status, position, data_json, revision, updated_at)
+       VALUES (?, ?, NULL, ?, ?, ?, ?, ?, 1, datetime('now'))`,
+    );
+    for (const epic of asset.epics) {
+      if (!created.has(`epic:${epic.id}`)) continue;
+      insertEpic.run(epic.id, plan.projectId, epic.title, epic.description ?? null, epic.status, epic.position, JSON.stringify(epic));
+    }
+
+    const insertFeature = db.prepare(
+      `INSERT INTO backlog_features (feature_id, epic_id, repo_id, title, type, depends_on, spec_file, position, data_json, description, revision, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, datetime('now'))`,
+    );
+    for (const workItem of asset.workItems) {
+      if (!created.has(`feature:${workItem.id}`)) continue;
+      const { epicId, repoId, position, archivedAt: _archivedAt, ...normalized } = workItem;
+      insertFeature.run(
+        workItem.id, epicId, repoId, workItem.title, workItem.type,
+        JSON.stringify(workItem.dependsOn), workItem.specFile ?? null, position,
+        JSON.stringify(normalized), workItem.description ?? null,
+      );
+    }
+  })();
 }
 
 interface StoredFeatureRow {
