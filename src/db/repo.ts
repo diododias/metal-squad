@@ -338,30 +338,6 @@ export function listEpics(projectId?: string): EpicRow[] {
   return (projectId ? getDb('readonly').prepare(query).all(projectId) : getDb('readonly').prepare(query).all()) as EpicRow[];
 }
 
-/** Archived (not deleted) Epics only, paginated for the `/archived` page
- * (PRJ-19). Optionally scoped to a Project. */
-export function listArchivedEpics(scope: ArchivedScope & { projectId?: string } = {}): EpicRow[] {
-  if (!hasDbFile()) return [];
-  const clauses = ['archived_at IS NOT NULL', 'deleted_at IS NULL'];
-  const params: (string | number)[] = [];
-  if (scope.projectId) { clauses.push('project_id = ?'); params.push(scope.projectId); }
-  const pagination = scope.limit === undefined ? '' : ' LIMIT ? OFFSET ?';
-  if (scope.limit !== undefined) params.push(scope.limit, scope.offset ?? 0);
-  return getDb('readonly').prepare(
-    `${EPIC_SELECT} WHERE ${clauses.join(' AND ')} ORDER BY archived_at DESC${pagination}`,
-  ).all(...params) as EpicRow[];
-}
-
-export function countArchivedEpics(projectId?: string): number {
-  if (!hasDbFile()) return 0;
-  const clauses = ['archived_at IS NOT NULL', 'deleted_at IS NULL'];
-  const params: string[] = [];
-  if (projectId) { clauses.push('project_id = ?'); params.push(projectId); }
-  return (getDb('readonly').prepare(
-    `SELECT COUNT(*) AS count FROM backlog_epics WHERE ${clauses.join(' AND ')}`,
-  ).get(...params) as { count: number }).count;
-}
-
 
 /** A single entity to project lifecycle actions for. */
 export interface LifecycleProjectionKey {
@@ -2162,7 +2138,13 @@ export function listRunsForTui(limit = 50, repoId?: string, scope: ProjectScope 
            WHEN psr.id IS NOT NULL THEN 'blocked'
            WHEN p.status IN ('paused', 'blocked') THEN 'blocked'
            WHEN p.status IN ('aborting', 'aborted') THEN 'aborted'
-           WHEN p.status = 'failed' THEN 'failed'
+           -- A terminal pipeline failure only stands in for this run's own
+           -- status while the run itself never reached its own terminal state
+           -- (e.g. the process died mid-flight without calling finishRun). A
+           -- later retry that DID reach its own terminal status (done,
+           -- blocked, failed) must not be masked by an earlier attempt's
+           -- pipeline-level failure.
+           WHEN p.status = 'failed' AND r.status = 'running' THEN 'failed'
            WHEN p.status = 'running' AND r.status = 'done' THEN 'running'
            ELSE r.status
          END           AS status,
@@ -2285,7 +2267,13 @@ export function listRunHistoryForFeature(repoId: string, featureId: string, limi
            WHEN psr.id IS NOT NULL THEN 'blocked'
            WHEN p.status IN ('paused', 'blocked') THEN 'blocked'
            WHEN p.status IN ('aborting', 'aborted') THEN 'aborted'
-           WHEN p.status = 'failed' THEN 'failed'
+           -- A terminal pipeline failure only stands in for this run's own
+           -- status while the run itself never reached its own terminal state
+           -- (e.g. the process died mid-flight without calling finishRun). A
+           -- later retry that DID reach its own terminal status (done,
+           -- blocked, failed) must not be masked by an earlier attempt's
+           -- pipeline-level failure.
+           WHEN p.status = 'failed' AND r.status = 'running' THEN 'failed'
            WHEN p.status = 'running' AND r.status = 'done' THEN 'running'
            ELSE r.status
          END           AS status,

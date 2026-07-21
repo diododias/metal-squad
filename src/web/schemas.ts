@@ -169,6 +169,28 @@ export const WorkflowTemplateActionMessageSchema = z.discriminatedUnion('type', 
 
 export type WorkflowTemplateActionMessage = z.infer<typeof WorkflowTemplateActionMessageSchema>;
 
+/** Fetches a template's full definition on demand (PRJ-26) — `state.workflowTemplates`
+ * only ever carries the lightweight summary. */
+export const WorkflowTemplateDefinitionMessageSchema = z.object({
+  type: z.literal('action:getWorkflowTemplateDefinition'),
+  requestId: RequestIdSchema,
+  templateId: z.string().min(1),
+}).strict();
+
+export type WorkflowTemplateDefinitionMessage = z.infer<typeof WorkflowTemplateDefinitionMessageSchema>;
+
+/** Validates a draft definition against every active repo of a Project before
+ * save/mapping (PRJ-26), returning a repo×skill matrix instead of a single
+ * pass/fail so the UI can pinpoint exactly which repo is missing which skill. */
+export const ValidateWorkflowTemplateMessageSchema = z.object({
+  type: z.literal('action:validateWorkflowTemplate'),
+  requestId: RequestIdSchema,
+  projectId: z.string().min(1),
+  definition: z.unknown(),
+}).strict();
+
+export type ValidateWorkflowTemplateMessage = z.infer<typeof ValidateWorkflowTemplateMessageSchema>;
+
 /** Type change on an existing Work Item. `preview: true` resolves and reports
  * the target snapshot without writing, so the UI can confirm before applying. */
 export const WorkItemTypeChangeMessageSchema = z.object({
