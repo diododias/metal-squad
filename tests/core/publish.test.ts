@@ -309,14 +309,14 @@ describe('verifyPublishContract', () => {
     });
   });
 
-  it('fails when the PR base branch is wrong', async () => {
+  it('accepts a PR whose base is not the configured integration base (target is the requester\'s call)', async () => {
     mockExecFileSync.mockImplementation((command: string, args?: string[]) => {
       const joined = `${command} ${(args ?? []).join(' ')}`;
       if (joined === 'git rev-parse --abbrev-ref HEAD') return 'feat/test\n';
       if (joined === 'git rev-parse HEAD') return 'abc1234\n';
       if (joined === 'git rev-parse --abbrev-ref --symbolic-full-name @{u}') return 'origin/feat/test\n';
-      if (joined === 'git rev-parse --verify develop') return 'base123\n';
-      if (joined === 'git rev-list --count develop..HEAD') return '1\n';
+      if (joined === 'git rev-parse --verify main') return 'base123\n';
+      if (joined === 'git rev-list --count main..HEAD') return '1\n';
       if (joined === 'gh --version') return '2.0.0\n';
       if (joined === 'gh pr view --json number,url,state,baseRefName,headRefName') {
         return JSON.stringify({ number: 8, url: 'https://example.test/pr/8', state: 'OPEN', baseRefName: 'main' });
@@ -326,9 +326,9 @@ describe('verifyPublishContract', () => {
 
     const { verifyPublishContract } = await import('../../src/core/git/publish.js');
     expect(verifyPublishContract('/repo', ['develop'])).toMatchObject({
-      ok: false,
-      status: 'failed',
-      summary: 'publish: pull request base is main, expected develop.',
+      ok: true,
+      status: 'done',
+      evidence: { baseBranch: 'main', prNumber: 8 },
     });
   });
 
@@ -362,14 +362,14 @@ describe('verifyPublishContract', () => {
     });
   });
 
-  it('fails when the PR base is outside the allowed set of bases', async () => {
+  it('accepts a PR whose base is outside the allowed set of bases', async () => {
     mockExecFileSync.mockImplementation((command: string, args?: string[]) => {
       const joined = `${command} ${(args ?? []).join(' ')}`;
       if (joined === 'git rev-parse --abbrev-ref HEAD') return 'feat/child\n';
       if (joined === 'git rev-parse HEAD') return 'abc1234\n';
       if (joined === 'git rev-parse --abbrev-ref --symbolic-full-name @{u}') return 'origin/feat/child\n';
-      if (joined === 'git rev-parse --verify feat/dep-a') return 'depbase1\n';
-      if (joined === 'git rev-list --count feat/dep-a..HEAD') return '3\n';
+      if (joined === 'git rev-parse --verify main') return 'depbase1\n';
+      if (joined === 'git rev-list --count main..HEAD') return '3\n';
       if (joined === 'gh --version') return '2.0.0\n';
       if (joined === 'gh pr view --json number,url,state,baseRefName,headRefName') {
         return JSON.stringify({ number: 56, url: 'https://example.test/pr/56', state: 'OPEN', baseRefName: 'main' });
@@ -379,9 +379,9 @@ describe('verifyPublishContract', () => {
 
     const { verifyPublishContract } = await import('../../src/core/git/publish.js');
     expect(verifyPublishContract('/repo', ['feat/dep-a', 'develop'])).toMatchObject({
-      ok: false,
-      status: 'failed',
-      summary: 'publish: pull request base is main, expected feat/dep-a or develop.',
+      ok: true,
+      status: 'done',
+      evidence: { baseBranch: 'main', prNumber: 56 },
     });
   });
 
