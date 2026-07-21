@@ -422,6 +422,34 @@ describe('claude adapter', () => {
     }));
   });
 
+  it('result event treats input_tokens as non-cached input (does not subtract cache_read_input_tokens)', async () => {
+    const resultLine = JSON.stringify({
+      type: 'result',
+      subtype: 'success',
+      result: 'done',
+      usage: { input_tokens: 376, cache_read_input_tokens: 35_443_314, output_tokens: 83_895 },
+    });
+    mockRunCli.mockImplementation(async () => ({
+      code: 0,
+      stdout: resultLine,
+      stderr: '',
+    }));
+    const { claudeAdapter } = await import('../../src/core/adapters/claude.js');
+
+    const result = await claudeAdapter.runFeature(
+      { id: 'feat-1', title: 'F', tool: 'claude', effort: 'medium', dependsOn: [], tasks: [] },
+      'PROMPT',
+      { cwd: '/repo', runId: 90 },
+    );
+
+    expect(result.usage).toEqual({
+      input: 376,
+      cachedInput: 35_443_314,
+      output: 83_895,
+      total: 376 + 35_443_314 + 83_895,
+    });
+  });
+
   it('transitions tool calls from started to completed when a tool_result user event arrives', async () => {
     const toolUseId = 'toolu_01abc';
     const assistant = JSON.stringify({
