@@ -87,7 +87,7 @@ export function EpicDetailPage({ state, projectId, epicId, send, actionResults, 
               label={`derived progress: ${String(completed)}/${String(items.length)}`}
             />
           </div>
-          <StatusPill status={epic.status === 'done' ? 'done' : epic.status === 'in_progress' ? 'running' : 'aborted'} label={`manual: ${epic.status}`} spinner={false} />
+          <StatusPill status={epic.status === 'done' ? 'done' : epic.status === 'in_progress' ? 'running' : 'not_started'} label={`manual: ${epic.status}`} spinner={false} />
         </div>
         <div style={tags}>{[...repoCounts].map(([label, count]) => <Tag key={label}>{label}: {count}</Tag>)}</div>
       </Card>
@@ -111,7 +111,7 @@ export function EpicDetailPage({ state, projectId, epicId, send, actionResults, 
             <div style={tags}>
               <Tag>{item.workItemType}</Tag>
               <Tag>{item.repoLabel ?? 'unresolved repo'}</Tag>
-              <StatusPill status={run?.status ?? 'aborted'} label={run?.status ?? 'not started'} spinner={false} />
+              <StatusPill status={run?.status ?? 'not_started'} label={run?.status ?? 'not started'} spinner={false} />
               {item.dependsOn.map((dependency) => <DependencyTag key={dependency} depId={dependency} doneFeatureIds={doneFeatureIds} failedFeatureIds={failedFeatureIds} />)}
             </div>
             {item.workflow.stages.length > 0 && <div style={{ marginTop: 8 }}>

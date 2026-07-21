@@ -1,6 +1,6 @@
 import React from 'react';
 
-export type PillStatus = 'running' | 'done' | 'failed' | 'blocked' | 'aborted';
+export type PillStatus = 'running' | 'done' | 'failed' | 'blocked' | 'aborted' | 'not_started';
 
 export interface StatusPillProps {
   status: PillStatus | (string & {});
@@ -9,13 +9,14 @@ export interface StatusPillProps {
   spinner?: boolean;
 }
 
-const ICON: Record<string, string> = { running: '⟳', done: '✓', failed: '✗', blocked: '⊘', aborted: '■' };
+const ICON: Record<string, string> = { running: '⟳', done: '✓', failed: '✗', blocked: '⊘', aborted: '■', not_started: '·' };
 const COLOR: Record<string, string> = {
   running: 'var(--accent-info)',
   done: 'var(--accent-ok)',
   failed: 'var(--accent-danger)',
   blocked: 'var(--accent-warn)',
   aborted: 'var(--text-dim)',
+  not_started: 'var(--text-faint)',
 };
 const BG: Record<string, string> = {
   running: 'var(--accent-info-10)',
@@ -23,7 +24,9 @@ const BG: Record<string, string> = {
   failed: 'var(--accent-danger-10)',
   blocked: 'var(--accent-warn-10)',
   aborted: 'transparent',
+  not_started: 'transparent',
 };
+const BORDER: Record<string, string> = { not_started: 'var(--border-dim)' };
 
 export function StatusPill({ status, label, spinner = true }: StatusPillProps): React.JSX.Element {
   const color = COLOR[status] ?? 'var(--text-dim)';
@@ -38,13 +41,13 @@ export function StatusPill({ status, label, spinner = true }: StatusPillProps): 
         fontFamily: 'var(--font-mono)',
         padding: '3px 9px',
         borderRadius: 'var(--radius-pill)',
-        border: `1px solid ${color}`,
+        border: `1px solid ${BORDER[status] ?? color}`,
         background: BG[status] ?? 'transparent',
         color,
         whiteSpace: 'nowrap',
       }}
     >
-      {showSpinner ? <span aria-hidden="true" className="msq-status-spinner" /> : (ICON[status] ?? '·')} {label ?? status}
+      {showSpinner ? <span aria-hidden="true" className="msq-status-spinner" /> : (ICON[status] ?? '·')} {label ?? (status === 'not_started' ? 'not started' : status)}
     </span>
   );
 }
