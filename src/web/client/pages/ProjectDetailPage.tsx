@@ -8,6 +8,7 @@ import { Tag } from '../components/core/Tag.js';
 import { DependencyTag } from '../components/FeatureConfigDetail.js';
 import { LifecycleActions } from '../components/LifecycleActions.js';
 import { WorkflowStepper } from '../components/navigation/WorkflowStepper.js';
+import { WorkflowTemplatesSection } from '../components/WorkflowTemplatesSection.js';
 import { PageHeader } from '../PageHeader.js';
 import type { EpicRow } from '../../../db/repo.js';
 import type { MsqWebState, MsqWorkItemType, WebSocketClientMessage, WebSocketServerMessage } from '../../types.js';
@@ -129,7 +130,8 @@ export function ProjectDetailPage({ state, projectId, send, actionResults, onBac
           <Button variant="primary" size="sm" disabled={!workTitle.trim() || !epicId || !repoId || !previewValid} onClick={createWorkItem}>create Work Item</Button>
         </div>}
       </Card>
-      <section><h2 style={heading}>Epics</h2>{epics.length ? epics.map((epic) => <EpicCard key={epic.epicId} epic={epic} state={state} page={pageByEpic[epic.epicId] ?? 0} onPage={(page) => setPageByEpic((current) => ({ ...current, [epic.epicId]: page }))} send={send} actionResults={actionResults} />) : <Card><p style={muted}>No Epics yet.</p></Card>}</section>
+      <section><h2 style={heading}>Epics</h2>{epics.length ? epics.map((epic) => <EpicCard key={epic.epicId} epic={epic} state={state} page={pageByEpic[epic.epicId] ?? 0} onPage={(page) => setPageByEpic((current) => ({ ...current, [epic.epicId]: page }))} />) : <Card><p style={muted}>No Epics yet.</p></Card>}</section>
+      <section><h2 style={heading}>Workflow Templates</h2><WorkflowTemplatesSection state={state} projectId={projectId} send={send} actionResults={actionResults} /></section>
     </main>
   </div>;
 }

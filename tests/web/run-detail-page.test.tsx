@@ -100,6 +100,24 @@ describe('RunDetailPage resume with override', () => {
     expect(container.textContent).toContain('900 tok');
   });
 
+  it('labels a publish note as a warning (not an error) when the publication is already verified', () => {
+    const note = 'note: post-run could not verify whether HEAD descends from the declared base develop. A verified GitHub PR already confirms this publication; treat this only as informational.';
+    const container = renderPage(makeRun({ publishVerified: true, publishError: note, prNumber: 230, prUrl: 'https://example.test/pr/230' }), vi.fn());
+
+    expect(container.textContent).toContain('Publish warning');
+    expect(container.textContent).not.toContain('Publish check');
+    expect(container.textContent).toContain(note);
+  });
+
+  it('labels an unverified publish error as a check failure', () => {
+    const error = 'publish: no pull request is open for the current branch against develop.';
+    const container = renderPage(makeRun({ publishVerified: false, publishError: error }), vi.fn());
+
+    expect(container.textContent).toContain('Publish check');
+    expect(container.textContent).not.toContain('Publish warning');
+    expect(container.textContent).toContain(error);
+  });
+
   it('renders the override controls for a resumable paused pipeline and dispatches overrides', () => {
     const send = vi.fn<(message: WebSocketClientMessage) => void>();
     const container = renderPage(makeRun(), send);

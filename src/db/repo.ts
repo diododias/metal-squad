@@ -2068,7 +2068,13 @@ export function listRunsForTui(limit = 50, repoId?: string, scope: ProjectScope 
            WHEN psr.id IS NOT NULL THEN 'blocked'
            WHEN p.status IN ('paused', 'blocked') THEN 'blocked'
            WHEN p.status IN ('aborting', 'aborted') THEN 'aborted'
-           WHEN p.status = 'failed' THEN 'failed'
+           -- A terminal pipeline failure only stands in for this run's own
+           -- status while the run itself never reached its own terminal state
+           -- (e.g. the process died mid-flight without calling finishRun). A
+           -- later retry that DID reach its own terminal status (done,
+           -- blocked, failed) must not be masked by an earlier attempt's
+           -- pipeline-level failure.
+           WHEN p.status = 'failed' AND r.status = 'running' THEN 'failed'
            WHEN p.status = 'running' AND r.status = 'done' THEN 'running'
            ELSE r.status
          END           AS status,
@@ -2191,7 +2197,13 @@ export function listRunHistoryForFeature(repoId: string, featureId: string, limi
            WHEN psr.id IS NOT NULL THEN 'blocked'
            WHEN p.status IN ('paused', 'blocked') THEN 'blocked'
            WHEN p.status IN ('aborting', 'aborted') THEN 'aborted'
-           WHEN p.status = 'failed' THEN 'failed'
+           -- A terminal pipeline failure only stands in for this run's own
+           -- status while the run itself never reached its own terminal state
+           -- (e.g. the process died mid-flight without calling finishRun). A
+           -- later retry that DID reach its own terminal status (done,
+           -- blocked, failed) must not be masked by an earlier attempt's
+           -- pipeline-level failure.
+           WHEN p.status = 'failed' AND r.status = 'running' THEN 'failed'
            WHEN p.status = 'running' AND r.status = 'done' THEN 'running'
            ELSE r.status
          END           AS status,
