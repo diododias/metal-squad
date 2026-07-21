@@ -1,7 +1,10 @@
 import {
+  archiveEpic,
   createEpic,
+  deleteEpic,
   getEpic,
   listEpics,
+  restoreArchivedEpic,
   updateEpic,
   type AuditContext,
   type CreateEpicInput,
@@ -33,6 +36,21 @@ export const epicService = {
     options: { audit?: AuditContext } = {},
   ): ServiceMutationResult<EpicRow> {
     const entity = updateEpic(epicId, normalizedEpicPatch(patch), expectedRevision, options);
+    return { entity, revision: entity.revision };
+  },
+
+  archive(epicId: string, expectedRevision: number, options: { audit?: AuditContext } = {}): ServiceMutationResult<EpicRow> {
+    const entity = archiveEpic(epicId, expectedRevision, options);
+    return { entity, revision: entity.revision };
+  },
+
+  delete(epicId: string, expectedRevision: number, options: { audit?: AuditContext } = {}): ServiceMutationResult<EpicRow> {
+    const entity = deleteEpic(epicId, expectedRevision, options);
+    return { entity, revision: entity.revision };
+  },
+
+  restoreArchive(epicId: string, expectedRevision: number, options: { audit?: AuditContext } = {}): ServiceMutationResult<EpicRow> {
+    const entity = restoreArchivedEpic(epicId, expectedRevision, options);
     return { entity, revision: entity.revision };
   },
 

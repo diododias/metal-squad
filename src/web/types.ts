@@ -296,6 +296,10 @@ export type ProjectActionErrorCode =
   | 'REPO_PATH_NOT_DIRECTORY'
   | 'REPO_PATH_NOT_ALLOWED'
   | 'REVISION_CONFLICT'
+  | 'ENTITY_RUNNING'
+  | 'ENTITY_HAS_HISTORY'
+  | 'ENTITY_IN_USE'
+  | 'ANCESTOR_ARCHIVED'
   | 'PROJECT_ACTION_FAILED';
 
 export interface ProjectActionError {
@@ -330,7 +334,12 @@ export type RepositoryActionResult =
 export type EpicActionErrorCode =
   | 'INVALID_PAYLOAD'
   | 'PROJECT_NOT_FOUND'
+  | 'EPIC_NOT_FOUND'
   | 'REVISION_CONFLICT'
+  | 'ENTITY_RUNNING'
+  | 'ENTITY_HAS_HISTORY'
+  | 'ENTITY_IN_USE'
+  | 'ANCESTOR_ARCHIVED'
   | 'EPIC_ACTION_FAILED';
 
 export interface EpicActionError {
@@ -341,6 +350,18 @@ export interface EpicActionError {
 export type EpicActionResult =
   | { type: 'action:result'; payload: { requestId: string; ok: true; entity: EpicRow } }
   | { type: 'action:result'; payload: { requestId: string; ok: false; error: EpicActionError } };
+
+/** Lifecycle mutation result (PRJ-17). The success payload carries the mutated
+ * entity plus its new `revision` for the next optimistic write. The error shape
+ * reuses the entity's own action error union so the codes stay consistent. */
+export interface LifecycleActionError {
+  code: ProjectActionErrorCode | EpicActionErrorCode | WorkItemActionErrorCode;
+  message: string;
+}
+
+export type LifecycleActionResult =
+  | { type: 'action:result'; payload: { requestId: string; ok: true; entity: ProjectRow | EpicRow | WorkItemRow; revision: number } }
+  | { type: 'action:result'; payload: { requestId: string; ok: false; error: LifecycleActionError } };
 
 export type WorkItemActionErrorCode =
   | 'INVALID_PAYLOAD'
@@ -354,6 +375,10 @@ export type WorkItemActionErrorCode =
   | 'WORK_ITEM_NOT_FOUND'
   | 'WORK_ITEM_HAS_HISTORY'
   | 'REVISION_CONFLICT'
+  | 'ENTITY_RUNNING'
+  | 'ENTITY_HAS_HISTORY'
+  | 'ENTITY_IN_USE'
+  | 'ANCESTOR_ARCHIVED'
   | 'WORKFLOW_TEMPLATE_NOT_FOUND'
   | 'WORKFLOW_TEMPLATE_INVALID'
   | 'WORK_ITEM_ACTION_FAILED';
@@ -449,6 +474,15 @@ export type WebSocketClientMessage =
   | { type: 'action:linkRepo'; requestId: string; projectId: string; repoId?: string; path?: string; confirm?: boolean }
   | { type: 'action:moveRepo'; requestId: string; repoId: string; toProjectId: string; expectedRevision?: number }
   | { type: 'action:unlinkRepo'; requestId: string; projectId: string; repoId: string }
+  | { type: 'action:archiveProject'; requestId: string; projectId: string; expectedRevision: number }
+  | { type: 'action:deleteProject'; requestId: string; projectId: string; expectedRevision: number }
+  | { type: 'action:restoreArchivedProject'; requestId: string; projectId: string; expectedRevision: number }
+  | { type: 'action:archiveEpic'; requestId: string; epicId: string; expectedRevision: number }
+  | { type: 'action:deleteEpic'; requestId: string; epicId: string; expectedRevision: number }
+  | { type: 'action:restoreArchivedEpic'; requestId: string; epicId: string; expectedRevision: number }
+  | { type: 'action:archiveWorkItem'; requestId: string; workItemId: string; expectedRevision: number }
+  | { type: 'action:deleteWorkItem'; requestId: string; workItemId: string; expectedRevision: number }
+  | { type: 'action:restoreArchivedWorkItem'; requestId: string; workItemId: string; expectedRevision: number }
   | { type: 'action:createEpic'; requestId: string; projectId: string; title: string; description?: string | null }
   | { type: 'action:createWorkItem'; requestId: string; epicId: string; repoId: string; workItemType?: MsqWorkItemType; title: string; description?: string | null; dependsOn?: string[] }
   | { type: 'action:resolveWorkflowTemplate'; requestId: string; epicId: string; repoId: string; workItemType: MsqWorkItemType }

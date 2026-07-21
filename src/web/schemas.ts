@@ -203,3 +203,41 @@ export const WorkItemTypeChangeMessageSchema = z.object({
 }).strict();
 
 export type WorkItemTypeChangeMessage = z.infer<typeof WorkItemTypeChangeMessageSchema>;
+
+/** Lifecycle mutations (PRJ-17): archive / delete / restoreArchive across the
+ * three levels. Each carries `expectedRevision` so a concurrent editor loses
+ * the race deterministically, and the policy engine runs inside the same write
+ * transaction so a concurrent Start cannot slip through. The id field is named
+ * per level (`projectId` / `epicId` / `workItemId`) to match each entity's
+ * existing action contract. */
+const RevisionField = z.number().int().positive();
+
+function projectLifecycle<T extends 'action:archiveProject' | 'action:deleteProject' | 'action:restoreArchivedProject'>(
+  type: T,
+): z.ZodObject<{ type: z.ZodLiteral<T>; requestId: typeof RequestIdSchema; projectId: z.ZodString; expectedRevision: typeof RevisionField }, 'strict'> {
+  return z.object({ type: z.literal(type), requestId: RequestIdSchema, projectId: z.string().min(1), expectedRevision: RevisionField }).strict();
+}
+function epicLifecycle<T extends 'action:archiveEpic' | 'action:deleteEpic' | 'action:restoreArchivedEpic'>(
+  type: T,
+): z.ZodObject<{ type: z.ZodLiteral<T>; requestId: typeof RequestIdSchema; epicId: z.ZodString; expectedRevision: typeof RevisionField }, 'strict'> {
+  return z.object({ type: z.literal(type), requestId: RequestIdSchema, epicId: z.string().min(1), expectedRevision: RevisionField }).strict();
+}
+function workItemLifecycle<T extends 'action:archiveWorkItem' | 'action:deleteWorkItem' | 'action:restoreArchivedWorkItem'>(
+  type: T,
+): z.ZodObject<{ type: z.ZodLiteral<T>; requestId: typeof RequestIdSchema; workItemId: z.ZodString; expectedRevision: typeof RevisionField }, 'strict'> {
+  return z.object({ type: z.literal(type), requestId: RequestIdSchema, workItemId: z.string().min(1), expectedRevision: RevisionField }).strict();
+}
+
+export const LifecycleActionMessageSchema = z.discriminatedUnion('type', [
+  projectLifecycle('action:archiveProject'),
+  projectLifecycle('action:deleteProject'),
+  projectLifecycle('action:restoreArchivedProject'),
+  epicLifecycle('action:archiveEpic'),
+  epicLifecycle('action:deleteEpic'),
+  epicLifecycle('action:restoreArchivedEpic'),
+  workItemLifecycle('action:archiveWorkItem'),
+  workItemLifecycle('action:deleteWorkItem'),
+  workItemLifecycle('action:restoreArchivedWorkItem'),
+]);
+
+export type LifecycleActionMessage = z.infer<typeof LifecycleActionMessageSchema>;
