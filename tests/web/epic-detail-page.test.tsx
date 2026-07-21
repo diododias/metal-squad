@@ -351,3 +351,97 @@ describe('EpicDetailPage edit modal (PF-06)', () => {
     expect(rows(container)).toHaveLength(8);
   });
 });
+
+describe('EpicDetailPage row execution actions (PF-15)', () => {
+  function renderRow(state: MsqWebState): { container: HTMLDivElement; send: ReturnType<typeof vi.fn>; onToast: ReturnType<typeof vi.fn> } {
+    const container = document.createElement('div');
+    document.body.appendChild(container);
+    const root = createRoot(container);
+    roots.push(root);
+    const send = vi.fn();
+    const onToast = vi.fn();
+    act(() => {
+      root.render(
+        <EpicDetailPage
+          state={state}
+          projectId="proj-1"
+          epicId="epic-1"
+          send={send}
+          actionResults={{}}
+          onBack={() => undefined}
+          onOpenBacklogItem={() => undefined}
+          onToast={onToast}
+        />,
+      );
+    });
+    return { container, send, onToast };
+  }
+
+  function startButtonIn(row: HTMLElement | undefined): HTMLButtonElement | undefined {
+    return [...(row?.querySelectorAll('button') ?? [])].find((button) => button.textContent === 'start') as HTMLButtonElement | undefined;
+  }
+
+  it('starts an eligible item from the row without navigating', () => {
+    window.location.hash = '#/projects/proj-1/epics/epic-1';
+    const view = renderRow(baseState());
+    const row = rows(view.container).find((candidate) => candidate.textContent?.includes('Item feat-2'));
+    const start = startButtonIn(row);
+    expect(start?.disabled).toBe(false);
+    act(() => { start?.click(); });
+    expect(view.send).toHaveBeenCalledWith({ type: 'action:startFeature', featureId: 'feat-2' });
+    expect(window.location.hash).toBe('#/projects/proj-1/epics/epic-1');
+    const toast = view.onToast.mock.calls[0]?.[0] as { tone: string; message: string; action?: { label: string; onSelect: () => void } };
+    expect(toast.tone).toBe('ok');
+    expect(toast.message).toContain('Item feat-2');
+    toast.action?.onSelect();
+    expect(window.location.hash).toBe('#/runs/feat-2');
+  });
+
+  it('disables start with the pending dependency reason and does not emit the action', () => {
+    const state = baseState({
+      featureCatalog: {
+        'feat-1': workItem('feat-1', { dependsOn: ['feat-9'] }),
+      },
+      runs: [],
+    } as unknown as Partial<MsqWebState>);
+    const view = renderRow(state);
+    const start = startButtonIn(rows(view.container)[0]);
+    expect(start?.disabled).toBe(true);
+    expect(start?.title).toContain('Pending dependencies: feat-9');
+    act(() => { start?.click(); });
+    expect(view.send).not.toHaveBeenCalled();
+  });
+
+  it('disables start when the repository is unavailable or the item has an integrity issue', () => {
+    const state = baseState({
+      featureCatalog: {
+        'feat-1': workItem('feat-1', { repoId: 'repo-1' }),
+        'feat-2': workItem('feat-2', { integrityIssue: 'workflow template missing' }),
+      },
+      repositories: [{ repoId: 'repo-1', projectId: 'proj-1', label: 'repo-one', health: 'unavailable', lastCheckedAt: null }],
+      runs: [],
+    } as unknown as Partial<MsqWebState>);
+    const view = renderRow(state);
+    const allRows = rows(view.container);
+    const repoRow = allRows.find((row) => row.textContent?.includes('Item feat-1'));
+    const integrityRow = allRows.find((row) => row.textContent?.includes('Item feat-2'));
+    expect(startButtonIn(repoRow)?.disabled).toBe(true);
+    expect(startButtonIn(repoRow)?.title).toContain('Repository unavailable');
+    expect(startButtonIn(integrityRow)?.disabled).toBe(true);
+    expect(startButtonIn(integrityRow)?.title).toContain('Integrity issue');
+  });
+
+  it('shows view run instead of start while a run is active, navigating to the run detail', () => {
+    window.location.hash = '#/projects/proj-1/epics/epic-1';
+    const state = baseState({
+      runs: [{ featureId: 'feat-1', status: 'running', runId: 7 }],
+    } as unknown as Partial<MsqWebState>);
+    const view = renderRow(state);
+    const row = rows(view.container).find((candidate) => candidate.textContent?.includes('Item feat-1'));
+    expect(startButtonIn(row)).toBeUndefined();
+    const viewRun = [...(row?.querySelectorAll('button') ?? [])].find((button) => button.textContent === 'view run');
+    expect(viewRun).toBeDefined();
+    act(() => { viewRun?.click(); });
+    expect(window.location.hash).toBe('#/runs/feat-1');
+  });
+});

@@ -10,6 +10,7 @@ import { Modal } from '../components/feedback/Modal.js';
 import { EpicEditor } from './EpicEditor.js';
 import { WorkflowStepper } from '../components/navigation/WorkflowStepper.js';
 import { ProgressBar } from '../components/data/ProgressBar.js';
+import { startEligibility } from '../lib/startEligibility.js';
 import { PageHeader } from '../PageHeader.js';
 import type { ToastStackItem } from '../components/feedback/ToastStack.js';
 import type { MsqWebState, WebSocketClientMessage, WebSocketServerMessage } from '../../types.js';
@@ -156,6 +157,24 @@ export function EpicDetailPage({ state, projectId, epicId, send, actionResults, 
         {items.length > 0 && filteredItems.length === 0 && <Card><p style={muted}>No matching Work Items.</p></Card>}
         {visible.map((item) => {
           const run = state.runs.find((candidate) => candidate.featureId === item.id);
+          const runActive = run?.status === 'running' || run?.status === 'blocked';
+          const eligibility = startEligibility({
+            dependsOn: item.dependsOn,
+            repoId: item.repoId,
+            integrityIssue: item.integrityIssue,
+            doneFeatureIds,
+            repositories: state.repositories,
+          });
+          const startItem = (): void => {
+            send({ type: 'action:startFeature', featureId: item.id });
+            onToast?.({
+              id: `${String(Date.now())}-start-${item.id}`,
+              tone: 'ok',
+              message: `Start requested for "${item.title}".`,
+              source: 'Work Items',
+              action: { label: 'acompanhar run', onSelect: (): void => { window.location.hash = `/runs/${item.id}`; } },
+            });
+          };
           return <div
             key={item.id}
             role="link"
@@ -167,11 +186,22 @@ export function EpicDetailPage({ state, projectId, epicId, send, actionResults, 
             onFocus={(event) => { event.currentTarget.style.outline = '1px solid var(--accent-info)'; }}
             onBlur={(event) => { event.currentTarget.style.outline = 'none'; }}
           >
-            <strong>{item.title}</strong>
+            <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, alignItems: 'flex-start', flexWrap: 'wrap' }}>
+              <strong>{item.title}</strong>
+              <div
+                style={{ display: 'flex', alignItems: 'center', gap: 8 }}
+                onClick={(event) => { event.stopPropagation(); }}
+                onKeyDown={(event) => { event.stopPropagation(); }}
+              >
+                {runActive
+                  ? <Button size="sm" onClick={() => { window.location.hash = `/runs/${item.id}`; }}>view run</Button>
+                  : <Button size="sm" disabled={!eligibility.canStart} title={eligibility.reason ?? `Start "${item.title}"`} onClick={startItem}>start</Button>}
+              </div>
+            </div>
             <div style={tags}>
               <Tag>{item.workItemType}</Tag>
               <Tag>{item.repoLabel ?? 'unresolved repo'}</Tag>
-              <StatusPill status={run?.status ?? 'not_started'} label={run?.status ?? 'not started'} spinner={false} />
+              <StatusPill status={run?.status ?? 'not_started'} label={run?.status ?? 'not started'} spinner={run?.status === 'running'} />
               {item.dependsOn.map((dependency) => <DependencyTag key={dependency} depId={dependency} doneFeatureIds={doneFeatureIds} failedFeatureIds={failedFeatureIds} />)}
             </div>
             {item.workflow.stages.length > 0 && <div style={{ marginTop: 8 }}>
