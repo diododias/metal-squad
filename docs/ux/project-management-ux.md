@@ -20,10 +20,16 @@ Contexto: o Project Detail atual empilha tudo numa página (forms de criação i
 /projects
   └─ /projects/:projectId              (Detalhe do Projeto = lista de Épicos)
        └─ /projects/:projectId/epics/:epicId   (Detalhe do Épico = lista de Features)  ← NOVA ROTA
-            └─ /backlog/:featureId             (Detalhe da Feature — já existe, reaproveitar)
+            └─ /projects/:projectId/epics/:epicId/items/:featureId
+               (Detalhe da Feature em contexto — mesmo `BacklogItemDetail`, entregue em PF-14)
 ```
 
-Breadcrumb sempre visível: `Projects › {Projeto} › {Épico}`.
+`/backlog/:featureId` continua existindo como entrada a partir do Board/Backlog,
+com o breadcrumb atual — as duas entradas coexistem.
+
+Breadcrumb sempre visível: `Projects › {Projeto} › {Épico}` (no detalhe do Work
+Item aberto pela hierarquia, a trilha completa é clicável e o voltar retorna ao
+`EpicDetailPage`).
 
 ---
 

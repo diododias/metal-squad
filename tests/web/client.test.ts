@@ -118,6 +118,7 @@ describe('parseHash', () => {
     expect(parseHash('#/backlog/feat-2')).toEqual({ page: 'backlog-detail', featureId: 'feat-2' });
     expect(parseHash('#/projects/proj-1')).toEqual({ page: 'project-detail', projectId: 'proj-1' });
     expect(parseHash('#/projects/proj-1/epics/epic-1')).toEqual({ page: 'epic-detail', projectId: 'proj-1', epicId: 'epic-1' });
+    expect(parseHash('#/projects/proj-1/epics/epic-1/items/feat-9')).toEqual({ page: 'epic-item-detail', projectId: 'proj-1', epicId: 'epic-1', featureId: 'feat-9' });
     expect(parseHash('#/gates')).toEqual({ page: 'gates' });
     expect(parseHash('#/analytics')).toEqual({ page: 'analytics' });
     expect(parseHash('#/config')).toEqual({ page: 'config' });

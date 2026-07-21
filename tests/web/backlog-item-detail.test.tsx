@@ -54,7 +54,7 @@ function baseState(overrides: Partial<MsqWebState> = {}): MsqWebState {
   } as unknown as MsqWebState;
 }
 
-function render(state: MsqWebState): string {
+function render(state: MsqWebState, breadcrumb?: Array<{ label: string; href: string }>): string {
   return renderToStaticMarkup(
     <BacklogItemDetail
       state={state}
@@ -66,6 +66,7 @@ function render(state: MsqWebState): string {
       onSaveConfig={() => undefined}
       onSaveTaskConfig={() => undefined}
       onOpenRun={() => undefined}
+      breadcrumb={breadcrumb}
     />,
   );
 }
@@ -79,6 +80,27 @@ function startButtonMarkup(html: string): string {
 afterEach(() => {
   act(() => { roots.splice(0).forEach((root) => { root.unmount(); }); });
   document.body.replaceChildren();
+});
+
+describe('BacklogItemDetail contextual breadcrumb (PF-14)', () => {
+  it('keeps the default Board breadcrumb when no override is given', () => {
+    const html = render(baseState());
+    expect(html).toContain('Board');
+    expect(html).not.toContain('›');
+  });
+
+  it('renders the Projects › Project › Epic trail when a breadcrumb override is given', () => {
+    const html = render(baseState(), [
+      { label: 'Projects', href: '/projects' },
+      { label: 'Project One', href: '/projects/proj-1' },
+      { label: 'Epic One', href: '/projects/proj-1/epics/epic-1' },
+    ]);
+    expect(html).toContain('Projects');
+    expect(html).toContain('Project One');
+    expect(html).toContain('Epic One');
+    expect(html).toContain('›');
+    expect(html).not.toContain('>Board<');
+  });
 });
 
 describe('BacklogItemDetail repo health guard', () => {

@@ -5,7 +5,7 @@ import { FeatureConfigDetail } from '../components/FeatureConfigDetail.js';
 import { WorkflowStepper } from '../components/navigation/WorkflowStepper.js';
 import { Tabs } from '../components/navigation/Tabs.js';
 import { MarkdownView } from '../components/MarkdownView.js';
-import { PageHeader } from '../PageHeader.js';
+import { PageHeader, type PageHeaderProps } from '../PageHeader.js';
 import { useActiveProject } from '../hooks/useActiveProject.js';
 import type { MsqWebState, FeatureConfigPatch, FeatureConfigSaveResult, TaskConfigPatch, WebSocketClientMessage, WebSocketServerMessage, MsqWorkItemType } from '../../types.js';
 import type { RunHistoryEntry } from '../../../db/repo.js';
@@ -23,6 +23,8 @@ export interface BacklogItemDetailProps {
   onOpenRun: (featureId: string) => void;
   send: (message: WebSocketClientMessage) => void;
   actionResults: Record<string, Extract<WebSocketServerMessage, { type: 'action:result' }>>;
+  /** Contextual breadcrumb override (e.g. Projects › Project › Epic when opened from the hierarchy). */
+  breadcrumb?: PageHeaderProps['breadcrumb'];
 }
 
 let typeChangeSequence = 0;
@@ -39,6 +41,7 @@ export function BacklogItemDetail({
   workflowSaveResult,
   send,
   actionResults,
+  breadcrumb,
 }: BacklogItemDetailProps): React.JSX.Element {
   const feature = state.featureCatalog[featureId];
   const [specDraft, setSpecDraft] = useState('');
@@ -138,14 +141,14 @@ export function BacklogItemDetail({
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
       <PageHeader
         title={feature.title}
-        breadcrumb={
+        breadcrumb={breadcrumb ?? (
           <span>
             <a href="#/board" onClick={returnToItemContext} style={{ color: 'var(--text-dim)' }}>
               Board
             </a>{' '}
             / {projectName ? `${projectName} · ` : ''}{feature.repoLabel ? `${feature.repoLabel} · ` : ''}{featureId} · not started yet
           </span>
-        }
+        )}
         actions={
           <>
             <Button
