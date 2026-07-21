@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { BacklogInputSchema, BacklogSchema, BacklogV1Schema, BacklogV2Schema, createRegisteredToolSchema, dependencyType, EpicSchema, FallbackAlternativeSchema, FeatureInputSchema, FeatureSchema, RetrySchema, stackDependencies, WorkItemTypeSchema } from '../../src/core/backlog/schema.js';
+import { BacklogInputSchema, BacklogSchema, BacklogV1Schema, BacklogV2Schema, BacklogV3Schema, createRegisteredToolSchema, dependencyType, EpicSchema, FallbackAlternativeSchema, FeatureInputSchema, FeatureSchema, RetrySchema, stackDependencies, WorkItemTypeSchema } from '../../src/core/backlog/schema.js';
 import { stagePublishesResolved } from '../../src/core/workflow/stagePublishes.js';
 
 const V1_YAML_OBJ = {
@@ -652,5 +652,65 @@ describe('defaults propagation (via BacklogV2Schema)', () => {
     if (result.success) {
       expect(result.data.epics[0]?.features[0]?.skills).toBeUndefined();
     }
+  });
+});
+
+describe('BacklogV3Schema', () => {
+  const VALID_V3 = {
+    version: 3,
+    project: { id: 'proj-1', name: 'Project One', position: 0 },
+    repositories: [{ repoId: 'repo-1', label: 'my-repo' }],
+    epics: [{ id: 'epic-1', title: 'Epic One', status: 'todo', position: 0 }],
+    workItems: [{
+      id: 'wi-1', title: 'Work One', epicId: 'epic-1', repoId: 'repo-1', position: 0,
+      tool: 'claude', effort: 'medium', thinking: 'off', dependsOn: [], tasks: [], autoStart: false,
+    }],
+  };
+
+  it('parses a minimal valid v3 asset', () => {
+    const result = BacklogV3Schema.safeParse(VALID_V3);
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.workItems[0]?.repoId).toBe('repo-1');
+      expect(result.data.workItems[0]?.epicId).toBe('epic-1');
+    }
+  });
+
+  it('rejects a repository entry without repoId/label', () => {
+    const result = BacklogV3Schema.safeParse({
+      ...VALID_V3,
+      repositories: [{ repoId: 'repo-1' }],
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it('accepts an optional local path/remote on a repository entry', () => {
+    const result = BacklogV3Schema.safeParse({
+      ...VALID_V3,
+      repositories: [{ repoId: 'repo-1', label: 'my-repo', remote: 'git@example.com:org/repo.git', path: '/abs/path' }],
+    });
+    expect(result.success).toBe(true);
+  });
+
+  it('carries the PRJ-24 template snapshot fields on a Work Item when present', () => {
+    const result = BacklogV3Schema.safeParse({
+      ...VALID_V3,
+      workItems: [{
+        ...VALID_V3.workItems[0],
+        stageSkills: { plan: ['research'] },
+        templateId: 'tmpl-1',
+        templateVersion: 2,
+        templateOrigin: 'builtin',
+      }],
+    });
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.workItems[0]).toMatchObject({ templateId: 'tmpl-1', templateVersion: 2, templateOrigin: 'builtin' });
+    }
+  });
+
+  it('rejects version other than 3', () => {
+    const result = BacklogV3Schema.safeParse({ ...VALID_V3, version: 2 });
+    expect(result.success).toBe(false);
   });
 });

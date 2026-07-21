@@ -283,6 +283,30 @@ export function listProjects(options: ProjectQueryOptions = {}): ProjectRow[] {
     .all() as ProjectRow[];
 }
 
+export interface ArchivedScope {
+  limit?: number;
+  offset?: number;
+}
+
+/** Archived (not deleted) Projects only, paginated for the `/archived` page
+ * (PRJ-19). Tombstoned Projects never appear here — they live in the audit
+ * trail instead. */
+export function listArchivedProjects(scope: ArchivedScope = {}): ProjectRow[] {
+  if (!hasDbFile()) return [];
+  const pagination = scope.limit === undefined ? '' : ' LIMIT ? OFFSET ?';
+  const stmt = getDb('readonly').prepare(
+    `${PROJECT_SELECT} WHERE archived_at IS NOT NULL AND deleted_at IS NULL ORDER BY archived_at DESC${pagination}`,
+  );
+  return (scope.limit === undefined ? stmt.all() : stmt.all(scope.limit, scope.offset ?? 0)) as ProjectRow[];
+}
+
+export function countArchivedProjects(): number {
+  if (!hasDbFile()) return 0;
+  return (getDb('readonly').prepare(
+    `SELECT COUNT(*) AS count FROM projects WHERE archived_at IS NOT NULL AND deleted_at IS NULL`,
+  ).get() as { count: number }).count;
+}
+
 export function createEpic(input: CreateEpicInput): EpicRow {
   return withTransaction((database) => {
     assertProjectExists(database, input.projectId);
@@ -664,6 +688,24 @@ export function deleteWorkItem(workItemId: string, expectedRevision: number, opt
 }
 
 /** Reverses an archive on a Work Item, clearing `archived_at`. */
+/** Restoring a Work Item requires its repository to still be linked to the same
+ * Project as its Epic — a repo transferred to another Project or unlinked
+ * entirely would otherwise leave the restored item orphaned. Name/position
+ * conflicts never block restore; only this identity/relation check does. */
+function assertWorkItemRepoStillLinked(database: ReturnType<typeof getDb>, workItemId: string): void {
+  const row = database.prepare(
+    `SELECT f.repo_id AS repoId, e.project_id AS epicProjectId, pr.project_id AS repoProjectId
+       FROM backlog_features f
+       JOIN backlog_epics e ON e.epic_id = f.epic_id
+       LEFT JOIN project_repos pr ON pr.repo_id = f.repo_id
+      WHERE f.feature_id = ?`,
+  ).get(workItemId) as { repoId: string; epicProjectId: string; repoProjectId: string | null } | undefined;
+  if (!row) throw new WorkItemNotFoundError(workItemId);
+  if (row.repoProjectId === null || row.repoProjectId !== row.epicProjectId) {
+    throw new RepositoryNotInProjectError(row.repoId, row.epicProjectId);
+  }
+}
+
 export function restoreArchivedWorkItem(workItemId: string, expectedRevision: number, options: { audit?: AuditContext } = {}): WorkItemRow {
   return withTransaction((database) => {
     const before = getWorkItemLifecycle(database, workItemId);
@@ -673,6 +715,7 @@ export function restoreArchivedWorkItem(workItemId: string, expectedRevision: nu
     if (epic && (epic.archivedAt !== null || epic.deletedAt !== null)) {
       throw new AncestorArchivedError('work_item', workItemId);
     }
+    assertWorkItemRepoStillLinked(database, workItemId);
     database.prepare(
       `UPDATE backlog_features
           SET archived_at = NULL, revision = revision + 1, updated_at = datetime('now')
@@ -1212,6 +1255,33 @@ function recordAuditEvent(
     before === null ? null : JSON.stringify(before),
     after === null ? null : JSON.stringify(after),
   );
+}
+
+export interface AuditEventRow {
+  id: number;
+  requestId: string | null;
+  actor: string | null;
+  entityKind: string;
+  entityId: string;
+  action: string;
+  beforeJson: string | null;
+  afterJson: string | null;
+  createdAt: string;
+}
+
+/** Audit timeline for one entity, most recent first (PRJ-19). Backed by
+ * `idx_audit_events_entity` so the query stays index-only regardless of the
+ * table's overall size. */
+export function listAuditEvents(entityKind: LifecycleEntityKind, entityId: string, limit = 50): AuditEventRow[] {
+  if (!hasDbFile()) return [];
+  return getDb('readonly').prepare(
+    `SELECT id, request_id AS requestId, actor, entity_kind AS entityKind, entity_id AS entityId,
+            action, before_json AS beforeJson, after_json AS afterJson, created_at AS createdAt
+       FROM audit_events
+      WHERE entity_kind = ? AND entity_id = ?
+      ORDER BY id DESC
+      LIMIT ?`,
+  ).all(entityKind, entityId, limit) as AuditEventRow[];
 }
 
 export type FeatureTopicAssociationState = 'creating' | 'active' | 'invalid' | 'error';

@@ -18,6 +18,7 @@ import { AnalyticsPage } from './pages/AnalyticsPage.js';
 import { ConfigPage } from './pages/ConfigPage.js';
 import { ProjectsPage } from './pages/ProjectsPage.js';
 import { ProjectDetailPage } from './pages/ProjectDetailPage.js';
+import { ArchivedPage } from './pages/ArchivedPage.js';
 import type { MsqWebState, WebSocketServerMessage, FeatureConfigPatch, FeatureConfigSaveResult, TaskConfigPatch } from '../types.js';
 import type { RunHistoryEntry, TaskRun } from '../../db/repo.js';
 import type { RunBreakdown } from '../../core/stats.js';
@@ -59,6 +60,8 @@ export function App(): React.JSX.Element {
   const [runHistories, setRunHistories] = useState<Record<string, RunHistoryEntry[]>>({});
   const [workflowSaveResults, setWorkflowSaveResults] = useState<Record<string, FeatureConfigSaveResult>>({});
   const [projectActionResults, setProjectActionResults] = useState<Record<string, Extract<WebSocketServerMessage, { type: 'action:result' }>>>({});
+  const [archivedResults, setArchivedResults] = useState<Record<string, Extract<WebSocketServerMessage, { type: 'action:archivedResult' }>>>({});
+  const [auditTrailResults, setAuditTrailResults] = useState<Record<string, Extract<WebSocketServerMessage, { type: 'action:auditTrailResult' }>>>({});
   const { linesByRun, append, clear } = useLocalOutput();
   const hasReceivedStateRef = useRef(false);
 
@@ -188,6 +191,10 @@ export function App(): React.JSX.Element {
         setWorkflowSaveResults((current) => ({ ...current, [message.payload.featureId]: message }));
       } else if (message.type === 'action:result') {
         setProjectActionResults((current) => ({ ...current, [message.payload.requestId]: message }));
+      } else if (message.type === 'action:archivedResult') {
+        setArchivedResults((current) => ({ ...current, [message.payload.requestId]: message }));
+      } else if (message.type === 'action:auditTrailResult') {
+        setAuditTrailResults((current) => ({ ...current, [message.payload.requestId]: message }));
       }
     },
     [append, pushToast],
@@ -221,6 +228,7 @@ export function App(): React.JSX.Element {
     { path: '/runs', label: 'Runs' },
     { path: '/gates', label: 'Gates', count: state?.gates.length },
     { path: '/analytics', label: 'Analytics' },
+    { path: '/archived', label: 'Archived' },
     { path: '/config', label: 'Settings' },
   ];
 
@@ -315,6 +323,16 @@ export function App(): React.JSX.Element {
     page = state && <ProjectsPage state={state} send={send} actionResults={projectActionResults} />;
   } else if (route.page === 'project-detail') {
     page = state && <ProjectDetailPage state={state} projectId={route.projectId} send={send} actionResults={projectActionResults} onBack={() => { navigate('/projects'); }} />;
+  } else if (route.page === 'archived') {
+    page = state && (
+      <ArchivedPage
+        state={state}
+        send={send}
+        actionResults={projectActionResults}
+        archivedResults={archivedResults}
+        auditTrailResults={auditTrailResults}
+      />
+    );
   } else {
     page = state && <ConfigPage state={state} isMobile={isMobile} send={send} />;
   }
