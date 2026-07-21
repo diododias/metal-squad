@@ -6,6 +6,7 @@ import { Tag } from '../components/core/Tag.js';
 import { LifecycleActions } from '../components/LifecycleActions.js';
 import { CreateEpicModal } from '../components/project/CreateEpicModal.js';
 import { CreateWorkItemModal } from '../components/project/CreateWorkItemModal.js';
+import { RepositoriesSection } from '../components/project/RepositoriesSection.js';
 import { WorkflowTemplatesSection } from '../components/WorkflowTemplatesSection.js';
 import { ProgressBar } from '../components/data/ProgressBar.js';
 import { PageHeader } from '../PageHeader.js';
@@ -61,7 +62,7 @@ export function ProjectDetailPage({ state, projectId, send, actionResults, onBac
           <StatusPill status={project.activeRuns ? 'running' : 'aborted'} label={`${String(project.activeRuns)} active runs`} spinner={false} />
         </div>
       </Card>
-      <Card><h2 style={heading}>Repositories</h2>{repos.length ? <div style={tags}>{repos.map((repo) => <Tag key={repo.repoId}>{repo.label} · {repo.health}</Tag>)}</div> : <p style={muted}>No repository is linked. You can still create Epics; Work Items require a target repository.</p>}</Card>
+      <Card><RepositoriesSection project={project} repositories={state.repositories} actionResults={actionResults} send={send} /></Card>
       <section>
         <h2 style={heading}>Epics</h2>
         {epics.length === 0 && <Card>
