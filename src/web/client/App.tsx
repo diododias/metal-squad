@@ -9,6 +9,7 @@ import { useWebSocket } from './hooks/useWebSocket.js';
 import { useLocalOutput, type OutputLine } from './hooks/useLocalOutput.js';
 import { ActiveProjectProvider, useActiveProject } from './hooks/useActiveProject.js';
 import { parseHash, type Route } from './lib/routes.js';
+import { hashWithRestoredQuery } from './lib/hashState.js';
 import { BoardPage } from './pages/BoardPage.js';
 import { RunDetailPage } from './pages/RunDetailPage.js';
 import { BacklogItemDetail } from './pages/BacklogItemDetail.js';
@@ -333,7 +334,7 @@ export function App(): React.JSX.Element {
         send={send}
         actionResults={projectActionResults}
         archivedResults={archivedResults}
-        onBack={() => { navigate(`/projects/${route.projectId}`); }}
+        onBack={() => { navigate(hashWithRestoredQuery(`/projects/${route.projectId}`)); }}
         onOpenBacklogItem={(featureId: string) => { navigate(`/projects/${route.projectId}/epics/${route.epicId}/items/${featureId}`); }}
         onToast={pushToast}
         connected={connected}
@@ -343,7 +344,7 @@ export function App(): React.JSX.Element {
     const item = state?.featureCatalog[route.featureId];
     const epic = state?.epics.find((candidate) => candidate.epicId === route.epicId && candidate.projectId === route.projectId);
     const project = state?.projects.find((candidate) => candidate.projectId === route.projectId);
-    const epicPath = `/projects/${route.projectId}/epics/${route.epicId}`;
+    const epicPath = hashWithRestoredQuery(`/projects/${route.projectId}/epics/${route.epicId}`);
     if (state && (item?.epicId !== route.epicId || !epic || !project)) {
       page = (
         <div style={{ padding: 24 }}>
@@ -380,7 +381,7 @@ export function App(): React.JSX.Element {
           actionResults={projectActionResults}
           breadcrumb={[
             { label: 'Projects', href: '/projects' },
-            { label: project.name, href: `/projects/${route.projectId}` },
+            { label: project.name, href: hashWithRestoredQuery(`/projects/${route.projectId}`) },
             { label: epic.title, href: epicPath },
           ]}
         />

@@ -11,6 +11,7 @@ import { EpicEditor } from './EpicEditor.js';
 import { WorkflowStepper } from '../components/navigation/WorkflowStepper.js';
 import { ProgressBar } from '../components/data/ProgressBar.js';
 import { startEligibility } from '../lib/startEligibility.js';
+import { hashWithRestoredQuery, readHashParams, updateHashParams } from '../lib/hashState.js';
 import { PageHeader } from '../PageHeader.js';
 import type { ToastStackItem } from '../components/feedback/ToastStack.js';
 import type { MsqWebState, WebSocketClientMessage, WebSocketServerMessage } from '../../types.js';
@@ -43,11 +44,34 @@ export function EpicDetailPage({ state, projectId, epicId, send, actionResults, 
   );
   const doneFeatureIds = useMemo(() => new Set(state.runs.filter((run) => run.status === 'done').map((run) => run.featureId)), [state.runs]);
   const failedFeatureIds = useMemo(() => new Set(state.runs.filter((run) => run.status === 'failed').map((run) => run.featureId)), [state.runs]);
-  const [query, setQuery] = useState('');
-  const [runStatusFilter, setRunStatusFilter] = useState('all');
-  const [typeFilter, setTypeFilter] = useState('all');
-  const [repoFilter, setRepoFilter] = useState('all');
-  const [order, setOrder] = useState('backlog');
+  const [initialParams] = useState((): URLSearchParams => readHashParams());
+  const [query, setQuery] = useState(() => initialParams.get('q') ?? '');
+  const [runStatusFilter, setRunStatusFilter] = useState(() => {
+    const status = initialParams.get('status');
+    return status && ['not_started', 'running', 'blocked', 'done', 'failed'].includes(status) ? status : 'all';
+  });
+  const [typeFilter, setTypeFilter] = useState(() => {
+    const type = initialParams.get('type');
+    return type && ['feature', 'bug'].includes(type) ? type : 'all';
+  });
+  const [repoFilter, setRepoFilter] = useState(() => initialParams.get('repo') ?? 'all');
+  const [order, setOrder] = useState(() => {
+    const value = initialParams.get('order');
+    return value && ['status', 'title'].includes(value) ? value : 'backlog';
+  });
+
+  useEffect(() => {
+    updateHashParams({
+      status: runStatusFilter === 'all' ? null : runStatusFilter,
+      type: typeFilter === 'all' ? null : typeFilter,
+      repo: repoFilter === 'all' ? null : repoFilter,
+      order: order === 'backlog' ? null : order,
+    });
+  }, [runStatusFilter, typeFilter, repoFilter, order]);
+  useEffect(() => {
+    const timer = setTimeout(() => { updateHashParams({ q: query.trim() || null }); }, 250);
+    return (): void => { clearTimeout(timer); };
+  }, [query]);
 
   const runStatusByItem = useMemo(() => {
     const map = new Map<string, string>();
@@ -126,7 +150,7 @@ export function EpicDetailPage({ state, projectId, epicId, send, actionResults, 
       title={epic.title}
       breadcrumb={[
         { label: 'Projects', href: '/projects' },
-        { label: project.name, href: `/projects/${projectId}` },
+        { label: project.name, href: hashWithRestoredQuery(`/projects/${projectId}`) },
       ]}
       filters={<div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center' }}>
         <input
