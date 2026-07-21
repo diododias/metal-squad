@@ -42,10 +42,13 @@ export function ProjectDetailPage({ state, projectId, send, actionResults, archi
     const status = initialParams.get('status');
     return status && ['todo', 'in_progress', 'done'].includes(status) ? status : 'all';
   });
-  const [order, setOrder] = useState(() => (initialParams.get('order') === 'progress' ? 'progress' : 'position'));
+  const [order, setOrder] = useState(() => {
+    const v = initialParams.get('order');
+    return v === 'progress' ? 'progress' : v === 'recent' ? 'recent' : 'position';
+  });
 
   useEffect(() => {
-    updateHashParams({ status: statusFilter === 'all' ? null : statusFilter, order: order === 'position' ? null : order });
+    updateHashParams({ status: statusFilter === 'all' ? null : statusFilter, order: order === 'position' ? null : order === 'recent' ? 'recent' : order });
   }, [statusFilter, order]);
   useEffect(() => {
     const timer = setTimeout(() => { updateHashParams({ q: query.trim() || null }); }, 250);
@@ -70,9 +73,9 @@ export function ProjectDetailPage({ state, projectId, send, actionResults, archi
       const progress = progressByEpic.get(epicId);
       return progress && progress.total > 0 ? progress.completed / progress.total : 0;
     };
-    return [...filtered].sort((a, b) => order === 'progress'
-      ? fraction(b.epicId) - fraction(a.epicId) || a.position - b.position
-      : a.position - b.position);
+    if (order === 'progress') return [...filtered].sort((a, b) => fraction(b.epicId) - fraction(a.epicId) || a.position - b.position);
+    if (order === 'recent') return [...filtered].sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+    return [...filtered].sort((a, b) => a.position - b.position);
   }, [epics, query, statusFilter, order, progressByEpic]);
 
   useEffect(() => { setPage(0); }, [query, statusFilter, order]);
@@ -121,6 +124,7 @@ export function ProjectDetailPage({ state, projectId, send, actionResults, archi
         <select value={order} onChange={(event) => { setOrder(event.target.value); }} aria-label="Epic order" style={controlStyle}>
           <option value="position">by position</option>
           <option value="progress">by progress</option>
+          <option value="recent">mais recente</option>
         </select>
         <label style={{ display: 'flex', alignItems: 'center', gap: 6, color: 'var(--text-dim)', fontSize: 'var(--text-sm)', whiteSpace: 'nowrap' }}>
           <input type="checkbox" checked={showArchived} onChange={(event) => { setShowArchived(event.target.checked); }} aria-label="Show archived Epics" />
@@ -271,6 +275,9 @@ function EpicRow({ epic, state, projectId, send, actionResults, onToast, progres
           <Tag>{items.length} Work Items</Tag>
           {[...repoCounts].map(([label, count]) => <Tag key={label}>{label}: {count}</Tag>)}
         </div>
+        <p style={{ ...muted, marginTop: 4, fontSize: 'var(--text-xs)' }}>
+          criado {new Date(epic.createdAt).toLocaleDateString()} · atualizado {new Date(epic.updatedAt).toLocaleDateString()}
+        </p>
       </div>
       <div
         style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}
