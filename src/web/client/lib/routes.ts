@@ -13,7 +13,9 @@ export type Route =
   | { page: 'config' };
 
 export function parseHash(hash: string): Route {
-  const h = hash.replace(/^#/, '') || '/board';
+  // Query suffixes (e.g. `?tab=templates`, filter persistence) are page-local
+  // state, never part of route identity.
+  const h = (hash.replace(/^#/, '').split('?')[0] ?? '') || '/board';
   if (h.startsWith('/runs/')) return { page: 'run-detail', featureId: h.slice('/runs/'.length) };
   if (h.startsWith('/backlog/')) return { page: 'backlog-detail', featureId: h.slice('/backlog/'.length) };
   if (h === '/runs') return { page: 'runs' };

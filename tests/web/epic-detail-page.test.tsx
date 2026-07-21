@@ -542,3 +542,10 @@ describe('EpicDetailPage archived visibility (PF-17)', () => {
     expect(view.container.textContent).toContain('Epic not found or no longer active.');
   });
 });
+
+describe('route query suffix (PF-11)', () => {
+  it('ignores a query suffix when parsing routes', () => {
+    expect(parseHash('#/projects/p1?tab=templates')).toEqual({ page: 'project-detail', projectId: 'p1' });
+    expect(parseHash('#/projects/p1/epics/e1?foo=bar')).toEqual({ page: 'epic-detail', projectId: 'p1', epicId: 'e1' });
+  });
+});

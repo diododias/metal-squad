@@ -367,3 +367,53 @@ describe('ProjectDetailPage archived visibility (PF-17)', () => {
     expect(view.container.querySelector('[aria-label="Archived epic-1 (archived)"]')).toBeNull();
   });
 });
+
+describe('ProjectDetailPage tabs (PF-11)', () => {
+  function tabButton(container: HTMLDivElement, label: string): HTMLButtonElement | undefined {
+    return [...container.querySelectorAll('button')].find((button) => button.textContent === label || button.textContent === `[${label}]`) as HTMLButtonElement | undefined;
+  }
+
+  it('defaults to the Epics tab without any templates content', () => {
+    const container = render(baseState());
+    expect(container.textContent).toContain('Epic One');
+    expect(container.textContent).not.toContain('Workflow Templates');
+  });
+
+  it('switches to the Templates tab, hiding the epic list and rendering the section', () => {
+    const container = render(baseState());
+    act(() => { tabButton(container, 'Templates')?.click(); });
+    expect(container.textContent).toContain('Workflow Templates');
+    expect(rows(container)).toHaveLength(0);
+    expect(window.location.hash).toContain('tab=templates');
+    act(() => { tabButton(container, 'Epics')?.click(); });
+    expect(rows(container)).toHaveLength(1);
+    expect(window.location.hash).not.toContain('tab=templates');
+  });
+
+  it('preserves epic list filters across tab switches', () => {
+    const epics = [
+      epicRow('epic-1', { title: 'Alpha', status: 'todo' }),
+      epicRow('epic-2', { title: 'Beta', status: 'done' }),
+    ];
+    const container = render(baseState({ epics } as unknown as Partial<MsqWebState>));
+    const statusSelect = container.querySelector('select[aria-label="Epic status"]') as HTMLSelectElement;
+    act(() => {
+      statusSelect.value = 'done';
+      statusSelect.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+    expect(rows(container)).toHaveLength(1);
+    act(() => { tabButton(container, 'Templates')?.click(); });
+    act(() => { tabButton(container, 'Epics')?.click(); });
+    const visible = rows(container);
+    expect(visible).toHaveLength(1);
+    expect(visible[0]?.textContent).toContain('Beta');
+    expect((container.querySelector('select[aria-label="Epic status"]') as HTMLSelectElement).value).toBe('done');
+  });
+
+  it('opens the Templates tab from a deep link with ?tab=templates', () => {
+    window.location.hash = '#/projects/proj-1?tab=templates';
+    const container = render(baseState());
+    expect(container.textContent).toContain('Workflow Templates');
+    expect(rows(container)).toHaveLength(0);
+  });
+});
