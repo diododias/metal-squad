@@ -483,7 +483,6 @@ export function planBacklogSeed(backlog: BacklogV2, repoId: string): BacklogSeed
 export function applyBacklogSeed(backlog: BacklogV2, plan: BacklogSeedPlan): void {
   const db = getDb('readwrite');
   const created = new Set(plan.items.filter((item) => item.status === 'created').map((item) => `${item.kind}:${item.id}`));
-  const epicRepoIdNullable = isNullableColumn(db, 'backlog_epics', 'repo_id');
   db.transaction(() => {
     if (created.has(`catalog:${plan.repoId}`)) {
       db.prepare(
@@ -493,7 +492,7 @@ export function applyBacklogSeed(backlog: BacklogV2, plan: BacklogSeedPlan): voi
     }
     const insertEpic = db.prepare(
       `INSERT INTO backlog_epics (epic_id, project_id, repo_id, title, position, data_json, archived_at, updated_at)
-       VALUES (?, (SELECT project_id FROM project_repos WHERE repo_id = ?), ${epicRepoIdNullable ? 'NULL' : '?'}, ?, ?, ?, NULL, datetime('now'))`,
+       VALUES (?, (SELECT project_id FROM project_repos WHERE repo_id = ?), ?, ?, ?, ?, NULL, datetime('now'))`,
     );
     const insertFeature = db.prepare(
       `INSERT INTO backlog_features (feature_id, epic_id, repo_id, title, depends_on, spec_file, position, data_json, archived_at, updated_at)
@@ -505,8 +504,7 @@ export function applyBacklogSeed(backlog: BacklogV2, plan: BacklogSeedPlan): voi
     );
     backlog.epics.forEach((epic, epicIndex) => {
       if (created.has(`epic:${epic.id}`)) {
-        if (epicRepoIdNullable) insertEpic.run(epic.id, plan.repoId, epic.title, epicIndex, JSON.stringify(epic));
-        else insertEpic.run(epic.id, plan.repoId, plan.repoId, epic.title, epicIndex, JSON.stringify(epic));
+        insertEpic.run(epic.id, plan.repoId, plan.repoId, epic.title, epicIndex, JSON.stringify(epic));
       }
       epic.features.forEach((feature, featureIndex) => {
         if (!created.has(`feature:${feature.id}`)) return;
@@ -863,8 +861,6 @@ export function upsertBacklogCatalog(
   const db = getDb('readwrite');
   const enforceGeneratedIds = registrations !== undefined;
   let diff: BacklogCatalogDiff | undefined;
-  const epicRepoIdNullable = isNullableColumn(db, 'backlog_epics', 'repo_id');
-
   const upsertMeta = db.prepare(
     `INSERT INTO backlog_catalog_meta (repo_id, repo, version, defaults_json, budget_json, updated_at)
      VALUES (?, ?, ?, ?, ?, datetime('now'))
@@ -876,7 +872,7 @@ export function upsertBacklogCatalog(
 
   const upsertEpic = db.prepare(
     `INSERT INTO backlog_epics (epic_id, project_id, repo_id, title, position, data_json, archived_at, updated_at)
-     VALUES (?, (SELECT project_id FROM project_repos WHERE repo_id = ?), ${epicRepoIdNullable ? 'NULL' : '?'}, ?, ?, ?, NULL, datetime('now'))
+     VALUES (?, (SELECT project_id FROM project_repos WHERE repo_id = ?), ?, ?, ?, ?, NULL, datetime('now'))
      ON CONFLICT(epic_id) DO UPDATE SET
        title = excluded.title,
        position = excluded.position,
@@ -949,11 +945,7 @@ export function upsertBacklogCatalog(
     );
 
     backlog.epics.forEach((epic, epicIndex) => {
-      if (epicRepoIdNullable) {
-        upsertEpic.run(epic.id, repoId, epic.title, epicIndex, JSON.stringify(epic));
-      } else {
-        upsertEpic.run(epic.id, repoId, repoId, epic.title, epicIndex, JSON.stringify(epic));
-      }
+      upsertEpic.run(epic.id, repoId, repoId, epic.title, epicIndex, JSON.stringify(epic));
 
       epic.features.forEach((feature, featureIndex) => {
         // `type` is defaulted by FeatureSchema, but callers may hand us a
@@ -990,11 +982,6 @@ export function upsertBacklogCatalog(
   run();
   if (!diff) throw new Error('Catalog publication did not produce a diff.');
   return diff;
-}
-
-function isNullableColumn(db: Database.Database, table: string, column: string): boolean {
-  const columns = db.prepare(`PRAGMA table_info(${table})`).all() as { name: string; notnull: number }[];
-  return columns.some((candidate) => candidate.name === column && candidate.notnull === 0);
 }
 
 function mergeFeaturePatch(current: Feature, patch: FeaturePatch): unknown {
