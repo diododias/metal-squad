@@ -15,10 +15,11 @@ import type { MsqWebState, WebSocketClientMessage, WebSocketServerMessage } from
 
 const PAGE_SIZE = 8;
 
-export function ProjectDetailPage({ state, projectId, send, actionResults, onBack, onToast }: {
+export function ProjectDetailPage({ state, projectId, send, actionResults, onBack, onToast, connected }: {
   state: MsqWebState; projectId: string; send: (message: WebSocketClientMessage) => void;
   actionResults: Record<string, Extract<WebSocketServerMessage, { type: 'action:result' }>>; onBack: () => void;
   onToast?: (item: ToastStackItem) => void;
+  connected?: boolean;
 }): React.JSX.Element {
   const project = state.projects.find((item) => item.projectId === projectId);
   const repos = state.repositories.filter((repo) => repo.projectId === projectId);
@@ -46,6 +47,7 @@ export function ProjectDetailPage({ state, projectId, send, actionResults, onBac
           allowed={state.lifecycle?.[`project:${project.projectId}`]}
           send={send}
           actionResults={actionResults}
+          onToast={onToast}
         />
       </div>}
     />
@@ -66,7 +68,7 @@ export function ProjectDetailPage({ state, projectId, send, actionResults, onBac
           <p style={muted}>No Epics yet.</p>
           <Button variant="primary" size="sm" onClick={() => { setShowCreateEpic(true); }}>+ Novo Épico</Button>
         </Card>}
-        {visible.map((epic) => <EpicRow key={epic.epicId} epic={epic} state={state} projectId={projectId} send={send} actionResults={actionResults} />)}
+        {visible.map((epic) => <EpicRow key={epic.epicId} epic={epic} state={state} projectId={projectId} send={send} actionResults={actionResults} onToast={onToast} />)}
         {epics.length > PAGE_SIZE && <div style={{ marginTop: 10, display: 'flex', gap: 8 }}>
           <Button size="sm" disabled={page === 0} onClick={() => { setPage(page - 1); }}>previous</Button>
           <Button size="sm" disabled={(page + 1) * PAGE_SIZE >= epics.length} onClick={() => { setPage(page + 1); }}>next</Button>
@@ -81,6 +83,7 @@ export function ProjectDetailPage({ state, projectId, send, actionResults, onBac
       actionResults={actionResults}
       onClose={() => { setShowCreateEpic(false); }}
       onCreated={(title) => { onToast?.({ id: `${String(Date.now())}-epic-created`, tone: 'ok', message: `Epic "${title}" created.`, source: 'Epics' }); }}
+      connected={connected}
     />
     <CreateWorkItemModal
       open={showCreateWorkItem}
@@ -89,15 +92,25 @@ export function ProjectDetailPage({ state, projectId, send, actionResults, onBac
       send={send}
       actionResults={actionResults}
       onClose={() => { setShowCreateWorkItem(false); }}
-      onCreated={(workItemId, title) => { onToast?.({ id: `${String(Date.now())}-work-item-created`, tone: 'ok', message: `Work Item "${title}" created (${workItemId}). Open its detail to configure spec and dependencies.`, source: 'Work Items' }); }}
+      onCreated={(workItemId, title, epicId) => {
+        onToast?.({
+          id: `${String(Date.now())}-work-item-created`,
+          tone: 'ok',
+          message: `Work Item "${title}" created (${workItemId}).`,
+          source: 'Work Items',
+          action: workItemId ? { label: 'abrir detalhe', onSelect: (): void => { window.location.hash = `/projects/${projectId}/epics/${epicId}/items/${workItemId}`; } } : undefined,
+        });
+      }}
+      connected={connected}
     />
   </div>;
 }
 
-function EpicRow({ epic, state, projectId, send, actionResults }: {
+function EpicRow({ epic, state, projectId, send, actionResults, onToast }: {
   epic: EpicRowData; state: MsqWebState; projectId: string;
   send: (message: WebSocketClientMessage) => void;
   actionResults: Record<string, Extract<WebSocketServerMessage, { type: 'action:result' }>>;
+  onToast?: (item: ToastStackItem) => void;
 }): React.JSX.Element {
   const items = useMemo(() => Object.values(state.featureCatalog).filter((item) => item.epicId === epic.epicId), [epic.epicId, state.featureCatalog]);
   const completed = useMemo(() => items.filter((item) => state.runs.some((run) => run.featureId === item.id && run.status === 'done')).length, [items, state.runs]);
@@ -137,7 +150,7 @@ function EpicRow({ epic, state, projectId, send, actionResults }: {
         onKeyDown={(event) => { event.stopPropagation(); }}
       >
         <StatusPill status={epic.status === 'done' ? 'done' : epic.status === 'in_progress' ? 'running' : 'aborted'} label={`manual: ${epic.status}`} spinner={false} />
-        <LifecycleActions kind="epic" id={epic.epicId} name={epic.title} revision={epic.revision} allowed={state.lifecycle?.[`epic:${epic.epicId}`]} send={send} actionResults={actionResults} />
+        <LifecycleActions kind="epic" id={epic.epicId} name={epic.title} revision={epic.revision} allowed={state.lifecycle?.[`epic:${epic.epicId}`]} send={send} actionResults={actionResults} onToast={onToast} />
       </div>
     </div>
   </div>;

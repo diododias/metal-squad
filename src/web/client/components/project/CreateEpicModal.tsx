@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { Button } from '../core/Button.js';
 import { EditableTextField } from '../core/EditableTextField.js';
 import { Modal } from '../feedback/Modal.js';
+import { CONNECTION_LOST_MESSAGE, readActionOutcome } from '../../lib/actionFeedback.js';
 import type { WebSocketClientMessage, WebSocketServerMessage } from '../../../types.js';
 
 let sequence = 0;
@@ -15,6 +16,9 @@ export interface CreateEpicModalProps {
   onClose: () => void;
   /** Fired once after the server confirms the Epic was created. */
   onCreated?: (title: string) => void;
+  /** WS connection state; a drop while a request is pending resets the modal
+   * out of `creating…` with an actionable error (PF-07). */
+  connected?: boolean;
 }
 
 /**
@@ -23,7 +27,7 @@ export interface CreateEpicModalProps {
  * requestId: success closes the modal, an error keeps it open showing the
  * server message. Opening always starts from a blank draft.
  */
-export function CreateEpicModal({ open, projectId, send, actionResults, onClose, onCreated }: CreateEpicModalProps): React.JSX.Element | null {
+export function CreateEpicModal({ open, projectId, send, actionResults, onClose, onCreated, connected }: CreateEpicModalProps): React.JSX.Element | null {
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
   const [pendingRequestId, setPendingRequestId] = useState<string | null>(null);
@@ -41,17 +45,26 @@ export function CreateEpicModal({ open, projectId, send, actionResults, onClose,
 
   useEffect(() => {
     if (!pendingRequestId || handledResults.current.has(pendingRequestId)) return;
-    const result = actionResults[pendingRequestId];
-    if (!result) return;
+    const outcome = readActionOutcome(actionResults[pendingRequestId]);
+    if (!outcome) return;
     handledResults.current.add(pendingRequestId);
     setPendingRequestId(null);
-    if (result.payload.ok) {
+    if (outcome.ok) {
       onCreated?.(title.trim());
       onClose();
-    } else if ('error' in result.payload) {
-      setError(result.payload.error.message);
+    } else {
+      setError(outcome.message);
     }
   }, [actionResults, pendingRequestId, onClose, onCreated, title]);
+
+  useEffect(() => {
+    if (!pendingRequestId || connected !== false) return;
+    // The in-flight request may never resolve; leave pending and offer a retry.
+    // A retry always sends a fresh requestId — the stale one is ignored.
+    handledResults.current.add(pendingRequestId);
+    setPendingRequestId(null);
+    setError(CONNECTION_LOST_MESSAGE);
+  }, [connected, pendingRequestId]);
 
   const pending = pendingRequestId !== null;
 

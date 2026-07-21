@@ -201,7 +201,7 @@ export function App(): React.JSX.Element {
     [append, pushToast],
   );
 
-  const { send, error: connectionError } = useWebSocket(onMessage);
+  const { send, error: connectionError, connected } = useWebSocket(onMessage);
 
   function navigate(path: string): void {
     window.location.hash = path;
@@ -323,7 +323,7 @@ export function App(): React.JSX.Element {
   } else if (route.page === 'projects') {
     page = state && <ProjectsPage state={state} send={send} actionResults={projectActionResults} />;
   } else if (route.page === 'project-detail') {
-    page = state && <ProjectDetailPage state={state} projectId={route.projectId} send={send} actionResults={projectActionResults} onBack={() => { navigate('/projects'); }} onToast={pushToast} />;
+    page = state && <ProjectDetailPage state={state} projectId={route.projectId} send={send} actionResults={projectActionResults} onBack={() => { navigate('/projects'); }} onToast={pushToast} connected={connected} />;
   } else if (route.page === 'epic-detail') {
     page = state && (
       <EpicDetailPage
@@ -335,6 +335,7 @@ export function App(): React.JSX.Element {
         onBack={() => { navigate(`/projects/${route.projectId}`); }}
         onOpenBacklogItem={(featureId: string) => { navigate(`/projects/${route.projectId}/epics/${route.epicId}/items/${featureId}`); }}
         onToast={pushToast}
+        connected={connected}
       />
     );
   } else if (route.page === 'epic-item-detail') {

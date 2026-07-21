@@ -18,7 +18,7 @@ const PAGE_SIZE = 8;
 let sequence = 0;
 const nextRequestId = (prefix: string): string => `${prefix}-${String(Date.now())}-${String(++sequence)}`;
 
-export function EpicDetailPage({ state, projectId, epicId, send, actionResults, onBack, onOpenBacklogItem, onToast }: {
+export function EpicDetailPage({ state, projectId, epicId, send, actionResults, onBack, onOpenBacklogItem, onToast, connected }: {
   state: MsqWebState;
   projectId: string;
   epicId: string;
@@ -27,6 +27,7 @@ export function EpicDetailPage({ state, projectId, epicId, send, actionResults, 
   onBack: () => void;
   onOpenBacklogItem: (featureId: string) => void;
   onToast?: (item: ToastStackItem) => void;
+  connected?: boolean;
 }): React.JSX.Element {
   const project = state.projects.find((item) => item.projectId === projectId);
   const epic = state.epics.find((item) => item.epicId === epicId && item.projectId === projectId && item.archivedAt === null);
@@ -71,6 +72,7 @@ export function EpicDetailPage({ state, projectId, epicId, send, actionResults, 
           allowed={state.lifecycle?.[`epic:${epic.epicId}`]}
           send={send}
           actionResults={actionResults}
+          onToast={onToast}
         />
       </div>}
     />
@@ -132,7 +134,16 @@ export function EpicDetailPage({ state, projectId, epicId, send, actionResults, 
       send={send}
       actionResults={actionResults}
       onClose={() => { setShowCreateWorkItem(false); }}
-      onCreated={(workItemId, title) => { onToast?.({ id: `${String(Date.now())}-work-item-created`, tone: 'ok', message: `Work Item "${title}" created (${workItemId}). Open its detail to configure spec and dependencies.`, source: 'Work Items' }); }}
+      onCreated={(workItemId, title, createdEpicId) => {
+        onToast?.({
+          id: `${String(Date.now())}-work-item-created`,
+          tone: 'ok',
+          message: `Work Item "${title}" created (${workItemId}).`,
+          source: 'Work Items',
+          action: workItemId ? { label: 'abrir detalhe', onSelect: (): void => { window.location.hash = `/projects/${projectId}/epics/${createdEpicId}/items/${workItemId}`; } } : undefined,
+        });
+      }}
+      connected={connected}
     />
     <Modal open={showEditEpic} onClose={() => { setShowEditEpic(false); }} width={640}>
       <div role="dialog" aria-label="Edit Epic" style={{ padding: 20, display: 'grid', gap: 12 }}>
@@ -143,6 +154,7 @@ export function EpicDetailPage({ state, projectId, epicId, send, actionResults, 
           send={send}
           actionResults={actionResults}
           requestId={nextRequestId}
+          onSaved={() => { onToast?.({ id: `${String(Date.now())}-epic-updated`, tone: 'ok', message: `Epic "${epic.title}" updated.`, source: 'Epics' }); }}
         />
         <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
           <Button size="sm" onClick={() => { setShowEditEpic(false); }}>fechar</Button>

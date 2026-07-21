@@ -4,6 +4,7 @@ import { EditableSelectField } from '../components/core/EditableSelectField.js';
 import { EditableTextField } from '../components/core/EditableTextField.js';
 import { StatusPill } from '../components/core/StatusPill.js';
 import { Tag } from '../components/core/Tag.js';
+import { readActionOutcome } from '../lib/actionFeedback.js';
 import type { EpicRow } from '../../../db/repo.js';
 import type { WebSocketClientMessage, WebSocketServerMessage } from '../../types.js';
 
@@ -49,11 +50,13 @@ export interface EpicEditorProps {
   send: (message: WebSocketClientMessage) => void;
   actionResults: Record<string, EpicActionResult>;
   requestId: (prefix: string) => string;
+  /** Fired after a successful save (PF-07 confirmation toast). */
+  onSaved?: () => void;
 }
 
 /** Editable Epic metadata. Execution state belongs to Work Item runs, so it is
  * deliberately only displayed as derived progress and never written here. */
-export function EpicEditor({ epic, completedWorkItems, totalWorkItems, send, actionResults, requestId }: EpicEditorProps): React.JSX.Element {
+export function EpicEditor({ epic, completedWorkItems, totalWorkItems, send, actionResults, requestId, onSaved }: EpicEditorProps): React.JSX.Element {
   const [draft, setDraft] = useState<EpicDraft>(() => toDraft(epic));
   const handledResults = useRef(new Set<string>());
   const previousEpic = useRef(epic);
@@ -70,20 +73,23 @@ export function EpicEditor({ epic, completedWorkItems, totalWorkItems, send, act
   useEffect(() => {
     if (!draft.pendingRequestId) return;
     const result = actionResults[draft.pendingRequestId];
-    if (!result || handledResults.current.has(draft.pendingRequestId)) return;
+    const outcome = readActionOutcome(result);
+    if (!result || !outcome || handledResults.current.has(draft.pendingRequestId)) return;
     handledResults.current.add(draft.pendingRequestId);
+    const saved = outcome.ok && 'entity' in outcome.payload && outcome.payload.entity !== null && 'revision' in outcome.payload.entity;
+    if (saved) onSaved?.();
     setDraft((current) => {
       if (current.pendingRequestId !== result.payload.requestId) return current;
-      if (result.payload.ok && 'entity' in result.payload && result.payload.entity !== null && 'revision' in result.payload.entity) {
-        return { ...current, expectedRevision: (result.payload.entity as { revision: number }).revision, pendingRequestId: undefined, error: undefined };
+      if (outcome.ok && 'entity' in outcome.payload && outcome.payload.entity !== null && 'revision' in outcome.payload.entity) {
+        return { ...current, expectedRevision: (outcome.payload.entity as { revision: number }).revision, pendingRequestId: undefined, error: undefined };
       }
       return {
         ...current,
         pendingRequestId: undefined,
-        error: 'error' in result.payload ? result.payload.error.message : 'Epic update was not acknowledged.',
+        error: outcome.ok ? 'Epic update was not acknowledged.' : outcome.message,
       };
     });
-  }, [actionResults, draft.pendingRequestId]);
+  }, [actionResults, draft.pendingRequestId, onSaved]);
 
   const position = Number(draft.position);
   const positionValid = Number.isInteger(position) && position >= 0;
