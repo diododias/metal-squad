@@ -6,6 +6,8 @@ import { Tag } from '../components/core/Tag.js';
 import { DependencyTag } from '../components/FeatureConfigDetail.js';
 import { LifecycleActions } from '../components/LifecycleActions.js';
 import { CreateWorkItemModal } from '../components/project/CreateWorkItemModal.js';
+import { Modal } from '../components/feedback/Modal.js';
+import { EpicEditor } from './EpicEditor.js';
 import { WorkflowStepper } from '../components/navigation/WorkflowStepper.js';
 import { ProgressBar } from '../components/data/ProgressBar.js';
 import { PageHeader } from '../PageHeader.js';
@@ -13,6 +15,8 @@ import type { ToastStackItem } from '../components/feedback/ToastStack.js';
 import type { MsqWebState, WebSocketClientMessage, WebSocketServerMessage } from '../../types.js';
 
 const PAGE_SIZE = 8;
+let sequence = 0;
+const nextRequestId = (prefix: string): string => `${prefix}-${String(Date.now())}-${String(++sequence)}`;
 
 export function EpicDetailPage({ state, projectId, epicId, send, actionResults, onBack, onOpenBacklogItem, onToast }: {
   state: MsqWebState;
@@ -28,6 +32,7 @@ export function EpicDetailPage({ state, projectId, epicId, send, actionResults, 
   const epic = state.epics.find((item) => item.epicId === epicId && item.projectId === projectId && item.archivedAt === null);
   const [page, setPage] = useState(0);
   const [showCreateWorkItem, setShowCreateWorkItem] = useState(false);
+  const [showEditEpic, setShowEditEpic] = useState(false);
 
   const items = useMemo(
     () => Object.values(state.featureCatalog).filter((item) => item.epicId === epicId),
@@ -57,6 +62,7 @@ export function EpicDetailPage({ state, projectId, epicId, send, actionResults, 
       ]}
       actions={<div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
         <Button variant="primary" size="sm" onClick={() => { setShowCreateWorkItem(true); }}>+ Nova Feature</Button>
+        <Button size="sm" onClick={() => { setShowEditEpic(true); }}>editar Épico</Button>
         <LifecycleActions
           kind="epic"
           id={epic.epicId}
@@ -128,6 +134,21 @@ export function EpicDetailPage({ state, projectId, epicId, send, actionResults, 
       onClose={() => { setShowCreateWorkItem(false); }}
       onCreated={(workItemId, title) => { onToast?.({ id: `${String(Date.now())}-work-item-created`, tone: 'ok', message: `Work Item "${title}" created (${workItemId}). Open its detail to configure spec and dependencies.`, source: 'Work Items' }); }}
     />
+    <Modal open={showEditEpic} onClose={() => { setShowEditEpic(false); }} width={640}>
+      <div role="dialog" aria-label="Edit Epic" style={{ padding: 20, display: 'grid', gap: 12 }}>
+        <EpicEditor
+          epic={epic}
+          completedWorkItems={completed}
+          totalWorkItems={items.length}
+          send={send}
+          actionResults={actionResults}
+          requestId={nextRequestId}
+        />
+        <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+          <Button size="sm" onClick={() => { setShowEditEpic(false); }}>fechar</Button>
+        </div>
+      </div>
+    </Modal>
   </div>;
 }
 
