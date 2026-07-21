@@ -169,14 +169,14 @@ describe('backlogCatalog upsert/diff/load', () => {
     ]);
   });
 
-  it('writes NULL to the legacy Epic repo_id after the project backfill', async () => {
+  it('keeps repo_id on catalog Epic after the project backfill', async () => {
     const { db, upsertBacklogCatalog } = await setup({ migrated: true });
 
     upsertBacklogCatalog(makeBacklog(), 'repo-1');
 
     expect(db.prepare(`SELECT project_id, repo_id FROM backlog_epics WHERE epic_id = 'epic-1'`).get()).toMatchObject({
       project_id: expect.any(String),
-      repo_id: null,
+      repo_id: 'repo-1',
     });
   });
 
