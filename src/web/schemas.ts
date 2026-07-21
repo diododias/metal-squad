@@ -218,4 +218,32 @@ export const LifecycleActionMessageSchema = z.discriminatedUnion('type', [
   workItemLifecycle('action:restoreArchivedWorkItem'),
 ]);
 
+/** Runtime boundary for the `/archived` listing query (PRJ-19). `limit` is
+ * capped defensively — the client paginates instead of ever requesting an
+ * unbounded page. */
+export const ArchivedQueryMessageSchema = z.object({
+  type: z.literal('action:queryArchived'),
+  requestId: RequestIdSchema,
+  filters: z.object({
+    projectId: z.string().min(1).optional(),
+    epicId: z.string().min(1).optional(),
+    repoId: z.string().min(1).optional(),
+    kind: z.enum(['project', 'epic', 'work_item']).optional(),
+  }).strict(),
+  limit: z.number().int().positive().max(200),
+  offset: z.number().int().nonnegative(),
+}).strict();
+
+export type ArchivedQueryMessage = z.infer<typeof ArchivedQueryMessageSchema>;
+
+/** Runtime boundary for the per-entity audit timeline query (PRJ-19). */
+export const AuditTrailQueryMessageSchema = z.object({
+  type: z.literal('action:queryAuditTrail'),
+  requestId: RequestIdSchema,
+  entityKind: z.enum(['project', 'epic', 'work_item']),
+  entityId: z.string().min(1),
+}).strict();
+
+export type AuditTrailQueryMessage = z.infer<typeof AuditTrailQueryMessageSchema>;
+
 export type LifecycleActionMessage = z.infer<typeof LifecycleActionMessageSchema>;
