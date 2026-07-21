@@ -1,7 +1,9 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import type { AllowedLifecycle, WebSocketClientMessage, WebSocketServerMessage } from '../../types.js';
+import { readActionOutcome, toastId } from '../lib/actionFeedback.js';
 import { Button } from './core/Button.js';
 import { Tag } from './core/Tag.js';
+import type { ToastStackItem } from './feedback/ToastStack.js';
 import { Modal } from './feedback/Modal.js';
 
 export type LifecycleEntityKind = 'project' | 'epic' | 'work_item';
@@ -28,6 +30,8 @@ export interface LifecycleActionsProps {
    * cannot cancel from here — only the blocked reason is shown. */
   onRequestCancel?: () => void;
   size?: 'sm' | 'md';
+  /** Confirmation toast on successful archive/restore/delete (PF-07). */
+  onToast?: (item: ToastStackItem) => void;
 }
 
 function nextRequestId(prefix: string): string {
@@ -57,12 +61,13 @@ function idField(kind: LifecycleEntityKind): 'projectId' | 'epicId' | 'workItemI
  * distinguished via a Tag.
  */
 export function LifecycleActions({
-  kind, id, name, revision, allowed, send, actionResults, onRequestCancel, size = 'sm',
+  kind, id, name, revision, allowed, send, actionResults, onRequestCancel, size = 'sm', onToast,
 }: LifecycleActionsProps): React.JSX.Element | null {
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [typed, setTyped] = useState('');
   const [pendingRequestId, setPendingRequestId] = useState<string | null>(null);
   const handled = useRef<Set<string>>(new Set());
+  const pendingVerbs = useRef<Map<string, 'archive' | 'delete' | 'restoreArchived'>>(new Map());
   const [error, setError] = useState<string | null>(null);
 
   // Surface the policy/concurrency error at the point of origin and let the next
@@ -70,23 +75,31 @@ export function LifecycleActions({
   // during render) so the reducer stays free of side effects.
   useEffect(() => {
     if (!pendingRequestId || handled.current.has(pendingRequestId)) return;
-    const result = actionResults[pendingRequestId];
-    if (!result) return;
+    const outcome = readActionOutcome(actionResults[pendingRequestId]);
+    if (!outcome) return;
     handled.current.add(pendingRequestId);
+    const verb = pendingVerbs.current.get(pendingRequestId);
+    pendingVerbs.current.delete(pendingRequestId);
     setPendingRequestId(null);
-    if (result.payload.ok) {
+    if (outcome.ok) {
       setError(null);
       setConfirmOpen(false);
       setTyped('');
+      if (verb) {
+        const entityLabel = kind === 'project' ? 'Project' : kind === 'epic' ? 'Epic' : 'Work Item';
+        const verbLabel = verb === 'archive' ? 'archived' : verb === 'delete' ? 'deleted' : 'restored';
+        onToast?.({ id: toastId(`lifecycle-${verb}`), tone: 'ok', message: `${entityLabel} "${name}" ${verbLabel}.`, source: 'Lifecycle' });
+      }
     } else {
-      setError(result.payload.error.message);
+      setError(outcome.message);
     }
-  }, [actionResults, pendingRequestId]);
+  }, [actionResults, pendingRequestId, kind, name, onToast]);
 
   const requiresTypedConfirm = kind === 'project' || kind === 'epic';
 
   const dispatch = useMemo(() => (verb: 'archive' | 'delete' | 'restoreArchived'): void => {
     const requestId = nextRequestId(`lifecycle-${verb}`);
+    pendingVerbs.current.set(requestId, verb);
     setPendingRequestId(requestId);
     setError(null);
     send({ type: messageType(kind, verb), requestId, [idField(kind)]: id, expectedRevision: revision } as unknown as WebSocketClientMessage);

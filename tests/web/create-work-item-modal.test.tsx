@@ -165,7 +165,7 @@ describe('CreateWorkItemModal', () => {
       [previewRequest!.requestId]: previewOk(previewRequest!.requestId),
       [create!.requestId]: { type: 'action:result', payload: { requestId: create!.requestId, ok: true, workItem: { workItemId: 'wi-9' }, revision: 1 } } as unknown as ActionResult,
     });
-    expect(onCreated).toHaveBeenCalledWith('wi-9', 'My feature');
+    expect(onCreated).toHaveBeenCalledWith('wi-9', 'My feature', 'epic-1');
     expect(onClose).toHaveBeenCalledTimes(1);
   });
 });

@@ -113,7 +113,7 @@ Item aberto pela hierarquia, a trilha completa é clicável e o voltar retorna a
 6. **Status "não iniciada" como pill própria** — hoje feature sem run mostra `aborted` reaproveitado (`status={run?.status ?? 'aborted'}`); criar estado visual correto.
 7. **Realocar Workflow Templates** — tirar do fluxo de gestão; mover para settings do projeto.
 8. ~~**Breadcrumb de 2 níveis**~~ — **entregue (PF-03)**: `PageHeader` aceita `BreadcrumbItem[]` (trilha N níveis clicável, retrocompatível com nó único); `EpicDetailPage` mostra `Projects › {Projeto}` e `ProjectDetailPage` migrou para o formato array.
-9. **Consistência de erro na criação** — "Could not save epic." atual não diz o motivo; propagar mensagem real do servidor no modal.
+9. ~~**Consistência de erro na criação**~~ — **entregue (PF-07)**: helper `lib/actionFeedback.ts` (`readActionOutcome`) extrai `ok/entity/error.message` tipado e é adotado por `CreateEpicModal`, `CreateWorkItemModal`, `EpicEditor` e `LifecycleActions` — nenhum fluxo de gestão resume/engole `error.message`. Sucesso de criar/editar/lifecycle emite toast padronizado (com ação "abrir detalhe" no toast de Work Item criado); desconexão WS com request pendente tira o modal de `creating…` com erro acionável e retry sempre gera novo `requestId`.
 10. **(Opcional) Sync manual ↔ derivado** — sugerir "marcar como done" quando progress = N/N.
 
 ---

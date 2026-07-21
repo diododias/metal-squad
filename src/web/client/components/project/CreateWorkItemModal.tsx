@@ -3,6 +3,7 @@ import { Button } from '../core/Button.js';
 import { EditableTextField } from '../core/EditableTextField.js';
 import { Modal } from '../feedback/Modal.js';
 import { WorkflowStepper } from '../navigation/WorkflowStepper.js';
+import { CONNECTION_LOST_MESSAGE, readActionOutcome } from '../../lib/actionFeedback.js';
 import type { MsqWebState, MsqWorkItemType, WebSocketClientMessage, WebSocketServerMessage } from '../../../types.js';
 
 let sequence = 0;
@@ -25,8 +26,12 @@ export interface CreateWorkItemModalProps {
   send: (message: WebSocketClientMessage) => void;
   actionResults: Record<string, Extract<WebSocketServerMessage, { type: 'action:result' }>>;
   onClose: () => void;
-  /** Fired once after the server confirms creation, with the new Work Item id. */
-  onCreated?: (workItemId: string, title: string) => void;
+  /** Fired once after the server confirms creation, with the new Work Item id
+   * and the Epic it was created under. */
+  onCreated?: (workItemId: string, title: string, epicId: string) => void;
+  /** WS connection state; a drop while a request is pending resets the modal
+   * out of `creating…` with an actionable error (PF-07). */
+  connected?: boolean;
 }
 
 /**
@@ -38,7 +43,7 @@ export interface CreateWorkItemModalProps {
  * Item → repo link is final at creation; type changes later live in the
  * backlog item detail (`action:changeWorkItemType`).
  */
-export function CreateWorkItemModal({ open, projectId, defaultEpicId, state, send, actionResults, onClose, onCreated }: CreateWorkItemModalProps): React.JSX.Element | null {
+export function CreateWorkItemModal({ open, projectId, defaultEpicId, state, send, actionResults, onClose, onCreated, connected }: CreateWorkItemModalProps): React.JSX.Element | null {
   const epics = state.epics.filter((epic) => epic.projectId === projectId && epic.archivedAt === null);
   const repos = state.repositories.filter((repo) => repo.projectId === projectId);
   const selectableRepos = repos.filter((repo) => repo.health !== 'unavailable');
@@ -93,18 +98,26 @@ export function CreateWorkItemModal({ open, projectId, defaultEpicId, state, sen
 
   useEffect(() => {
     if (!pendingRequestId || handledCreateResults.current.has(pendingRequestId)) return;
-    const result = actionResults[pendingRequestId];
-    if (!result) return;
+    const outcome = readActionOutcome(actionResults[pendingRequestId]);
+    if (!outcome) return;
     handledCreateResults.current.add(pendingRequestId);
     setPendingRequestId(null);
-    if (result.payload.ok) {
-      const workItemId = 'workItem' in result.payload ? (result.payload.workItem as { workItemId: string }).workItemId : '';
-      onCreated?.(workItemId, title.trim());
+    if (outcome.ok) {
+      const workItemId = 'workItem' in outcome.payload ? (outcome.payload.workItem as { workItemId: string }).workItemId : '';
+      onCreated?.(workItemId, title.trim(), epicId);
       onClose();
-    } else if ('error' in result.payload) {
-      setError(result.payload.error.message);
+    } else {
+      setError(outcome.message);
     }
-  }, [actionResults, pendingRequestId, onClose, onCreated, title]);
+  }, [actionResults, pendingRequestId, onClose, onCreated, title, epicId]);
+
+  useEffect(() => {
+    if (!pendingRequestId || connected !== false) return;
+    // The in-flight request may never resolve; a retry sends a fresh requestId.
+    handledCreateResults.current.add(pendingRequestId);
+    setPendingRequestId(null);
+    setError(CONNECTION_LOST_MESSAGE);
+  }, [connected, pendingRequestId]);
 
   const pending = pendingRequestId !== null;
 
