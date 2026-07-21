@@ -199,6 +199,32 @@ describe('Lifecycle policy engine (archive/delete/restore)', () => {
     expect(() => restoreArchivedWorkItem(workItemId, 2)).toThrowError(AncestorArchivedError);
   });
 
+  // PRJ-19: restoring a Work Item requires its repository to still be linked
+  // to the same Project as its Epic. `unlinkRepo`/`moveRepo` already refuse
+  // this while a non-deleted (including archived) Work Item still references
+  // the repo, so the scenario below drives `project_repos` directly — the
+  // same defense-in-depth the repo layer applies for every other lifecycle
+  // mutation, exercised here for the case a future relaxation of that guard
+  // could otherwise leave a restored Work Item orphaned.
+  it('refuses to restore a Work Item whose repository was unlinked from its Project', async () => {
+    const env = await setup();
+    const { db, archiveWorkItem, restoreArchivedWorkItem, RepositoryNotInProjectError } = env;
+    const { workItemId, repoId } = await seed(env);
+    archiveWorkItem(workItemId, 1);
+    db.prepare(`DELETE FROM project_repos WHERE repo_id = ?`).run(repoId);
+    expect(() => restoreArchivedWorkItem(workItemId, 2)).toThrowError(RepositoryNotInProjectError);
+  });
+
+  it('refuses to restore a Work Item whose repository moved to another Project', async () => {
+    const env = await setup();
+    const { db, createProject, archiveWorkItem, restoreArchivedWorkItem, RepositoryNotInProjectError } = env;
+    const { workItemId, repoId } = await seed(env);
+    archiveWorkItem(workItemId, 1);
+    const otherProject = createProject({ name: 'Other project' });
+    db.prepare(`UPDATE project_repos SET project_id = ? WHERE repo_id = ?`).run(otherProject.projectId, repoId);
+    expect(() => restoreArchivedWorkItem(workItemId, 2)).toThrowError(RepositoryNotInProjectError);
+  });
+
   // --- Epic matrix --------------------------------------------------------
 
   it('deletes an Epic only after every Work Item is tombstoned', async () => {
@@ -294,5 +320,54 @@ describe('Lifecycle policy engine (archive/delete/restore)', () => {
     // transaction — no window where the delete could commit against a run.
     insertRun(db, repoId, workItemId, 'running');
     expect(() => deleteWorkItem(workItemId, 1)).toThrowError(EntityRunningError);
+  });
+
+  // --- PRJ-19: /archived listing and audit trail ---------------------------
+
+  it('lists archived Projects and Epics paginated, most recently archived first', async () => {
+    const env = await setup();
+    const { archiveProject, listArchivedProjects, countArchivedProjects, archiveEpic, listArchivedEpics, countArchivedEpics } = env;
+    const first = await seed(env, 'repo-a');
+    const second = await seed(env, 'repo-b');
+
+    expect(listArchivedProjects()).toHaveLength(0);
+    archiveProject(first.projectId, 1);
+    archiveProject(second.projectId, 1);
+    expect(countArchivedProjects()).toBe(2);
+    expect(listArchivedProjects({ limit: 1, offset: 0 })).toHaveLength(1);
+    expect(listArchivedProjects({ limit: 1, offset: 1 })).toHaveLength(1);
+
+    expect(listArchivedEpics()).toHaveLength(0);
+    archiveEpic(first.epicId, 1);
+    expect(countArchivedEpics()).toBe(1);
+    expect(countArchivedEpics(second.projectId)).toBe(0);
+    expect(listArchivedEpics({ projectId: first.projectId })).toMatchObject([{ epicId: first.epicId }]);
+  });
+
+  it('excludes tombstoned (deleted) Projects and Epics from the archived listing', async () => {
+    const env = await setup();
+    const { deleteWorkItem, deleteEpic, deleteProject, unlinkRepo, listArchivedProjects, listArchivedEpics } = env;
+    const { projectId, epicId, workItemId, repoId } = await seed(env);
+    deleteWorkItem(workItemId, 1);
+    deleteEpic(epicId, 1);
+    unlinkRepo(repoId);
+    deleteProject(projectId, 1);
+    // A tombstoned entity is never archived-and-not-deleted, so it must not
+    // surface as a restorable row — only through the audit trail.
+    expect(listArchivedProjects()).toHaveLength(0);
+    expect(listArchivedEpics()).toHaveLength(0);
+  });
+
+  it('records an audit event per lifecycle mutation and returns them most-recent-first', async () => {
+    const env = await setup();
+    const { archiveWorkItem, restoreArchivedWorkItem, listAuditEvents } = env;
+    const { workItemId } = await seed(env);
+    archiveWorkItem(workItemId, 1, { audit: { actor: 'web', requestId: 'req-archive' } });
+    restoreArchivedWorkItem(workItemId, 2, { audit: { actor: 'web', requestId: 'req-restore' } });
+
+    const events = listAuditEvents('work_item', workItemId);
+    expect(events.map((event) => event.action)).toEqual(['restoreArchive', 'archive', 'create']);
+    expect(events[0]?.requestId).toBe('req-restore');
+    expect(events.every((event) => event.entityId === workItemId && event.entityKind === 'work_item')).toBe(true);
   });
 });

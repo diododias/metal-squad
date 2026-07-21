@@ -2,7 +2,7 @@
 
 **Feature Branch**: `feat/prj20-backup-export-v3`
 **Created**: 2026-07-17
-**Status**: Ready for planning
+**Status**: Implemented
 **Roadmap**: Projetos — M7
 **Depende de**: PRJ-04, PRJ-15, PRJ-17, PRJ-24
 
@@ -74,9 +74,25 @@ Comandos entram via `register*(program)` (padrão `registerBacklog`,
 - `src/core/backlog/export.ts` (novo) — serialização DB→YAML v3 reusando
   `stringify` (`load.ts:3`) e o catálogo por Project (PRJ-15).
 - `src/core/backlog/schema.ts` — `BacklogV3Schema` (`workItems`, Project-level).
-- `src/db/index.ts` — backup API WAL-safe + `integrity_check`/`foreign_key_check`.
-- `scripts/` — se necessário, wrapper de backup/restore.
-- `tests/backlog/*`, `tests/db/*` — round-trip v3, backup/restore, ausência de segredos.
+- `src/db/backup.ts` (novo, em vez de `src/db/index.ts`) — backup API WAL-safe +
+  `integrity_check`/`foreign_key_check`; mantém `index.ts` restrito à gestão de
+  conexão (`architecture.md`).
+- `scripts/backup-db.mjs` — passou a delegar para `backupDb` em vez de duplicar
+  a lógica de backup.
+- `tests/backlog/exportV3.test.ts`, `tests/db/backup.test.ts` — round-trip v3,
+  backup/restore, ausência de segredos.
+
+## Notas de implementação
+
+- `backlog load` v3 detecta a versão via `peekBacklogVersion`
+  (`src/core/backlog/load.ts`) antes de escolher entre o parser v1/v2 e o v3.
+- O plano de seed v3 (`planBacklogSeedV3`/`applyBacklogSeedV3`,
+  `src/db/backlogCatalog.ts`) resolve repos por `repoId` já registrado ou por
+  `--repo-map <repoId>=<path>` explícito; sem mapeamento, o item do repo entra
+  como `invalid` no plano e nada é escrito.
+- Mapeamento local para repos não registrados é resolvido via flag CLI
+  (`--repo-map`, repetível), não por prompt interativo — mantém `backlog load`
+  scriptável em CI/automação.
 
 ## Success Criteria
 
