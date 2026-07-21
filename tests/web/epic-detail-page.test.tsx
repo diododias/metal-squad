@@ -259,4 +259,95 @@ describe('EpicDetailPage edit modal (PF-06)', () => {
     expect(view.container.querySelector('[aria-label="Edit Epic"]')).not.toBeNull();
     expect(view.container.textContent).toContain('Epic was modified by someone else.');
   });
+
+  function selectValue(container: HTMLDivElement, ariaLabel: string, value: string): void {
+    const select = container.querySelector(`select[aria-label="${ariaLabel}"]`) as HTMLSelectElement;
+    act(() => {
+      select.value = value;
+      select.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+  }
+
+  function typeQuery(container: HTMLDivElement, value: string): void {
+    const input = container.querySelector('input[aria-label="Search Work Items"]') as HTMLInputElement;
+    act(() => {
+      const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set;
+      setter?.call(input, value);
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+  }
+
+  it('filters by failed run status', () => {
+    const state = baseState({
+      runs: [
+        { featureId: 'feat-1', status: 'done', runId: 1 },
+        { featureId: 'feat-2', status: 'failed', runId: 2 },
+      ],
+    } as unknown as Partial<MsqWebState>);
+    const container = render(state);
+    selectValue(container, 'Run status', 'failed');
+    const visible = rows(container);
+    expect(visible).toHaveLength(1);
+    expect(visible[0]?.textContent).toContain('Item feat-2');
+  });
+
+  it('filters by not started (items without a run)', () => {
+    const container = render(baseState());
+    selectValue(container, 'Run status', 'not_started');
+    const visible = rows(container);
+    expect(visible).toHaveLength(2);
+    expect(visible.map((row) => row.textContent).join(' ')).not.toContain('Item feat-1');
+  });
+
+  it('combines type, repo and search filters', () => {
+    const container = render(baseState());
+    selectValue(container, 'Work Item type filter', 'feature');
+    selectValue(container, 'Repository filter', 'repo-one');
+    expect(rows(container)).toHaveLength(1);
+    typeQuery(container, 'no-such-item');
+    expect(rows(container)).toHaveLength(0);
+    expect(container.textContent).toContain('No matching Work Items.');
+    expect(container.textContent).not.toContain('No Work Items in this Epic yet.');
+  });
+
+  it('filters unresolved repo items', () => {
+    const container = render(baseState());
+    selectValue(container, 'Repository filter', 'unresolved');
+    const visible = rows(container);
+    expect(visible).toHaveLength(1);
+    expect(visible[0]?.textContent).toContain('Item feat-3');
+  });
+
+  it('orders by title and by run status', () => {
+    const state = baseState({
+      featureCatalog: {
+        'feat-1': workItem('feat-1', { title: 'Zebra' }),
+        'feat-2': workItem('feat-2', { title: 'Alpha' }),
+      },
+      runs: [{ featureId: 'feat-1', status: 'running', runId: 1 }],
+    } as unknown as Partial<MsqWebState>);
+    const container = render(state);
+    selectValue(container, 'Work Item order', 'title');
+    expect(rows(container)[0]?.textContent).toContain('Alpha');
+    selectValue(container, 'Work Item order', 'status');
+    expect(rows(container)[0]?.textContent).toContain('Zebra');
+  });
+
+  it('keeps the epic summary progress stable while filters are active', () => {
+    const container = render(baseState());
+    selectValue(container, 'Run status', 'failed');
+    expect(rows(container)).toHaveLength(0);
+    expect(container.textContent).toContain('derived progress: 1/3');
+  });
+
+  it('applies pagination after the filter and resets the page on filter change', () => {
+    const catalog: Record<string, unknown> = {};
+    for (let index = 0; index < 10; index += 1) catalog[`feat-${String(index)}`] = workItem(`feat-${String(index)}`);
+    const container = render(baseState({ featureCatalog: catalog, runs: [] } as unknown as Partial<MsqWebState>));
+    const next = [...container.querySelectorAll('button')].find((button) => button.textContent === 'next');
+    act(() => { next?.click(); });
+    expect(rows(container)).toHaveLength(2);
+    selectValue(container, 'Run status', 'not_started');
+    expect(rows(container)).toHaveLength(8);
+  });
 });

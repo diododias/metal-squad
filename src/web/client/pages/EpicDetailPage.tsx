@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { Button } from '../components/core/Button.js';
 import { Card } from '../components/core/Card.js';
 import { StatusPill } from '../components/core/StatusPill.js';
@@ -41,6 +41,34 @@ export function EpicDetailPage({ state, projectId, epicId, send, actionResults, 
   );
   const doneFeatureIds = useMemo(() => new Set(state.runs.filter((run) => run.status === 'done').map((run) => run.featureId)), [state.runs]);
   const failedFeatureIds = useMemo(() => new Set(state.runs.filter((run) => run.status === 'failed').map((run) => run.featureId)), [state.runs]);
+  const [query, setQuery] = useState('');
+  const [runStatusFilter, setRunStatusFilter] = useState('all');
+  const [typeFilter, setTypeFilter] = useState('all');
+  const [repoFilter, setRepoFilter] = useState('all');
+  const [order, setOrder] = useState('backlog');
+
+  const runStatusByItem = useMemo(() => {
+    const map = new Map<string, string>();
+    items.forEach((item) => { map.set(item.id, state.runs.find((run) => run.featureId === item.id)?.status ?? 'not_started'); });
+    return map;
+  }, [items, state.runs]);
+
+  const filteredItems = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    const filtered = items.filter((item) =>
+      (!q || item.title.toLowerCase().includes(q) || item.id.toLowerCase().includes(q))
+      && (runStatusFilter === 'all' || runStatusByItem.get(item.id) === runStatusFilter)
+      && (typeFilter === 'all' || item.workItemType === typeFilter)
+      && (repoFilter === 'all' || (item.repoLabel ?? 'unresolved') === repoFilter));
+    if (order === 'title') return [...filtered].sort((a, b) => a.title.localeCompare(b.title));
+    if (order === 'status') {
+      const rank: Record<string, number> = { running: 0, blocked: 1, failed: 2, done: 3, aborted: 4, not_started: 5 };
+      return [...filtered].sort((a, b) => (rank[runStatusByItem.get(a.id) ?? 'not_started'] ?? 5) - (rank[runStatusByItem.get(b.id) ?? 'not_started'] ?? 5));
+    }
+    return filtered;
+  }, [items, query, runStatusFilter, typeFilter, repoFilter, order, runStatusByItem]);
+
+  useEffect(() => { setPage(0); }, [query, runStatusFilter, typeFilter, repoFilter, order]);
 
   if (!project || !epic) {
     return <div style={{ padding: 24 }}>
@@ -50,7 +78,7 @@ export function EpicDetailPage({ state, projectId, epicId, send, actionResults, 
   }
 
   const completed = items.filter((item) => doneFeatureIds.has(item.id)).length;
-  const visible = items.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE);
+  const visible = filteredItems.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE);
   const repoCounts = new Map<string, number>();
   items.forEach((item) => repoCounts.set(item.repoLabel ?? 'unresolved', (repoCounts.get(item.repoLabel ?? 'unresolved') ?? 0) + 1));
 
@@ -61,6 +89,37 @@ export function EpicDetailPage({ state, projectId, epicId, send, actionResults, 
         { label: 'Projects', href: '/projects' },
         { label: project.name, href: `/projects/${projectId}` },
       ]}
+      filters={<div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center' }}>
+        <input
+          value={query}
+          onChange={(event) => { setQuery(event.target.value); }}
+          placeholder="Search Work Items…"
+          aria-label="Search Work Items"
+          style={searchStyle}
+        />
+        <select value={runStatusFilter} onChange={(event) => { setRunStatusFilter(event.target.value); }} aria-label="Run status" style={controlStyle}>
+          <option value="all">all statuses</option>
+          <option value="not_started">not started</option>
+          <option value="running">running</option>
+          <option value="blocked">blocked</option>
+          <option value="done">done</option>
+          <option value="failed">failed</option>
+        </select>
+        <select value={typeFilter} onChange={(event) => { setTypeFilter(event.target.value); }} aria-label="Work Item type filter" style={controlStyle}>
+          <option value="all">all types</option>
+          <option value="feature">feature</option>
+          <option value="bug">bug</option>
+        </select>
+        <select value={repoFilter} onChange={(event) => { setRepoFilter(event.target.value); }} aria-label="Repository filter" style={controlStyle}>
+          <option value="all">all repos</option>
+          {[...repoCounts.keys()].map((label) => <option key={label} value={label}>{label}</option>)}
+        </select>
+        <select value={order} onChange={(event) => { setOrder(event.target.value); }} aria-label="Work Item order" style={controlStyle}>
+          <option value="backlog">backlog order</option>
+          <option value="status">by status</option>
+          <option value="title">by title</option>
+        </select>
+      </div>}
       actions={<div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
         <Button variant="primary" size="sm" onClick={() => { setShowCreateWorkItem(true); }}>+ Nova Feature</Button>
         <Button size="sm" onClick={() => { setShowEditEpic(true); }}>editar Épico</Button>
@@ -94,6 +153,7 @@ export function EpicDetailPage({ state, projectId, epicId, send, actionResults, 
       <section>
         <h2 style={heading}>Work Items</h2>
         {items.length === 0 && <Card><p style={muted}>No Work Items in this Epic yet.</p></Card>}
+        {items.length > 0 && filteredItems.length === 0 && <Card><p style={muted}>No matching Work Items.</p></Card>}
         {visible.map((item) => {
           const run = state.runs.find((candidate) => candidate.featureId === item.id);
           return <div
@@ -120,9 +180,9 @@ export function EpicDetailPage({ state, projectId, epicId, send, actionResults, 
             {item.integrityIssue && <p role="alert" style={{ color: 'var(--accent-warn)', margin: '8px 0 0' }}>{item.integrityIssue}</p>}
           </div>;
         })}
-        {items.length > PAGE_SIZE && <div style={{ marginTop: 10, display: 'flex', gap: 8 }}>
+        {filteredItems.length > PAGE_SIZE && <div style={{ marginTop: 10, display: 'flex', gap: 8 }}>
           <Button size="sm" disabled={page === 0} onClick={() => { setPage(page - 1); }}>previous</Button>
-          <Button size="sm" disabled={(page + 1) * PAGE_SIZE >= items.length} onClick={() => { setPage(page + 1); }}>next</Button>
+          <Button size="sm" disabled={(page + 1) * PAGE_SIZE >= filteredItems.length} onClick={() => { setPage(page + 1); }}>next</Button>
         </div>}
       </section>
     </main>
@@ -166,6 +226,16 @@ export function EpicDetailPage({ state, projectId, epicId, send, actionResults, 
 
 const heading: React.CSSProperties = { margin: '0 0 10px', fontFamily: 'var(--font-display)', fontWeight: 400 };
 const muted: React.CSSProperties = { color: 'var(--text-dim)', margin: '4px 0' };
+const controlStyle: React.CSSProperties = {
+  background: 'var(--bg-sunken)',
+  border: '1px solid var(--border-dim)',
+  borderRadius: 'var(--radius-sm)',
+  color: 'var(--text-primary)',
+  fontFamily: 'var(--font-mono)',
+  fontSize: 'var(--text-sm)',
+  padding: '7px 10px',
+};
+const searchStyle: React.CSSProperties = { ...controlStyle, flex: '1 1 160px', minWidth: 140 };
 const tags: React.CSSProperties = { display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 10 };
 const rowStyle: React.CSSProperties = {
   border: '1px solid var(--border-dim)',
