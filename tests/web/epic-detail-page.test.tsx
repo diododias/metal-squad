@@ -195,3 +195,68 @@ describe('EpicDetailPage', () => {
     expect(container.textContent).toContain('Epic not found or no longer active.');
   });
 });
+
+describe('EpicDetailPage edit modal (PF-06)', () => {
+  function renderWithSend(state: MsqWebState): { container: HTMLDivElement; send: ReturnType<typeof vi.fn>; rerender: (actionResults: Record<string, ActionResult>) => void } {
+    const container = document.createElement('div');
+    document.body.appendChild(container);
+    const root = createRoot(container);
+    roots.push(root);
+    const send = vi.fn();
+    const element = (actionResults: Record<string, ActionResult>): React.JSX.Element => (
+      <EpicDetailPage
+        state={state}
+        projectId="proj-1"
+        epicId="epic-1"
+        send={send}
+        actionResults={actionResults}
+        onBack={() => undefined}
+        onOpenBacklogItem={() => undefined}
+      />
+    );
+    act(() => { root.render(element({})); });
+    return { container, send, rerender: (actionResults) => { act(() => { root.render(element(actionResults)); }); } };
+  }
+
+  function openEditor(container: HTMLDivElement): void {
+    const button = [...container.querySelectorAll('button')].find((item) => item.textContent === 'editar Épico');
+    if (!button) throw new Error('editar Épico button not found');
+    act(() => { button.click(); });
+  }
+
+  it('opens the EpicEditor inside a modal from the header action', () => {
+    const view = renderWithSend(baseState());
+    expect(view.container.querySelector('[aria-label="Edit Epic"]')).toBeNull();
+    openEditor(view.container);
+    const dialog = view.container.querySelector('[aria-label="Edit Epic"]');
+    expect(dialog).not.toBeNull();
+    expect((dialog?.querySelector('#epic-epic-1-title') as HTMLInputElement).value).toBe('Epic One');
+  });
+
+  it('saves the manual status via action:updateEpic with expectedRevision', () => {
+    const view = renderWithSend(baseState());
+    openEditor(view.container);
+    const statusSelect = view.container.querySelector('#epic-epic-1-status') as HTMLSelectElement;
+    Object.getOwnPropertyDescriptor(Object.getPrototypeOf(statusSelect), 'value')?.set?.call(statusSelect, 'done');
+    act(() => { statusSelect.dispatchEvent(new Event('change', { bubbles: true })); });
+    const save = [...view.container.querySelectorAll('button')].find((item) => item.textContent?.startsWith('save'));
+    act(() => { save?.click(); });
+    const message = view.send.mock.calls.map((call) => call[0] as { type: string; patch?: { status?: string }; expectedRevision?: number }).find((item) => item.type === 'action:updateEpic');
+    expect(message?.patch?.status).toBe('done');
+    expect(message?.expectedRevision).toBe(1);
+  });
+
+  it('surfaces the revision-conflict recovery actions inside the modal', () => {
+    const view = renderWithSend(baseState());
+    openEditor(view.container);
+    const titleInput = view.container.querySelector('#epic-epic-1-title') as HTMLInputElement;
+    Object.getOwnPropertyDescriptor(Object.getPrototypeOf(titleInput), 'value')?.set?.call(titleInput, 'Renamed');
+    act(() => { titleInput.dispatchEvent(new Event('input', { bubbles: true })); });
+    const save = [...view.container.querySelectorAll('button')].find((item) => item.textContent?.startsWith('save'));
+    act(() => { save?.click(); });
+    const message = view.send.mock.calls.map((call) => call[0] as { type: string; requestId: string }).find((item) => item.type === 'action:updateEpic');
+    view.rerender({ [message!.requestId]: { type: 'action:result', payload: { requestId: message!.requestId, ok: false, error: { code: 'REVISION_CONFLICT', message: 'Epic was modified by someone else.' } } } as unknown as ActionResult });
+    expect(view.container.querySelector('[aria-label="Edit Epic"]')).not.toBeNull();
+    expect(view.container.textContent).toContain('Epic was modified by someone else.');
+  });
+});
