@@ -164,10 +164,12 @@ export function ProjectDetailPage({ state, projectId, send, actionResults, archi
       </Card>
       <Card><RepositoriesSection project={project} repositories={state.repositories} actionResults={actionResults} send={send} /></Card>
       <section>
-        <h2 style={heading}>Epics</h2>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
+          <h2 style={{ ...heading, marginBottom: 0 }}>Epics</h2>
+          <Button variant="primary" size="sm" onClick={() => { setShowCreateEpic(true); }}>+ Novo Épico</Button>
+        </div>
         {epics.length === 0 && <Card>
           <p style={muted}>No Epics yet.</p>
-          <Button variant="primary" size="sm" onClick={() => { setShowCreateEpic(true); }}>+ Novo Épico</Button>
         </Card>}
         {epics.length > 0 && filteredEpics.length === 0 && <Card><p style={muted}>No matching Epics.</p></Card>}
         {visible.map((epic) => <EpicRow key={epic.epicId} epic={epic} state={state} projectId={projectId} send={send} actionResults={actionResults} onToast={onToast} progress={progressByEpic.get(epic.epicId)} />)}
