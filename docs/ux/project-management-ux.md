@@ -1,7 +1,7 @@
 # UX — Gestão de Projetos (Projeto → Épicos → Features)
 
-Status: proposta para validação
-Contexto: o Project Detail atual empilha tudo numa página (forms de criação inline, todos os épicos expandidos, workflow templates), sem hierarquia de navegação e sem respeitar os padrões visuais do restante do app (Board, Backlog Detail).
+Status: **épico entregue** (PF-01–PF-18 mergeados; suite `tests/web/` verde)
+Contexto histórico: o Project Detail original empilhava tudo numa página (forms de criação inline, todos os épicos expandidos, workflow templates), sem hierarquia de navegação e sem respeitar os padrões visuais do restante do app (Board, Backlog Detail).
 
 ---
 
@@ -114,7 +114,7 @@ Item aberto pela hierarquia, a trilha completa é clicável e o voltar retorna a
 7. ~~**Realocar Workflow Templates**~~ — **entregue (PF-11)**: `ProjectDetailPage` ganha `Tabs` (`components/navigation/Tabs.tsx`): tab **Epics** (default — resumo + repositories + lista de épicos com filtros) e tab **Templates** (a `WorkflowTemplatesSection` como está, sem mudança de contrato). Filtros de PF-08 só aparecem na tab Epics e sobrevivem à troca de tab. Deep-link `#/projects/:id?tab=templates`; o parser de rotas (`lib/routes.ts`) passou a ignorar sufixo de query em qualquer rota (base para PF-18). Espaço futuro para tab "Settings" segue reservado (não-escopo).
 8. ~~**Breadcrumb de 2 níveis**~~ — **entregue (PF-03)**: `PageHeader` aceita `BreadcrumbItem[]` (trilha N níveis clicável, retrocompatível com nó único); `EpicDetailPage` mostra `Projects › {Projeto}` e `ProjectDetailPage` migrou para o formato array.
 9. ~~**Consistência de erro na criação**~~ — **entregue (PF-07)**: helper `lib/actionFeedback.ts` (`readActionOutcome`) extrai `ok/entity/error.message` tipado e é adotado por `CreateEpicModal`, `CreateWorkItemModal`, `EpicEditor` e `LifecycleActions` — nenhum fluxo de gestão resume/engole `error.message`. Sucesso de criar/editar/lifecycle emite toast padronizado (com ação "abrir detalhe" no toast de Work Item criado); desconexão WS com request pendente tira o modal de `creating…` com erro acionável e retry sempre gera novo `requestId`.
-10. **(Opcional) Sync manual ↔ derivado** — sugerir "marcar como done" quando progress = N/N.
+10. **(Opcional / melhoria futura) Sync manual ↔ derivado** — sugerir "marcar como done" quando progress = N/N. Não incluído neste épico; o badge de divergência (entregue em PF-02) cobre o feedback visual.
 15. ~~**Persistência de filtros e tab no hash**~~ — **entregue (PF-18)**: filtros, ordenação e tab de `ProjectDetailPage` (`q`, `status`, `order`, `tab`) e `EpicDetailPage` (`q`, `status`, `type`, `repo`, `order`) persistem como query no hash (`#/projects/p1?status=done&q=auth`) via `lib/hashState.ts` — escrita por `history.replaceState` (sem poluir histórico; busca de texto com debounce de 250ms), leitura na montagem com validação (valor inválido cai no default sem crash) e memória por rota para o breadcrumb/voltar restaurar a lista como estava (`hashWithRestoredQuery`, usado no breadcrumb do `EpicDetailPage` e nos backs do `App`). `parseHash` ignora o sufixo de query (PF-11). Paginação fica em state local — único estado que se perde ao voltar (decisão registrada). Board/Runs fora do escopo (não-escopo declarado).
 14. ~~**Visibilidade de arquivados no contexto**~~ — **entregue (PF-17)**: toggle "show archived" ao lado dos filtros no `ProjectDetailPage` (Epics) e no `EpicDetailPage` (Work Items), default off. Ligado, dispara `action:queryArchived` escopada (`{projectId, kind:'epic'}` / `{epicId, kind:'work_item'}`) e renderiza os arquivados atenuados (`--text-faint`, borda tracejada, `Tag` "archived", sem drill-down) com `Restore` inline via `LifecycleActions` (feedback padrão PF-07); a entidade restaurada volta à lista ativa via push e sai da seção de arquivados. Rota direta de epic arquivado mostra "Epic archived" com restore + voltar, em vez do "not found" genérico. Progresso derivado segue ignorando arquivados (listas ativas não os incluem).
 13. ~~**Ações de execução na hierarquia**~~ — **entregue (PF-15)**: linha do Work Item no `EpicDetailPage` ganha ação à direita (com `stopPropagation`, sem disparar a navegação da linha): item elegível mostra `start` que emite `action:startFeature` e toast com ação "acompanhar run" → `/runs/:featureId`; item inelegível mostra `start` desabilitado com o motivo em `title` (dependência pendente, repo `unavailable`, `integrityIssue`); item com run ativa (`running`/`blocked`) mostra `view run` → detalhe da run (onde vivem pause/resume/abort) e a pill anima o spinner. Elegibilidade centralizada em `lib/startEligibility.ts`, compartilhada com o `BacklogItemDetail` (que passou a considerar `integrityIssue` também). Erros de start seguem o canal `ui:notice` existente (mensagem real do servidor).
@@ -123,10 +123,13 @@ Item aberto pela hierarquia, a trilha completa é clicável e o voltar retorna a
 
 ---
 
-## 7. Ordem sugerida de implementação
+## 7. Ordem de implementação (referência histórica — épico concluído)
 
-1. F-A: Rota + `EpicDetailPage` (lista de features, sem filtros) — destrava a navegação.
+1. F-A: Rota + `EpicDetailPage` (lista de features, sem filtros) — destravou a navegação.
 2. F-B: Refatorar `ProjectDetailPage` (lista de épicos em linhas + remover forms inline).
 3. F-C: Modais de criação (Épico e Feature).
 4. F-D: Filtros (épicos e features) + status "não iniciada".
+
+Todas as 18 features (PF-01–PF-18) foram implementadas e validadas. A suite
+`tests/web/` cobre navegação, modais, filtros, arquivados e persistência de hash.
 5. F-E: Realocar Workflow Templates + polish (breadcrumb, toasts, erros).
