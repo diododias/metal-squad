@@ -445,3 +445,100 @@ describe('EpicDetailPage row execution actions (PF-15)', () => {
     expect(window.location.hash).toBe('#/runs/feat-1');
   });
 });
+
+describe('EpicDetailPage archived visibility (PF-17)', () => {
+  type ArchivedResult = Extract<WebSocketServerMessage, { type: 'action:archivedResult' }>;
+
+  function archivedEntry(id: string, overrides: Record<string, unknown> = {}): Record<string, unknown> {
+    return {
+      kind: 'work_item',
+      id,
+      title: `Archived ${id}`,
+      parentLabel: 'Epic One',
+      parentId: 'epic-1',
+      repoLabel: 'repo-one',
+      workItemType: 'feature',
+      archivedAt: '2026-07-10T00:00:00.000Z',
+      revision: 3,
+      allowed: { archive: false, restore: true, delete: false, cancel: false, deleted: false },
+      ...overrides,
+    };
+  }
+
+  function renderArchived(state: MsqWebState, epicId = 'epic-1'): {
+    container: HTMLDivElement;
+    send: ReturnType<typeof vi.fn>;
+    rerender: (archivedResults: Record<string, ArchivedResult>) => void;
+  } {
+    const container = document.createElement('div');
+    document.body.appendChild(container);
+    const root = createRoot(container);
+    roots.push(root);
+    const send = vi.fn();
+    const element = (archivedResults: Record<string, ArchivedResult>): React.JSX.Element => (
+      <EpicDetailPage
+        state={state}
+        projectId="proj-1"
+        epicId={epicId}
+        send={send}
+        actionResults={{}}
+        archivedResults={archivedResults}
+        onBack={() => undefined}
+        onOpenBacklogItem={() => undefined}
+      />
+    );
+    act(() => { root.render(element({})); });
+    return { container, send, rerender: (archivedResults) => { act(() => { root.render(element(archivedResults)); }); } };
+  }
+
+  it('queries archived work items scoped to the epic when the toggle is turned on and renders them attenuated', () => {
+    const view = renderArchived(baseState());
+    expect(view.send).not.toHaveBeenCalled();
+    const checkbox = view.container.querySelector('input[aria-label="Show archived Work Items"]') as HTMLInputElement;
+    act(() => { checkbox.click(); });
+    const message = view.send.mock.calls.map((call) => call[0] as { type: string; requestId: string; filters?: Record<string, string> }).find((item) => item.type === 'action:queryArchived');
+    expect(message?.filters).toEqual({ epicId: 'epic-1', kind: 'work_item' });
+    view.rerender({
+      [message!.requestId]: {
+        type: 'action:archivedResult',
+        payload: { requestId: message!.requestId, ok: true, items: [archivedEntry('feat-9')], total: 1, limit: 50, offset: 0 },
+      } as unknown as ArchivedResult,
+    });
+    const row = view.container.querySelector('[aria-label="Archived feat-9 (archived)"]');
+    expect(row).not.toBeNull();
+    const restore = [...(row?.querySelectorAll('button') ?? [])].find((button) => button.textContent === 'Restore');
+    expect(restore).toBeDefined();
+    expect(rows(view.container)).toHaveLength(3);
+  });
+
+  it('shows an archived state with restore instead of not-found for a directly routed archived epic', () => {
+    const state = baseState({ epics: [] } as unknown as Partial<MsqWebState>);
+    const view = renderArchived(state);
+    const probe = view.send.mock.calls.map((call) => call[0] as { type: string; requestId: string; filters?: Record<string, string> }).find((item) => item.type === 'action:queryArchived');
+    expect(probe?.filters).toEqual({ projectId: 'proj-1', kind: 'epic' });
+    view.rerender({
+      [probe!.requestId]: {
+        type: 'action:archivedResult',
+        payload: { requestId: probe!.requestId, ok: true, items: [archivedEntry('epic-1', { kind: 'epic', title: 'Epic One', repoLabel: null, workItemType: null })], total: 1, limit: 50, offset: 0 },
+      } as unknown as ArchivedResult,
+    });
+    expect(view.container.textContent).not.toContain('Epic not found or no longer active.');
+    expect(view.container.textContent).toContain('Epic One');
+    expect(view.container.textContent).toContain('Epic archived');
+    const restore = [...view.container.querySelectorAll('button')].find((button) => button.textContent === 'Restore');
+    expect(restore).toBeDefined();
+  });
+
+  it('keeps the plain not-found state when the epic is not in the archived results', () => {
+    const state = baseState({ epics: [] } as unknown as Partial<MsqWebState>);
+    const view = renderArchived(state, 'missing');
+    const probe = view.send.mock.calls.map((call) => call[0] as { type: string; requestId: string }).find((item) => item.type === 'action:queryArchived');
+    view.rerender({
+      [probe!.requestId]: {
+        type: 'action:archivedResult',
+        payload: { requestId: probe!.requestId, ok: true, items: [], total: 0, limit: 50, offset: 0 },
+      } as unknown as ArchivedResult,
+    });
+    expect(view.container.textContent).toContain('Epic not found or no longer active.');
+  });
+});

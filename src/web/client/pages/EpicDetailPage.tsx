@@ -19,12 +19,13 @@ const PAGE_SIZE = 8;
 let sequence = 0;
 const nextRequestId = (prefix: string): string => `${prefix}-${String(Date.now())}-${String(++sequence)}`;
 
-export function EpicDetailPage({ state, projectId, epicId, send, actionResults, onBack, onOpenBacklogItem, onToast, connected }: {
+export function EpicDetailPage({ state, projectId, epicId, send, actionResults, archivedResults, onBack, onOpenBacklogItem, onToast, connected }: {
   state: MsqWebState;
   projectId: string;
   epicId: string;
   send: (message: WebSocketClientMessage) => void;
   actionResults: Record<string, Extract<WebSocketServerMessage, { type: 'action:result' }>>;
+  archivedResults?: Record<string, Extract<WebSocketServerMessage, { type: 'action:archivedResult' }>>;
   onBack: () => void;
   onOpenBacklogItem: (featureId: string) => void;
   onToast?: (item: ToastStackItem) => void;
@@ -71,7 +72,44 @@ export function EpicDetailPage({ state, projectId, epicId, send, actionResults, 
 
   useEffect(() => { setPage(0); }, [query, runStatusFilter, typeFilter, repoFilter, order]);
 
+  const [showArchived, setShowArchived] = useState(false);
+  const [archivedRequestId, setArchivedRequestId] = useState<string | null>(null);
+  useEffect(() => {
+    if (!showArchived || !epic) return;
+    const requestId = nextRequestId('epic-archived-items');
+    setArchivedRequestId(requestId);
+    send({ type: 'action:queryArchived', requestId, filters: { epicId, kind: 'work_item' }, limit: 50, offset: 0 });
+  }, [showArchived, epicId, epic, items.length, send]);
+  const archivedResult = archivedRequestId ? archivedResults?.[archivedRequestId] : undefined;
+  const archivedItems = (archivedResult?.payload.ok ? archivedResult.payload.items : [])
+    .filter((entry) => !items.some((active) => active.id === entry.id));
+  const archivedError = archivedResult && !archivedResult.payload.ok ? archivedResult.payload.error.message : null;
+
+  const epicMissing = Boolean(project) && !epic;
+  const [probeRequestId, setProbeRequestId] = useState<string | null>(null);
+  useEffect(() => {
+    if (!epicMissing) return;
+    const requestId = nextRequestId('epic-archived-probe');
+    setProbeRequestId(requestId);
+    send({ type: 'action:queryArchived', requestId, filters: { projectId, kind: 'epic' }, limit: 50, offset: 0 });
+  }, [epicMissing, projectId, send]);
+  const probeResult = probeRequestId ? archivedResults?.[probeRequestId] : undefined;
+  const archivedEpicEntry = (probeResult?.payload.ok ? probeResult.payload.items : []).find((entry) => entry.id === epicId);
+
   if (!project || !epic) {
+    if (project && archivedEpicEntry) {
+      return <div style={{ padding: 24, display: 'grid', gap: 12, justifyItems: 'start' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+          <h2 style={{ margin: 0, color: 'var(--text-faint)' }}>{archivedEpicEntry.title}</h2>
+          <Tag>archived</Tag>
+        </div>
+        <p style={muted}>Epic archived {new Date(archivedEpicEntry.archivedAt).toLocaleString()}. Restore it to keep working, or go back to the project.</p>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <LifecycleActions kind="epic" id={archivedEpicEntry.id} name={archivedEpicEntry.title} revision={archivedEpicEntry.revision} allowed={archivedEpicEntry.allowed} send={send} actionResults={actionResults} onToast={onToast} />
+          <Button onClick={onBack}>back to Project</Button>
+        </div>
+      </div>;
+    }
     return <div style={{ padding: 24 }}>
       <p>Epic not found or no longer active.</p>
       <Button onClick={onBack}>back to Project</Button>
@@ -120,6 +158,10 @@ export function EpicDetailPage({ state, projectId, epicId, send, actionResults, 
           <option value="status">by status</option>
           <option value="title">by title</option>
         </select>
+        <label style={{ display: 'flex', alignItems: 'center', gap: 6, color: 'var(--text-dim)', fontSize: 'var(--text-sm)', whiteSpace: 'nowrap' }}>
+          <input type="checkbox" checked={showArchived} onChange={(event) => { setShowArchived(event.target.checked); }} aria-label="Show archived Work Items" />
+          show archived
+        </label>
       </div>}
       actions={<div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
         <Button variant="primary" size="sm" onClick={() => { setShowCreateWorkItem(true); }}>+ Nova Feature</Button>
@@ -214,6 +256,20 @@ export function EpicDetailPage({ state, projectId, epicId, send, actionResults, 
           <Button size="sm" disabled={page === 0} onClick={() => { setPage(page - 1); }}>previous</Button>
           <Button size="sm" disabled={(page + 1) * PAGE_SIZE >= filteredItems.length} onClick={() => { setPage(page + 1); }}>next</Button>
         </div>}
+        {showArchived && <div style={{ marginTop: 12 }}>
+          {archivedError && <p role="alert" style={{ color: 'var(--accent-warn)', margin: '4px 0' }}>{archivedError}</p>}
+          {!archivedError && archivedItems.length === 0 && <p style={{ color: 'var(--text-faint)', margin: '4px 0' }}>No archived Work Items in this Epic.</p>}
+          {archivedItems.map((entry) => <div key={entry.id} aria-label={`${entry.title} (archived)`} style={archivedRowStyle}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+              <strong style={{ color: 'var(--text-faint)' }}>{entry.title}</strong>
+              <Tag>archived</Tag>
+              {entry.workItemType && <Tag>{entry.workItemType}</Tag>}
+              {entry.repoLabel && <Tag>{entry.repoLabel}</Tag>}
+              <span style={{ color: 'var(--text-faint)', fontSize: 'var(--text-xs)' }}>archived {new Date(entry.archivedAt).toLocaleString()}</span>
+            </div>
+            <LifecycleActions kind="work_item" id={entry.id} name={entry.title} revision={entry.revision} allowed={entry.allowed} send={send} actionResults={actionResults} onToast={onToast} />
+          </div>)}
+        </div>}
       </section>
     </main>
     <CreateWorkItemModal
@@ -266,6 +322,18 @@ const controlStyle: React.CSSProperties = {
   padding: '7px 10px',
 };
 const searchStyle: React.CSSProperties = { ...controlStyle, flex: '1 1 160px', minWidth: 140 };
+const archivedRowStyle: React.CSSProperties = {
+  border: '1px dashed var(--border-dim)',
+  borderRadius: 'var(--radius-sm)',
+  background: 'transparent',
+  padding: 12,
+  marginBottom: 10,
+  display: 'flex',
+  justifyContent: 'space-between',
+  alignItems: 'center',
+  gap: 8,
+  flexWrap: 'wrap',
+};
 const tags: React.CSSProperties = { display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 10 };
 const rowStyle: React.CSSProperties = {
   border: '1px solid var(--border-dim)',

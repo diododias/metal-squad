@@ -17,9 +17,13 @@ import type { MsqWebState, WebSocketClientMessage, WebSocketServerMessage } from
 
 const PAGE_SIZE = 8;
 
-export function ProjectDetailPage({ state, projectId, send, actionResults, onBack, onToast, connected }: {
+let archivedSequence = 0;
+const nextArchivedRequestId = (prefix: string): string => `${prefix}-${String(Date.now())}-${String(++archivedSequence)}`;
+
+export function ProjectDetailPage({ state, projectId, send, actionResults, archivedResults, onBack, onToast, connected }: {
   state: MsqWebState; projectId: string; send: (message: WebSocketClientMessage) => void;
   actionResults: Record<string, Extract<WebSocketServerMessage, { type: 'action:result' }>>; onBack: () => void;
+  archivedResults?: Record<string, Extract<WebSocketServerMessage, { type: 'action:archivedResult' }>>;
   onToast?: (item: ToastStackItem) => void;
   connected?: boolean;
 }): React.JSX.Element {
@@ -59,6 +63,19 @@ export function ProjectDetailPage({ state, projectId, send, actionResults, onBac
 
   useEffect(() => { setPage(0); }, [query, statusFilter, order]);
 
+  const [showArchived, setShowArchived] = useState(false);
+  const [archivedRequestId, setArchivedRequestId] = useState<string | null>(null);
+  useEffect(() => {
+    if (!showArchived) return;
+    const requestId = nextArchivedRequestId('project-archived-epics');
+    setArchivedRequestId(requestId);
+    send({ type: 'action:queryArchived', requestId, filters: { projectId, kind: 'epic' }, limit: 50, offset: 0 });
+  }, [showArchived, projectId, epics.length, send]);
+  const archivedResult = archivedRequestId ? archivedResults?.[archivedRequestId] : undefined;
+  const archivedEpics = (archivedResult?.payload.ok ? archivedResult.payload.items : [])
+    .filter((entry) => !epics.some((active) => active.epicId === entry.id));
+  const archivedError = archivedResult && !archivedResult.payload.ok ? archivedResult.payload.error.message : null;
+
   if (!project) return <div style={{ padding: 24 }}><p>Project not found or no longer active.</p><Button onClick={onBack}>back to Projects</Button></div>;
 
   const visible = filteredEpics.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE);
@@ -85,6 +102,10 @@ export function ProjectDetailPage({ state, projectId, send, actionResults, onBac
           <option value="position">by position</option>
           <option value="progress">by progress</option>
         </select>
+        <label style={{ display: 'flex', alignItems: 'center', gap: 6, color: 'var(--text-dim)', fontSize: 'var(--text-sm)', whiteSpace: 'nowrap' }}>
+          <input type="checkbox" checked={showArchived} onChange={(event) => { setShowArchived(event.target.checked); }} aria-label="Show archived Epics" />
+          show archived
+        </label>
       </div>}
       actions={<div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
         <Button variant="primary" size="sm" onClick={() => { setShowCreateEpic(true); }}>+ Novo Épico</Button>
@@ -124,6 +145,18 @@ export function ProjectDetailPage({ state, projectId, send, actionResults, onBac
         {filteredEpics.length > PAGE_SIZE && <div style={{ marginTop: 10, display: 'flex', gap: 8 }}>
           <Button size="sm" disabled={page === 0} onClick={() => { setPage(page - 1); }}>previous</Button>
           <Button size="sm" disabled={(page + 1) * PAGE_SIZE >= filteredEpics.length} onClick={() => { setPage(page + 1); }}>next</Button>
+        </div>}
+        {showArchived && <div style={{ marginTop: 12 }}>
+          {archivedError && <p role="alert" style={{ color: 'var(--accent-warn)', margin: '4px 0' }}>{archivedError}</p>}
+          {!archivedError && archivedEpics.length === 0 && <p style={{ color: 'var(--text-faint)', margin: '4px 0' }}>No archived Epics in this project.</p>}
+          {archivedEpics.map((entry) => <div key={entry.id} aria-label={`${entry.title} (archived)`} style={archivedRowStyle}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+              <strong style={{ color: 'var(--text-faint)' }}>{entry.title}</strong>
+              <Tag>archived</Tag>
+              <span style={{ color: 'var(--text-faint)', fontSize: 'var(--text-xs)' }}>archived {new Date(entry.archivedAt).toLocaleString()}</span>
+            </div>
+            <LifecycleActions kind="epic" id={entry.id} name={entry.title} revision={entry.revision} allowed={entry.allowed} send={send} actionResults={actionResults} onToast={onToast} />
+          </div>)}
         </div>}
       </section>
       <section><h2 style={heading}>Workflow Templates</h2><WorkflowTemplatesSection state={state} projectId={projectId} send={send} actionResults={actionResults} /></section>
@@ -238,6 +271,18 @@ const controlStyle: React.CSSProperties = {
   padding: '7px 10px',
 };
 const searchStyle: React.CSSProperties = { ...controlStyle, flex: '1 1 160px', minWidth: 140 };
+const archivedRowStyle: React.CSSProperties = {
+  border: '1px dashed var(--border-dim)',
+  borderRadius: 'var(--radius-sm)',
+  background: 'transparent',
+  padding: 12,
+  marginBottom: 10,
+  display: 'flex',
+  justifyContent: 'space-between',
+  alignItems: 'center',
+  gap: 8,
+  flexWrap: 'wrap',
+};
 const muted: React.CSSProperties = { color: 'var(--text-dim)', margin: '4px 0' };
 const tags: React.CSSProperties = { display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 10 };
 const rowStyle: React.CSSProperties = {
