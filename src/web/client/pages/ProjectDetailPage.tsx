@@ -6,6 +6,7 @@ import { Tag } from '../components/core/Tag.js';
 import { LifecycleActions } from '../components/LifecycleActions.js';
 import { CreateEpicModal } from '../components/project/CreateEpicModal.js';
 import { CreateWorkItemModal } from '../components/project/CreateWorkItemModal.js';
+import { EditProjectModal } from '../components/project/EditProjectModal.js';
 import { RepositoriesSection } from '../components/project/RepositoriesSection.js';
 import { WorkflowTemplatesSection } from '../components/WorkflowTemplatesSection.js';
 import { ProgressBar } from '../components/data/ProgressBar.js';
@@ -28,6 +29,7 @@ export function ProjectDetailPage({ state, projectId, send, actionResults, onBac
   const [page, setPage] = useState(0);
   const [showCreateEpic, setShowCreateEpic] = useState(false);
   const [showCreateWorkItem, setShowCreateWorkItem] = useState(false);
+  const [showEditProject, setShowEditProject] = useState(false);
 
   if (!project) return <div style={{ padding: 24 }}><p>Project not found or no longer active.</p><Button onClick={onBack}>back to Projects</Button></div>;
 
@@ -40,6 +42,7 @@ export function ProjectDetailPage({ state, projectId, send, actionResults, onBac
       actions={<div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
         <Button variant="primary" size="sm" onClick={() => { setShowCreateEpic(true); }}>+ Novo Épico</Button>
         <Button variant="primary" size="sm" onClick={() => { setShowCreateWorkItem(true); }}>+ Nova Feature</Button>
+        <Button size="sm" onClick={() => { setShowEditProject(true); }}>editar Projeto</Button>
         <LifecycleActions
           kind="project"
           id={project.projectId}
@@ -102,6 +105,15 @@ export function ProjectDetailPage({ state, projectId, send, actionResults, onBac
           action: workItemId ? { label: 'abrir detalhe', onSelect: (): void => { window.location.hash = `/projects/${projectId}/epics/${epicId}/items/${workItemId}`; } } : undefined,
         });
       }}
+      connected={connected}
+    />
+    <EditProjectModal
+      open={showEditProject}
+      project={project}
+      send={send}
+      actionResults={actionResults}
+      onClose={() => { setShowEditProject(false); }}
+      onSaved={(name) => { onToast?.({ id: `${String(Date.now())}-project-updated`, tone: 'ok', message: `Project "${name}" updated.`, source: 'Projects' }); }}
       connected={connected}
     />
   </div>;

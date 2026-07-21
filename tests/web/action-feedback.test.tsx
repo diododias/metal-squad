@@ -41,7 +41,7 @@ describe('readActionOutcome', () => {
 
   it('extracts the exact server error message', () => {
     const result = { type: 'action:result', payload: { requestId: 'r1', ok: false, error: { code: 'validation', message: 'title already exists in project' } } } as unknown as ActionResult;
-    expect(readActionOutcome(result)).toEqual({ ok: false, message: 'title already exists in project' });
+    expect(readActionOutcome(result)).toEqual({ ok: false, message: 'title already exists in project', code: 'validation' });
   });
 });
 

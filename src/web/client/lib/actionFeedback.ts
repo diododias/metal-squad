@@ -4,7 +4,7 @@ export type ActionResultMessage = Extract<WebSocketServerMessage, { type: 'actio
 
 export type ActionOutcome =
   | { ok: true; payload: Extract<ActionResultMessage['payload'], { ok: true }> }
-  | { ok: false; message: string };
+  | { ok: false; message: string; code?: string };
 
 /**
  * Typed read of an `action:result` payload so callers stop hand-casting
@@ -20,7 +20,18 @@ export function readActionOutcome(result: ActionResultMessage | undefined): Acti
     message: 'error' in result.payload && typeof result.payload.error.message === 'string'
       ? result.payload.error.message
       : 'The server did not acknowledge the action.',
+    code: 'error' in result.payload && typeof (result.payload.error as { code?: unknown }).code === 'string'
+      ? (result.payload.error as { code: string }).code
+      : undefined,
   };
+}
+
+/** True when an error message is a revision conflict. Matches the actual
+ * RevisionConflictError wording ("… has revision N; expected M") plus the
+ * legacy "changed" phrasing older surfaces keyed on. */
+export function isRevisionConflictMessage(message: string | undefined): boolean {
+  if (!message) return false;
+  return message.includes('has revision') || message.includes('changed');
 }
 
 /** Error shown when the socket drops while a request is in flight. Retrying is
