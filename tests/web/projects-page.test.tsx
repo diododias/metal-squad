@@ -41,7 +41,7 @@ describe('ProjectsPage', () => {
     expect(container.textContent).toContain('recent tokens');
     expect(container.textContent).toContain('1.2k');
     expect(container.textContent).toContain('healthy');
-    expect(container.textContent).toContain('Project details (Epics and Work Items) arrive in PRJ-12.');
+    expect(container.textContent).toContain('view details →');
   });
 
   it('shows an accessible empty CTA and search-empty state', () => {
@@ -98,9 +98,8 @@ describe('ProjectsPage', () => {
     expect(send.mock.calls[0]?.[0]).toMatchObject({ type: 'action:linkRepo', projectId: 'project-1', repoId: 'repo-free' });
   });
 
-  it('keeps unauthorized paths out of the repository section while explaining the PRJ-15B boundary', () => {
+  it('keeps filesystem paths out of the repository section', () => {
     const container = render({ state: state() });
-    expect(container.textContent).toContain('New paths and authorized path diagnostics require PRJ-15B validation');
     expect(container.textContent).not.toContain('/private/secret');
   });
 });
