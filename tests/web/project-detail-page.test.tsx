@@ -156,6 +156,114 @@ describe('ProjectDetailPage as epic list', () => {
     expect(rows(container)).toHaveLength(1);
   });
 
+  it('filters epics by manual status', () => {
+    const epics = [
+      epicRow('epic-1', { title: 'Alpha', status: 'todo' }),
+      epicRow('epic-2', { title: 'Beta', status: 'done' }),
+    ];
+    const container = render(baseState({ epics } as unknown as Partial<MsqWebState>));
+    const statusSelect = container.querySelector('select[aria-label="Epic status"]') as HTMLSelectElement;
+    act(() => {
+      statusSelect.value = 'done';
+      statusSelect.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+    const visible = rows(container);
+    expect(visible).toHaveLength(1);
+    expect(visible[0]?.textContent).toContain('Beta');
+  });
+
+  it('search is case-insensitive and combines with the status filter', () => {
+    const epics = [
+      epicRow('epic-1', { title: 'Payments Alpha', status: 'done' }),
+      epicRow('epic-2', { title: 'Payments Beta', status: 'todo' }),
+      epicRow('epic-3', { title: 'Search', status: 'done' }),
+    ];
+    const container = render(baseState({ epics } as unknown as Partial<MsqWebState>));
+    const search = container.querySelector('input[aria-label="Search Epics"]') as HTMLInputElement;
+    const statusSelect = container.querySelector('select[aria-label="Epic status"]') as HTMLSelectElement;
+    act(() => {
+      const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set;
+      setter?.call(search, 'payments');
+      search.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    act(() => {
+      statusSelect.value = 'done';
+      statusSelect.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+    const visible = rows(container);
+    expect(visible).toHaveLength(1);
+    expect(visible[0]?.textContent).toContain('Payments Alpha');
+  });
+
+  it('orders by derived progress with position as tie-breaker', () => {
+    const epics = [
+      epicRow('epic-a', { title: 'Zero progress', position: 0 }),
+      epicRow('epic-1', { title: 'Half done', position: 1 }),
+    ];
+    const container = render(baseState({ epics } as unknown as Partial<MsqWebState>));
+    const orderSelect = container.querySelector('select[aria-label="Epic order"]') as HTMLSelectElement;
+    act(() => {
+      orderSelect.value = 'progress';
+      orderSelect.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+    const visible = rows(container);
+    expect(visible[0]?.textContent).toContain('Half done');
+    expect(visible[1]?.textContent).toContain('Zero progress');
+  });
+
+  it('shows a divergence badge when manual status differs from derived', () => {
+    const state = baseState({
+      epics: [epicRow('epic-1', { title: 'Diverged', status: 'todo' })],
+      runs: [
+        { featureId: 'feat-1', status: 'done', runId: 1 },
+        { featureId: 'feat-2', status: 'done', runId: 2 },
+      ],
+    } as unknown as Partial<MsqWebState>);
+    const container = render(state);
+    expect(container.textContent).toContain('derived: done');
+    expect(container.textContent).toContain('manual: todo');
+  });
+
+  it('does not show a divergence badge when manual matches derived or the epic has no items', () => {
+    const state = baseState({
+      epics: [
+        epicRow('epic-1', { title: 'Matched', status: 'in_progress' }),
+        epicRow('epic-empty', { title: 'Empty epic', status: 'todo' }),
+      ],
+    } as unknown as Partial<MsqWebState>);
+    const container = render(state);
+    expect(container.textContent).not.toContain('derived: in_progress');
+    expect(container.textContent).not.toContain('derived: todo');
+  });
+
+  it('shows a distinct empty state when filters match nothing', () => {
+    const container = render(baseState());
+    const search = container.querySelector('input[aria-label="Search Epics"]') as HTMLInputElement;
+    act(() => {
+      const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set;
+      setter?.call(search, 'no-such-epic');
+      search.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    expect(rows(container)).toHaveLength(0);
+    expect(container.textContent).toContain('No matching Epics.');
+    expect(container.textContent).not.toContain('No Epics yet.');
+  });
+
+  it('resets pagination when a filter changes', () => {
+    const epics = Array.from({ length: 10 }, (_, index) => epicRow(`epic-${String(index)}`, { title: `Epic ${String(index)}`, position: index }));
+    const container = render(baseState({ epics } as unknown as Partial<MsqWebState>));
+    const next = [...container.querySelectorAll('button')].find((button) => button.textContent === 'next');
+    act(() => { next?.click(); });
+    expect(rows(container)).toHaveLength(2);
+    const search = container.querySelector('input[aria-label="Search Epics"]') as HTMLInputElement;
+    act(() => {
+      const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set;
+      setter?.call(search, 'Epic');
+      search.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    expect(rows(container)).toHaveLength(8);
+  });
+
   it('shows not-found for an unknown project', () => {
     const state = baseState({ projects: [] } as unknown as Partial<MsqWebState>);
     const container = document.createElement('div');
