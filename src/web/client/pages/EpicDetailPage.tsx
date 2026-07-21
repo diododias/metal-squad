@@ -57,7 +57,7 @@ export function EpicDetailPage({ state, projectId, epicId, send, actionResults, 
   const [repoFilter, setRepoFilter] = useState(() => initialParams.get('repo') ?? 'all');
   const [order, setOrder] = useState(() => {
     const value = initialParams.get('order');
-    return value && ['status', 'title'].includes(value) ? value : 'backlog';
+    return value && ['status', 'title', 'recent'].includes(value) ? value : 'backlog';
   });
 
   useEffect(() => {
@@ -65,7 +65,7 @@ export function EpicDetailPage({ state, projectId, epicId, send, actionResults, 
       status: runStatusFilter === 'all' ? null : runStatusFilter,
       type: typeFilter === 'all' ? null : typeFilter,
       repo: repoFilter === 'all' ? null : repoFilter,
-      order: order === 'backlog' ? null : order,
+      order: order === 'backlog' ? null : order === 'recent' ? 'recent' : order,
     });
   }, [runStatusFilter, typeFilter, repoFilter, order]);
   useEffect(() => {
@@ -87,6 +87,7 @@ export function EpicDetailPage({ state, projectId, epicId, send, actionResults, 
       && (typeFilter === 'all' || item.workItemType === typeFilter)
       && (repoFilter === 'all' || (item.repoLabel ?? 'unresolved') === repoFilter));
     if (order === 'title') return [...filtered].sort((a, b) => a.title.localeCompare(b.title));
+    if (order === 'recent') return [...filtered].sort((a, b) => new Date(b.updatedAt ?? 0).getTime() - new Date(a.updatedAt ?? 0).getTime());
     if (order === 'status') {
       const rank: Record<string, number> = { running: 0, blocked: 1, failed: 2, done: 3, aborted: 4, not_started: 5 };
       return [...filtered].sort((a, b) => (rank[runStatusByItem.get(a.id) ?? 'not_started'] ?? 5) - (rank[runStatusByItem.get(b.id) ?? 'not_started'] ?? 5));
@@ -181,6 +182,7 @@ export function EpicDetailPage({ state, projectId, epicId, send, actionResults, 
           <option value="backlog">backlog order</option>
           <option value="status">by status</option>
           <option value="title">by title</option>
+          <option value="recent">mais recente</option>
         </select>
         <label style={{ display: 'flex', alignItems: 'center', gap: 6, color: 'var(--text-dim)', fontSize: 'var(--text-sm)', whiteSpace: 'nowrap' }}>
           <input type="checkbox" checked={showArchived} onChange={(event) => { setShowArchived(event.target.checked); }} aria-label="Show archived Work Items" />
@@ -269,6 +271,7 @@ export function EpicDetailPage({ state, projectId, epicId, send, actionResults, 
               <Tag>{item.repoLabel ?? 'unresolved repo'}</Tag>
               <StatusPill status={run?.status ?? 'not_started'} label={run?.status ?? 'not started'} spinner={run?.status === 'running'} />
               {item.dependsOn.map((dependency) => <DependencyTag key={dependency} depId={dependency} doneFeatureIds={doneFeatureIds} failedFeatureIds={failedFeatureIds} />)}
+              {item.updatedAt && <span style={{ color: 'var(--text-faint)', fontSize: 'var(--text-xs)' }}>atualizado {new Date(item.updatedAt).toLocaleDateString()}</span>}
             </div>
             {item.workflow.stages.length > 0 && <div style={{ marginTop: 8 }}>
               <WorkflowStepper stages={item.workflow.stages} currentStage={null} allPending size="compact" />
