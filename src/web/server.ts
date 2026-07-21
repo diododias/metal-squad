@@ -53,7 +53,7 @@ import { workItemService } from '../core/workItemService.js';
 import { projectService, repoLinkService } from '../core/projectService.js';
 import { buildMsqWebState, appendNotification, resetWebStateCaches, invalidateWorkflowTemplatesCache } from './state.js';
 import { createWebAuth, isAllowedHostHeader, isAllowedOrigin, timingSafeEqualStrings } from './auth.js';
-import { EpicActionMessageSchema, ProjectActionMessageSchema, RepositoryActionMessageSchema, WorkItemActionMessageSchema, WorkflowTemplateActionMessageSchema, WorkItemTypeChangeMessageSchema, ResolveWorkflowTemplateMessageSchema, WorkflowTemplateDefinitionMessageSchema, ValidateWorkflowTemplateMessageSchema } from './schemas.js';
+import { EpicActionMessageSchema, LifecycleActionMessageSchema, ProjectActionMessageSchema, RepositoryActionMessageSchema, WorkItemActionMessageSchema, WorkflowTemplateActionMessageSchema, WorkItemTypeChangeMessageSchema, ResolveWorkflowTemplateMessageSchema, WorkflowTemplateDefinitionMessageSchema, ValidateWorkflowTemplateMessageSchema } from './schemas.js';
 import {
   archiveWorkflowTemplate,
   createWorkflowTemplate,
@@ -1528,6 +1528,7 @@ export function createWebServer(options: {
         case 'action:archiveWorkItem': entity = workItemService.archive(data.workItemId, data.expectedRevision, { audit }).entity; break;
         case 'action:deleteWorkItem': entity = workItemService.delete(data.workItemId, data.expectedRevision, { audit }).entity; break;
         case 'action:restoreArchivedWorkItem': entity = workItemService.restoreArchive(data.workItemId, data.expectedRevision, { audit }).entity; break;
+        default: data satisfies never; throw new Error('Unknown lifecycle action type');
       }
       return { type: 'action:result', payload: { requestId: data.requestId, ok: true, entity, revision: entity.revision } };
     } catch (error) {
