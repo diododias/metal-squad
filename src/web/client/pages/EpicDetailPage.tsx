@@ -5,14 +5,16 @@ import { StatusPill } from '../components/core/StatusPill.js';
 import { Tag } from '../components/core/Tag.js';
 import { DependencyTag } from '../components/FeatureConfigDetail.js';
 import { LifecycleActions } from '../components/LifecycleActions.js';
+import { CreateWorkItemModal } from '../components/project/CreateWorkItemModal.js';
 import { WorkflowStepper } from '../components/navigation/WorkflowStepper.js';
 import { ProgressBar } from '../components/data/ProgressBar.js';
 import { PageHeader } from '../PageHeader.js';
+import type { ToastStackItem } from '../components/feedback/ToastStack.js';
 import type { MsqWebState, WebSocketClientMessage, WebSocketServerMessage } from '../../types.js';
 
 const PAGE_SIZE = 8;
 
-export function EpicDetailPage({ state, projectId, epicId, send, actionResults, onBack, onOpenBacklogItem }: {
+export function EpicDetailPage({ state, projectId, epicId, send, actionResults, onBack, onOpenBacklogItem, onToast }: {
   state: MsqWebState;
   projectId: string;
   epicId: string;
@@ -20,10 +22,12 @@ export function EpicDetailPage({ state, projectId, epicId, send, actionResults, 
   actionResults: Record<string, Extract<WebSocketServerMessage, { type: 'action:result' }>>;
   onBack: () => void;
   onOpenBacklogItem: (featureId: string) => void;
+  onToast?: (item: ToastStackItem) => void;
 }): React.JSX.Element {
   const project = state.projects.find((item) => item.projectId === projectId);
   const epic = state.epics.find((item) => item.epicId === epicId && item.projectId === projectId && item.archivedAt === null);
   const [page, setPage] = useState(0);
+  const [showCreateWorkItem, setShowCreateWorkItem] = useState(false);
 
   const items = useMemo(
     () => Object.values(state.featureCatalog).filter((item) => item.epicId === epicId),
@@ -51,15 +55,18 @@ export function EpicDetailPage({ state, projectId, epicId, send, actionResults, 
         { label: 'Projects', href: '/projects' },
         { label: project.name, href: `/projects/${projectId}` },
       ]}
-      actions={<LifecycleActions
-        kind="epic"
-        id={epic.epicId}
-        name={epic.title}
-        revision={epic.revision}
-        allowed={state.lifecycle?.[`epic:${epic.epicId}`]}
-        send={send}
-        actionResults={actionResults}
-      />}
+      actions={<div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+        <Button variant="primary" size="sm" onClick={() => { setShowCreateWorkItem(true); }}>+ Nova Feature</Button>
+        <LifecycleActions
+          kind="epic"
+          id={epic.epicId}
+          name={epic.title}
+          revision={epic.revision}
+          allowed={state.lifecycle?.[`epic:${epic.epicId}`]}
+          send={send}
+          actionResults={actionResults}
+        />
+      </div>}
     />
     <main style={{ overflow: 'auto', padding: 20, display: 'grid', gap: 16 }}>
       <Card>
@@ -111,6 +118,16 @@ export function EpicDetailPage({ state, projectId, epicId, send, actionResults, 
         </div>}
       </section>
     </main>
+    <CreateWorkItemModal
+      open={showCreateWorkItem}
+      projectId={projectId}
+      defaultEpicId={epicId}
+      state={state}
+      send={send}
+      actionResults={actionResults}
+      onClose={() => { setShowCreateWorkItem(false); }}
+      onCreated={(workItemId, title) => { onToast?.({ id: `${String(Date.now())}-work-item-created`, tone: 'ok', message: `Work Item "${title}" created (${workItemId}). Open its detail to configure spec and dependencies.`, source: 'Work Items' }); }}
+    />
   </div>;
 }
 
