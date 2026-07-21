@@ -334,6 +334,7 @@ export function App(): React.JSX.Element {
         actionResults={projectActionResults}
         onBack={() => { navigate(`/projects/${route.projectId}`); }}
         onOpenBacklogItem={(featureId: string) => { navigate(`/projects/${route.projectId}/epics/${route.epicId}/items/${featureId}`); }}
+        onToast={pushToast}
       />
     );
   } else if (route.page === 'epic-item-detail') {

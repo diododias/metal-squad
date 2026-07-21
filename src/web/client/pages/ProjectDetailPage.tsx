@@ -5,6 +5,7 @@ import { StatusPill } from '../components/core/StatusPill.js';
 import { Tag } from '../components/core/Tag.js';
 import { LifecycleActions } from '../components/LifecycleActions.js';
 import { CreateEpicModal } from '../components/project/CreateEpicModal.js';
+import { CreateWorkItemModal } from '../components/project/CreateWorkItemModal.js';
 import { WorkflowTemplatesSection } from '../components/WorkflowTemplatesSection.js';
 import { ProgressBar } from '../components/data/ProgressBar.js';
 import { PageHeader } from '../PageHeader.js';
@@ -24,6 +25,7 @@ export function ProjectDetailPage({ state, projectId, send, actionResults, onBac
   const epics = state.epics.filter((epic) => epic.projectId === projectId && epic.archivedAt === null);
   const [page, setPage] = useState(0);
   const [showCreateEpic, setShowCreateEpic] = useState(false);
+  const [showCreateWorkItem, setShowCreateWorkItem] = useState(false);
 
   if (!project) return <div style={{ padding: 24 }}><p>Project not found or no longer active.</p><Button onClick={onBack}>back to Projects</Button></div>;
 
@@ -35,6 +37,7 @@ export function ProjectDetailPage({ state, projectId, send, actionResults, onBac
       breadcrumb={[{ label: 'Projects', href: '/projects' }]}
       actions={<div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
         <Button variant="primary" size="sm" onClick={() => { setShowCreateEpic(true); }}>+ Novo Épico</Button>
+        <Button variant="primary" size="sm" onClick={() => { setShowCreateWorkItem(true); }}>+ Nova Feature</Button>
         <LifecycleActions
           kind="project"
           id={project.projectId}
@@ -77,7 +80,16 @@ export function ProjectDetailPage({ state, projectId, send, actionResults, onBac
       send={send}
       actionResults={actionResults}
       onClose={() => { setShowCreateEpic(false); }}
-      onCreated={(title) => { onToast?.({ id: `epic-created-${title}`, tone: 'ok', message: `Epic "${title}" created.`, source: 'Epics' }); }}
+      onCreated={(title) => { onToast?.({ id: `${String(Date.now())}-epic-created`, tone: 'ok', message: `Epic "${title}" created.`, source: 'Epics' }); }}
+    />
+    <CreateWorkItemModal
+      open={showCreateWorkItem}
+      projectId={projectId}
+      state={state}
+      send={send}
+      actionResults={actionResults}
+      onClose={() => { setShowCreateWorkItem(false); }}
+      onCreated={(workItemId, title) => { onToast?.({ id: `${String(Date.now())}-work-item-created`, tone: 'ok', message: `Work Item "${title}" created (${workItemId}). Open its detail to configure spec and dependencies.`, source: 'Work Items' }); }}
     />
   </div>;
 }
