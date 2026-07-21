@@ -279,3 +279,91 @@ describe('ProjectDetailPage as epic list', () => {
     expect(container.textContent).toContain('Project not found or no longer active.');
   });
 });
+
+describe('ProjectDetailPage archived visibility (PF-17)', () => {
+  type ArchivedResult = Extract<WebSocketServerMessage, { type: 'action:archivedResult' }>;
+
+  function archivedEntry(id: string, overrides: Record<string, unknown> = {}): Record<string, unknown> {
+    return {
+      kind: 'epic',
+      id,
+      title: `Archived ${id}`,
+      parentLabel: 'Project One',
+      parentId: 'proj-1',
+      repoLabel: null,
+      workItemType: null,
+      archivedAt: '2026-07-10T00:00:00.000Z',
+      revision: 3,
+      allowed: { archive: false, restore: true, delete: false, cancel: false, deleted: false },
+      ...overrides,
+    };
+  }
+
+  function renderArchived(state: MsqWebState): {
+    container: HTMLDivElement;
+    send: ReturnType<typeof vi.fn>;
+    rerender: (archivedResults: Record<string, ArchivedResult>) => void;
+  } {
+    const container = document.createElement('div');
+    document.body.appendChild(container);
+    const root = createRoot(container);
+    roots.push(root);
+    const send = vi.fn();
+    const element = (archivedResults: Record<string, ArchivedResult>): React.JSX.Element => (
+      <ProjectDetailPage
+        state={state}
+        projectId="proj-1"
+        send={send}
+        actionResults={{}}
+        archivedResults={archivedResults}
+        onBack={() => undefined}
+      />
+    );
+    act(() => { root.render(element({})); });
+    return { container, send, rerender: (archivedResults) => { act(() => { root.render(element(archivedResults)); }); } };
+  }
+
+  function toggleShowArchived(container: HTMLDivElement): void {
+    const checkbox = container.querySelector('input[aria-label="Show archived Epics"]') as HTMLInputElement;
+    act(() => { checkbox.click(); });
+  }
+
+  it('does not query archived epics until the toggle is turned on', () => {
+    const view = renderArchived(baseState());
+    expect(view.send).not.toHaveBeenCalled();
+    toggleShowArchived(view.container);
+    const message = view.send.mock.calls.map((call) => call[0] as { type: string; requestId: string; filters?: Record<string, string> }).find((item) => item.type === 'action:queryArchived');
+    expect(message?.filters).toEqual({ projectId: 'proj-1', kind: 'epic' });
+  });
+
+  it('renders archived epics attenuated with a Restore action when the toggle is on', () => {
+    const view = renderArchived(baseState());
+    toggleShowArchived(view.container);
+    const message = view.send.mock.calls.map((call) => call[0] as { type: string; requestId: string }).find((item) => item.type === 'action:queryArchived');
+    view.rerender({
+      [message!.requestId]: {
+        type: 'action:archivedResult',
+        payload: { requestId: message!.requestId, ok: true, items: [archivedEntry('epic-9')], total: 1, limit: 50, offset: 0 },
+      } as unknown as ArchivedResult,
+    });
+    const row = view.container.querySelector('[aria-label="Archived epic-9 (archived)"]');
+    expect(row).not.toBeNull();
+    expect(row?.textContent).toContain('archived');
+    const restore = [...(row?.querySelectorAll('button') ?? [])].find((button) => button.textContent === 'Restore');
+    expect(restore).toBeDefined();
+    expect(rows(view.container)).toHaveLength(1);
+  });
+
+  it('drops an archived entry from the section once it is active again in state', () => {
+    const view = renderArchived(baseState());
+    toggleShowArchived(view.container);
+    const message = view.send.mock.calls.map((call) => call[0] as { type: string; requestId: string }).find((item) => item.type === 'action:queryArchived');
+    view.rerender({
+      [message!.requestId]: {
+        type: 'action:archivedResult',
+        payload: { requestId: message!.requestId, ok: true, items: [archivedEntry('epic-1')], total: 1, limit: 50, offset: 0 },
+      } as unknown as ArchivedResult,
+    });
+    expect(view.container.querySelector('[aria-label="Archived epic-1 (archived)"]')).toBeNull();
+  });
+});
