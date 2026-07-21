@@ -373,6 +373,54 @@ export type LifecycleActionResult =
   | { type: 'action:result'; payload: { requestId: string; ok: true; entity: ProjectRow | EpicRow | WorkItemRow; revision: number } }
   | { type: 'action:result'; payload: { requestId: string; ok: false; error: LifecycleActionError } };
 
+
+/** One archived entity as listed on `/archived` (PRJ-19). `parentLabel` is the
+ * Project name for an Epic row, or the Epic title for a Work Item row — the UI
+ * needs it to render breadcrumbs without a second round trip. */
+export interface ArchivedEntry {
+  kind: 'project' | 'epic' | 'work_item';
+  id: string;
+  title: string;
+  parentLabel: string | null;
+  /** Ancestor id backing `parentLabel` — a Project id for an Epic row, an Epic
+   * id for a Work Item row. Lets the UI offer a "filter by ancestor" shortcut
+   * when `allowed.restore` is false because the ancestor is still archived,
+   * without guessing an id from a display label. */
+  parentId: string | null;
+  repoLabel: string | null;
+  workItemType: MsqWorkItemType | null;
+  archivedAt: string;
+  revision: number;
+  allowed: AllowedLifecycle;
+}
+
+export interface ArchivedQueryFilters {
+  projectId?: string;
+  epicId?: string;
+  repoId?: string;
+  kind?: 'project' | 'epic' | 'work_item';
+}
+
+export type ArchivedQueryResult =
+  | { type: 'action:archivedResult'; payload: { requestId: string; ok: true; items: ArchivedEntry[]; total: number; limit: number; offset: number } }
+  | { type: 'action:archivedResult'; payload: { requestId: string; ok: false; error: { message: string } } };
+
+/** One row in an entity's audit timeline (PRJ-19), the client-facing
+ * projection of `AuditEventRow` — `beforeJson`/`afterJson` stay opaque strings
+ * the UI may pretty-print but never has to parse into a typed shape. */
+export interface AuditTimelineEntry {
+  id: number;
+  actor: string | null;
+  action: string;
+  beforeJson: string | null;
+  afterJson: string | null;
+  createdAt: string;
+}
+
+export type AuditTrailQueryResult =
+  | { type: 'action:auditTrailResult'; payload: { requestId: string; ok: true; entityKind: 'project' | 'epic' | 'work_item'; entityId: string; events: AuditTimelineEntry[] } }
+  | { type: 'action:auditTrailResult'; payload: { requestId: string; ok: false; error: { message: string } } };
+
 export type WorkItemActionErrorCode =
   | 'INVALID_PAYLOAD'
   | 'EPIC_NOT_FOUND'
@@ -493,6 +541,8 @@ export type WebSocketClientMessage =
   | { type: 'action:archiveWorkItem'; requestId: string; workItemId: string; expectedRevision: number }
   | { type: 'action:deleteWorkItem'; requestId: string; workItemId: string; expectedRevision: number }
   | { type: 'action:restoreArchivedWorkItem'; requestId: string; workItemId: string; expectedRevision: number }
+  | { type: 'action:queryArchived'; requestId: string; filters: ArchivedQueryFilters; limit: number; offset: number }
+  | { type: 'action:queryAuditTrail'; requestId: string; entityKind: 'project' | 'epic' | 'work_item'; entityId: string }
   | { type: 'action:createEpic'; requestId: string; projectId: string; title: string; description?: string | null }
   | { type: 'action:createWorkItem'; requestId: string; epicId: string; repoId: string; workItemType?: MsqWorkItemType; title: string; description?: string | null; dependsOn?: string[] }
   | { type: 'action:resolveWorkflowTemplate'; requestId: string; epicId: string; repoId: string; workItemType: MsqWorkItemType }

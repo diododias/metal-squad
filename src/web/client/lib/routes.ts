@@ -7,6 +7,7 @@ export type Route =
   | { page: 'runs' }
   | { page: 'gates' }
   | { page: 'analytics' }
+  | { page: 'archived' }
   | { page: 'config' };
 
 export function parseHash(hash: string): Route {
@@ -19,5 +20,6 @@ export function parseHash(hash: string): Route {
   if (h === '/gates') return { page: 'gates' };
   if (h === '/config') return { page: 'config' };
   if (h === '/analytics') return { page: 'analytics' };
+  if (h === '/archived') return { page: 'archived' };
   return { page: 'board' };
 }

@@ -164,6 +164,9 @@ export interface WorkItemCatalogEntry {
   dataJson: string;
   workItemType: WorkItemType;
   revision: number;
+  /** Own archive timestamp, or the ancestor Epic's when the Work Item itself is
+   * not archived but its Epic is — `lifecycleWhere('archived')` matches either. */
+  archivedAt: string | null;
   integrityIssue?: string;
 }
 
@@ -208,7 +211,8 @@ export function listWorkItemsByScope(scope: WorkItemScope = {}): WorkItemCatalog
   const rows = db.prepare(
     `SELECT f.feature_id AS featureId, f.epic_id AS epicId, f.repo_id AS featureRepoId,
             e.project_id AS projectId, pr.repo_id AS linkedRepoId, pr.project_id AS linkedProjectId, r.path AS repoPath,
-            e.title AS epicTitle, f.title, f.type AS workItemType, f.revision, f.position, f.data_json AS dataJson
+            e.title AS epicTitle, f.title, f.type AS workItemType, f.revision, f.position, f.data_json AS dataJson,
+            COALESCE(f.archived_at, e.archived_at) AS archivedAt
        FROM backlog_features f
        JOIN backlog_epics e ON e.epic_id = f.epic_id
        LEFT JOIN project_repos pr ON pr.repo_id = f.repo_id
@@ -217,7 +221,7 @@ export function listWorkItemsByScope(scope: WorkItemScope = {}): WorkItemCatalog
       ORDER BY e.position ASC, f.position ASC, f.feature_id ASC${pagination}`,
   ).all(...params) as {
     featureId: string; epicId: string; featureRepoId: string; projectId: string | null;
-    linkedRepoId: string | null; linkedProjectId: string | null; repoPath: string | null; epicTitle: string; title: string; workItemType: WorkItemType; revision: number; position: number; dataJson: string;
+    linkedRepoId: string | null; linkedProjectId: string | null; repoPath: string | null; epicTitle: string; title: string; workItemType: WorkItemType; revision: number; position: number; dataJson: string; archivedAt: string | null;
   }[];
   return rows.map((row) => {
     const issues: string[] = [];
@@ -238,9 +242,30 @@ export function listWorkItemsByScope(scope: WorkItemScope = {}): WorkItemCatalog
       dataJson: row.dataJson,
       workItemType: row.workItemType,
       revision: row.revision,
+      archivedAt: row.archivedAt,
       ...(issues.length > 0 ? { integrityIssue: issues.join(' ') } : {}),
     };
   });
+}
+
+/** Total count for the same scope `listWorkItemsByScope` filters by, ignoring
+ * `limit`/`offset` — drives pagination on the `/archived` page (PRJ-19). */
+export function countWorkItemsByScope(scope: Omit<WorkItemScope, 'limit' | 'offset'> = {}): number {
+  const db = getReadonlyDbOrNull();
+  if (!db) return 0;
+  const lifecycle = scope.lifecycle ?? 'active';
+  const clauses = [lifecycleWhere(lifecycle)];
+  const params: string[] = [];
+  if (scope.projectId) { clauses.push('e.project_id = ?'); params.push(scope.projectId); }
+  if (scope.epicId) { clauses.push('f.epic_id = ?'); params.push(scope.epicId); }
+  if (scope.repoId) { clauses.push('f.repo_id = ?'); params.push(scope.repoId); }
+  const row = db.prepare(
+    `SELECT COUNT(*) AS count
+       FROM backlog_features f
+       JOIN backlog_epics e ON e.epic_id = f.epic_id
+      WHERE ${clauses.join(' AND ')}`,
+  ).get(...params) as { count: number };
+  return row.count;
 }
 
 export function countByScope(scope: Pick<WorkItemScope, 'projectId'> = {}): ScopeCounts {
