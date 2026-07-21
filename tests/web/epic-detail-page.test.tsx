@@ -2,9 +2,10 @@
 
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { EpicDetailPage } from '../../src/web/client/pages/EpicDetailPage.js';
 import { parseHash } from '../../src/web/client/lib/routes.js';
+import { readHashParams } from '../../src/web/client/lib/hashState.js';
 import type { MsqWebState, WebSocketClientMessage, WebSocketServerMessage } from '../../src/web/types.js';
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
@@ -100,6 +101,10 @@ function render(
 function rows(container: HTMLDivElement): HTMLElement[] {
   return [...container.querySelectorAll('[role="link"]')] as HTMLElement[];
 }
+
+beforeEach(() => {
+  window.location.hash = '';
+});
 
 afterEach(() => {
   act(() => { roots.splice(0).forEach((root) => { root.unmount(); }); });
@@ -547,5 +552,43 @@ describe('route query suffix (PF-11)', () => {
   it('ignores a query suffix when parsing routes', () => {
     expect(parseHash('#/projects/p1?tab=templates')).toEqual({ page: 'project-detail', projectId: 'p1' });
     expect(parseHash('#/projects/p1/epics/e1?foo=bar')).toEqual({ page: 'epic-detail', projectId: 'p1', epicId: 'e1' });
+  });
+});
+
+describe('EpicDetailPage filter persistence (PF-18)', () => {
+  it('applies work item filters from a deep link on mount', () => {
+    window.location.hash = '#/projects/proj-1/epics/epic-1?type=bug&order=title';
+    const container = render(baseState());
+    expect((container.querySelector('select[aria-label="Work Item type filter"]') as HTMLSelectElement).value).toBe('bug');
+    expect((container.querySelector('select[aria-label="Work Item order"]') as HTMLSelectElement).value).toBe('title');
+    const visible = rows(container);
+    expect(visible).toHaveLength(1);
+    expect(visible[0]?.textContent).toContain('Item feat-2');
+  });
+
+  it('degrades invalid query values to defaults without crashing', () => {
+    window.location.hash = '#/projects/proj-1/epics/epic-1?status=banana&type=chore&order=sideways';
+    const container = render(baseState());
+    expect((container.querySelector('select[aria-label="Run status"]') as HTMLSelectElement).value).toBe('all');
+    expect((container.querySelector('select[aria-label="Work Item type filter"]') as HTMLSelectElement).value).toBe('all');
+    expect((container.querySelector('select[aria-label="Work Item order"]') as HTMLSelectElement).value).toBe('backlog');
+    expect(rows(container)).toHaveLength(3);
+  });
+
+  it('writes filter changes into the hash and the project breadcrumb restores its saved query', () => {
+    window.location.hash = '#/projects/proj-1?status=done';
+    // Simulate the project page having written its query before drill-down.
+    readHashParams();
+    window.location.hash = '#/projects/proj-1/epics/epic-1';
+    const container = render(baseState());
+    const statusSelect = container.querySelector('select[aria-label="Run status"]') as HTMLSelectElement;
+    act(() => {
+      statusSelect.value = 'failed';
+      statusSelect.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+    expect(window.location.hash).toContain('status=failed');
+    const projectCrumb = [...container.querySelectorAll('button')].find((button) => button.textContent === 'Project One');
+    act(() => { projectCrumb?.click(); });
+    expect(window.location.hash).toBe('#/projects/proj-1?status=done');
   });
 });

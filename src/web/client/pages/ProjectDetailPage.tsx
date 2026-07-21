@@ -10,6 +10,7 @@ import { EditProjectModal } from '../components/project/EditProjectModal.js';
 import { RepositoriesSection } from '../components/project/RepositoriesSection.js';
 import { WorkflowTemplatesSection } from '../components/WorkflowTemplatesSection.js';
 import { Tabs } from '../components/navigation/Tabs.js';
+import { readHashParams, updateHashParams } from '../lib/hashState.js';
 import { ProgressBar } from '../components/data/ProgressBar.js';
 import { PageHeader } from '../PageHeader.js';
 import type { EpicRow as EpicRowData } from '../../../db/repo.js';
@@ -35,9 +36,21 @@ export function ProjectDetailPage({ state, projectId, send, actionResults, archi
   const [showCreateEpic, setShowCreateEpic] = useState(false);
   const [showCreateWorkItem, setShowCreateWorkItem] = useState(false);
   const [showEditProject, setShowEditProject] = useState(false);
-  const [query, setQuery] = useState('');
-  const [statusFilter, setStatusFilter] = useState('all');
-  const [order, setOrder] = useState('position');
+  const [initialParams] = useState((): URLSearchParams => readHashParams());
+  const [query, setQuery] = useState(() => initialParams.get('q') ?? '');
+  const [statusFilter, setStatusFilter] = useState(() => {
+    const status = initialParams.get('status');
+    return status && ['todo', 'in_progress', 'done'].includes(status) ? status : 'all';
+  });
+  const [order, setOrder] = useState(() => (initialParams.get('order') === 'progress' ? 'progress' : 'position'));
+
+  useEffect(() => {
+    updateHashParams({ status: statusFilter === 'all' ? null : statusFilter, order: order === 'position' ? null : order });
+  }, [statusFilter, order]);
+  useEffect(() => {
+    const timer = setTimeout(() => { updateHashParams({ q: query.trim() || null }); }, 250);
+    return (): void => { clearTimeout(timer); };
+  }, [query]);
 
   const progressByEpic = useMemo(() => {
     const map = new Map<string, { completed: number; total: number }>();
@@ -64,12 +77,10 @@ export function ProjectDetailPage({ state, projectId, send, actionResults, archi
 
   useEffect(() => { setPage(0); }, [query, statusFilter, order]);
 
-  const [activeTab, setActiveTab] = useState<string>(() =>
-    new URLSearchParams(window.location.hash.split('?')[1] ?? '').get('tab') === 'templates' ? 'templates' : 'epics');
+  const [activeTab, setActiveTab] = useState<string>(() => (initialParams.get('tab') === 'templates' ? 'templates' : 'epics'));
   const selectTab = (id: string): void => {
     setActiveTab(id);
-    const base = (window.location.hash.split('?')[0] ?? '').replace(/^#/, '') || `/projects/${projectId}`;
-    window.location.hash = id === 'templates' ? `${base}?tab=templates` : base;
+    updateHashParams({ tab: id === 'templates' ? 'templates' : null });
   };
 
   const [showArchived, setShowArchived] = useState(false);

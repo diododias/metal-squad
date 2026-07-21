@@ -417,3 +417,40 @@ describe('ProjectDetailPage tabs (PF-11)', () => {
     expect(rows(container)).toHaveLength(0);
   });
 });
+
+describe('ProjectDetailPage filter persistence (PF-18)', () => {
+  it('applies filters from a deep link on mount', () => {
+    window.location.hash = '#/projects/proj-1?status=done&q=beta&order=progress';
+    const epics = [
+      epicRow('epic-1', { title: 'Alpha', status: 'done' }),
+      epicRow('epic-2', { title: 'Beta', status: 'done' }),
+      epicRow('epic-3', { title: 'Beta two', status: 'todo' }),
+    ];
+    const container = render(baseState({ epics } as unknown as Partial<MsqWebState>));
+    const visible = rows(container);
+    expect(visible).toHaveLength(1);
+    expect(visible[0]?.textContent).toContain('Beta');
+    expect((container.querySelector('select[aria-label="Epic status"]') as HTMLSelectElement).value).toBe('done');
+    expect((container.querySelector('select[aria-label="Epic order"]') as HTMLSelectElement).value).toBe('progress');
+    expect((container.querySelector('input[aria-label="Search Epics"]') as HTMLInputElement).value).toBe('beta');
+  });
+
+  it('degrades an invalid status in the query to the default without crashing', () => {
+    window.location.hash = '#/projects/proj-1?status=banana&order=sideways';
+    const container = render(baseState());
+    expect((container.querySelector('select[aria-label="Epic status"]') as HTMLSelectElement).value).toBe('all');
+    expect((container.querySelector('select[aria-label="Epic order"]') as HTMLSelectElement).value).toBe('position');
+    expect(rows(container)).toHaveLength(1);
+  });
+
+  it('writes select filter changes into the hash query', () => {
+    window.location.hash = '#/projects/proj-1';
+    const container = render(baseState());
+    const statusSelect = container.querySelector('select[aria-label="Epic status"]') as HTMLSelectElement;
+    act(() => {
+      statusSelect.value = 'done';
+      statusSelect.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+    expect(window.location.hash).toContain('status=done');
+  });
+});
