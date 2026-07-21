@@ -333,9 +333,56 @@ export function App(): React.JSX.Element {
         send={send}
         actionResults={projectActionResults}
         onBack={() => { navigate(`/projects/${route.projectId}`); }}
-        onOpenBacklogItem={openBacklogItem}
+        onOpenBacklogItem={(featureId: string) => { navigate(`/projects/${route.projectId}/epics/${route.epicId}/items/${featureId}`); }}
       />
     );
+  } else if (route.page === 'epic-item-detail') {
+    const item = state?.featureCatalog[route.featureId];
+    const epic = state?.epics.find((candidate) => candidate.epicId === route.epicId && candidate.projectId === route.projectId);
+    const project = state?.projects.find((candidate) => candidate.projectId === route.projectId);
+    const epicPath = `/projects/${route.projectId}/epics/${route.epicId}`;
+    if (state && (!item || item.epicId !== route.epicId || !epic || !project)) {
+      page = (
+        <div style={{ padding: 24 }}>
+          <p>Work Item not found in this Epic.</p>
+          <button onClick={() => { navigate(epicPath); }} style={{ background: 'none', border: '1px solid var(--border-dim)', borderRadius: 'var(--radius-sm)', color: 'var(--accent-info)', padding: '6px 10px', cursor: 'pointer' }}>back to Epic</button>
+        </div>
+      );
+    } else {
+      page = state && epic && project && (
+        <BacklogItemDetail
+          state={state}
+          featureId={route.featureId}
+          runHistories={runHistories}
+          onSubscribeHistory={requestHistorySubscription}
+          onBack={() => { navigate(epicPath); }}
+          onStart={(featureId: string) => {
+            send({ type: 'action:startFeature', featureId });
+            navigate(epicPath);
+          }}
+          onSaveConfig={(featureId: string, patch: FeatureConfigPatch) => {
+            setWorkflowSaveResults((current) => {
+              return Object.fromEntries(
+                Object.entries(current).filter(([resultFeatureId]) => resultFeatureId !== featureId),
+              );
+            });
+            send({ type: 'action:updateFeatureConfig', featureId, patch });
+          }}
+          workflowSaveResult={workflowSaveResults[route.featureId]}
+          onSaveTaskConfig={(featureId: string, taskId: string, patch: TaskConfigPatch) =>
+            { send({ type: 'action:updateTaskConfig', featureId, taskId, patch }); }
+          }
+          onOpenRun={openRun}
+          send={send}
+          actionResults={projectActionResults}
+          breadcrumb={[
+            { label: 'Projects', href: '/projects' },
+            { label: project.name, href: `/projects/${route.projectId}` },
+            { label: epic.title, href: epicPath },
+          ]}
+        />
+      );
+    }
   } else if (route.page === 'archived') {
     page = state && (
       <ArchivedPage
