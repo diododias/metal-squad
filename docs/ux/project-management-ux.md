@@ -100,7 +100,7 @@ Breadcrumb sempre visível: `Projects › {Projeto} › {Épico}`.
 ## 6. Gap — o que precisa ser desenvolvido
 
 1. ~~**Rota de detalhe do Épico**~~ — **entregue (PF-01)**: rota `/projects/:projectId/epics/:epicId` + página `EpicDetailPage` com resumo (progresso derivado + status manual), linhas de Work Item clicáveis/navegáveis por teclado e paginação; breadcrumb provisório `Projects › {Projeto}` até PF-03.
-2. **Lista de Épicos com filtros** — refazer corpo do `ProjectDetailPage`: linhas clicáveis, filtro por status (manual + derivado), busca, ordenação.
+2. **Lista de Épicos com filtros** — **parcial (PF-02)**: corpo do `ProjectDetailPage` refeito como lista de linhas de Epic clicáveis (progresso derivado, contagem de Work Items, tags de repo, `LifecycleActions` sem navegação, paginação); forms inline de criação removidos (modais chegam em PF-04/PF-05, botão `+ Novo Épico` desabilitado até lá). Filtros por status/busca/ordenação continuam pendentes (PF-08).
 3. **Modal de criação de Épico** — extrair form atual para modal; hoje é inline.
 4. **Modal de criação de Feature** — extrair form + preview de template para modal com épico pré-selecionado.
 5. **Lista de Features com filtros** — filtro por status de run, tipo e repo não existe em lugar nenhum no contexto do épico (só no Board, escopo diferente).

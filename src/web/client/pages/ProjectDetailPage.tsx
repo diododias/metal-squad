@@ -1,21 +1,16 @@
-/* eslint-disable @typescript-eslint/no-confusing-void-expression, @typescript-eslint/restrict-template-expressions */
 import React, { useMemo, useState } from 'react';
 import { Button } from '../components/core/Button.js';
 import { Card } from '../components/core/Card.js';
-import { EditableTextField } from '../components/core/EditableTextField.js';
 import { StatusPill } from '../components/core/StatusPill.js';
 import { Tag } from '../components/core/Tag.js';
-import { DependencyTag } from '../components/FeatureConfigDetail.js';
 import { LifecycleActions } from '../components/LifecycleActions.js';
-import { WorkflowStepper } from '../components/navigation/WorkflowStepper.js';
 import { WorkflowTemplatesSection } from '../components/WorkflowTemplatesSection.js';
+import { ProgressBar } from '../components/data/ProgressBar.js';
 import { PageHeader } from '../PageHeader.js';
-import type { EpicRow } from '../../../db/repo.js';
-import type { MsqWebState, MsqWorkItemType, WebSocketClientMessage, WebSocketServerMessage } from '../../types.js';
+import type { EpicRow as EpicRowData } from '../../../db/repo.js';
+import type { MsqWebState, WebSocketClientMessage, WebSocketServerMessage } from '../../types.js';
 
 const PAGE_SIZE = 8;
-let sequence = 0;
-const requestId = (prefix: string): string => `${prefix}-${Date.now()}-${++sequence}`;
 
 export function ProjectDetailPage({ state, projectId, send, actionResults, onBack }: {
   state: MsqWebState; projectId: string; send: (message: WebSocketClientMessage) => void;
@@ -24,157 +19,115 @@ export function ProjectDetailPage({ state, projectId, send, actionResults, onBac
   const project = state.projects.find((item) => item.projectId === projectId);
   const repos = state.repositories.filter((repo) => repo.projectId === projectId);
   const epics = state.epics.filter((epic) => epic.projectId === projectId && epic.archivedAt === null);
-  const [epicTitle, setEpicTitle] = useState('');
-  const [workTitle, setWorkTitle] = useState('');
-  const [epicId, setEpicId] = useState('');
-  const [repoId, setRepoId] = useState('');
-  const [workItemType, setWorkItemType] = useState<MsqWorkItemType>('feature');
-  const [pageByEpic, setPageByEpic] = useState<Record<string, number>>({});
-  const [preview, setPreview] = useState<{
-    requestId: string;
-    epicId: string;
-    repoId: string;
-    workItemType: MsqWorkItemType;
-    result?: { stages: string[]; templateId: string; templateVersion: number; origin: string } | { error: string };
-  } | null>(null);
-  const handledPreviewResults = React.useRef(new Set<string>());
-  const [epicRequestId, setEpicRequestId] = useState<string | null>(null);
-  const [epicError, setEpicError] = useState<string>();
-  const handledEpicResults = React.useRef(new Set<string>());
-  const [createRequestId, setCreateRequestId] = useState<string | null>(null);
-  const handledCreateResults = React.useRef(new Set<string>());
-
-  React.useEffect(() => {
-    if (!epicId || !repoId) { setPreview(null); return; }
-    if (preview?.epicId === epicId && preview.repoId === repoId && preview.workItemType === workItemType) return;
-    const id = requestId('template-preview');
-    setPreview({ requestId: id, epicId, repoId, workItemType });
-    send({ type: 'action:resolveWorkflowTemplate', requestId: id, epicId, repoId, workItemType });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [epicId, repoId, workItemType]);
-
-  React.useEffect(() => {
-    if (!preview || preview.result || handledPreviewResults.current.has(preview.requestId)) return;
-    const result = actionResults[preview.requestId];
-    if (!result) return;
-    handledPreviewResults.current.add(preview.requestId);
-    const { payload } = result;
-    if (payload.ok && 'preview' in payload && 'origin' in payload.preview) {
-      const { stages, templateId, templateVersion, origin } = payload.preview;
-      setPreview((current) => (current?.requestId === preview.requestId ? { ...current, result: { stages, templateId, templateVersion, origin } } : current));
-    } else if (!payload.ok && 'error' in payload) {
-      const { message } = payload.error;
-      setPreview((current) => (current?.requestId === preview.requestId ? { ...current, result: { error: message } } : current));
-    }
-  }, [actionResults, preview]);
-
-  React.useEffect(() => {
-    if (!epicRequestId || handledEpicResults.current.has(epicRequestId)) return;
-    const result = actionResults[epicRequestId];
-    if (!result) return;
-    handledEpicResults.current.add(epicRequestId);
-    setEpicRequestId(null);
-    if (result.payload.ok) {
-      setEpicTitle('');
-      setEpicError(undefined);
-    } else if ('error' in result.payload) {
-      setEpicError((result.payload as { error: { message: string } }).error.message);
-    }
-  }, [actionResults, epicRequestId]);
-
-  React.useEffect(() => {
-    if (!createRequestId || handledCreateResults.current.has(createRequestId)) return;
-    const result = actionResults[createRequestId];
-    if (!result) return;
-    handledCreateResults.current.add(createRequestId);
-    setCreateRequestId(null);
-    if (result.payload.ok) {
-      setWorkTitle('');
-      setEpicId('');
-      setRepoId('');
-      setWorkItemType('feature');
-      setPreview(null);
-    }
-  }, [actionResults, createRequestId]);
+  const [page, setPage] = useState(0);
 
   if (!project) return <div style={{ padding: 24 }}><p>Project not found or no longer active.</p><Button onClick={onBack}>back to Projects</Button></div>;
-  const createEpic = (): void => {
-    const title = epicTitle.trim();
-    if (!title) return;
-    const id = requestId('epic');
-    setEpicRequestId(id);
-    setEpicError(undefined);
-    send({ type: 'action:createEpic', requestId: id, projectId, title });
-  };
-  const previewReady = preview?.epicId === epicId && preview.repoId === repoId && preview.workItemType === workItemType;
-  const previewResult = previewReady ? preview.result : undefined;
-  const previewValid = previewResult != null && 'stages' in previewResult;
-  const createWorkItem = (): void => {
-    if (!workTitle.trim() || !epicId || !repoId || !previewValid) return;
-    const id = requestId('work-item');
-    setCreateRequestId(id);
-    send({ type: 'action:createWorkItem', requestId: id, epicId, repoId, workItemType, title: workTitle.trim() });
-  };
+
+  const visible = epics.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE);
+
   return <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
     <PageHeader
       title={project.name}
       breadcrumb={<button onClick={onBack} style={linkStyle}>Projects</button>}
-      actions={<LifecycleActions
-        kind="project"
-        id={project.projectId}
-        name={project.name}
-        revision={project.revision}
-        allowed={state.lifecycle?.[`project:${project.projectId}`]}
-        send={send}
-        actionResults={actionResults}
-      />}
+      actions={<div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+        <Button variant="primary" size="sm" disabled title="Epic creation moves to a modal in an upcoming release">+ Novo Épico</Button>
+        <LifecycleActions
+          kind="project"
+          id={project.projectId}
+          name={project.name}
+          revision={project.revision}
+          allowed={state.lifecycle?.[`project:${project.projectId}`]}
+          send={send}
+          actionResults={actionResults}
+        />
+      </div>}
     />
     <main style={{ overflow: 'auto', padding: 20, display: 'grid', gap: 16 }}>
-      <Card><p style={{ margin: 0, color: 'var(--text-dim)' }}>{project.description ?? 'No project description.'}</p><div style={tags}><Tag>{repos.length} repos</Tag><Tag>{project.counts.epics} Epics</Tag><Tag>{project.counts.workItems} Work Items</Tag><StatusPill status={project.activeRuns ? 'running' : 'aborted'} label={`${project.activeRuns} active runs`} spinner={false} /></div></Card>
-      <Card><h2 style={heading}>Repositories</h2>{repos.length ? <div style={tags}>{repos.map((repo) => <Tag key={repo.repoId}>{repo.label} · {repo.health}</Tag>)}</div> : <p style={muted}>No repository is linked. You can still create Epics; Work Items require a target repository.</p>}</Card>
-      <Card><h2 style={heading}>Create Epic</h2><EditableTextField id="new-epic-title" label="Title" value={epicTitle} initialValue="" onChange={setEpicTitle} disabled={Boolean(epicRequestId)} />{epicError && <p role="alert" style={{ margin: 0, color: 'var(--accent-danger)', fontSize: 'var(--text-xs)' }}>{epicError}</p>}<Button variant="primary" size="sm" disabled={Boolean(epicRequestId)} onClick={createEpic}>{epicRequestId ? 'creating…' : 'create Epic'}</Button></Card>
       <Card>
-        <h2 style={heading}>Create Work Item</h2>
-        {repos.length === 0 ? <p style={muted}>Link a repository before creating a Work Item. The server rejects targets outside this Project.</p> : <div style={{ display: 'grid', gap: 10 }}>
-          <EditableTextField id="new-work-item-title" label="Title" value={workTitle} initialValue="" onChange={setWorkTitle} />
-          <select aria-label="Epic" value={epicId} onChange={(e) => setEpicId(e.target.value)} style={control}><option value="">Select an Epic</option>{epics.map((epic) => <option key={epic.epicId} value={epic.epicId}>{epic.title}</option>)}</select>
-          <select aria-label="Repository" value={repoId} onChange={(e) => setRepoId(e.target.value)} style={control}><option value="">Select a repository</option>{repos.map((repo) => <option key={repo.repoId} value={repo.repoId}>{repo.label}</option>)}</select>
-          <select aria-label="Work Item type" value={workItemType} onChange={(e) => setWorkItemType(e.target.value as MsqWorkItemType)} style={control}><option value="feature">feature</option><option value="bug">bug</option></select>
-          {epicId && repoId && (
-            <div style={{ padding: 10, border: '1px solid var(--border-dim)', borderRadius: 'var(--radius-sm)', background: 'var(--bg-sunken)' }}>
-              <div style={{ fontSize: 'var(--text-2xs)', color: 'var(--text-faint)', marginBottom: 4 }}>workflow preview</div>
-              {(!previewReady || !previewResult) && <p style={{ ...muted, margin: 0 }}>resolving template…</p>}
-              {previewReady && previewResult && 'error' in previewResult && <p role="alert" style={{ margin: 0, color: 'var(--accent-danger)', fontSize: 'var(--text-xs)' }}>{previewResult.error}</p>}
-              {previewReady && previewResult && 'stages' in previewResult && <div style={{ display: 'grid', gap: 6 }}>
-                <div style={{ fontSize: 'var(--text-xs)', color: 'var(--text-dim)' }}>template: {previewResult.templateId} v{previewResult.templateVersion} ({previewResult.origin})</div>
-                <WorkflowStepper stages={previewResult.stages} currentStage={null} allPending size="compact" />
-              </div>}
-            </div>
-          )}
-          <Button variant="primary" size="sm" disabled={!workTitle.trim() || !epicId || !repoId || !previewValid} onClick={createWorkItem}>create Work Item</Button>
-        </div>}
+        <p style={{ margin: 0, color: 'var(--text-dim)' }}>{project.description ?? 'No project description.'}</p>
+        <div style={tags}>
+          <Tag>{repos.length} repos</Tag>
+          <Tag>{project.counts.epics} Epics</Tag>
+          <Tag>{project.counts.workItems} Work Items</Tag>
+          <StatusPill status={project.activeRuns ? 'running' : 'aborted'} label={`${String(project.activeRuns)} active runs`} spinner={false} />
+        </div>
       </Card>
-      <section><h2 style={heading}>Epics</h2>{epics.length ? epics.map((epic) => <EpicCard key={epic.epicId} epic={epic} state={state} page={pageByEpic[epic.epicId] ?? 0} onPage={(page) => setPageByEpic((current) => ({ ...current, [epic.epicId]: page }))} send={send} actionResults={actionResults} />) : <Card><p style={muted}>No Epics yet.</p></Card>}</section>
+      <Card><h2 style={heading}>Repositories</h2>{repos.length ? <div style={tags}>{repos.map((repo) => <Tag key={repo.repoId}>{repo.label} · {repo.health}</Tag>)}</div> : <p style={muted}>No repository is linked. You can still create Epics; Work Items require a target repository.</p>}</Card>
+      <section>
+        <h2 style={heading}>Epics</h2>
+        {epics.length === 0 && <Card>
+          <p style={muted}>No Epics yet.</p>
+          <Button variant="primary" size="sm" disabled title="Epic creation moves to a modal in an upcoming release">+ Novo Épico</Button>
+        </Card>}
+        {visible.map((epic) => <EpicRow key={epic.epicId} epic={epic} state={state} projectId={projectId} send={send} actionResults={actionResults} />)}
+        {epics.length > PAGE_SIZE && <div style={{ marginTop: 10, display: 'flex', gap: 8 }}>
+          <Button size="sm" disabled={page === 0} onClick={() => { setPage(page - 1); }}>previous</Button>
+          <Button size="sm" disabled={(page + 1) * PAGE_SIZE >= epics.length} onClick={() => { setPage(page + 1); }}>next</Button>
+        </div>}
+      </section>
       <section><h2 style={heading}>Workflow Templates</h2><WorkflowTemplatesSection state={state} projectId={projectId} send={send} actionResults={actionResults} /></section>
     </main>
   </div>;
 }
 
-function EpicCard({ epic, state, page, onPage, send, actionResults }: {
-  epic: EpicRow; state: MsqWebState; page: number; onPage: (page: number) => void;
+function EpicRow({ epic, state, projectId, send, actionResults }: {
+  epic: EpicRowData; state: MsqWebState; projectId: string;
   send: (message: WebSocketClientMessage) => void;
   actionResults: Record<string, Extract<WebSocketServerMessage, { type: 'action:result' }>>;
 }): React.JSX.Element {
   const items = useMemo(() => Object.values(state.featureCatalog).filter((item) => item.epicId === epic.epicId), [epic.epicId, state.featureCatalog]);
-  const visible = items.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE);
-  const completed = items.filter((item) => state.runs.some((run) => run.featureId === item.id && run.status === 'done')).length;
-  const repoCounts = new Map<string, number>(); items.forEach((item) => repoCounts.set(item.repoLabel ?? 'unresolved', (repoCounts.get(item.repoLabel ?? 'unresolved') ?? 0) + 1));
-  const doneFeatureIds = useMemo(() => new Set(state.runs.filter((run) => run.status === 'done').map((run) => run.featureId)), [state.runs]);
-  const failedFeatureIds = useMemo(() => new Set(state.runs.filter((run) => run.status === 'failed').map((run) => run.featureId)), [state.runs]);
-  return <Card style={{ marginBottom: 12 }}><div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, flexWrap: 'wrap' }}><div><h3 style={{ margin: 0 }}>{epic.title}</h3>{epic.description && <p style={muted}>{epic.description}</p>}</div><div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}><StatusPill status={epic.status === 'done' ? 'done' : epic.status === 'in_progress' ? 'running' : 'aborted'} label={`manual: ${epic.status}`} spinner={false} /><LifecycleActions kind="epic" id={epic.epicId} name={epic.title} revision={epic.revision} allowed={state.lifecycle?.[`epic:${epic.epicId}`]} send={send} actionResults={actionResults} /></div></div><div style={tags}><Tag>derived progress: {completed}/{items.length}</Tag>{[...repoCounts].map(([label, count]) => <Tag key={label}>{label}: {count}</Tag>)}</div>{visible.map((item) => { const run = state.runs.find((candidate) => candidate.featureId === item.id); return <div key={item.id} style={{ borderTop: '1px solid var(--border-dim)', paddingTop: 10, marginTop: 10 }}><strong>{item.title}</strong><div style={tags}><Tag>{item.workItemType}</Tag><Tag>{item.repoLabel ?? 'unresolved repo'}</Tag><StatusPill status={run?.status ?? 'aborted'} label={run?.status ?? 'not started'} spinner={false} /><Tag>workflow: {item.workflow.stages.join(' → ') || 'none'}</Tag>{item.dependsOn.map((dependency) => <DependencyTag key={dependency} depId={dependency} doneFeatureIds={doneFeatureIds} failedFeatureIds={failedFeatureIds} />)}</div>{item.integrityIssue && <p role="alert" style={{ color: 'var(--accent-warn)' }}>{item.integrityIssue}</p>}</div>; })}{items.length > PAGE_SIZE && <div style={{ marginTop: 10, display: 'flex', gap: 8 }}><Button size="sm" disabled={page === 0} onClick={() => onPage(page - 1)}>previous</Button><Button size="sm" disabled={(page + 1) * PAGE_SIZE >= items.length} onClick={() => onPage(page + 1)}>next</Button></div>}</Card>;
+  const completed = useMemo(() => items.filter((item) => state.runs.some((run) => run.featureId === item.id && run.status === 'done')).length, [items, state.runs]);
+  const repoCounts = new Map<string, number>();
+  items.forEach((item) => repoCounts.set(item.repoLabel ?? 'unresolved', (repoCounts.get(item.repoLabel ?? 'unresolved') ?? 0) + 1));
+  const navigateToEpic = (): void => { window.location.hash = `/projects/${projectId}/epics/${epic.epicId}`; };
+
+  return <div
+    role="link"
+    tabIndex={0}
+    aria-label={epic.title}
+    onClick={navigateToEpic}
+    onKeyDown={(event) => { if (event.key === 'Enter') navigateToEpic(); }}
+    style={rowStyle}
+    onFocus={(event) => { event.currentTarget.style.outline = '1px solid var(--accent-info)'; }}
+    onBlur={(event) => { event.currentTarget.style.outline = 'none'; }}
+  >
+    <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, flexWrap: 'wrap', alignItems: 'flex-start' }}>
+      <div style={{ flex: '1 1 260px', minWidth: 200 }}>
+        <h3 style={{ margin: 0 }}>{epic.title}</h3>
+        {epic.description && <p style={muted}>{epic.description}</p>}
+        <div style={{ marginTop: 8, maxWidth: 320 }}>
+          <ProgressBar
+            percent={items.length ? (completed / items.length) * 100 : 0}
+            tone="ok"
+            label={`derived progress: ${String(completed)}/${String(items.length)}`}
+          />
+        </div>
+        <div style={tags}>
+          <Tag>{items.length} Work Items</Tag>
+          {[...repoCounts].map(([label, count]) => <Tag key={label}>{label}: {count}</Tag>)}
+        </div>
+      </div>
+      <div
+        style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}
+        onClick={(event) => { event.stopPropagation(); }}
+        onKeyDown={(event) => { event.stopPropagation(); }}
+      >
+        <StatusPill status={epic.status === 'done' ? 'done' : epic.status === 'in_progress' ? 'running' : 'aborted'} label={`manual: ${epic.status}`} spinner={false} />
+        <LifecycleActions kind="epic" id={epic.epicId} name={epic.title} revision={epic.revision} allowed={state.lifecycle?.[`epic:${epic.epicId}`]} send={send} actionResults={actionResults} />
+      </div>
+    </div>
+  </div>;
 }
+
 const heading: React.CSSProperties = { margin: '0 0 10px', fontFamily: 'var(--font-display)', fontWeight: 400 };
 const muted: React.CSSProperties = { color: 'var(--text-dim)', margin: '4px 0' };
 const tags: React.CSSProperties = { display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 10 };
-const control: React.CSSProperties = { background: 'var(--bg-sunken)', color: 'var(--text-primary)', border: '1px solid var(--border-dim)', padding: 8, borderRadius: 'var(--radius-sm)' };
 const linkStyle: React.CSSProperties = { background: 'none', border: 0, color: 'var(--accent-info)', padding: 0, cursor: 'pointer' };
+const rowStyle: React.CSSProperties = {
+  border: '1px solid var(--border-dim)',
+  borderRadius: 'var(--radius-sm)',
+  background: 'var(--bg-panel)',
+  padding: 12,
+  marginBottom: 10,
+  cursor: 'pointer',
+};
