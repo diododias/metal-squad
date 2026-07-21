@@ -4,7 +4,7 @@ import { EditableSelectField } from '../components/core/EditableSelectField.js';
 import { EditableTextField } from '../components/core/EditableTextField.js';
 import { StatusPill } from '../components/core/StatusPill.js';
 import { Tag } from '../components/core/Tag.js';
-import { readActionOutcome } from '../lib/actionFeedback.js';
+import { isRevisionConflictMessage, readActionOutcome } from '../lib/actionFeedback.js';
 import type { EpicRow } from '../../../db/repo.js';
 import type { WebSocketClientMessage, WebSocketServerMessage } from '../../types.js';
 
@@ -95,7 +95,7 @@ export function EpicEditor({ epic, completedWorkItems, totalWorkItems, send, act
   const positionValid = Number.isInteger(position) && position >= 0;
   const title = draft.title.trim();
   const dirty = isDirty(draft, epic);
-  const conflict = draft.error?.includes('changed') ?? false;
+  const conflict = isRevisionConflictMessage(draft.error);
 
   const save = (): void => {
     if (!title) {

@@ -5,6 +5,7 @@ import { EditableTextField } from '../components/core/EditableTextField.js';
 import { StatusPill } from '../components/core/StatusPill.js';
 import { PageHeader } from '../PageHeader.js';
 import { RepositoriesSection } from '../components/project/RepositoriesSection.js';
+import { isRevisionConflictMessage } from '../lib/actionFeedback.js';
 import { formatTokens } from '../lib/format.js';
 import type { MsqWebState, ProjectSummary, WebSocketClientMessage, WebSocketServerMessage } from '../../types.js';
 
@@ -166,7 +167,7 @@ function ProjectCard({ project, repositories, actionResults, send, draft, onDraf
     <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}><StatusPill status={health.status} label={health.label} spinner={false} /><StatusPill status={project.activeRuns > 0 ? 'running' : 'aborted'} label={`${String(project.activeRuns)} active runs`} spinner={false} /></div>
     <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 6, color: 'var(--text-dim)', fontSize: 'var(--text-xs)' }}><Metric label="repos" value={String(linkedRepositories.length)} /><Metric label="Epics" value={String(project.counts.epics)} /><Metric label="Work Items" value={String(project.counts.workItems)} /><Metric label="recent tokens" value={formatTokens(project.tokens.totalTokens)} /></div>
     <RepositoriesSection project={project} repositories={repositories} actionResults={actionResults} send={send} />
-    {draft.error && <div role="alert" style={errorStyle}>{draft.error}{draft.error.includes('changed') && ' Your draft is preserved; reload the current values and reapply it.'}</div>}
+    {draft.error && <div role="alert" style={errorStyle}>{draft.error}{isRevisionConflictMessage(draft.error) && ' Your draft is preserved; reload the current values and reapply it.'}</div>}
     <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, alignItems: 'center' }}><button onClick={() => { window.location.hash = `/projects/${project.projectId}`; }} style={{ background: 'none', border: 0, color: 'var(--accent-info)', padding: 0, cursor: 'pointer', fontSize: 'var(--text-xs)' }}>view details →</button><Button variant="primary" size="sm" disabled={!dirty || Boolean(draft.pendingRequestId)} onClick={onSave}>{draft.pendingRequestId ? 'saving…' : 'save'}</Button></div>
   </Card>;
 }
