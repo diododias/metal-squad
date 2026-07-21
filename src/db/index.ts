@@ -391,7 +391,7 @@ function migrate(d: Database.Database): void {
 
     CREATE TABLE IF NOT EXISTS backlog_epics (
       epic_id     TEXT PRIMARY KEY,
-      repo_id     TEXT NOT NULL REFERENCES repos(repo_id),
+      repo_id     TEXT REFERENCES repos(repo_id),
       title       TEXT NOT NULL,
       position    INTEGER NOT NULL,
       data_json   TEXT NOT NULL,
@@ -679,6 +679,35 @@ function migrate(d: Database.Database): void {
   d.exec(`CREATE INDEX IF NOT EXISTS idx_backlog_epics_project ON backlog_epics(project_id)`);
   d.exec(`CREATE INDEX IF NOT EXISTS idx_backlog_epics_deleted_at ON backlog_epics(deleted_at)`);
   d.exec(`CREATE INDEX IF NOT EXISTS idx_backlog_epics_project_lifecycle ON backlog_epics(project_id, archived_at, deleted_at, position)`);
+
+  const repoIdNotnull = (epicColumns.find((c) => c.name === 'repo_id') as { name: string; notnull?: number } | undefined)?.notnull;
+  if (repoIdNotnull === 1) {
+    d.pragma('foreign_keys = OFF');
+    d.exec(`
+      DROP TABLE IF EXISTS backlog_epics_new;
+      CREATE TABLE backlog_epics_new (
+        epic_id     TEXT PRIMARY KEY,
+        repo_id     TEXT REFERENCES repos(repo_id),
+        title       TEXT NOT NULL,
+        position    INTEGER NOT NULL,
+        data_json   TEXT NOT NULL,
+        archived_at TEXT,
+        updated_at  TEXT NOT NULL DEFAULT (datetime('now')),
+        project_id  TEXT REFERENCES projects(project_id),
+        description TEXT,
+        status      TEXT,
+        deleted_at  TEXT,
+        revision    INTEGER NOT NULL DEFAULT 1
+      );
+      INSERT INTO backlog_epics_new SELECT * FROM backlog_epics;
+      DROP TABLE backlog_epics;
+      ALTER TABLE backlog_epics_new RENAME TO backlog_epics;
+      CREATE INDEX IF NOT EXISTS idx_backlog_epics_project ON backlog_epics(project_id);
+      CREATE INDEX IF NOT EXISTS idx_backlog_epics_deleted_at ON backlog_epics(deleted_at);
+      CREATE INDEX IF NOT EXISTS idx_backlog_epics_project_lifecycle ON backlog_epics(project_id, archived_at, deleted_at, position);
+    `);
+    d.pragma('foreign_keys = ON');
+  }
 
   const backlogFeatureColumns = d
     .prepare(`PRAGMA table_info(backlog_features)`)
