@@ -1,4 +1,5 @@
-import { basename } from 'node:path';
+import { existsSync } from 'node:fs';
+import { basename, join } from 'node:path';
 import {
   listRunsForTui,
   listCompletedFeatureIds,
@@ -199,13 +200,17 @@ function collectProjectSummaries(): ProjectSummary[] {
  * per-repository enrichments and must never turn into N filesystem walks. */
 function collectRepositorySummaries(): RepositorySummary[] {
   try {
-    return listRepositoryStateSummaries().map((repository) => ({
-      repoId: repository.repoId,
-      label: basename(repository.path),
-      projectId: repository.projectId,
-      health: 'unchecked' as const,
-      lastCheckedAt: null,
-    }));
+    const checkedAt = new Date().toISOString();
+    return listRepositoryStateSummaries().map((repository) => {
+      const health = existsSync(join(repository.path, '.git')) ? 'ok' : 'unavailable';
+      return {
+        repoId: repository.repoId,
+        label: basename(repository.path),
+        projectId: repository.projectId,
+        health,
+        lastCheckedAt: checkedAt,
+      };
+    });
   } catch (error) {
     pushError('web/state.collectRepositorySummaries', error);
     return [];
