@@ -6,6 +6,7 @@ import { EditableTextField } from '../components/core/EditableTextField.js';
 import { StatusPill } from '../components/core/StatusPill.js';
 import { Tag } from '../components/core/Tag.js';
 import { DependencyTag } from '../components/FeatureConfigDetail.js';
+import { LifecycleActions } from '../components/LifecycleActions.js';
 import { WorkflowStepper } from '../components/navigation/WorkflowStepper.js';
 import { WorkflowTemplatesSection } from '../components/WorkflowTemplatesSection.js';
 import { PageHeader } from '../PageHeader.js';
@@ -91,7 +92,19 @@ export function ProjectDetailPage({ state, projectId, send, actionResults, onBac
     send({ type: 'action:createWorkItem', requestId: id, epicId, repoId, workItemType, title: workTitle.trim() });
   };
   return <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
-    <PageHeader title={project.name} breadcrumb={<button onClick={onBack} style={linkStyle}>Projects</button>} />
+    <PageHeader
+      title={project.name}
+      breadcrumb={<button onClick={onBack} style={linkStyle}>Projects</button>}
+      actions={<LifecycleActions
+        kind="project"
+        id={project.projectId}
+        name={project.name}
+        revision={project.revision}
+        allowed={state.lifecycle?.[`project:${project.projectId}`]}
+        send={send}
+        actionResults={actionResults}
+      />}
+    />
     <main style={{ overflow: 'auto', padding: 20, display: 'grid', gap: 16 }}>
       <Card><p style={{ margin: 0, color: 'var(--text-dim)' }}>{project.description ?? 'No project description.'}</p><div style={tags}><Tag>{repos.length} repos</Tag><Tag>{project.counts.epics} Epics</Tag><Tag>{project.counts.workItems} Work Items</Tag><StatusPill status={project.activeRuns ? 'running' : 'aborted'} label={`${project.activeRuns} active runs`} spinner={false} /></div></Card>
       <Card><h2 style={heading}>Repositories</h2>{repos.length ? <div style={tags}>{repos.map((repo) => <Tag key={repo.repoId}>{repo.label} · {repo.health}</Tag>)}</div> : <p style={muted}>No repository is linked. You can still create Epics; Work Items require a target repository.</p>}</Card>
@@ -117,20 +130,24 @@ export function ProjectDetailPage({ state, projectId, send, actionResults, onBac
           <Button variant="primary" size="sm" disabled={!workTitle.trim() || !epicId || !repoId || !previewValid} onClick={createWorkItem}>create Work Item</Button>
         </div>}
       </Card>
-      <section><h2 style={heading}>Epics</h2>{epics.length ? epics.map((epic) => <EpicCard key={epic.epicId} epic={epic} state={state} page={pageByEpic[epic.epicId] ?? 0} onPage={(page) => setPageByEpic((current) => ({ ...current, [epic.epicId]: page }))} />) : <Card><p style={muted}>No Epics yet.</p></Card>}</section>
+      <section><h2 style={heading}>Epics</h2>{epics.length ? epics.map((epic) => <EpicCard key={epic.epicId} epic={epic} state={state} page={pageByEpic[epic.epicId] ?? 0} onPage={(page) => setPageByEpic((current) => ({ ...current, [epic.epicId]: page }))} send={send} actionResults={actionResults} />) : <Card><p style={muted}>No Epics yet.</p></Card>}</section>
       <section><h2 style={heading}>Workflow Templates</h2><WorkflowTemplatesSection state={state} projectId={projectId} send={send} actionResults={actionResults} /></section>
     </main>
   </div>;
 }
 
-function EpicCard({ epic, state, page, onPage }: { epic: EpicRow; state: MsqWebState; page: number; onPage: (page: number) => void }): React.JSX.Element {
+function EpicCard({ epic, state, page, onPage, send, actionResults }: {
+  epic: EpicRow; state: MsqWebState; page: number; onPage: (page: number) => void;
+  send: (message: WebSocketClientMessage) => void;
+  actionResults: Record<string, Extract<WebSocketServerMessage, { type: 'action:result' }>>;
+}): React.JSX.Element {
   const items = useMemo(() => Object.values(state.featureCatalog).filter((item) => item.epicId === epic.epicId), [epic.epicId, state.featureCatalog]);
   const visible = items.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE);
   const completed = items.filter((item) => state.runs.some((run) => run.featureId === item.id && run.status === 'done')).length;
   const repoCounts = new Map<string, number>(); items.forEach((item) => repoCounts.set(item.repoLabel ?? 'unresolved', (repoCounts.get(item.repoLabel ?? 'unresolved') ?? 0) + 1));
   const doneFeatureIds = useMemo(() => new Set(state.runs.filter((run) => run.status === 'done').map((run) => run.featureId)), [state.runs]);
   const failedFeatureIds = useMemo(() => new Set(state.runs.filter((run) => run.status === 'failed').map((run) => run.featureId)), [state.runs]);
-  return <Card style={{ marginBottom: 12 }}><div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, flexWrap: 'wrap' }}><div><h3 style={{ margin: 0 }}>{epic.title}</h3>{epic.description && <p style={muted}>{epic.description}</p>}</div><StatusPill status={epic.status === 'done' ? 'done' : epic.status === 'in_progress' ? 'running' : 'aborted'} label={`manual: ${epic.status}`} spinner={false} /></div><div style={tags}><Tag>derived progress: {completed}/{items.length}</Tag>{[...repoCounts].map(([label, count]) => <Tag key={label}>{label}: {count}</Tag>)}</div>{visible.map((item) => { const run = state.runs.find((candidate) => candidate.featureId === item.id); return <div key={item.id} style={{ borderTop: '1px solid var(--border-dim)', paddingTop: 10, marginTop: 10 }}><strong>{item.title}</strong><div style={tags}><Tag>{item.workItemType}</Tag><Tag>{item.repoLabel ?? 'unresolved repo'}</Tag><StatusPill status={run?.status ?? 'aborted'} label={run?.status ?? 'not started'} spinner={false} /><Tag>workflow: {item.workflow.stages.join(' → ') || 'none'}</Tag>{item.dependsOn.map((dependency) => <DependencyTag key={dependency} depId={dependency} doneFeatureIds={doneFeatureIds} failedFeatureIds={failedFeatureIds} />)}</div>{item.integrityIssue && <p role="alert" style={{ color: 'var(--accent-warn)' }}>{item.integrityIssue}</p>}</div>; })}{items.length > PAGE_SIZE && <div style={{ marginTop: 10, display: 'flex', gap: 8 }}><Button size="sm" disabled={page === 0} onClick={() => onPage(page - 1)}>previous</Button><Button size="sm" disabled={(page + 1) * PAGE_SIZE >= items.length} onClick={() => onPage(page + 1)}>next</Button></div>}</Card>;
+  return <Card style={{ marginBottom: 12 }}><div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, flexWrap: 'wrap' }}><div><h3 style={{ margin: 0 }}>{epic.title}</h3>{epic.description && <p style={muted}>{epic.description}</p>}</div><div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}><StatusPill status={epic.status === 'done' ? 'done' : epic.status === 'in_progress' ? 'running' : 'aborted'} label={`manual: ${epic.status}`} spinner={false} /><LifecycleActions kind="epic" id={epic.epicId} name={epic.title} revision={epic.revision} allowed={state.lifecycle?.[`epic:${epic.epicId}`]} send={send} actionResults={actionResults} /></div></div><div style={tags}><Tag>derived progress: {completed}/{items.length}</Tag>{[...repoCounts].map(([label, count]) => <Tag key={label}>{label}: {count}</Tag>)}</div>{visible.map((item) => { const run = state.runs.find((candidate) => candidate.featureId === item.id); return <div key={item.id} style={{ borderTop: '1px solid var(--border-dim)', paddingTop: 10, marginTop: 10 }}><strong>{item.title}</strong><div style={tags}><Tag>{item.workItemType}</Tag><Tag>{item.repoLabel ?? 'unresolved repo'}</Tag><StatusPill status={run?.status ?? 'aborted'} label={run?.status ?? 'not started'} spinner={false} /><Tag>workflow: {item.workflow.stages.join(' → ') || 'none'}</Tag>{item.dependsOn.map((dependency) => <DependencyTag key={dependency} depId={dependency} doneFeatureIds={doneFeatureIds} failedFeatureIds={failedFeatureIds} />)}</div>{item.integrityIssue && <p role="alert" style={{ color: 'var(--accent-warn)' }}>{item.integrityIssue}</p>}</div>; })}{items.length > PAGE_SIZE && <div style={{ marginTop: 10, display: 'flex', gap: 8 }}><Button size="sm" disabled={page === 0} onClick={() => onPage(page - 1)}>previous</Button><Button size="sm" disabled={(page + 1) * PAGE_SIZE >= items.length} onClick={() => onPage(page + 1)}>next</Button></div>}</Card>;
 }
 const heading: React.CSSProperties = { margin: '0 0 10px', fontFamily: 'var(--font-display)', fontWeight: 400 };
 const muted: React.CSSProperties = { color: 'var(--text-dim)', margin: '4px 0' };

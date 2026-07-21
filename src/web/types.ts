@@ -8,6 +8,9 @@ import type { ThemeRoleName } from '../ui/theme/types.js';
 import type { AppConfigPatch as ConfigAppConfigPatch, Config, NotificationChannelConfig, NotificationsPatch, ToolRegistryEntry } from '../config/index.js';
 import type { Skill } from '../core/skills/types.js';
 import type { WorkItemType as MsqWorkItemType } from '../db/workflowTemplates.js';
+import type { AllowedLifecycle } from '../core/lifecyclePolicy.js';
+
+export type { AllowedLifecycle } from '../core/lifecyclePolicy.js';
 
 export type { MsqWorkItemType };
 
@@ -183,6 +186,13 @@ export interface MsqWebState {
   workflowTemplateMappings: WorkflowTemplateMappings;
   /** Collector errors since the last snapshot — empty when all collectors succeeded. */
   errors: ErrorEntry[];
+  /** Policy-permitted lifecycle actions per entity (PRJ-18), keyed by
+   * `${kind}:${id}` (kind = `project` | `epic` | `work_item`). Computed
+   * server-side from the single policy engine; the client only enables or
+   * disables buttons from these flags and never recomputes the rules.
+   * Optional so a snapshot predating PRJ-18 (or one built while the DB was
+   * unreadable) simply renders no lifecycle actions instead of throwing. */
+  lifecycle?: Record<string, AllowedLifecycle>;
 }
 
 export interface RunChangedFile {

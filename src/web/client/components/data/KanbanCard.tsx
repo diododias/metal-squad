@@ -3,6 +3,8 @@ import { Card } from '../core/Card.js';
 import { StatusPill, type PillStatus } from '../core/StatusPill.js';
 import { WorkflowStepper } from '../navigation/WorkflowStepper.js';
 import { formatTokens } from '../../lib/format.js';
+import { LifecycleActions } from '../LifecycleActions.js';
+import type { AllowedLifecycle, WebSocketClientMessage, WebSocketServerMessage } from '../../../types.js';
 
 /** Deterministic 8-hex-digit short id from a feature id string, so the same
  * feature always renders the same F-XXXXXXXX badge without a backend. */
@@ -51,6 +53,15 @@ export interface KanbanCardProps {
   run: KanbanCardRun;
   selected?: boolean;
   onClick?: () => void;
+  /** Policy-permitted lifecycle actions for this Work Item (PRJ-18), computed
+   * server-side. Omitted by surfaces that don't offer lifecycle from the card. */
+  lifecycle?: {
+    allowed: AllowedLifecycle | undefined;
+    revision: number;
+    send: (message: WebSocketClientMessage) => void;
+    actionResults: Record<string, Extract<WebSocketServerMessage, { type: 'action:result' }>>;
+    onRequestCancel?: () => void;
+  };
 }
 
 const mutedTextStyle: React.CSSProperties = {
@@ -78,7 +89,7 @@ function buildToolRailCells(run: KanbanCardRun): ToolRailCell[] {
   return cells;
 }
 
-export function KanbanCard({ run, selected, onClick }: KanbanCardProps): React.JSX.Element {
+export function KanbanCard({ run, selected, onClick, lifecycle }: KanbanCardProps): React.JSX.Element {
   const tasksLabel = run.tasksTotal != null ? `${String(run.tasksDone ?? 0)}/${String(run.tasksTotal)} tasks` : null;
   const isDone = run.status === 'done';
   const displayId = run.persistedId ?? toShortFeatureId(run.featureId);
@@ -204,6 +215,22 @@ export function KanbanCard({ run, selected, onClick }: KanbanCardProps): React.J
         {run.tokens != null && <span>{formatTokens(run.tokens)} tok</span>}
         {tasksLabel && <span>{tasksLabel}</span>}
       </div>
+
+      {lifecycle && (
+        // The card itself is clickable; lifecycle controls must not navigate.
+        <div onClick={(event) => { event.stopPropagation(); }}>
+          <LifecycleActions
+            kind="work_item"
+            id={run.persistedId ?? run.featureId}
+            name={run.title?.trim() ?? run.featureId}
+            revision={lifecycle.revision}
+            allowed={lifecycle.allowed}
+            send={lifecycle.send}
+            actionResults={lifecycle.actionResults}
+            onRequestCancel={lifecycle.onRequestCancel}
+          />
+        </div>
+      )}
     </Card>
   );
 }

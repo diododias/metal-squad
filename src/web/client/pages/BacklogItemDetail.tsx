@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { Button } from '../components/core/Button.js';
+import { LifecycleActions } from '../components/LifecycleActions.js';
 import { FeatureConfigDetail } from '../components/FeatureConfigDetail.js';
 import { WorkflowStepper } from '../components/navigation/WorkflowStepper.js';
 import { Tabs } from '../components/navigation/Tabs.js';
@@ -162,6 +163,15 @@ export function BacklogItemDetail({
             >
               start feature
             </Button>
+            <LifecycleActions
+              kind="work_item"
+              id={feature.persistedId ?? featureId}
+              name={feature.title}
+              revision={feature.revision}
+              allowed={state.lifecycle?.[`work_item:${feature.persistedId ?? featureId}`]}
+              send={send}
+              actionResults={actionResults}
+            />
             <Button variant="neutral" size="sm" onClick={() => { returnToItemContext(); onBack(); }}>
               close
             </Button>
