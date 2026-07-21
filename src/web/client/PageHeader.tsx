@@ -13,7 +13,7 @@ export interface PageHeaderProps {
 }
 
 function isBreadcrumbTrail(breadcrumb: React.ReactNode | BreadcrumbItem[]): breadcrumb is BreadcrumbItem[] {
-  return Array.isArray(breadcrumb) && breadcrumb.every((item) => typeof item === 'object' && item !== null && 'label' in item && 'href' in item);
+  return Array.isArray(breadcrumb) && breadcrumb.every((item: unknown) => typeof item === 'object' && item !== null && 'label' in item && 'href' in item);
 }
 
 const crumbLinkStyle: React.CSSProperties = { background: 'none', border: 0, color: 'var(--accent-info)', padding: 0, cursor: 'pointer', font: 'inherit' };

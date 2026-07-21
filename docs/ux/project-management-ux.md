@@ -106,8 +106,8 @@ Item aberto pela hierarquia, a trilha completa é clicável e o voltar retorna a
 ## 6. Gap — o que precisa ser desenvolvido
 
 1. ~~**Rota de detalhe do Épico**~~ — **entregue (PF-01)**: rota `/projects/:projectId/epics/:epicId` + página `EpicDetailPage` com resumo (progresso derivado + status manual), linhas de Work Item clicáveis/navegáveis por teclado e paginação; breadcrumb provisório `Projects › {Projeto}` até PF-03.
-2. **Lista de Épicos com filtros** — **parcial (PF-02)**: corpo do `ProjectDetailPage` refeito como lista de linhas de Epic clicáveis (progresso derivado, contagem de Work Items, tags de repo, `LifecycleActions` sem navegação, paginação); forms inline de criação removidos (modais chegam em PF-04/PF-05, botão `+ Novo Épico` desabilitado até lá). Filtros por status/busca/ordenação continuam pendentes (PF-08).
-3. **Modal de criação de Épico** — extrair form atual para modal; hoje é inline.
+2. **Lista de Épicos com filtros** — **parcial (PF-02)**: corpo do `ProjectDetailPage` refeito como lista de linhas de Epic clicáveis (progresso derivado, contagem de Work Items, tags de repo, `LifecycleActions` sem navegação, paginação); forms inline de criação removidos. Filtros por status/busca/ordenação continuam pendentes (PF-08).
+3. ~~**Modal de criação de Épico**~~ — **entregue (PF-04)**: `CreateEpicModal` (`components/project/`) aberto pelo `+ Novo Épico` do header e do empty state; título obrigatório, descrição opcional, `creating…` bloqueia campos, sucesso fecha + toast `ok` via `ToastStack`, erro mantém o modal aberto com a mensagem real do servidor em `role="alert"`; `Esc`/click-fora/cancelar fecham sem criar.
 4. **Modal de criação de Feature** — extrair form + preview de template para modal com épico pré-selecionado.
 5. **Lista de Features com filtros** — filtro por status de run, tipo e repo não existe em lugar nenhum no contexto do épico (só no Board, escopo diferente).
 6. **Status "não iniciada" como pill própria** — hoje feature sem run mostra `aborted` reaproveitado (`status={run?.status ?? 'aborted'}`); criar estado visual correto.

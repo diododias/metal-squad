@@ -1,0 +1,94 @@
+import React, { useEffect, useRef, useState } from 'react';
+import { Button } from '../core/Button.js';
+import { EditableTextField } from '../core/EditableTextField.js';
+import { Modal } from '../feedback/Modal.js';
+import type { WebSocketClientMessage, WebSocketServerMessage } from '../../../types.js';
+
+let sequence = 0;
+const nextRequestId = (): string => `epic-${String(Date.now())}-${String(++sequence)}`;
+
+export interface CreateEpicModalProps {
+  open: boolean;
+  projectId: string;
+  send: (message: WebSocketClientMessage) => void;
+  actionResults: Record<string, Extract<WebSocketServerMessage, { type: 'action:result' }>>;
+  onClose: () => void;
+  /** Fired once after the server confirms the Epic was created. */
+  onCreated?: (title: string) => void;
+}
+
+/**
+ * Modal form behind the `+ Novo Épico` action on the project detail page.
+ * Sends the existing `action:createEpic` and tracks its `action:result` by
+ * requestId: success closes the modal, an error keeps it open showing the
+ * server message. Opening always starts from a blank draft.
+ */
+export function CreateEpicModal({ open, projectId, send, actionResults, onClose, onCreated }: CreateEpicModalProps): React.JSX.Element | null {
+  const [title, setTitle] = useState('');
+  const [description, setDescription] = useState('');
+  const [pendingRequestId, setPendingRequestId] = useState<string | null>(null);
+  const [error, setError] = useState<string>();
+  const handledResults = useRef(new Set<string>());
+
+  useEffect(() => {
+    if (!open) return;
+    setTitle('');
+    setDescription('');
+    setPendingRequestId(null);
+    setError(undefined);
+    document.getElementById('create-epic-title')?.focus();
+  }, [open]);
+
+  useEffect(() => {
+    if (!pendingRequestId || handledResults.current.has(pendingRequestId)) return;
+    const result = actionResults[pendingRequestId];
+    if (!result) return;
+    handledResults.current.add(pendingRequestId);
+    setPendingRequestId(null);
+    if (result.payload.ok) {
+      onCreated?.(title.trim());
+      onClose();
+    } else if ('error' in result.payload) {
+      setError(result.payload.error.message);
+    }
+  }, [actionResults, pendingRequestId, onClose, onCreated, title]);
+
+  const pending = pendingRequestId !== null;
+
+  useEffect(() => {
+    if (!open || pending) return;
+    const onKeyDown = (event: KeyboardEvent): void => { if (event.key === 'Escape') onClose(); };
+    window.addEventListener('keydown', onKeyDown);
+    return (): void => { window.removeEventListener('keydown', onKeyDown); };
+  }, [open, pending, onClose]);
+
+  if (!open) return null;
+
+  const createEpic = (): void => {
+    const trimmed = title.trim();
+    if (!trimmed || pending) return;
+    const requestId = nextRequestId();
+    setError(undefined);
+    setPendingRequestId(requestId);
+    send({
+      type: 'action:createEpic',
+      requestId,
+      projectId,
+      title: trimmed,
+      description: description.trim() ? description.trim() : null,
+    });
+  };
+
+  return <Modal open={open} onClose={pending ? (): void => undefined : onClose} width={520}>
+    <div role="dialog" aria-label="Create Epic" style={{ padding: 20, display: 'grid', gap: 12 }}>
+      <h2 style={{ margin: 0, fontFamily: 'var(--font-display)', fontWeight: 400 }}>+ Novo Épico</h2>
+      <EditableTextField id="create-epic-title" label="Title" value={title} initialValue="" onChange={setTitle} disabled={pending} placeholder="Epic title (required)" />
+      <EditableTextField id="create-epic-description" label="Description" value={description} initialValue="" onChange={setDescription} disabled={pending} placeholder="Optional description" />
+      {error && <p role="alert" style={{ margin: 0, color: 'var(--accent-danger)', fontSize: 'var(--text-xs)' }}>{error}</p>}
+      <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
+        <Button size="sm" disabled={pending} onClick={onClose}>cancelar</Button>
+        <Button variant="primary" size="sm" disabled={pending || !title.trim()} onClick={createEpic}>{pending ? 'creating…' : 'criar'}</Button>
+      </div>
+    </div>
+  </Modal>;
+}
