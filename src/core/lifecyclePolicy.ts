@@ -190,3 +190,138 @@ export function classifyState(db: Database.Database, kind: LifecycleEntityKind, 
 export function canArchive(state: LifecycleState): boolean {
   return state !== 'running';
 }
+
+
+/**
+ * The lifecycle actions the UI may offer for an entity, computed server-side so
+ * the client never re-derives the policy (PRJ-18). Booleans mirror the exact
+ * accept/reject checks in the repo-layer archive/delete/restore mutations; a
+ * `false` here means the corresponding WS action would be refused right now.
+ */
+export interface AllowedLifecycle {
+  /** Authoritative pristine/running/historical classification. */
+  state: LifecycleState;
+  /** Already archived (archived_at set, deleted_at null) — restore is offered. */
+  archived: boolean;
+  /** Logically deleted (tombstone) — no common-flow action is offered. */
+  deleted: boolean;
+  /** Archive (reversible) is permitted. */
+  archive: boolean;
+  /** Logical delete (tombstone, not restorable via the common flow) is permitted. */
+  delete: boolean;
+  /** Entity is running: the UI offers cancel first before any lifecycle action. */
+  cancel: boolean;
+  /** Restore of a previously archived entity is permitted (ancestor not archived). */
+  restore: boolean;
+  /** Human-readable reason lifecycle mutations are blocked, or null when the
+   * entity is fully actionable. Surfaced next to a disabled destructive action. */
+  blockedReason: string | null;
+}
+
+interface LifecycleColumns {
+  archivedAt: string | null;
+  deletedAt: string | null;
+}
+
+function readLifecycleColumns(db: Database.Database, kind: LifecycleEntityKind, id: string): LifecycleColumns | null {
+  const table = kind === 'work_item' ? 'backlog_features' : kind === 'epic' ? 'backlog_epics' : 'projects';
+  const idColumn = kind === 'work_item' ? 'feature_id' : kind === 'epic' ? 'epic_id' : 'project_id';
+  const row = db.prepare(
+    `SELECT archived_at AS archivedAt, deleted_at AS deletedAt FROM ${table} WHERE ${idColumn} = ?`,
+  ).get(id) as LifecycleColumns | undefined;
+  return row ?? null;
+}
+
+/** Whether the entity's parent is archived/deleted, which blocks restore. */
+function hasArchivedAncestor(db: Database.Database, kind: LifecycleEntityKind, id: string): boolean {
+  if (kind === 'work_item') {
+    const row = db.prepare(
+      `SELECT e.archived_at AS archivedAt, e.deleted_at AS deletedAt
+         FROM backlog_features f JOIN backlog_epics e ON e.epic_id = f.epic_id
+        WHERE f.feature_id = ?`,
+    ).get(id) as LifecycleColumns | undefined;
+    return Boolean(row && (row.archivedAt !== null || row.deletedAt !== null));
+  }
+  if (kind === 'epic') {
+    const row = db.prepare(
+      `SELECT p.archived_at AS archivedAt, p.deleted_at AS deletedAt
+         FROM backlog_epics e JOIN projects p ON p.project_id = e.project_id
+        WHERE e.epic_id = ?`,
+    ).get(id) as LifecycleColumns | undefined;
+    return Boolean(row && (row.archivedAt !== null || row.deletedAt !== null));
+  }
+  return false; // Project has no ancestor.
+}
+
+/** Computes the delete decision and, when refused, the reason. Mirrors the
+ * repo-layer delete guards exactly so the button state never disagrees with the
+ * eventual WS result. Assumes the entity is not archived/deleted. */
+function deleteDecision(db: Database.Database, kind: LifecycleEntityKind, id: string, state: LifecycleState): { delete: boolean; reason: string | null } {
+  if (state === 'running') return { delete: false, reason: 'It is running; cancel it first.' };
+  if (state === 'historical') return { delete: false, reason: 'It has run history and can be archived but not deleted.' };
+  switch (kind) {
+    case 'work_item': {
+      const refs = collectWorkItemReferences(db, id);
+      if (refs.activeGate) return { delete: false, reason: 'It has an unresolved gate.' };
+      if (refs.topic) return { delete: false, reason: 'It has a topic association.' };
+      if (refs.dependents.length > 0) return { delete: false, reason: `It is a dependency of ${refs.dependents.join(', ')}.` };
+      return { delete: true, reason: null };
+    }
+    case 'epic':
+      if (epicHasUndeletedWorkItems(db, id)) return { delete: false, reason: 'It still has Work Items that are not deleted.' };
+      return { delete: true, reason: null };
+    case 'project':
+      if (projectHasUndeletedEpics(db, id)) return { delete: false, reason: 'It still has Epics that are not deleted.' };
+      if (projectHasLinkedRepos(db, id)) return { delete: false, reason: 'It still has linked repositories.' };
+      return { delete: true, reason: null };
+  }
+}
+
+/**
+ * Projects the full set of lifecycle actions the UI may offer for one entity.
+ * Single source of truth consumed by the web state builder (PRJ-18) so the
+ * client only enables/disables buttons — it never recomputes the policy.
+ */
+export function projectLifecycle(db: Database.Database, kind: LifecycleEntityKind, id: string): AllowedLifecycle {
+  const columns = readLifecycleColumns(db, kind, id);
+  const archived = Boolean(columns && columns.archivedAt !== null && columns.deletedAt === null);
+  const deleted = Boolean(columns && columns.deletedAt !== null);
+
+  // A tombstoned entity offers nothing through the common flow.
+  if (deleted) {
+    return { state: 'historical', archived: false, deleted: true, archive: false, delete: false, cancel: false, restore: false, blockedReason: 'It is deleted.' };
+  }
+
+  const state = classifyState(db, kind, id);
+
+  if (archived) {
+    const restore = !hasArchivedAncestor(db, kind, id);
+    return {
+      state,
+      archived: true,
+      deleted: false,
+      archive: false,
+      delete: false,
+      cancel: false,
+      restore,
+      blockedReason: restore ? null : 'An ancestor is archived; restore it first.',
+    };
+  }
+
+  if (state === 'running') {
+    return { state, archived: false, deleted: false, archive: false, delete: false, cancel: true, restore: false, blockedReason: 'It is running; cancel it first.' };
+  }
+
+  const archive = canArchive(state);
+  const decision = deleteDecision(db, kind, id, state);
+  return {
+    state,
+    archived: false,
+    deleted: false,
+    archive,
+    delete: decision.delete,
+    cancel: false,
+    restore: false,
+    blockedReason: decision.delete ? null : decision.reason,
+  };
+}

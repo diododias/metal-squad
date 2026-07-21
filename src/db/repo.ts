@@ -3,6 +3,7 @@ import { existsSync, statSync } from 'node:fs';
 import { getDb, withTransaction } from './index.js';
 import {
   AncestorArchivedError,
+  type LifecycleEntityKind,
   EntityHasHistoryError,
   EntityInUseError,
   EntityRunningError,
@@ -29,6 +30,8 @@ import {
   epicHasUndeletedWorkItems,
   projectHasLinkedRepos,
   projectHasUndeletedEpics,
+  projectLifecycle,
+  type AllowedLifecycle,
 } from '../core/lifecyclePolicy.js';
 import { listOccupiedFeatureIds } from './backlogCatalog.js';
 import { allocateFeatureId } from '../core/backlog/featureId.js';
@@ -309,6 +312,29 @@ export function listEpics(projectId?: string): EpicRow[] {
     ? `${EPIC_SELECT} WHERE project_id = ? AND archived_at IS NULL AND deleted_at IS NULL ORDER BY position ASC, updated_at ASC`
     : `${EPIC_SELECT} WHERE archived_at IS NULL AND deleted_at IS NULL ORDER BY position ASC, updated_at ASC`;
   return (projectId ? getDb('readonly').prepare(query).all(projectId) : getDb('readonly').prepare(query).all()) as EpicRow[];
+}
+
+
+/** A single entity to project lifecycle actions for. */
+export interface LifecycleProjectionKey {
+  kind: LifecycleEntityKind;
+  id: string;
+}
+
+/**
+ * Computes the policy-permitted lifecycle actions (PRJ-18) for a batch of
+ * entities in one read-only pass, keyed by `${kind}:${id}`. The web state
+ * builder calls this so the client consumes the projection instead of
+ * re-deriving the policy. Missing DB file yields an empty map.
+ */
+export function projectLifecycleActions(keys: LifecycleProjectionKey[]): Record<string, AllowedLifecycle> {
+  const result: Record<string, AllowedLifecycle> = {};
+  if (!hasDbFile() || keys.length === 0) return result;
+  const database = getDb('readonly');
+  for (const { kind, id } of keys) {
+    result[`${kind}:${id}`] = projectLifecycle(database, kind, id);
+  }
+  return result;
 }
 
 export function updateEpic(epicId: string, patch: UpdateEpicPatch, expectedRevision: number, options: { audit?: AuditContext } = {}): EpicRow {
