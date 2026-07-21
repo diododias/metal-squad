@@ -323,7 +323,7 @@ export function App(): React.JSX.Element {
   } else if (route.page === 'projects') {
     page = state && <ProjectsPage state={state} send={send} actionResults={projectActionResults} />;
   } else if (route.page === 'project-detail') {
-    page = state && <ProjectDetailPage state={state} projectId={route.projectId} send={send} actionResults={projectActionResults} onBack={() => { navigate('/projects'); }} />;
+    page = state && <ProjectDetailPage state={state} projectId={route.projectId} send={send} actionResults={projectActionResults} onBack={() => { navigate('/projects'); }} onToast={pushToast} />;
   } else if (route.page === 'epic-detail') {
     page = state && (
       <EpicDetailPage
@@ -341,7 +341,7 @@ export function App(): React.JSX.Element {
     const epic = state?.epics.find((candidate) => candidate.epicId === route.epicId && candidate.projectId === route.projectId);
     const project = state?.projects.find((candidate) => candidate.projectId === route.projectId);
     const epicPath = `/projects/${route.projectId}/epics/${route.epicId}`;
-    if (state && (!item || item.epicId !== route.epicId || !epic || !project)) {
+    if (state && (item?.epicId !== route.epicId || !epic || !project)) {
       page = (
         <div style={{ padding: 24 }}>
           <p>Work Item not found in this Epic.</p>

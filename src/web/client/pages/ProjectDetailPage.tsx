@@ -4,22 +4,26 @@ import { Card } from '../components/core/Card.js';
 import { StatusPill } from '../components/core/StatusPill.js';
 import { Tag } from '../components/core/Tag.js';
 import { LifecycleActions } from '../components/LifecycleActions.js';
+import { CreateEpicModal } from '../components/project/CreateEpicModal.js';
 import { WorkflowTemplatesSection } from '../components/WorkflowTemplatesSection.js';
 import { ProgressBar } from '../components/data/ProgressBar.js';
 import { PageHeader } from '../PageHeader.js';
 import type { EpicRow as EpicRowData } from '../../../db/repo.js';
+import type { ToastStackItem } from '../components/feedback/ToastStack.js';
 import type { MsqWebState, WebSocketClientMessage, WebSocketServerMessage } from '../../types.js';
 
 const PAGE_SIZE = 8;
 
-export function ProjectDetailPage({ state, projectId, send, actionResults, onBack }: {
+export function ProjectDetailPage({ state, projectId, send, actionResults, onBack, onToast }: {
   state: MsqWebState; projectId: string; send: (message: WebSocketClientMessage) => void;
   actionResults: Record<string, Extract<WebSocketServerMessage, { type: 'action:result' }>>; onBack: () => void;
+  onToast?: (item: ToastStackItem) => void;
 }): React.JSX.Element {
   const project = state.projects.find((item) => item.projectId === projectId);
   const repos = state.repositories.filter((repo) => repo.projectId === projectId);
   const epics = state.epics.filter((epic) => epic.projectId === projectId && epic.archivedAt === null);
   const [page, setPage] = useState(0);
+  const [showCreateEpic, setShowCreateEpic] = useState(false);
 
   if (!project) return <div style={{ padding: 24 }}><p>Project not found or no longer active.</p><Button onClick={onBack}>back to Projects</Button></div>;
 
@@ -30,7 +34,7 @@ export function ProjectDetailPage({ state, projectId, send, actionResults, onBac
       title={project.name}
       breadcrumb={[{ label: 'Projects', href: '/projects' }]}
       actions={<div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-        <Button variant="primary" size="sm" disabled title="Epic creation moves to a modal in an upcoming release">+ Novo Épico</Button>
+        <Button variant="primary" size="sm" onClick={() => { setShowCreateEpic(true); }}>+ Novo Épico</Button>
         <LifecycleActions
           kind="project"
           id={project.projectId}
@@ -57,7 +61,7 @@ export function ProjectDetailPage({ state, projectId, send, actionResults, onBac
         <h2 style={heading}>Epics</h2>
         {epics.length === 0 && <Card>
           <p style={muted}>No Epics yet.</p>
-          <Button variant="primary" size="sm" disabled title="Epic creation moves to a modal in an upcoming release">+ Novo Épico</Button>
+          <Button variant="primary" size="sm" onClick={() => { setShowCreateEpic(true); }}>+ Novo Épico</Button>
         </Card>}
         {visible.map((epic) => <EpicRow key={epic.epicId} epic={epic} state={state} projectId={projectId} send={send} actionResults={actionResults} />)}
         {epics.length > PAGE_SIZE && <div style={{ marginTop: 10, display: 'flex', gap: 8 }}>
@@ -67,6 +71,14 @@ export function ProjectDetailPage({ state, projectId, send, actionResults, onBac
       </section>
       <section><h2 style={heading}>Workflow Templates</h2><WorkflowTemplatesSection state={state} projectId={projectId} send={send} actionResults={actionResults} /></section>
     </main>
+    <CreateEpicModal
+      open={showCreateEpic}
+      projectId={projectId}
+      send={send}
+      actionResults={actionResults}
+      onClose={() => { setShowCreateEpic(false); }}
+      onCreated={(title) => { onToast?.({ id: `epic-created-${title}`, tone: 'ok', message: `Epic "${title}" created.`, source: 'Epics' }); }}
+    />
   </div>;
 }
 
