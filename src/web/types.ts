@@ -453,6 +453,9 @@ export type WorkItemActionResult =
 export interface WorkflowTemplateActionError {
   code: string;
   message: string;
+  /** Present only for `WORKFLOW_TEMPLATE_IN_USE`: the type mappings blocking
+   * archive, so the UI can offer explicit reassociation instead of a dead end. */
+  mappings?: { projectId: string; workItemType: string }[];
 }
 
 export type WorkflowTemplateActionResult =
@@ -489,6 +492,25 @@ export interface WorkflowTemplatePreview {
 export type ResolveWorkflowTemplateResult =
   | { type: 'action:result'; payload: { requestId: string; ok: true; preview: WorkflowTemplatePreview } }
   | { type: 'action:result'; payload: { requestId: string; ok: false; error: WorkItemActionError } };
+
+/** Full definition of a template, fetched on demand (PRJ-26) when the user
+ * opens it for editing/duplication — `workflowTemplates` in state only ever
+ * carries the lightweight summary. */
+export type WorkflowTemplateDefinitionResult =
+  | { type: 'action:result'; payload: { requestId: string; ok: true; templateId: string; definition: unknown } }
+  | { type: 'action:result'; payload: { requestId: string; ok: false; error: WorkflowTemplateActionError } };
+
+/** Per-repo skill validation matrix for a draft template definition, checked
+ * against every active repo of a Project before save/mapping (PRJ-26). */
+export interface WorkflowTemplateValidationEntry {
+  repoId: string;
+  repoLabel: string;
+  missing: string[];
+}
+
+export type ValidateWorkflowTemplateResult =
+  | { type: 'action:result'; payload: { requestId: string; ok: true; valid: boolean; matrix: WorkflowTemplateValidationEntry[] } }
+  | { type: 'action:result'; payload: { requestId: string; ok: false; error: WorkflowTemplateActionError } };
 
 export type WebSocketClientMessage =
   | { type: 'auth'; token: string }
@@ -529,6 +551,8 @@ export type WebSocketClientMessage =
   | { type: 'action:duplicateWorkflowTemplate'; requestId: string; templateId: string; projectId: string; name?: string }
   | { type: 'action:archiveWorkflowTemplate'; requestId: string; templateId: string }
   | { type: 'action:setTypeTemplate'; requestId: string; projectId: string; workItemType: MsqWorkItemType; templateId: string }
+  | { type: 'action:getWorkflowTemplateDefinition'; requestId: string; templateId: string }
+  | { type: 'action:validateWorkflowTemplate'; requestId: string; projectId: string; definition: unknown }
   | { type: 'action:changeWorkItemType'; requestId: string; workItemId: string; workItemType: MsqWorkItemType; expectedRevision: number; preview?: boolean }
   | {
       type: 'action:updateEpic';
@@ -577,8 +601,8 @@ export type WebSocketServerMessage =
   | WorkflowTemplateActionResult
   | WorkItemTypeChangeResult
   | ResolveWorkflowTemplateResult
-  | ArchivedQueryResult
-  | AuditTrailQueryResult
+  | WorkflowTemplateDefinitionResult
+  | ValidateWorkflowTemplateResult
   | { type: 'run:detail'; payload: { runId: number; taskRuns: TaskRun[]; breakdown: RunBreakdown | null; sessionStatus: SessionStatusSnapshot | null; statusHistory: SessionStatusSnapshot[]; toolCalls: ToolCallRecord[] } }
   | { type: 'run:history'; payload: { featureId: string; runs: RunHistoryEntry[] } }
   | { type: 'run:changes'; payload: RunChangesPayload }
