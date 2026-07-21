@@ -106,7 +106,7 @@ Breadcrumb sempre visível: `Projects › {Projeto} › {Épico}`.
 5. **Lista de Features com filtros** — filtro por status de run, tipo e repo não existe em lugar nenhum no contexto do épico (só no Board, escopo diferente).
 6. **Status "não iniciada" como pill própria** — hoje feature sem run mostra `aborted` reaproveitado (`status={run?.status ?? 'aborted'}`); criar estado visual correto.
 7. **Realocar Workflow Templates** — tirar do fluxo de gestão; mover para settings do projeto.
-8. **Breadcrumb de 2 níveis** — `PageHeader` aceita um nó só; suportar `Projects › Projeto` no detalhe do épico.
+8. ~~**Breadcrumb de 2 níveis**~~ — **entregue (PF-03)**: `PageHeader` aceita `BreadcrumbItem[]` (trilha N níveis clicável, retrocompatível com nó único); `EpicDetailPage` mostra `Projects › {Projeto}` e `ProjectDetailPage` migrou para o formato array.
 9. **Consistência de erro na criação** — "Could not save epic." atual não diz o motivo; propagar mensagem real do servidor no modal.
 10. **(Opcional) Sync manual ↔ derivado** — sugerir "marcar como done" quando progress = N/N.
 

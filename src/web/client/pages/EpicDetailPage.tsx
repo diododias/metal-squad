@@ -47,11 +47,10 @@ export function EpicDetailPage({ state, projectId, epicId, send, actionResults, 
   return <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
     <PageHeader
       title={epic.title}
-      breadcrumb={<span>
-        <button onClick={() => { window.location.hash = '/projects'; }} style={linkStyle}>Projects</button>
-        <span style={{ color: 'var(--text-faint)' }}> › </span>
-        <button onClick={onBack} style={linkStyle}>{project.name}</button>
-      </span>}
+      breadcrumb={[
+        { label: 'Projects', href: '/projects' },
+        { label: project.name, href: `/projects/${projectId}` },
+      ]}
       actions={<LifecycleActions
         kind="epic"
         id={epic.epicId}
@@ -118,7 +117,6 @@ export function EpicDetailPage({ state, projectId, epicId, send, actionResults, 
 const heading: React.CSSProperties = { margin: '0 0 10px', fontFamily: 'var(--font-display)', fontWeight: 400 };
 const muted: React.CSSProperties = { color: 'var(--text-dim)', margin: '4px 0' };
 const tags: React.CSSProperties = { display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 10 };
-const linkStyle: React.CSSProperties = { background: 'none', border: 0, color: 'var(--accent-info)', padding: 0, cursor: 'pointer' };
 const rowStyle: React.CSSProperties = {
   border: '1px solid var(--border-dim)',
   borderRadius: 'var(--radius-sm)',

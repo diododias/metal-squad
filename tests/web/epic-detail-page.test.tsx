@@ -114,6 +114,20 @@ describe('epic-detail route parsing', () => {
 });
 
 describe('EpicDetailPage', () => {
+  it('renders a two-level breadcrumb that navigates to the project detail and projects list', () => {
+    window.location.hash = '';
+    const container = render(baseState());
+    const buttons = [...container.querySelectorAll('button')];
+    const projectCrumb = buttons.find((button) => button.textContent === 'Project One');
+    const projectsCrumb = buttons.find((button) => button.textContent === 'Projects');
+    expect(projectCrumb).toBeDefined();
+    expect(projectsCrumb).toBeDefined();
+    act(() => { projectCrumb?.click(); });
+    expect(window.location.hash).toBe('#/projects/proj-1');
+    act(() => { projectsCrumb?.click(); });
+    expect(window.location.hash).toBe('#/projects');
+  });
+
   it('renders the epic summary with derived progress and manual status', () => {
     const container = render(baseState());
     expect(container.textContent).toContain('Epic One');
