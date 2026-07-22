@@ -92,8 +92,8 @@ describe('ProjectDetailPage as epic list', () => {
     expect(allRows).toHaveLength(1);
     expect(container.textContent).toContain('Epic One');
     expect(container.textContent).toContain('2 work items');
-    expect(container.textContent).toContain('criado');
-    expect(container.textContent).toContain('atualizado');
+    expect(container.textContent).toContain('created');
+    expect(container.textContent).toContain('updated');
   });
 
   it('navigates to the epic detail hash on row click', () => {
@@ -139,10 +139,10 @@ describe('ProjectDetailPage as epic list', () => {
     expect(rows(container)).toHaveLength(2);
   });
 
-  it('shows the empty state with a "+ Novo Épico" CTA', () => {
+  it('shows the empty state with a "+ New Epic" CTA', () => {
     const container = render(baseState({ epics: [] } as unknown as Partial<MsqWebState>));
     expect(container.textContent).toContain('No Epics yet.');
-    const ctas = [...container.querySelectorAll('button')].filter((button) => button.textContent === '+ Novo Épico');
+    const ctas = [...container.querySelectorAll('button')].filter((button) => button.textContent === '+ New Epic');
     expect(ctas.length).toBeGreaterThanOrEqual(1);
   });
 

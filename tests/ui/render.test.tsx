@@ -94,7 +94,7 @@ describe('StatsBar', () => {
         done={3}
         todo={5}
         execution={2}
-        falha={1}
+        failed={1}
         gatesPending={4}
         tokenStats={{ status: 'ready', totalTokens: 1500, error: null }}
       />,
@@ -113,7 +113,7 @@ describe('StatsBar', () => {
         done={0}
         todo={0}
         execution={0}
-        falha={0}
+        failed={0}
         gatesPending={0}
         tokenStats={{ status: 'loading', totalTokens: null, error: null }}
       />,
@@ -127,7 +127,7 @@ describe('StatsBar', () => {
         done={0}
         todo={0}
         execution={0}
-        falha={0}
+        failed={0}
         gatesPending={0}
         tokenStats={{ status: 'error', totalTokens: 900, error: 'db locked' }}
       />,
@@ -144,7 +144,7 @@ describe('StatsBar', () => {
         done={3}
         todo={5}
         execution={2}
-        falha={1}
+        failed={1}
         gatesPending={4}
         tokenStats={{ status: 'ready', totalTokens: 1500, error: null }}
         compact
