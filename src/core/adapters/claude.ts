@@ -155,11 +155,6 @@ export const claudeAdapter: ToolAdapter = {
       return { ok: false, summary: `exit ${String(code)}. ${partial}` };
     }
 
-    const limitMessage = detectSessionLimit(stdout, stderr);
-    if (limitMessage) {
-      return { ok: false, blocked: true, summary: `session limit reached: ${limitMessage}` };
-    }
-
     const resultEvent = findResultEvent(stdout);
     const usage = this.parseUsage?.(stdout) ?? undefined;
     const session = buildClaudeSessionHandle(stdout, assignedSessionId, opts.runId);

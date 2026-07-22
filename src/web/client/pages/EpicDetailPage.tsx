@@ -190,8 +190,8 @@ export function EpicDetailPage({ state, projectId, epicId, send, actionResults, 
         </label>
       </div>}
       actions={<div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-        <Button variant="primary" size="sm" onClick={() => { setShowCreateWorkItem(true); }}>+ Nova Feature</Button>
-        <Button size="sm" onClick={() => { setShowEditEpic(true); }}>editar Épico</Button>
+        <Button variant="primary" size="sm" onClick={() => { setShowCreateWorkItem(true); }}>+ New Feature</Button>
+        <Button size="sm" onClick={() => { setShowEditEpic(true); }}>Edit Epic</Button>
         <LifecycleActions
           kind="epic"
           id={epic.epicId}
@@ -271,7 +271,7 @@ export function EpicDetailPage({ state, projectId, epicId, send, actionResults, 
               <Tag>{item.repoLabel ?? 'unresolved repo'}</Tag>
               <StatusPill status={run?.status ?? 'not_started'} label={run?.status ?? 'not started'} spinner={run?.status === 'running'} />
               {item.dependsOn.map((dependency) => <DependencyTag key={dependency} depId={dependency} doneFeatureIds={doneFeatureIds} failedFeatureIds={failedFeatureIds} />)}
-              {item.updatedAt && <span style={{ color: 'var(--text-faint)', fontSize: 'var(--text-xs)' }}>atualizado {new Date(item.updatedAt).toLocaleDateString()}</span>}
+              {item.updatedAt && <span style={{ color: 'var(--text-faint)', fontSize: 'var(--text-xs)' }}>updated {new Date(item.updatedAt).toLocaleDateString()}</span>}
             </div>
             {item.workflow.stages.length > 0 && <div style={{ marginTop: 8 }}>
               <WorkflowStepper stages={item.workflow.stages} currentStage={null} allPending size="compact" />

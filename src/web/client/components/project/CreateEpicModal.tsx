@@ -94,7 +94,7 @@ export function CreateEpicModal({ open, projectId, send, actionResults, onClose,
 
   return <Modal open={open} onClose={pending ? (): void => undefined : onClose} width={520}>
     <div role="dialog" aria-label="Create Epic" style={{ padding: 20, display: 'grid', gap: 12 }}>
-      <h2 style={{ margin: 0, fontFamily: 'var(--font-display)', fontWeight: 400 }}>+ Novo Épico</h2>
+      <h2 style={{ margin: 0, fontFamily: 'var(--font-display)', fontWeight: 400 }}>+ New Epic</h2>
       <EditableTextField id="create-epic-title" label="Title" value={title} initialValue="" onChange={setTitle} disabled={pending} placeholder="Epic title (required)" />
       <EditableTextField id="create-epic-description" label="Description" value={description} initialValue="" onChange={setDescription} disabled={pending} placeholder="Optional description" />
       {error && <p role="alert" style={{ margin: 0, color: 'var(--accent-danger)', fontSize: 'var(--text-xs)' }}>{error}</p>}

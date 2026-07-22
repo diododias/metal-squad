@@ -206,7 +206,7 @@ describe('Create Epic modal from ProjectDetailPage (PF-04, PF-07)', () => {
   }
 
   function openCreateEpicModal(el: HTMLDivElement): void {
-    const btn = [...el.querySelectorAll('button')].find((b) => b.textContent === '+ Novo Épico');
+    const btn = [...el.querySelectorAll('button')].find((b) => b.textContent === '+ New Epic');
     act(() => { btn?.click(); });
   }
 

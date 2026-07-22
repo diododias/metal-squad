@@ -144,7 +144,7 @@ export function CreateWorkItemModal({ open, projectId, defaultEpicId, state, sen
 
   return <Modal open={open} onClose={pending ? (): void => undefined : onClose} width={560}>
     <div role="dialog" aria-label="Create Work Item" style={{ padding: 20, display: 'grid', gap: 12 }}>
-      <h2 style={{ margin: 0, fontFamily: 'var(--font-display)', fontWeight: 400 }}>+ Nova Feature</h2>
+      <h2 style={{ margin: 0, fontFamily: 'var(--font-display)', fontWeight: 400 }}>+ New Feature</h2>
       {repos.length === 0 ? <>
         <p style={{ margin: 0, color: 'var(--text-dim)' }}>Link a repository before creating a Work Item. The server rejects targets outside this Project.</p>
         <div style={{ display: 'flex', justifyContent: 'flex-end' }}><Button size="sm" onClick={onClose}>fechar</Button></div>

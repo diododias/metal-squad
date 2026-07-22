@@ -214,12 +214,12 @@ export function App(): React.ReactElement {
   // whatever run happens to sit at the same global offset.
   const executionRuns = useMemo(() => runs.filter((run) => getRunGroup(run.status) === 'execution'), [runs]);
   const doneRunsList = useMemo(() => runs.filter((run) => getRunGroup(run.status) === 'done'), [runs]);
-  const falhaRunsList = useMemo(() => runs.filter((run) => getRunGroup(run.status) === 'canceled'), [runs]);
+  const failedRunsList = useMemo(() => runs.filter((run) => getRunGroup(run.status) === 'canceled'), [runs]);
   const columnRunLists = useMemo((): Partial<Record<DashboardGroupId, RunSummary[]>> => ({
     execution: executionRuns,
     done: doneRunsList,
-    canceled: falhaRunsList,
-  }), [executionRuns, doneRunsList, falhaRunsList]);
+    canceled: failedRunsList,
+  }), [executionRuns, doneRunsList, failedRunsList]);
   // F31 "Riscos de UX resolvidos" item 5 / "Navegacao e casos de borda":
   // resolving the last gate must never leave focus orphaned on a now-empty
   // column — it falls back to EXECUTION, or the first non-empty non-TODO
@@ -234,7 +234,7 @@ export function App(): React.ReactElement {
       ? 'execution'
       : doneRunsList.length > 0
         ? 'done'
-        : falhaRunsList.length > 0
+        : failedRunsList.length > 0
           ? 'canceled'
           : storedActiveColumn
     : storedActiveColumn;
@@ -309,7 +309,7 @@ export function App(): React.ReactElement {
   // header stats and the columns can never disagree on what counts as
   // "execução" vs. "falha".
   const executionCount = executionRuns.length;
-  const falhaCount = falhaRunsList.length;
+  const failedCount = failedRunsList.length;
   // F31 "Riscos de UX resolvidos" item 2: while a gate is pending, a/s/r/F
   // capture regardless of which column is focused — so `focusContext`
   // resolves to 'gates' whenever there's a decision waiting, overriding
@@ -915,7 +915,7 @@ export function App(): React.ReactElement {
                 done={doneRuns}
                 todo={pendingFeatures.length}
                 execution={executionCount}
-                falha={falhaCount}
+                failed={failedCount}
                 gatesPending={gates.length}
                 tokenStats={tokenStats}
                 compact={verticalBudget === 'short'}
@@ -927,7 +927,7 @@ export function App(): React.ReactElement {
               done={doneRuns}
               todo={pendingFeatures.length}
               execution={executionCount}
-              falha={falhaCount}
+              failed={failedCount}
               gatesPending={gates.length}
               tokenStats={tokenStats}
               compact
