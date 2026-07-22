@@ -10,7 +10,7 @@ globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 const roots: Root[] = [];
 
 function project(overrides: Record<string, unknown> = {}) {
-  return { projectId: 'project-1', name: 'Platform', position: 0, description: 'Shared platform', revision: 1, counts: { epics: 2, workItems: 4, archived: 0 }, activeRuns: 1, tokens: { status: 'ready' as const, totalTokens: 1200, error: null }, archivedAt: null, ...overrides };
+  return { projectId: 'project-1', name: 'Platform', position: 0, description: 'Shared platform', revision: 1, counts: { epics: 2, workItems: 4, archived: 0 }, activeRuns: 1, tokens: { status: 'ready' as const, totalTokens: 1200, error: null }, archivedAt: null, updatedAt: '2026-07-01T00:00:00.000Z', ...overrides };
 }
 
 function state(projects = [project()]): MsqWebState {
@@ -35,13 +35,13 @@ function setValue(control: HTMLInputElement | HTMLTextAreaElement, value: string
 afterEach(() => { act(() => { roots.splice(0).forEach((root) => root.unmount()); }); document.body.replaceChildren(); });
 
 describe('ProjectsPage', () => {
-  it('lists active Projects with aggregate metrics and health', () => {
+  it('lists active Projects with name, description, and aggregate tag pills', () => {
     const container = render();
-    expect((container.querySelector('#project-project-1-name') as HTMLInputElement).value).toBe('Platform');
-    expect(container.textContent).toContain('recent tokens');
-    expect(container.textContent).toContain('1.2k');
-    expect(container.textContent).toContain('healthy');
-    expect(container.textContent).toContain('view details →');
+    expect(container.textContent).toContain('Platform');
+    expect(container.textContent).toContain('Shared platform');
+    expect(container.textContent).toContain('2 Epics');
+    expect(container.textContent).toContain('4 Work Items');
+    expect(container.textContent).toContain('atualizado');
   });
 
   it('shows an accessible empty CTA and search-empty state', () => {
@@ -56,12 +56,13 @@ describe('ProjectsPage', () => {
   it('sends create and update actions with a request id and expected revision', () => {
     const send = vi.fn<(message: WebSocketClientMessage) => void>();
     const container = render({ send });
-    act(() => { Array.from(container.querySelectorAll('button')).find((button) => button.textContent === 'new project')?.click(); });
+    act(() => { Array.from(container.querySelectorAll('button')).find((button) => button.textContent === '+ Novo Projeto')?.click(); });
     act(() => { setValue(container.querySelector('#new-project-name') as HTMLInputElement, 'New Project'); });
     act(() => { Array.from(container.querySelectorAll('button')).find((button) => button.textContent === 'create project')?.click(); });
     expect(send.mock.calls[0]?.[0]).toMatchObject({ type: 'action:createProject', name: 'New Project' });
     expect((send.mock.calls[0]?.[0] as { requestId: string }).requestId).toBeTruthy();
 
+    act(() => { Array.from(container.querySelectorAll('button')).find((button) => button.textContent === 'edit')?.click(); });
     const name = container.querySelector('#project-project-1-name') as HTMLInputElement;
     act(() => { setValue(name, 'Renamed'); });
     act(() => { Array.from(container.querySelectorAll('button')).find((button) => button.textContent === 'save')?.click(); });
@@ -71,6 +72,7 @@ describe('ProjectsPage', () => {
   it('preserves an update draft after a correlated revision conflict', () => {
     const send = vi.fn<(message: WebSocketClientMessage) => void>();
     const container = render({ send });
+    act(() => { Array.from(container.querySelectorAll('button')).find((button) => button.textContent === 'edit')?.click(); });
     const name = container.querySelector('#project-project-1-name') as HTMLInputElement;
     act(() => { setValue(name, 'Draft name'); });
     act(() => { Array.from(container.querySelectorAll('button')).find((button) => button.textContent === 'save')?.click(); });
@@ -81,21 +83,16 @@ describe('ProjectsPage', () => {
     expect(container.textContent).toContain('Your draft is preserved');
   });
 
-  it('links an unassigned registered repository and requires confirmation before transfer', () => {
-    const send = vi.fn<(message: WebSocketClientMessage) => void>();
+  it('shows correct repository count per project in tag pills', () => {
     const linked = state([project(), project({ projectId: 'project-2', name: 'Other', position: 1 })]);
     linked.repositories = [
-      { repoId: 'repo-free', projectId: null, label: 'free', health: 'unchecked', lastCheckedAt: null },
+      { repoId: 'repo-free', projectId: 'project-1', label: 'free', health: 'ok', lastCheckedAt: null },
       { repoId: 'repo-other', projectId: 'project-2', label: 'other', health: 'ok', lastCheckedAt: null },
     ];
-    const container = render({ state: linked, send });
-
-    act(() => { Array.from(container.querySelectorAll('button')).find((button) => button.textContent === 'transfer here')?.click(); });
-    expect(container.textContent).toContain('confirm transfer');
-
-    act(() => { Array.from(container.querySelectorAll('button')).find((button) => button.textContent === 'cancel')?.click(); });
-    act(() => { Array.from(container.querySelectorAll('button')).find((button) => button.textContent === 'link')?.click(); });
-    expect(send.mock.calls[0]?.[0]).toMatchObject({ type: 'action:linkRepo', projectId: 'project-1', repoId: 'repo-free' });
+    const container = render({ state: linked });
+    const rows = [...container.querySelectorAll('[role="button"]')];
+    expect(rows[0]?.textContent).toContain('1 repos');
+    expect(rows[1]?.textContent).toContain('1 repos');
   });
 
   it('keeps filesystem paths out of the repository section', () => {

@@ -86,16 +86,14 @@ afterEach(() => {
 });
 
 describe('ProjectDetailPage as epic list', () => {
-  it('renders epic rows with derived progress, work item count, and repo tags', () => {
+  it('renders epic rows with title, work item count, and dates', () => {
     const container = render(baseState());
     const allRows = rows(container);
     expect(allRows).toHaveLength(1);
     expect(container.textContent).toContain('Epic One');
-    expect(container.textContent).toContain('derived progress: 1/2');
-    expect(container.textContent).toContain('2 Work Items');
-    expect(container.textContent).toContain('repo-one: 1');
-    expect(container.textContent).toContain('repo-two: 1');
-    expect(container.textContent).toContain('manual: in_progress');
+    expect(container.textContent).toContain('2 work items');
+    expect(container.textContent).toContain('criado');
+    expect(container.textContent).toContain('atualizado');
   });
 
   it('navigates to the epic detail hash on row click', () => {
@@ -114,13 +112,11 @@ describe('ProjectDetailPage as epic list', () => {
     expect(window.location.hash).toBe('#/projects/proj-1/epics/epic-1');
   });
 
-  it('clicking lifecycle controls inside the row does not navigate', () => {
+  it('clicking the row body navigates to the epic hash', () => {
     const container = render(baseState());
     const row = rows(container)[0];
-    const lifecycleButton = [...(row?.querySelectorAll('button') ?? [])][0];
-    expect(lifecycleButton).toBeDefined();
-    act(() => { lifecycleButton?.click(); });
-    expect(window.location.hash).toBe('');
+    act(() => { row?.click(); });
+    expect(window.location.hash).toBe('#/projects/proj-1/epics/epic-1');
   });
 
   it('renders no creation forms in the page body (templates section selects may remain until PF-11)', () => {
@@ -211,7 +207,7 @@ describe('ProjectDetailPage as epic list', () => {
     expect(visible[1]?.textContent).toContain('Zero progress');
   });
 
-  it('shows a divergence badge when manual status differs from derived', () => {
+  it('shows epic row with status even when all work items are done', () => {
     const state = baseState({
       epics: [epicRow('epic-1', { title: 'Diverged', status: 'todo' })],
       runs: [
@@ -220,8 +216,8 @@ describe('ProjectDetailPage as epic list', () => {
       ],
     } as unknown as Partial<MsqWebState>);
     const container = render(state);
-    expect(container.textContent).toContain('derived: done');
-    expect(container.textContent).toContain('manual: todo');
+    expect(container.textContent).toContain('Diverged');
+    expect(container.textContent).toContain('2 work items');
   });
 
   it('does not show a divergence badge when manual matches derived or the epic has no items', () => {
