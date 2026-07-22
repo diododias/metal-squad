@@ -24,7 +24,7 @@ export function registerDb(program: Command): void {
     .action(async (opts: { output: string }) => {
       const destPath = resolve(process.cwd(), opts.output);
       await backupDb(destPath);
-      console.log(`Backup criado em ${destPath}`);
+      console.log(`Backup created at ${destPath}`);
     });
 
   db
@@ -40,7 +40,7 @@ export function registerDb(program: Command): void {
           `Isso vai substituir o banco em ${destPath} pelo conteudo de ${sourcePath}. Continuar?`,
         );
         if (!proceed) {
-          console.log('Restore cancelado.');
+          console.log('Restore cancelled.');
           return;
         }
       }

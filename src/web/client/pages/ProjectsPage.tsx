@@ -36,7 +36,7 @@ function formatUpdatedAt(iso: string): string {
   const day = String(d.getDate()).padStart(2, '0');
   const month = String(d.getMonth() + 1).padStart(2, '0');
   const year = d.getFullYear();
-  return `atualizado ${day}/${month}/${String(year)}`;
+  return `updated ${day}/${month}/${String(year)}`;
 }
 
 export function ProjectsPage({ state, send, actionResults }: ProjectsPageProps): React.JSX.Element {

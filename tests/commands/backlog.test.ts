@@ -124,7 +124,7 @@ describe('backlog load command', () => {
     expect(mockRegisterRepo).toHaveBeenCalledWith('repo-1', '/repo');
     expect(mockPlanBacklogSeed).toHaveBeenCalledWith(backlog, 'repo-1');
     expect(mockApplyBacklogSeed).toHaveBeenCalledWith(backlog, plan);
-    expect(log).toHaveBeenCalledWith(expect.stringContaining('Seed criado'));
+    expect(log).toHaveBeenCalledWith(expect.stringContaining('Seed created'));
   });
 
   it('passes --file through to the YAML loader', async () => {
@@ -149,7 +149,7 @@ describe('backlog load command', () => {
 
     await expect(
       program.parseAsync(['node', 'msq', 'backlog', 'load']),
-    ).rejects.toThrow('Catalogo nao foi atualizado.');
+    ).rejects.toThrow('Catalog was not updated.');
     expect(mockApplyBacklogSeed).not.toHaveBeenCalled();
   });
 
@@ -205,7 +205,7 @@ describe('backlog load command', () => {
       expect(mockLoadBacklogWithRegistration).not.toHaveBeenCalled();
       expect(mockPlanBacklogSeedV3).toHaveBeenCalledWith(v3Asset, 'proj-1', { 'repo-1': '/repo' });
       expect(mockApplyBacklogSeedV3).toHaveBeenCalledWith(v3Asset, v3Plan);
-      expect(log).toHaveBeenCalledWith(expect.stringContaining('Seed criado'));
+      expect(log).toHaveBeenCalledWith(expect.stringContaining('Seed created'));
     });
 
     it('dry-run for a v3 asset never applies the plan', async () => {

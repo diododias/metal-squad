@@ -224,8 +224,8 @@ describe('EpicDetailPage edit modal (PF-06)', () => {
   }
 
   function openEditor(container: HTMLDivElement): void {
-    const button = [...container.querySelectorAll('button')].find((item) => item.textContent === 'editar Épico');
-    if (!button) throw new Error('editar Épico button not found');
+    const button = [...container.querySelectorAll('button')].find((item) => item.textContent === 'Edit Epic');
+    if (!button) throw new Error('Edit Epic button not found');
     act(() => { button.click(); });
   }
 

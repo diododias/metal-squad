@@ -400,7 +400,7 @@ export function FeatureConfigDetail({ feature, backlogSettings, approvalChannels
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-      <ConfigCard title="Execução">
+      <ConfigCard title="Execution">
         <div style={{ display: 'flex', flexDirection: 'column', gap: 12, marginBottom: 12 }}>
           <EditableSelectField
             id="execution-tool"

@@ -41,7 +41,7 @@ describe('ProjectsPage', () => {
     expect(container.textContent).toContain('Shared platform');
     expect(container.textContent).toContain('2 Epics');
     expect(container.textContent).toContain('4 Work Items');
-    expect(container.textContent).toContain('atualizado');
+    expect(container.textContent).toContain('updated');
   });
 
   it('shows an accessible empty CTA and search-empty state', () => {
