@@ -106,6 +106,7 @@ export interface ProjectSummary {
   activeRuns: number;
   tokens: TokenStats;
   archivedAt: string | null;
+  updatedAt: string;
 }
 
 export interface RepositorySummary {

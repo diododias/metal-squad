@@ -140,6 +140,7 @@ export interface ProjectStateSummaryRow {
   description: string | null;
   revision: number;
   archivedAt: string | null;
+  updatedAt: string;
   epicCount: number;
   workItemCount: number;
   archivedCount: number;
@@ -1058,7 +1059,7 @@ export function listProjectStateSummaries(): ProjectStateSummaryRow[] {
   if (!hasDbFile()) return [];
   return getDb('readonly').prepare(`
     SELECT p.project_id AS projectId, p.name, p.position, p.description, p.revision,
-           p.archived_at AS archivedAt,
+           p.archived_at AS archivedAt, p.updated_at AS updatedAt,
            (SELECT COUNT(*) FROM backlog_epics e
              WHERE e.project_id = p.project_id AND e.archived_at IS NULL AND e.deleted_at IS NULL) AS epicCount,
            (SELECT COUNT(*) FROM backlog_features f JOIN backlog_epics e ON e.epic_id = f.epic_id
