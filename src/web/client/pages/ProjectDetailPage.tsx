@@ -11,7 +11,6 @@ import { RepositoriesSection } from '../components/project/RepositoriesSection.j
 import { WorkflowTemplatesSection } from '../components/WorkflowTemplatesSection.js';
 import { Tabs } from '../components/navigation/Tabs.js';
 import { readHashParams, updateHashParams } from '../lib/hashState.js';
-import { ProgressBar } from '../components/data/ProgressBar.js';
 import { PageHeader } from '../PageHeader.js';
 import type { EpicRow as EpicRowData } from '../../../db/repo.js';
 import type { ToastStackItem } from '../components/feedback/ToastStack.js';
@@ -106,6 +105,7 @@ export function ProjectDetailPage({ state, projectId, send, actionResults, archi
   return <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
     <PageHeader
       title={project.name}
+      description={project.description ?? undefined}
       breadcrumb={[{ label: 'Projects', href: '/projects' }]}
       filters={activeTab === 'epics' && <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center' }}>
         <input
@@ -133,7 +133,7 @@ export function ProjectDetailPage({ state, projectId, send, actionResults, archi
       </div>}
       actions={<div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
         <Button variant="primary" size="sm" onClick={() => { setShowCreateEpic(true); }}>+ Novo Épico</Button>
-        <Button variant="primary" size="sm" onClick={() => { setShowCreateWorkItem(true); }}>+ Nova Feature</Button>
+        <Button size="sm" onClick={() => { setShowCreateWorkItem(true); }}>+ Nova Feature</Button>
         <Button size="sm" onClick={() => { setShowEditProject(true); }}>editar Projeto</Button>
         <LifecycleActions
           kind="project"
@@ -154,7 +154,6 @@ export function ProjectDetailPage({ state, projectId, send, actionResults, archi
         onSelect={selectTab}
       />
       {activeTab === 'epics' && <><Card>
-        <p style={{ margin: 0, color: 'var(--text-dim)' }}>{project.description ?? 'No project description.'}</p>
         <div style={tags}>
           <Tag>{repos.length} repos</Tag>
           <Tag>{project.counts.epics} Epics</Tag>
@@ -170,7 +169,7 @@ export function ProjectDetailPage({ state, projectId, send, actionResults, archi
           <Button variant="primary" size="sm" onClick={() => { setShowCreateEpic(true); }}>+ Novo Épico</Button>
         </Card>}
         {epics.length > 0 && filteredEpics.length === 0 && <Card><p style={muted}>No matching Epics.</p></Card>}
-        {visible.map((epic) => <EpicRow key={epic.epicId} epic={epic} state={state} projectId={projectId} send={send} actionResults={actionResults} onToast={onToast} progress={progressByEpic.get(epic.epicId)} />)}
+        {visible.map((epic) => <EpicRow key={epic.epicId} epic={epic} state={state} projectId={projectId} />)}
         {filteredEpics.length > PAGE_SIZE && <div style={{ marginTop: 10, display: 'flex', gap: 8 }}>
           <Button size="sm" disabled={page === 0} onClick={() => { setPage(page - 1); }}>previous</Button>
           <Button size="sm" disabled={(page + 1) * PAGE_SIZE >= filteredEpics.length} onClick={() => { setPage(page + 1); }}>next</Button>
@@ -229,25 +228,10 @@ export function ProjectDetailPage({ state, projectId, send, actionResults, archi
   </div>;
 }
 
-function deriveEpicStatus(progress: { completed: number; total: number } | undefined): 'todo' | 'in_progress' | 'done' | null {
-  if (!progress || progress.total === 0) return null;
-  if (progress.completed === progress.total) return 'done';
-  if (progress.completed > 0) return 'in_progress';
-  return 'todo';
-}
-
-function EpicRow({ epic, state, projectId, send, actionResults, onToast, progress }: {
+function EpicRow({ epic, state, projectId }: {
   epic: EpicRowData; state: MsqWebState; projectId: string;
-  send: (message: WebSocketClientMessage) => void;
-  actionResults: Record<string, Extract<WebSocketServerMessage, { type: 'action:result' }>>;
-  onToast?: (item: ToastStackItem) => void;
-  progress?: { completed: number; total: number };
 }): React.JSX.Element {
   const items = useMemo(() => Object.values(state.featureCatalog).filter((item) => item.epicId === epic.epicId), [epic.epicId, state.featureCatalog]);
-  const completed = progress?.completed ?? 0;
-  const derivedStatus = deriveEpicStatus(progress);
-  const repoCounts = new Map<string, number>();
-  items.forEach((item) => repoCounts.set(item.repoLabel ?? 'unresolved', (repoCounts.get(item.repoLabel ?? 'unresolved') ?? 0) + 1));
   const navigateToEpic = (): void => { window.location.hash = `/projects/${projectId}/epics/${epic.epicId}`; };
 
   return <div
@@ -260,33 +244,19 @@ function EpicRow({ epic, state, projectId, send, actionResults, onToast, progres
     onFocus={(event) => { event.currentTarget.style.outline = '1px solid var(--accent-info)'; }}
     onBlur={(event) => { event.currentTarget.style.outline = 'none'; }}
   >
-    <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, flexWrap: 'wrap', alignItems: 'flex-start' }}>
+    <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, alignItems: 'center' }}>
       <div style={{ flex: '1 1 260px', minWidth: 200 }}>
         <h3 style={{ margin: 0 }}>{epic.title}</h3>
-        {epic.description && <p style={muted}>{epic.description}</p>}
-        <div style={{ marginTop: 8, maxWidth: 320 }}>
-          <ProgressBar
-            percent={items.length ? (completed / items.length) * 100 : 0}
-            tone="ok"
-            label={`derived progress: ${String(completed)}/${String(items.length)}`}
-          />
-        </div>
-        <div style={tags}>
-          <Tag>{items.length} Work Items</Tag>
-          {[...repoCounts].map(([label, count]) => <Tag key={label}>{label}: {count}</Tag>)}
-        </div>
         <p style={{ ...muted, marginTop: 4, fontSize: 'var(--text-xs)' }}>
           criado {new Date(epic.createdAt).toLocaleDateString()} · atualizado {new Date(epic.updatedAt).toLocaleDateString()}
         </p>
+        <p style={{ margin: '2px 0 0', color: 'var(--text-faint)', fontFamily: 'var(--font-mono)', fontSize: 'var(--text-xs)' }}>
+          {items.length === 0 ? 'no work items yet' : `${String(items.length)} work items`}
+        </p>
       </div>
-      <div
-        style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}
-        onClick={(event) => { event.stopPropagation(); }}
-        onKeyDown={(event) => { event.stopPropagation(); }}
-      >
-        {derivedStatus !== null && derivedStatus !== epic.status && <Tag>derived: {derivedStatus}</Tag>}
-        <StatusPill status={epic.status === 'done' ? 'done' : epic.status === 'in_progress' ? 'running' : 'not_started'} label={`manual: ${epic.status}`} spinner={false} />
-        <LifecycleActions kind="epic" id={epic.epicId} name={epic.title} revision={epic.revision} allowed={state.lifecycle?.[`epic:${epic.epicId}`]} send={send} actionResults={actionResults} onToast={onToast} />
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
+        <StatusPill status={epic.status === 'done' ? 'done' : epic.status === 'in_progress' ? 'running' : 'not_started'} spinner={false} />
+        <span style={{ color: 'var(--text-faint)', fontSize: 'var(--text-sm)' }}>›</span>
       </div>
     </div>
   </div>;

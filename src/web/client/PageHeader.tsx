@@ -7,6 +7,7 @@ export interface BreadcrumbItem {
 
 export interface PageHeaderProps {
   title: string;
+  description?: string;
   breadcrumb?: React.ReactNode | BreadcrumbItem[];
   actions?: React.ReactNode;
   filters?: React.ReactNode;
@@ -27,7 +28,7 @@ function BreadcrumbTrail({ items }: { items: BreadcrumbItem[] }): React.JSX.Elem
   </span>;
 }
 
-export function PageHeader({ title, breadcrumb, actions, filters }: PageHeaderProps): React.JSX.Element {
+export function PageHeader({ title, description, breadcrumb, actions, filters }: PageHeaderProps): React.JSX.Element {
   const breadcrumbNode = isBreadcrumbTrail(breadcrumb) ? <BreadcrumbTrail items={breadcrumb} /> : breadcrumb;
   return (
     <div className="msq-page-header" style={{ padding: '20px 28px 16px', borderBottom: '1px solid var(--border-dim)', flexShrink: 0 }}>
@@ -47,6 +48,7 @@ export function PageHeader({ title, breadcrumb, actions, filters }: PageHeaderPr
           >
             {title}
           </h1>
+          {description && <p style={{ margin: '6px 0 0', color: 'var(--text-dim)', fontSize: 'var(--text-sm)' }}>{description}</p>}
         </div>
         {actions && <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>{actions}</div>}
       </div>
