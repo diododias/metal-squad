@@ -186,11 +186,6 @@ export const opencodeAdapter: ToolAdapter = {
       return { ok: false, summary: errorSummary };
     }
 
-    const limitMessage = detectSessionLimit(stdout, stderr);
-    if (limitMessage) {
-      return { ok: false, blocked: true, summary: `session limit reached: ${limitMessage}` };
-    }
-
     const events = extractOpenCodeEvents(stdout);
     const json = safeJson<OpenCodeResponse>(stdout) ?? events[events.length - 1] ?? null;
 

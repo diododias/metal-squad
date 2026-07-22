@@ -175,11 +175,6 @@ export const codexAdapter: ToolAdapter = {
       return { ok: false, summary: stdoutError || stderr.slice(-500) || `exit ${String(code)}` };
     }
 
-    const limitMessage = detectSessionLimit(stdout, stderr);
-    if (limitMessage) {
-      return { ok: false, blocked: true, summary: `session limit reached: ${limitMessage}` };
-    }
-
     const finalMsg = lastAgentMessage(stdout);
     const usage = this.parseUsage?.(stdout) ?? undefined;
     const session = buildCodexSessionHandle(stdout, opts, opts.runId);
