@@ -191,6 +191,7 @@ function collectProjectSummaries(): ProjectSummary[] {
       activeRuns: project.activeRuns,
       tokens: { status: 'ready', totalTokens: project.totalTokens, error: null },
       archivedAt: project.archivedAt,
+      updatedAt: project.updatedAt,
     }));
   } catch (error) {
     pushError('web/state.collectProjectSummaries', error);
