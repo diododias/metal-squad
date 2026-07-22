@@ -451,7 +451,7 @@ export function buildMsqWebState(): MsqWebState {
 
   const executionRuns = runs.filter((run) => getRunGroup(run.status) === 'execution');
   const doneRuns = runs.filter((run) => run.status === 'done');
-  const falhaRunsList = runs.filter((run) => getRunGroup(run.status) === 'canceled');
+  const failedRunsList = runs.filter((run) => getRunGroup(run.status) === 'canceled');
 
   const errors = snapshotErrors;
   snapshotErrors = [];
@@ -475,7 +475,7 @@ export function buildMsqWebState(): MsqWebState {
       totalRuns: runs.length,
       doneRuns: doneRuns.length,
       executionCount: executionRuns.length,
-      falhaCount: falhaRunsList.length,
+      failedCount: failedRunsList.length,
       tokenStats: computeTokenStats(7),
     },
     dashboard: {

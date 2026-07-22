@@ -158,7 +158,7 @@ export interface MsqWebState {
     totalRuns: number;
     doneRuns: number;
     executionCount: number;
-    falhaCount: number;
+    failedCount: number;
     tokenStats: TokenStats;
   };
   dashboard: {
