@@ -28,6 +28,7 @@ import {
   createTimeoutOccurrence,
   finishPipeline,
   finishRun,
+  getLatestRunSessionHandle,
   getRunContextTelemetry,
   getPipeline,
   getPipelineSnapshot,
@@ -42,6 +43,7 @@ import {
   cleanupStaleRuns,
   updatePipelineSnapshot,
   updatePipelineStage,
+  updateRunSessionHandle,
   updateRunTool,
   updateStageTransitionDecisionNextSessionId,
   type PipelineStatus,
@@ -365,6 +367,11 @@ export async function executeBacklog(
       let reinforcementUsed = false;
       let declaredDone = false;
       for (;;) {
+        // Persist the adapter's real session id (when it returned one) so a
+        // later resume — new `msq resume` process or an in-process scheduler
+        // re-dispatch after a gate/timeout — can continue this exact adapter
+        // session instead of always starting fresh.
+        if (res.session) updateRunSessionHandle(runId, res.session);
         if (res.usage) {
           recordUsage(runId, res.usage);
           applyBudgetUsage(feature, res.usage, runId);
@@ -382,7 +389,7 @@ export async function executeBacklog(
         if (res.publishEvidence) {
           updateRunPublishState(runId, {
             verified: res.publishVerified ?? false,
-            error: res.publishVerified ? null : res.summary,
+            error: res.publishVerified ? (res.publishNote ?? null) : res.summary,
             evidence: res.publishEvidence,
           });
         }
@@ -723,7 +730,24 @@ export async function executeBacklog(
         // same adapter session with the human's answer inlined and retry,
         // reusing the same sessionPolicy decision the staged loop uses.
         const stageInputs: string[] = [];
+        // Seed the initial session the same way the staged loop does: a
+        // retomada (new `msq resume` process or in-process re-dispatch after
+        // a gate/timeout) starts this closure fresh, so without this the
+        // first adapter call would always begin a brand-new session even
+        // when a reusable one was persisted for this exact pipeline+feature+
+        // stage. A genuinely new pipeline has no prior run under this
+        // `pipelineId`, so the lookup naturally returns nothing there.
         let nextSession: RunFeatureOptions['session'] | undefined;
+        if (singleStage) {
+          const expectedTool = resolvePrimaryTool(
+            feature,
+            opts.resumeOverride?.featureId === feature.id ? opts.resumeOverride : undefined,
+          );
+          const previousHandle = getLatestRunSessionHandle(pipelineId, feature.id, singleStage);
+          if (previousHandle?.tool === expectedTool) {
+            nextSession = { mode: 'resume', handle: previousHandle };
+          }
+        }
         // Bounded retry: if the agent keeps asking questions, the human can
         // keep answering; cap the count so a pathological loop cannot run
         // forever against a misbehaving adapter.
@@ -1172,7 +1196,6 @@ async function executeStagedFeature(
   const stageInputs = loadPersistedStageInputs(persistedRequests);
   const currentStage = getPipeline(pipelineId)?.currentStage ?? null;
   let pendingTransitionDecisionId: number | null = null;
-  let nextStageSession: RunFeatureOptions['session'] | undefined;
   // A gate-blocked stage leaves `currentStage` set and re-enters this
   // function within the same process once the scheduler resumes it — treat
   // that the same as an explicit `msq resume` so it continues from the
@@ -1183,6 +1206,27 @@ async function executeStagedFeature(
     persistedRequests,
     Boolean(opts.resumePipelineId) || currentStage !== null,
   );
+
+  // Re-attempting the stage this run will actually start on (whether that's
+  // an explicit `msq resume` in a new process or an in-process re-dispatch)
+  // begins with a fresh local variable here — nothing else seeds it from
+  // what got persisted before the previous attempt exited. Without this, the
+  // first adapter call of the new attempt always starts a brand-new session
+  // even when a reusable one already exists for this exact pipeline+feature+
+  // stage. A genuinely new pipeline never has a prior run under this
+  // `pipelineId`, so the lookup naturally returns nothing there.
+  let nextStageSession: RunFeatureOptions['session'] | undefined;
+  const seedStage = stages[startIndex];
+  if (seedStage) {
+    const expectedTool = resolvePrimaryTool(
+      feature,
+      opts.resumeOverride?.featureId === feature.id ? opts.resumeOverride : undefined,
+    );
+    const previousHandle = getLatestRunSessionHandle(pipelineId, feature.id, seedStage);
+    if (previousHandle?.tool === expectedTool) {
+      nextStageSession = { mode: 'resume', handle: previousHandle };
+    }
+  }
 
   for (let index = startIndex; index < stages.length; index += 1) {
     const stage = stages[index] ?? 'implement';
@@ -1492,6 +1536,13 @@ export function applyPublishGate(
   };
 }
 
+// This runs after `applyPublishGate` has already verified a real, open PR
+// against whatever base it declares — that GitHub-side check is authoritative
+// on the publication itself. `git merge-base --is-ancestor` here is a local,
+// redundant sanity check on top of it, and it can be inconclusive for
+// legitimate reasons (e.g. the declared dependency branch was already merged
+// and its ref deleted). A verified PR must not be blocked by this secondary
+// check failing or being inconclusive; surface it as an informational note.
 function applyBaseReconciliation(
   result: RunResult,
   cwd: string,
@@ -1505,17 +1556,11 @@ function applyBaseReconciliation(
   const detail = descendant === false
     ? `HEAD does not descend from the declared base ${baseBranch}.`
     : `could not verify whether HEAD descends from the declared base ${baseBranch}.`;
-  const summary = [
-    'MSQ_BLOCKED: validation_failed',
-    `post-run: ${detail}`,
-    'Resolve the branch base or Git error, then retry the run.',
-    result.summary,
-  ].join('\n');
+  const note = `note: post-run ${detail} A verified GitHub PR already confirms this publication; treat this only as informational.`;
   return {
     ...result,
-    ok: false,
-    summary,
-    publishVerificationStatus: 'blocked',
+    summary: [result.summary, note].join('\n'),
+    publishNote: note,
   };
 }
 

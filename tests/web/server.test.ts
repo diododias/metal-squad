@@ -61,8 +61,12 @@ const mocks = vi.hoisted(() => ({
   projectService: {
     create: vi.fn(),
     update: vi.fn(),
+    archive: vi.fn(),
+    delete: vi.fn(),
+    restoreArchive: vi.fn(),
   },
   repoLinkService: {
+    list: vi.fn(() => []),
     link: vi.fn(),
     move: vi.fn(),
     unlink: vi.fn(),
@@ -70,9 +74,15 @@ const mocks = vi.hoisted(() => ({
   epicService: {
     create: vi.fn(),
     update: vi.fn(),
+    archive: vi.fn(),
+    delete: vi.fn(),
+    restoreArchive: vi.fn(),
   },
   workItemService: {
     create: vi.fn(),
+    archive: vi.fn(),
+    delete: vi.fn(),
+    restoreArchive: vi.fn(),
   },
   getEpicTemplateTarget: vi.fn(() => ({ projectId: 'project-1', repoPath: '/safe/repo' })),
   getWorkItemTemplateTarget: vi.fn(() => ({
@@ -750,6 +760,91 @@ describe('web server', () => {
     peer.close();
   });
 
+  it('routes a Work Item archive to the lifecycle service and returns the mutated entity', async () => {
+    const { createWebServer } = await import('../../src/web/server.js');
+    const archived = { workItemId: 'F-ABC12345', epicId: 'epic-1', repoId: 'repo-1', type: 'feature', revision: 2, createdAt: 'now', updatedAt: 'now' };
+    mocks.workItemService.archive.mockReturnValue({ entity: archived, revision: 2 });
+
+    server = createWebServer({ host: '127.0.0.1', port: 0, auth: 'token', token: 'secret', cwd });
+    await new Promise<void>((resolve) => server!.server.listen(0, '127.0.0.1', resolve));
+    const address = server!.server.address() as { port: number };
+    const socket = new WebSocket(`ws://127.0.0.1:${address.port}/ws`);
+    await waitForOpen(socket);
+    socket.send(JSON.stringify({ type: 'auth', token: 'secret' }));
+    await waitForSocketMessage(socket);
+
+    const result = waitForMatchingMessage(socket, (message) => message.type === 'action:result' && (message.payload as { requestId?: string }).requestId === 'arch-1');
+    socket.send(JSON.stringify({ type: 'action:archiveWorkItem', requestId: 'arch-1', workItemId: 'F-ABC12345', expectedRevision: 1 }));
+
+    expect(await result).toEqual({ type: 'action:result', payload: { requestId: 'arch-1', ok: true, entity: archived, revision: 2 } });
+    expect(mocks.workItemService.archive).toHaveBeenCalledWith('F-ABC12345', 1, { audit: { actor: 'web', requestId: 'arch-1' } });
+    socket.close();
+  });
+
+  it('routes an Epic restore to the lifecycle service', async () => {
+    const { createWebServer } = await import('../../src/web/server.js');
+    const restored = epicEntity({ revision: 3 });
+    mocks.epicService.restoreArchive.mockReturnValue({ entity: restored, revision: 3 });
+
+    server = createWebServer({ host: '127.0.0.1', port: 0, auth: 'token', token: 'secret', cwd });
+    await new Promise<void>((resolve) => server!.server.listen(0, '127.0.0.1', resolve));
+    const address = server!.server.address() as { port: number };
+    const socket = new WebSocket(`ws://127.0.0.1:${address.port}/ws`);
+    await waitForOpen(socket);
+    socket.send(JSON.stringify({ type: 'auth', token: 'secret' }));
+    await waitForSocketMessage(socket);
+
+    const result = waitForMatchingMessage(socket, (message) => message.type === 'action:result' && (message.payload as { requestId?: string }).requestId === 'rst-1');
+    socket.send(JSON.stringify({ type: 'action:restoreArchivedEpic', requestId: 'rst-1', epicId: 'epic-1', expectedRevision: 2 }));
+
+    expect(await result).toEqual({ type: 'action:result', payload: { requestId: 'rst-1', ok: true, entity: restored, revision: 3 } });
+    expect(mocks.epicService.restoreArchive).toHaveBeenCalledWith('epic-1', 2, { audit: { actor: 'web', requestId: 'rst-1' } });
+    socket.close();
+  });
+
+  it('maps a lifecycle policy failure onto a stable error code', async () => {
+    const { createWebServer } = await import('../../src/web/server.js');
+    mocks.epicService.delete.mockImplementation(() => { throw Object.assign(new Error('Epic epic-1 has run history'), { code: 'ENTITY_HAS_HISTORY' }); });
+
+    server = createWebServer({ host: '127.0.0.1', port: 0, auth: 'token', token: 'secret', cwd });
+    await new Promise<void>((resolve) => server!.server.listen(0, '127.0.0.1', resolve));
+    const address = server!.server.address() as { port: number };
+    const socket = new WebSocket(`ws://127.0.0.1:${address.port}/ws`);
+    await waitForOpen(socket);
+    socket.send(JSON.stringify({ type: 'auth', token: 'secret' }));
+    await waitForSocketMessage(socket);
+
+    const result = waitForMatchingMessage(socket, (message) => message.type === 'action:result' && (message.payload as { requestId?: string }).requestId === 'del-1');
+    socket.send(JSON.stringify({ type: 'action:deleteEpic', requestId: 'del-1', epicId: 'epic-1', expectedRevision: 3 }));
+
+    expect(await result).toEqual({
+      type: 'action:result',
+      payload: { requestId: 'del-1', ok: false, error: { code: 'ENTITY_HAS_HISTORY', message: 'Epic epic-1 has run history' } },
+    });
+    socket.close();
+  });
+
+  it('rejects a lifecycle payload missing expectedRevision before calling the service', async () => {
+    const { createWebServer } = await import('../../src/web/server.js');
+    server = createWebServer({ host: '127.0.0.1', port: 0, auth: 'token', token: 'secret', cwd });
+    await new Promise<void>((resolve) => server!.server.listen(0, '127.0.0.1', resolve));
+    const address = server!.server.address() as { port: number };
+    const socket = new WebSocket(`ws://127.0.0.1:${address.port}/ws`);
+    await waitForOpen(socket);
+    socket.send(JSON.stringify({ type: 'auth', token: 'secret' }));
+    await waitForSocketMessage(socket);
+
+    const result = waitForMatchingMessage(socket, (message) => message.type === 'action:result' && (message.payload as { requestId?: string }).requestId === 'bad-1');
+    socket.send(JSON.stringify({ type: 'action:deleteProject', requestId: 'bad-1', projectId: 'project-1' }));
+
+    expect(await result).toEqual({
+      type: 'action:result',
+      payload: { requestId: 'bad-1', ok: false, error: { code: 'INVALID_PAYLOAD', message: 'Invalid lifecycle action payload.' } },
+    });
+    expect(mocks.projectService.delete).not.toHaveBeenCalled();
+    socket.close();
+  });
+
   it('uses createWorkItem/workItemId as the WebSocket contract and reemits state', async () => {
     const { createWebServer } = await import('../../src/web/server.js');
     const workItem = {
@@ -991,10 +1086,11 @@ describe('web server', () => {
     socket.close();
   });
 
-  it('refuses to archive a workflow template that a Project still maps', async () => {
+  it('refuses to archive a workflow template that a Project still maps, and reports which mappings block it', async () => {
     mocks.archiveWorkflowTemplate.mockImplementation(() => {
       throw Object.assign(new Error('Workflow template is mapped by 1 Project'), {
         code: 'WORKFLOW_TEMPLATE_IN_USE',
+        mappings: [{ projectId: 'proj-1', workItemType: 'feature' }],
       });
     });
     const socket = await connectAuthenticated();
@@ -1005,7 +1101,11 @@ describe('web server', () => {
     }));
 
     expect(await result).toMatchObject({
-      payload: { requestId: 'tpl-archive-1', ok: false, error: { code: 'WORKFLOW_TEMPLATE_IN_USE' } },
+      payload: {
+        requestId: 'tpl-archive-1',
+        ok: false,
+        error: { code: 'WORKFLOW_TEMPLATE_IN_USE', mappings: [{ projectId: 'proj-1', workItemType: 'feature' }] },
+      },
     });
     socket.close();
   });

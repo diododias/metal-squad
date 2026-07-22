@@ -336,6 +336,63 @@ export const BacklogV2InputSchema = z.object({
   epics: z.array(EpicInputSchema).default([]),
 });
 
+/**
+ * v3 asset shape (PRJ-20): Project-scoped, multi-repo export/import format.
+ * Distinct from v1/v2, which are single-repo `backlog.yaml` files. `path` is
+ * omitted from `BacklogRepositoryV3Schema` on export by default (only emitted
+ * with `--include-paths`) so the asset stays portable across machines.
+ */
+export const BacklogRepositoryV3Schema = z.object({
+  repoId: z.string().trim().min(1),
+  label: z.string().trim().min(1),
+  remote: z.string().trim().min(1).optional(),
+  path: z.string().trim().min(1).optional(),
+});
+
+export const BacklogProjectV3Schema = z.object({
+  id: z.string(),
+  name: z.string(),
+  description: z.string().optional(),
+  position: z.number().int().default(0),
+});
+
+export const EpicV3Schema = z.object({
+  id: z.string(),
+  title: z.string(),
+  description: z.string().optional(),
+  status: EpicStatusSchema.default('todo'),
+  position: z.number().int().default(0),
+  archivedAt: z.string().optional(),
+});
+
+/**
+ * Work Item as it appears in the v3 asset: the same execution-config fields
+ * as `WorkItemSchema`, plus the repo/epic ownership that v1/v2 inferred from
+ * YAML nesting. `stageSkills`/`templateId`/`templateVersion`/`templateOrigin`
+ * (already optional on `WorkItemSchema`) carry the PRJ-24 template snapshot —
+ * the template itself is metadata, not a reimport requirement.
+ */
+export const WorkItemV3Schema = WorkItemSchema.and(z.object({
+  epicId: z.string(),
+  repoId: z.string(),
+  position: z.number().int().default(0),
+  archivedAt: z.string().optional(),
+}));
+
+export const BacklogV3Schema = z.object({
+  version: z.literal(3),
+  project: BacklogProjectV3Schema,
+  repositories: z.array(BacklogRepositoryV3Schema).default([]),
+  epics: z.array(EpicV3Schema).default([]),
+  workItems: z.array(WorkItemV3Schema).default([]),
+});
+
+export type BacklogRepositoryV3 = z.infer<typeof BacklogRepositoryV3Schema>;
+export type BacklogProjectV3 = z.infer<typeof BacklogProjectV3Schema>;
+export type EpicV3 = z.infer<typeof EpicV3Schema>;
+export type WorkItemV3 = z.infer<typeof WorkItemV3Schema>;
+export type BacklogV3 = z.infer<typeof BacklogV3Schema>;
+
 export const BacklogSchema = z.union([BacklogV1Schema, BacklogV2Schema]);
 export const BacklogInputSchema = z.union([BacklogV1InputSchema, BacklogV2InputSchema]);
 

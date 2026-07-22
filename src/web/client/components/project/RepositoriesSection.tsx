@@ -28,6 +28,8 @@ export function RepositoriesSection({ project, repositories, actionResults, send
   const [pendingRequestId, setPendingRequestId] = useState<string>();
   const [error, setError] = useState<string>();
   const [moveCandidateId, setMoveCandidateId] = useState<string>();
+  const [addPath, setAddPath] = useState('');
+  const [awaitingPathConfirm, setAwaitingPathConfirm] = useState(false);
   const handled = useRef(new Set<string>());
   const linked = repositories.filter((repository) => repository.projectId === project.projectId);
   const available = repositories.filter((repository) => repository.projectId === null);
@@ -40,7 +42,23 @@ export function RepositoriesSection({ project, repositories, actionResults, send
     handled.current.add(pendingRequestId);
     setPendingRequestId(undefined);
     setMoveCandidateId(undefined);
-    setError(result.payload.ok ? undefined : result.payload.error.message);
+    if (result.payload.ok) {
+      setError(undefined);
+      setAddPath('');
+      setAwaitingPathConfirm(false);
+      return;
+    }
+    // The probe send (path without confirm) is always refused with this code:
+    // it is the server's request for explicit confirmation, not a failure.
+    // Path resolution (realpath/allowlist) only runs on the confirmed call, so
+    // there is no canonical path to show yet — the panel shows the typed one.
+    if ('code' in result.payload.error && result.payload.error.code === 'REPO_PATH_CONFIRMATION_REQUIRED' && pendingRequestId.startsWith('repository-add-path-probe')) {
+      setError(undefined);
+      setAwaitingPathConfirm(true);
+      return;
+    }
+    setAwaitingPathConfirm(false);
+    setError(result.payload.error.message);
   }, [actionResults, pendingRequestId]);
 
   const dispatch = (message: WebSocketClientMessage): void => {
@@ -52,7 +70,7 @@ export function RepositoriesSection({ project, repositories, actionResults, send
 
   return <section aria-label={`Repositories for ${project.name}`} style={{ borderTop: '1px solid var(--border-dim)', paddingTop: 10 }}>
     <strong style={{ fontFamily: 'var(--font-mono)', fontSize: 'var(--text-xs)' }}>Repositories</strong>
-    {linked.length === 0 && <p style={{ color: 'var(--accent-warn)', fontSize: 'var(--text-xs)' }}>No repository linked — this Project is not executable.</p>}
+    {linked.length === 0 && <p style={{ color: 'var(--accent-warn)', fontSize: 'var(--text-xs)' }}>No repository linked — this Project is not executable. Add one by path below.</p>}
     {linked.map((repository) => {
       const health = healthStatus(repository.health);
       return <div key={repository.repoId} style={{ display: 'flex', gap: 8, alignItems: 'center', justifyContent: 'space-between', marginTop: 8 }}>
@@ -62,7 +80,36 @@ export function RepositoriesSection({ project, repositories, actionResults, send
     })}
     {available.length > 0 && <div style={{ marginTop: 10 }}><span style={{ color: 'var(--text-dim)', fontSize: 'var(--text-xs)' }}>Registered repositories</span>{available.map((repository) => <div key={repository.repoId} style={{ display: 'flex', justifyContent: 'space-between', gap: 8, marginTop: 5 }}><span style={{ fontSize: 'var(--text-xs)' }}>{repository.label} · {repository.repoId}</span><Button size="sm" disabled={Boolean(pendingRequestId)} onClick={() => { dispatch({ type: 'action:linkRepo', requestId: nextRequestId('link'), projectId: project.projectId, repoId: repository.repoId }); }}>link</Button></div>)}</div>}
     {transferable.length > 0 && <div style={{ marginTop: 10 }}><span style={{ color: 'var(--text-dim)', fontSize: 'var(--text-xs)' }}>Transfer an empty repository</span>{transferable.map((repository) => <div key={repository.repoId} style={{ display: 'flex', justifyContent: 'space-between', gap: 8, marginTop: 5 }}><span style={{ fontSize: 'var(--text-xs)' }}>{repository.label} · {repository.repoId}</span>{moveCandidateId === repository.repoId ? <span style={{ display: 'flex', gap: 5 }}><Button size="sm" variant="ok" disabled={Boolean(pendingRequestId)} onClick={() => { dispatch({ type: 'action:moveRepo', requestId: nextRequestId('move'), repoId: repository.repoId, toProjectId: project.projectId }); }}>confirm transfer</Button><Button size="sm" disabled={Boolean(pendingRequestId)} onClick={() => { setMoveCandidateId(undefined); }}>cancel</Button></span> : <Button size="sm" disabled={Boolean(pendingRequestId)} onClick={() => { setMoveCandidateId(repository.repoId); }}>transfer here</Button>}</div>)}</div>}
-    <p style={{ color: 'var(--text-faint)', fontSize: 'var(--text-xs)', marginBottom: 0 }}>New paths and authorized path diagnostics require PRJ-15B validation; no path is exposed here.</p>
+    <div style={{ marginTop: 10 }}>
+      <span style={{ color: 'var(--text-dim)', fontSize: 'var(--text-xs)' }}>Add a repository by path</span>
+      {awaitingPathConfirm ? <div style={{ marginTop: 5, display: 'grid', gap: 6 }}>
+        <span style={{ fontSize: 'var(--text-xs)' }}>
+          Register and link <code>{addPath.trim()}</code>? The server resolves the real path and derives the repository id on confirmation.
+        </span>
+        <span style={{ display: 'flex', gap: 5 }}>
+          <Button size="sm" variant="ok" disabled={Boolean(pendingRequestId)} onClick={() => { dispatch({ type: 'action:linkRepo', requestId: nextRequestId('add-path-confirm'), projectId: project.projectId, path: addPath.trim(), confirm: true }); }}>confirm add</Button>
+          <Button size="sm" disabled={Boolean(pendingRequestId)} onClick={() => { setAwaitingPathConfirm(false); }}>cancel</Button>
+        </span>
+      </div> : <div style={{ display: 'flex', gap: 6, marginTop: 5 }}>
+        <input
+          aria-label="Repository path"
+          value={addPath}
+          disabled={Boolean(pendingRequestId)}
+          placeholder="/absolute/path/to/repo"
+          onChange={(event) => { setAddPath(event.target.value); }}
+          style={{
+            flex: 1, minWidth: 0, fontFamily: 'var(--font-mono)', fontSize: 'var(--text-xs)', padding: '5px 8px',
+            background: 'var(--bg-sunken)', color: 'var(--text-primary)',
+            border: '1px solid var(--border-dim)', borderRadius: 'var(--radius-sm)', boxSizing: 'border-box',
+          }}
+        />
+        <Button
+          size="sm"
+          disabled={Boolean(pendingRequestId) || !addPath.trim().startsWith('/')}
+          onClick={() => { dispatch({ type: 'action:linkRepo', requestId: nextRequestId('add-path-probe'), projectId: project.projectId, path: addPath.trim() }); }}
+        >add</Button>
+      </div>}
+    </div>
     {error && <div role="alert" style={{ color: 'var(--accent-warn)', fontSize: 'var(--text-xs)', marginTop: 8 }}>{error}</div>}
   </section>;
 }

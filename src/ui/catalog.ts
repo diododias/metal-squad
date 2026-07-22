@@ -57,6 +57,8 @@ export interface WorkItemCatalogEntry {
   autoStart?: boolean;
   /** Dynamic projection for manual start guardrails. */
   pendingDependencies?: string[];
+  /** ISO timestamp of the last DB update; absent for backlog-only entries. */
+  updatedAt?: string;
 }
 
 /** Compatibility alias while older UI call sites migrate to Work Item naming. */
@@ -158,6 +160,7 @@ export function getFeatureCatalog(scope: WorkItemScope = {}): Record<string, Wor
         context: feature.context,
         maxTokens: feature.maxTokens,
         autoStart: feature.autoStart,
+        updatedAt: row.updatedAt,
       } satisfies WorkItemCatalogEntry];
     }));
   } catch (error) {

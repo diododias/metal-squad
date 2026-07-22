@@ -46,6 +46,9 @@
     "ink": "^5.1.0",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
+    "react-markdown": "^9.1.0",
+    "rehype-highlight": "^7.0.2",
+    "remark-gfm": "^4.0.1",
     "ws": "^8.21.0",
     "yaml": "^2.7.0",
     "zod": "^3.24.1"

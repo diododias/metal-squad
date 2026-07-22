@@ -18,7 +18,11 @@ export type DomainErrorCode =
   | 'WORKFLOW_TEMPLATE_INVALID'
   | 'WORKFLOW_TEMPLATE_IN_USE'
   | 'WORKFLOW_TEMPLATE_ARCHIVED'
-  | 'WORKFLOW_TEMPLATE_SCOPE_MISMATCH';
+  | 'WORKFLOW_TEMPLATE_SCOPE_MISMATCH'
+  | 'ENTITY_RUNNING'
+  | 'ENTITY_HAS_HISTORY'
+  | 'ENTITY_IN_USE'
+  | 'ANCESTOR_ARCHIVED';
 
 export class DomainError extends Error {
   public constructor(
@@ -141,6 +145,72 @@ export class RevisionConflictError extends DomainError {
       `${entityName} ${projectId} has revision ${String(actualRevision)}; expected ${String(expectedRevision)}`,
     );
     this.name = 'RevisionConflictError';
+  }
+}
+
+/** The lifecycle entity kind the policy engine reasons about. */
+export type LifecycleEntityKind = 'project' | 'epic' | 'work_item';
+
+const LIFECYCLE_ENTITY_LABEL: Record<LifecycleEntityKind, string> = {
+  project: 'Project',
+  epic: 'Epic',
+  work_item: 'Work Item',
+};
+
+function lifecycleLabel(kind: LifecycleEntityKind): string {
+  return LIFECYCLE_ENTITY_LABEL[kind];
+}
+
+/** Raised when archive/delete is attempted on an entity that is still running
+ * (an active run/pipeline or a pending stage request). The caller must cancel
+ * the execution first. */
+export class EntityRunningError extends DomainError {
+  public constructor(
+    public readonly entityKind: LifecycleEntityKind,
+    public readonly entityId: string,
+  ) {
+    super('ENTITY_RUNNING', `${lifecycleLabel(entityKind)} ${entityId} is running; cancel it before archiving or deleting`);
+    this.name = 'EntityRunningError';
+  }
+}
+
+/** Raised when a logical delete is attempted on an entity that already has run
+ * history. History-bearing entities may be archived but never deleted, so their
+ * audit trail is preserved. */
+export class EntityHasHistoryError extends DomainError {
+  public constructor(
+    public readonly entityKind: LifecycleEntityKind,
+    public readonly entityId: string,
+  ) {
+    super('ENTITY_HAS_HISTORY', `${lifecycleLabel(entityKind)} ${entityId} has run history and can be archived but not deleted`);
+    this.name = 'EntityHasHistoryError';
+  }
+}
+
+/** Raised when a logical delete is blocked by a live reference: a downstream
+ * `dependsOn`, an external task, a topic association, or a not-yet-tombstoned
+ * descendant/linked repository. */
+export class EntityInUseError extends DomainError {
+  public constructor(
+    public readonly entityKind: LifecycleEntityKind,
+    public readonly entityId: string,
+    detail: string,
+  ) {
+    super('ENTITY_IN_USE', `${lifecycleLabel(entityKind)} ${entityId} cannot be deleted: ${detail}`);
+    this.name = 'EntityInUseError';
+  }
+}
+
+/** Raised when a restore is attempted while an ancestor is still archived; the
+ * ancestor must be restored first because effective listings hide descendants
+ * of an archived ancestor. */
+export class AncestorArchivedError extends DomainError {
+  public constructor(
+    public readonly entityKind: LifecycleEntityKind,
+    public readonly entityId: string,
+  ) {
+    super('ANCESTOR_ARCHIVED', `${lifecycleLabel(entityKind)} ${entityId} has an archived ancestor; restore the ancestor first`);
+    this.name = 'AncestorArchivedError';
   }
 }
 

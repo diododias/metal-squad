@@ -1,6 +1,8 @@
 import { resolveRepoAllowlist, sanitizeRepoPath } from './repo.js';
 import {
+  archiveProject,
   createProject,
+  deleteProject,
   getRegisteredRepo,
   getProject,
   linkRepo,
@@ -8,8 +10,10 @@ import {
   listProjects,
   moveRepo,
   registerRepo,
+  restoreArchivedProject,
   unlinkRepo,
   updateProject,
+  type AuditContext,
   type CreateProjectInput,
   type ProjectQueryOptions,
   type ProjectRepoRow,
@@ -40,6 +44,21 @@ export const projectService = {
 
   update(projectId: string, patch: UpdateProjectPatch, expectedRevision: number): ServiceMutationResult<ProjectRow> {
     const entity = updateProject(projectId, normalizedProjectPatch(patch), expectedRevision);
+    return { entity, revision: entity.revision };
+  },
+
+  archive(projectId: string, expectedRevision: number, options: { audit?: AuditContext } = {}): ServiceMutationResult<ProjectRow> {
+    const entity = archiveProject(projectId, expectedRevision, options);
+    return { entity, revision: entity.revision };
+  },
+
+  delete(projectId: string, expectedRevision: number, options: { audit?: AuditContext } = {}): ServiceMutationResult<ProjectRow> {
+    const entity = deleteProject(projectId, expectedRevision, options);
+    return { entity, revision: entity.revision };
+  },
+
+  restoreArchive(projectId: string, expectedRevision: number, options: { audit?: AuditContext } = {}): ServiceMutationResult<ProjectRow> {
+    const entity = restoreArchivedProject(projectId, expectedRevision, options);
     return { entity, revision: entity.revision };
   },
 

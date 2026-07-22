@@ -140,6 +140,7 @@ export const codexAdapter: ToolAdapter = {
         const partial = summarizePartialOutput(error.stdout, error.stderr, touchedFiles);
         const usage = this.parseUsage?.(error.stdout) ?? undefined;
         if (usage) emitUsage(opts.runId, feature, usage);
+        const session = buildCodexSessionHandle(error.stdout, opts, opts.runId);
         return {
           ok: false,
           summary: `timeout após ${String(Math.round(error.runtimeMs / 1000))}s. ${partial}`,
@@ -149,6 +150,7 @@ export const codexAdapter: ToolAdapter = {
             runtimeMs: error.runtimeMs,
             ...(error.lastProgress ? { lastProgress: sanitizeTimeoutProgress(error.lastProgress) } : {}),
           },
+          ...(session ? { session } : {}),
         };
       }
       if (error instanceof CliAbortError) {
@@ -183,6 +185,23 @@ export const codexAdapter: ToolAdapter = {
     const session = buildCodexSessionHandle(stdout, opts, opts.runId);
     const control = parseControlSignal(finalMsg);
     if (usage) emitUsage(opts.runId, feature, usage);
+
+    // See claude.ts: a parsed control signal proves the session closed
+    // cleanly, so it takes precedence over the session-limit text heuristic,
+    // which can false-positive on incidental matches in tool output.
+    if (!control) {
+      const limitMessage = detectSessionLimit(stdout, stderr);
+      if (limitMessage) {
+        return {
+          ok: false,
+          blocked: true,
+          summary: `session limit reached: ${limitMessage}`,
+          usage,
+          ...(session ? { session } : {}),
+        };
+      }
+    }
+
     return {
       ok: true,
       summary: finalMsg.slice(0, 200),

@@ -1,23 +1,40 @@
 # metal-squad (`msq`)
 
-`metal-squad` is a backlog-driven AI development orchestrator built around a
-repo-local `backlog.yaml`, a global SQLite state database, and tool adapters
-such as `codex`, `claude`, and `opencode`.
+`metal-squad` is a multi-repo AI development orchestrator. A global SQLite
+database is the authoritative source of operational state — Projects, Epics,
+Work Items, Tasks, runs, and repo links all live there. `backlog.yaml` (and the
+newer v3 asset) are import seeds and export artifacts, never a live
+reconciliation source. Execution itself runs through tool adapters such as
+`codex`, `claude`, and `opencode`.
 
-It executes work as a graph of `epics -> features -> tasks`, supports staged
+The domain hierarchy is `Project -> Epic -> Work Item (type: feature|bug, one
+target Repository) -> Task`. A Project groups one or more Repositories and
+Epics; each Work Item targets exactly one Repository belonging to its Epic's
+Project. `metal-squad` executes work as a dependency graph, supports staged
 flows such as `specify -> plan -> implement -> validate`, persists runs across
 repositories, and can ask for human approval or input through Telegram.
 
 ## What It Does
 
-- Stores project work in a versioned `backlog.yaml`
-- Resolves dependencies between features before execution
-- Runs one feature or a whole backlog with configurable concurrency
+- Manages Projects, Epics, Work Items, and Tasks in a global SQLite catalog
+- Links, moves, and unlinks Repositories from Projects with transactional safety
+- Imports `backlog.yaml`/v3 assets as non-destructive seeds and exports the
+  catalog back to a portable v3 asset
+- Resolves dependencies between Work Items before execution, refusing
+  cross-repo dependencies before a pipeline starts
+- Routes execution, config, and skill discovery to the correct Repository path
+  per Work Item, regardless of the terminal's current directory
+- Runs one Work Item or a whole Repository backlog with configurable concurrency
 - Supports staged workflows with pause/resume/abort and approval gates
-- Persists runs, token usage, output, retry history, gates, and pipelines in SQLite
+- Applies an archive/delete/restore lifecycle with tombstones — no destructive
+  deletes, no ID reuse
+- Persists runs, token usage, output, retry history, gates, pipelines, and
+  audit events in SQLite
+- Backs up and restores the SQLite catalog WAL-safely
 - Streams notifications to Telegram, Slack, Discord, webhook, or desktop
 - Keeps a legacy TUI for monitoring runs, gates, output, and costs
-- Exposes the official web dashboard for remote monitoring and control
+- Exposes the official web dashboard for remote monitoring and control across
+  Projects
 - Lets you customize prompts via builtin, global, repo, and Spec Kit skills
 
 ## Requirements
@@ -81,35 +98,47 @@ npm run dev -- ui
 
 ## Quick Start
 
-1. Create or edit a `backlog.yaml` in the repo root.
+1. Create or edit a `backlog.yaml` in the repo root (or prepare a v3 asset for
+   a multi-repo Project — see [Backlog Model](#backlog-model)).
 2. Install and authenticate the adapter CLI you want to use.
-3. Register the repo and create the initial backlog if needed:
+3. Register the repo, then create a Project and link the repo to it:
 
 ```bash
 msq init
+msq projects create "My Project"
+msq projects repos link <projectId> --repo-id <repoId>
 ```
 
-4. Run a single feature:
+4. Load the backlog into the catalog (creates Epics/Work Items under that
+   Project's linked repo):
+
+```bash
+msq backlog load
+```
+
+5. Run a single Work Item (still identified by its legacy `feature` id in v2
+   seeds):
 
 ```bash
 msq run --feature feat-08
 ```
 
-5. Inspect status:
+6. Inspect status:
 
 ```bash
 msq status
 msq stats --period 7d
 msq ui
+msq web
 ```
 
 ## Core Files and Paths
 
-- Repo-local backlog: `./backlog.yaml`
+- Repo-local backlog seed: `./backlog.yaml`
 - Example backlog: [backlog.example.yaml](./backlog.example.yaml)
 - Global config: `~/.config/metal-squad/config.json`
-- Global DB: `~/.local/share/metal-squad/app.db`
-- SQLite backups: `~/.config/metal-squad/backup/<timestamp>/app.db` (run `npm run db:backup`)
+- Global DB (authoritative catalog): `~/.local/share/metal-squad/app.db`
+- SQLite backups: `~/.config/metal-squad/backup/<timestamp>/app.db` (run `npm run db:backup`, or `msq db backup --output <path>` for an ad hoc copy)
 - Repo skills: `./.msq/skills/<skill-name>/`
 - Global skills: `~/.config/metal-squad/skills/<skill-name>/`
 - Generated task decomposition output: `./.msq/generated/<featureId>/decompose.yaml`
@@ -133,6 +162,63 @@ the global DB.
 ```bash
 msq init
 ```
+
+### `msq projects`
+
+Manages Projects and their linked Repositories. A Project groups Repositories
+and Epics and owns the Work Item type-to-template map.
+
+```bash
+msq projects list
+msq projects list --include-archived --include-deleted --format json
+msq projects create "My Project" --description "..."
+msq projects update <projectId> --name "New name" --expected-revision <rev>
+msq projects archive <projectId> --expected-revision <rev>
+msq projects delete <projectId> --expected-revision <rev>
+msq projects restore <projectId> --expected-revision <rev>
+
+msq projects repos link <projectId> --repo-id <repoId> --path <path>
+msq projects repos move <repoId> <toProjectId>
+msq projects repos unlink <repoId>
+```
+
+A Repository belongs to at most one Project at a time; `repos move` transfers
+it transactionally. `--expected-revision` guards mutations against concurrent
+edits (see [Revision Concurrency](#revision-concurrency-and-mutation-contract)).
+
+### `msq epics`
+
+Manages Epics within a Project. An Epic has no operational Repository of its
+own — every Work Item under it still targets one Repository of the Project.
+
+```bash
+msq epics list --project-id <projectId>
+msq epics create <projectId> "Epic title" --description "..."
+msq epics update <epicId> --status in_progress --expected-revision <rev>
+msq epics archive <epicId> --expected-revision <rev>
+msq epics delete <epicId> --expected-revision <rev>
+msq epics restore <epicId> --expected-revision <rev>
+```
+
+Epic `status` (`todo | in_progress | done`) is set manually; Work Item status
+stays derived from its runs.
+
+### `msq work-items`
+
+Creates and manages Work Items — the canonical term for a unit of work of type
+`feature` or `bug`. Each Work Item targets exactly one Repository linked to
+its Epic's Project.
+
+```bash
+msq work-items create --epic <epicId> --repo <repoId> --title "..." \
+  --description "..." --depends-on <workItemId>
+msq work-items archive <workItemId> --expected-revision <rev>
+msq work-items delete <workItemId> --expected-revision <rev>
+msq work-items restore <workItemId> --expected-revision <rev>
+```
+
+`--depends-on` may be repeated; cross-repo dependencies are rejected before a
+pipeline is created.
 
 ### `msq run`
 
@@ -277,14 +363,86 @@ msq daemon restart
 
 The daemon stores its PID in `~/.local/share/metal-squad/daemon.pid`.
 
+### `msq backlog load`
+
+Consumes a `backlog.yaml` (v1/v2, repo-scoped) or a v3 asset (Project-scoped,
+multi-repo) and publishes epics/Work Items into the catalog DB as a
+non-destructive import seed. Never overwrites or archives existing entities by
+YAML diff; conflicts are reported explicitly instead of applied.
+
+```bash
+msq backlog load
+msq backlog load --file ./backlog.yaml --dry-run
+msq backlog load --file ./export.v3.yaml --project <projectId> \
+  --repo-map repoA=/abs/path/to/repoA --repo-map repoB=/abs/path/to/repoB
+```
+
+Options:
+
+- `--file <path>`: seed file (default: `./backlog.yaml` in the current repo)
+- `--mode <mode>`: import mode, only `seed` is supported
+- `--format <format>`: `text` or `json` report
+- `--dry-run`: print the plan without writing to the DB
+- `--project <id>`: target Project for a v3 asset (default: the asset's own id)
+- `--repo-map <repoId>=<path>`: resolve a v3 asset's repository ids to local
+  paths; repeatable
+
+### `msq backlog export`
+
+Exports a Project's catalog (Epics, Work Items, linked Repositories) from the
+DB to a portable v3 asset (YAML or JSON) — the inverse of `backlog load` for a
+v3 asset, used for backup, transport, and disaster recovery.
+
+```bash
+msq backlog export --project <projectId>
+msq backlog export --project <projectId> --file ./export.v3.yaml
+msq backlog export --project <projectId> --format json --include-archived
+```
+
+Options:
+
+- `--project <id>` (required): Project to export
+- `--file <path>`: output file (default: stdout)
+- `--format <format>`: `yaml` (default) or `json`
+- `--include-archived`: include archived Epics/Work Items
+- `--include-paths`: include each Repository's local path (not portable across
+  machines — omit when sharing the export)
+
+### `msq db backup` / `msq db restore`
+
+Creates or restores a WAL-safe, integrity-checked copy of the SQLite catalog.
+Prefer these over copying `app.db` directly while `msq` may be running.
+
+```bash
+msq db backup --output ~/backups/app-$(date +%Y%m%d).db
+msq db restore --input ~/backups/app-20260701.db
+msq db restore --input ~/backups/app-20260701.db --yes
+```
+
+Options:
+
+- `--output <path>` (required for `backup`): destination file
+- `--input <path>` (required for `restore`): backup file to restore from
+- `--yes`: skip the interactive confirmation prompt
+
+`restore` saves a backup of the DB it is about to replace before overwriting
+it, so a bad restore can itself be rolled back. See
+[docs/runbooks/backup-restore.md](./docs/runbooks/backup-restore.md) for the
+full backup/restore/migration/rollback runbook.
+
 ## Backlog Model
+
+There are two seed/export formats: the repo-scoped `backlog.yaml` (v1/v2) and
+the Project-scoped v3 asset. Both are import seeds and export artifacts, not a
+live reconciliation source — the catalog DB is authoritative once a seed has
+been loaded (see [Projects and source-of-truth governance](#projects-and-source-of-truth-governance)).
+
+### v2: repo-scoped `backlog.yaml`
 
 The loader-backed filename is `backlog.yaml`.
 
-The current schema version is `2`. Version `1` still parses, but the loader
+The current v2 schema version is `2`. Version `1` still parses, but the loader
 prints a warning and normalizes it to v2 shape.
-
-### Top-Level Schema
 
 ```yaml
 version: 2
@@ -295,32 +453,22 @@ epics:
     features:
       - id: feat-01
         title: Example feature
-        # Optional execution overrides; omitted values come from Projeto.
+        # Optional execution overrides; omitted values come from Repository defaults.
         tool: codex
         effort: high
 ```
 
-`backlog.yaml` is an import seed for epics and Work Items. Repository defaults
-and budget settings are stored in the catalog DB, not authored in this file. The
-loader accepts legacy `defaults` and `budget` blocks for migration, warns that
-they are ignored, and resolves effective execution values from Repository
-defaults. The current v2 seed still uses `features` as a compatibility import
-key; new domain contracts use Work Item terminology.
+`backlog.yaml` is an import seed for epics and Work Items, loaded into whatever
+repo/Project the current repo is linked to. Repository defaults and budget
+settings are stored in the catalog DB, not authored in this file. The loader
+accepts legacy `defaults` and `budget` blocks for migration, warns that they
+are ignored, and resolves effective execution values from Repository defaults.
+The v2 seed still uses `features` as a compatibility import key; new domain
+contracts use Work Item terminology.
 
-### Supported Fields
+Top level fields: `version`, `repo`, `epics`.
 
-Top level:
-
-- `version`
-- `repo`
-- `epics`
-
-Defaults e budget são configurados nos Repository defaults do catálogo SQLite.
-O `backlog.yaml` é um seed de importação somente de Epics e Work Items.
-Backlogs legados com `defaults` continuam carregando, mas o bloco é ignorado
-com aviso.
-
-`feature` (chave de importação v2; entidade canônica: `Work Item`):
+`feature` (v2 import key; canonical entity: `Work Item`):
 
 - `id`
 - `title`
@@ -353,6 +501,44 @@ com aviso.
 - `maxAttempts`
 - `backoffMs`
 - `onFail`: `stop | continue | gate`
+
+### v3: Project-scoped asset (multi-repo)
+
+The v3 asset is the export/import format for a whole Project spanning multiple
+Repositories, produced by `msq backlog export` and consumed by
+`msq backlog load` (see [Command Reference](#msq-backlog-load)).
+
+```yaml
+version: 3
+project:
+  id: proj-1
+  name: My Project
+  description: optional
+  position: 0
+repositories:
+  - repoId: repoA
+    label: repo-a
+    remote: git@example.com:org/repo-a.git
+    path: /abs/path/to/repo-a   # only present with --include-paths
+epics:
+  - id: epic-1
+    title: Epic title
+    status: todo   # todo | in_progress | done
+    position: 0
+workItems:
+  - id: feat-01
+    title: Example Work Item
+    epicId: epic-1
+    repoId: repoA
+    position: 0
+    # remaining fields are the same execution fields as v2 `feature`
+```
+
+Loading a v3 asset resolves each `repoId` to a local path via `--repo-map
+<repoId>=<path>`, an already-registered repo, or fails fast if neither is
+available. `--project` overrides which Project the asset seeds into (default:
+the asset's own `project.id`). Archived Epics/Work Items are included only when
+exported with `--include-archived`, and `archivedAt` round-trips accordingly.
 
 ### Settings Ownership: App, Repository defaults, and Work Item
 
@@ -428,12 +614,12 @@ Only the *automatic* continuation is opt-in.
 `metal-squad` applies defaults in this order:
 
 1. Repository defaults (DB)
-2. Valores explícitos do Work Item
+2. Explicit Work Item values
 
 Current propagation behavior:
 
-- Repository defaults propagam para Work Items que omitem valores de execução.
-- Valores explícitos do Work Item continuam tendo precedência.
+- Repository defaults propagate to Work Items that omit execution values.
+- Explicit Work Item values still take precedence.
 
 ### Projects and source-of-truth governance
 
@@ -453,6 +639,47 @@ New Project contracts use `WorkItem`, `WorkItemCatalogEntry`, `workItemId`,
 key and persistence names such as `backlog_features`, `feature_id`,
 `FeatureSchema`, and `projectDefaults` remain compatibility aliases during the
 epic; they are not new domain names.
+
+### Lifecycle: archive, delete, and restore
+
+Project, Epic, and Work Item entities share one policy engine for lifecycle
+transitions:
+
+- A **pristine** entity (no run has ever started) can be archived or logically
+  deleted. Delete uses a tombstone (`deleted_at`) — the ID is preserved and
+  never reused.
+- An entity with any **terminal run** (done, failed, aborted) can only be
+  archived, not deleted.
+- A **running** entity must be cancelled before it can be archived or deleted.
+- `restore` reverses an archive and validates that ancestors (Epic, Project)
+  and the linked Repository still exist and are reachable.
+
+```bash
+msq projects archive <projectId> --expected-revision <rev>
+msq epics delete <epicId> --expected-revision <rev>
+msq work-items restore <workItemId> --expected-revision <rev>
+```
+
+The web dashboard exposes the same actions plus an `/archived` view with
+restore and an audit trail. Every mutation carries an audit event (actor,
+entity, operation, timestamp).
+
+### Revision concurrency and mutation contract
+
+Mutating commands and WebSocket actions accept `--expected-revision` /
+`revision` to detect concurrent edits: if the entity's current revision does
+not match, the mutation is rejected with a typed conflict error instead of
+silently overwriting another change. Every related write inside one mutation
+uses a single transaction.
+
+### Repo routing and health
+
+Execution, config resolution, and skill discovery for a Work Item always use
+its target Repository's registered path — not the terminal's current working
+directory. If a Repository's registered path is missing, unreadable, or
+outside an allowed root, the web dashboard reports it with a health
+diagnostic instead of silently failing or starting a run against the wrong
+directory.
 
 ### File Validation
 
@@ -493,10 +720,10 @@ Runs the feature stage by stage. The default system stage mapping is:
 - `implement -> speckit-implement, dev-flow`
 - `validate -> review`
 
-The default project template supplies this mapping. Each Projeto can customize
-its `stageSkills`; App configuration does not provide a competing stage-skill
-layer. If a stage has no explicit mapping, the registry tries to resolve a
-skill with the same name as the stage itself.
+The default workflow template supplies this mapping. Each Repository's
+defaults can customize its `stageSkills`; App configuration does not provide a
+competing stage-skill layer. If a stage has no explicit mapping, the registry
+tries to resolve a skill with the same name as the stage itself.
 
 ### Approvals and Human Input
 
@@ -731,13 +958,14 @@ It is created automatically on first run.
 
 ### Precedence
 
-For feature execution values:
+For Work Item execution values:
 
-1. Projeto defaults
-2. Feature fields
+1. Repository defaults
+2. Work Item fields
 
 App configuration is not an execution-default layer. It supplies infrastructure
-and the tool registry; a selected Feature/Projeto tool ID must resolve there.
+and the tool registry; a selected Work Item/Repository-default tool ID must
+resolve there.
 
 ## Notifications and Telegram
 
@@ -871,7 +1099,9 @@ Main capabilities:
 
 The SQLite DB persists:
 
-- repos
+- projects, repos, and Project-Repository links
+- epics and Work Items (`backlog_features` is the legacy persistence name for
+  Work Items, kept for compatibility)
 - runs
 - token usage
 - gates
@@ -881,6 +1111,7 @@ The SQLite DB persists:
 - pipelines
 - run events
 - stage requests
+- audit events (actor, entity, operation, timestamp, revision)
 
 `msq status`, `msq stats`, the web dashboard, and the legacy TUI all read from this DB.
 
@@ -917,6 +1148,16 @@ Then either:
 
 If `specFile` or `taskFile` points to a non-existent path, the loader fails
 before execution. Fix the path or create the file.
+
+### Repository path is unreachable
+
+If a Work Item's target Repository path was moved, deleted, or is on an
+unmounted volume, the web dashboard reports repo `health: unavailable` instead
+of starting a run against the wrong directory. Re-link the Repository to its
+current path (`msq projects repos link <projectId> --repo-id <repoId> --path
+<newPath>`) before retrying. See
+[docs/runbooks/backup-restore.md](./docs/runbooks/backup-restore.md) for full
+repo-path recovery steps.
 
 ### Model not found
 
@@ -966,13 +1207,25 @@ src/
   security/
   ui/
 docs/
+  adr/
+  epics/
+  features/
+  hotfixes/
+  runbooks/
 specs/
 tests/
 ```
 
 ## Related Docs
 
-- [docs/ARCHITECTURE.md](./docs/ARCHITECTURE.md)
-- [docs/ROADMAP.md](./docs/ROADMAP.md)
+- [docs/ARCHITECTURE.md](./docs/ARCHITECTURE.md) — placeholder; not a decision
+  source, see [.claude/rules/repo-context.md](./.claude/rules/repo-context.md)
+- [docs/ROADMAP.md](./docs/ROADMAP.md) — transition notice only, not a live backlog
+- [ADR-001](./docs/adr/ADR-001-governanca-fonte-de-verdade-terminologia.md) —
+  governance, source-of-truth, and terminology decisions for the Projects model
+- [Projects epic roadmap](<./docs/epics/epico - projetos/ROADMAP.md>) —
+  milestones and acceptance criteria for the multi-repo Project model
+- [docs/runbooks/backup-restore.md](./docs/runbooks/backup-restore.md) —
+  backup, restore, migration, rollback, and repo-path recovery
 - [docs/features](./docs/features)
 - [backlog.example.yaml](./backlog.example.yaml)

@@ -170,6 +170,56 @@ describe('codexAdapter.runFeature — success path', () => {
     expect(result.summary).toBe(agentMsg);
   });
 
+  it('does not block a run whose transcript merely mentions "session limit" in tool output but closes with a valid MSQ_DONE', async () => {
+    const transcript = [
+      JSON.stringify({
+        type: 'item.completed',
+        item: {
+          type: 'command_execution',
+          command: 'git log',
+          aggregated_output: 'commit 0767d46 feat(notify): suggest and enable adapter fallback resume on Telegram session limit (#218)',
+          exit_code: 0,
+        },
+      }),
+      JSON.stringify({
+        type: 'item.completed',
+        item: { type: 'agent_message', text: 'All good. MSQ_DONE: Implemented.\npr_url=https://github.com/org/repo/pull/1 pr_number=1 base=develop head=feat/x' },
+      }),
+    ].join('\n');
+    mockRunCli.mockResolvedValue({ code: 0, stdout: transcript, stderr: '' });
+    mockParseControlSignal.mockReturnValue({
+      type: 'done',
+      summary: 'Implemented.',
+      publication: { prUrl: 'https://github.com/org/repo/pull/1', prNumber: 1, base: 'develop', head: 'feat/x' },
+    });
+
+    const { codexAdapter } = await import('../../src/core/adapters/codex.js');
+    const result = await codexAdapter.runFeature(feature, 'prompt', { cwd: '/repo', runId: 100 });
+
+    expect(result.ok).toBe(true);
+    expect(result.blocked).toBeUndefined();
+    expect(result.control).toEqual(expect.objectContaining({
+      type: 'done',
+      publication: expect.objectContaining({ prUrl: 'https://github.com/org/repo/pull/1', prNumber: 1 }),
+    }));
+  });
+
+  it('still reports a blocked run when the transcript has no MSQ_DONE/control signal and genuinely mentions a rate limit', async () => {
+    const transcript = JSON.stringify({
+      type: 'item.completed',
+      item: { type: 'agent_message', text: 'Hit a provider error while working.' },
+    });
+    mockRunCli.mockResolvedValue({ code: 0, stdout: transcript, stderr: 'Error: rate limit exceeded, please retry later' });
+    mockParseControlSignal.mockReturnValue(null);
+
+    const { codexAdapter } = await import('../../src/core/adapters/codex.js');
+    const result = await codexAdapter.runFeature(feature, 'prompt', { cwd: '/repo', runId: 101 });
+
+    expect(result.ok).toBe(false);
+    expect(result.blocked).toBe(true);
+    expect(result.summary).toContain('session limit reached');
+  });
+
   it('emits tokens:update when turn.completed in stdout', async () => {
     const transcript = JSON.stringify({
       type: 'turn.completed',

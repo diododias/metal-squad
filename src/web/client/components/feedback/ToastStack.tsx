@@ -9,6 +9,9 @@ export interface ToastStackItem {
   source?: string;
   /** Auto-dismiss after this many ms. 0 keeps the toast until dismissed. */
   ttlMs?: number;
+  /** Optional secondary action rendered as a button inside the toast (e.g.
+   * "abrir detalhe" after a creation). Selecting it also dismisses the toast. */
+  action?: { label: string; onSelect: () => void };
 }
 
 export interface ToastStackProps {
@@ -78,21 +81,15 @@ export function ToastStack({ items, maxVisible = 4, onDismiss }: ToastStackProps
       }}
     >
       {visible.map((item) => (
-        <button
-          type="button"
+        // A div (not a button) so the optional action can be a real button —
+        // nested buttons are invalid HTML. Clicking anywhere else dismisses.
+        <div
           key={item.id}
           onClick={() => { onDismiss?.(item.id); }}
           style={{
             pointerEvents: 'auto',
-            background: 'transparent',
-            border: 'none',
-            padding: 0,
-            margin: 0,
             cursor: 'pointer',
             textAlign: 'left',
-            fontFamily: 'inherit',
-            fontSize: 'inherit',
-            color: 'inherit',
             width: '100%',
           }}
           title="Dismiss"
@@ -112,9 +109,33 @@ export function ToastStack({ items, maxVisible = 4, onDismiss }: ToastStackProps
               <span style={{ color: 'var(--text-primary)', whiteSpace: 'pre-wrap', fontSize: 'var(--text-sm)' }}>
                 {item.message}
               </span>
+              {item.action && (
+                <button
+                  type="button"
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    item.action?.onSelect();
+                    onDismiss?.(item.id);
+                  }}
+                  style={{
+                    alignSelf: 'flex-start',
+                    marginTop: 4,
+                    background: 'transparent',
+                    border: '1px solid var(--border-dim)',
+                    borderRadius: 'var(--radius-sm)',
+                    color: 'var(--accent-info)',
+                    fontFamily: 'inherit',
+                    fontSize: 'var(--text-xs)',
+                    padding: '3px 8px',
+                    cursor: 'pointer',
+                  }}
+                >
+                  {item.action.label}
+                </button>
+              )}
             </div>
           </Toast>
-        </button>
+        </div>
       ))}
     </div>
   );

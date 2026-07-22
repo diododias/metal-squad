@@ -2,6 +2,11 @@ import { randomUUID } from 'node:crypto';
 import { existsSync, statSync } from 'node:fs';
 import { getDb, withTransaction } from './index.js';
 import {
+  AncestorArchivedError,
+  type LifecycleEntityKind,
+  EntityHasHistoryError,
+  EntityInUseError,
+  EntityRunningError,
   EpicNotFoundError,
   CrossRepositoryDependencyError,
   DependencyCycleError,
@@ -16,12 +21,24 @@ import {
   WorkItemHasHistoryError,
   WorkItemNotFoundError,
 } from './errors.js';
+import {
+  canArchive,
+  classifyEpicState,
+  classifyProjectState,
+  classifyWorkItemState,
+  collectWorkItemReferences,
+  epicHasUndeletedWorkItems,
+  projectHasLinkedRepos,
+  projectHasUndeletedEpics,
+  projectLifecycle,
+  type AllowedLifecycle,
+} from '../core/lifecyclePolicy.js';
 import { listOccupiedFeatureIds } from './backlogCatalog.js';
 import { allocateFeatureId } from '../core/backlog/featureId.js';
 import { DefaultsSchema, FeatureSchema, type Defaults, type Feature, type WorkItem, type WorkflowTemplateDefinition } from '../core/backlog/schema.js';
 import type { TemplateOrigin, WorkItemType } from './workflowTemplates.js';
 import { topoOrder } from '../core/orchestrator/graph.js';
-import { sanitizeToolCallRecord, type PublishEvidence, type SessionStatusSnapshot, type TokenUsage, type ToolCallRecord } from '../core/adapters/types.js';
+import { sanitizeToolCallRecord, type PublishEvidence, type SessionHandle, type SessionStatusSnapshot, type TokenUsage, type ToolCallRecord } from '../core/adapters/types.js';
 import { resolveDbPath } from '../config/index.js';
 import { msqEventBus, logCaughtError } from '../core/events/index.js';
 import type {
@@ -123,6 +140,7 @@ export interface ProjectStateSummaryRow {
   description: string | null;
   revision: number;
   archivedAt: string | null;
+  updatedAt: string;
   epicCount: number;
   workItemCount: number;
   archivedCount: number;
@@ -266,6 +284,30 @@ export function listProjects(options: ProjectQueryOptions = {}): ProjectRow[] {
     .all() as ProjectRow[];
 }
 
+export interface ArchivedScope {
+  limit?: number;
+  offset?: number;
+}
+
+/** Archived (not deleted) Projects only, paginated for the `/archived` page
+ * (PRJ-19). Tombstoned Projects never appear here — they live in the audit
+ * trail instead. */
+export function listArchivedProjects(scope: ArchivedScope = {}): ProjectRow[] {
+  if (!hasDbFile()) return [];
+  const pagination = scope.limit === undefined ? '' : ' LIMIT ? OFFSET ?';
+  const stmt = getDb('readonly').prepare(
+    `${PROJECT_SELECT} WHERE archived_at IS NOT NULL AND deleted_at IS NULL ORDER BY archived_at DESC${pagination}`,
+  );
+  return (scope.limit === undefined ? stmt.all() : stmt.all(scope.limit, scope.offset ?? 0)) as ProjectRow[];
+}
+
+export function countArchivedProjects(): number {
+  if (!hasDbFile()) return 0;
+  return (getDb('readonly').prepare(
+    `SELECT COUNT(*) AS count FROM projects WHERE archived_at IS NOT NULL AND deleted_at IS NULL`,
+  ).get() as { count: number }).count;
+}
+
 export function createEpic(input: CreateEpicInput): EpicRow {
   return withTransaction((database) => {
     assertProjectExists(database, input.projectId);
@@ -295,6 +337,53 @@ export function listEpics(projectId?: string): EpicRow[] {
     ? `${EPIC_SELECT} WHERE project_id = ? AND archived_at IS NULL AND deleted_at IS NULL ORDER BY position ASC, updated_at ASC`
     : `${EPIC_SELECT} WHERE archived_at IS NULL AND deleted_at IS NULL ORDER BY position ASC, updated_at ASC`;
   return (projectId ? getDb('readonly').prepare(query).all(projectId) : getDb('readonly').prepare(query).all()) as EpicRow[];
+}
+
+/** Archived (not deleted) Epics only, paginated for the `/archived` page
+ * (PRJ-19). Optionally scoped to a Project. */
+export function listArchivedEpics(scope: ArchivedScope & { projectId?: string } = {}): EpicRow[] {
+  if (!hasDbFile()) return [];
+  const clauses = ['archived_at IS NOT NULL', 'deleted_at IS NULL'];
+  const params: (string | number)[] = [];
+  if (scope.projectId) { clauses.push('project_id = ?'); params.push(scope.projectId); }
+  const pagination = scope.limit === undefined ? '' : ' LIMIT ? OFFSET ?';
+  if (scope.limit !== undefined) params.push(scope.limit, scope.offset ?? 0);
+  return getDb('readonly').prepare(
+    `${EPIC_SELECT} WHERE ${clauses.join(' AND ')} ORDER BY archived_at DESC${pagination}`,
+  ).all(...params) as EpicRow[];
+}
+
+export function countArchivedEpics(projectId?: string): number {
+  if (!hasDbFile()) return 0;
+  const clauses = ['archived_at IS NOT NULL', 'deleted_at IS NULL'];
+  const params: string[] = [];
+  if (projectId) { clauses.push('project_id = ?'); params.push(projectId); }
+  return (getDb('readonly').prepare(
+    `SELECT COUNT(*) AS count FROM backlog_epics WHERE ${clauses.join(' AND ')}`,
+  ).get(...params) as { count: number }).count;
+}
+
+
+/** A single entity to project lifecycle actions for. */
+export interface LifecycleProjectionKey {
+  kind: LifecycleEntityKind;
+  id: string;
+}
+
+/**
+ * Computes the policy-permitted lifecycle actions (PRJ-18) for a batch of
+ * entities in one read-only pass, keyed by `${kind}:${id}`. The web state
+ * builder calls this so the client consumes the projection instead of
+ * re-deriving the policy. Missing DB file yields an empty map.
+ */
+export function projectLifecycleActions(keys: LifecycleProjectionKey[]): Record<string, AllowedLifecycle> {
+  const result: Record<string, AllowedLifecycle> = {};
+  if (!hasDbFile() || keys.length === 0) return result;
+  const database = getDb('readonly');
+  for (const { kind, id } of keys) {
+    result[`${kind}:${id}`] = projectLifecycle(database, kind, id);
+  }
+  return result;
 }
 
 export function updateEpic(epicId: string, patch: UpdateEpicPatch, expectedRevision: number, options: { audit?: AuditContext } = {}): EpicRow {
@@ -527,6 +616,322 @@ export function getWorkItemExecutionTarget(workItemId: string): WorkItemExecutio
   ).get(workItemId) as WorkItemExecutionTarget | undefined) ?? null;
 }
 
+// --------------------------------------------------------------------------
+// Lifecycle: archive / delete / restore (PRJ-17)
+//
+// The policy classification and the write share the same transaction so a
+// concurrent Start cannot slip a run in between the check and the mutation.
+// Every mutation records an audit event in that same transaction.
+// --------------------------------------------------------------------------
+
+export type LifecycleAction = 'archive' | 'delete' | 'restoreArchive';
+
+interface LifecycleRow {
+  archivedAt: string | null;
+  deletedAt: string | null;
+  revision: number;
+}
+
+/** Reads lifecycle columns for a Work Item regardless of archive/delete state. */
+function getWorkItemLifecycle(database: ReturnType<typeof getDb>, workItemId: string): LifecycleRow | null {
+  return (database.prepare(
+    `SELECT archived_at AS archivedAt, deleted_at AS deletedAt, revision
+       FROM backlog_features WHERE feature_id = ?`,
+  ).get(workItemId) as LifecycleRow | undefined) ?? null;
+}
+
+function getEpicLifecycle(database: ReturnType<typeof getDb>, epicId: string): (LifecycleRow & { projectId: string | null }) | null {
+  return (database.prepare(
+    `SELECT archived_at AS archivedAt, deleted_at AS deletedAt, revision, project_id AS projectId
+       FROM backlog_epics WHERE epic_id = ?`,
+  ).get(epicId) as (LifecycleRow & { projectId: string | null }) | undefined) ?? null;
+}
+
+function getProjectLifecycle(database: ReturnType<typeof getDb>, projectId: string): LifecycleRow | null {
+  return (database.prepare(
+    `SELECT archived_at AS archivedAt, deleted_at AS deletedAt, revision
+       FROM projects WHERE project_id = ?`,
+  ).get(projectId) as LifecycleRow | undefined) ?? null;
+}
+
+function assertRevision(entityId: string, expectedRevision: number, actual: number, label: string): void {
+  if (expectedRevision !== actual) throw new RevisionConflictError(entityId, expectedRevision, actual, label);
+}
+
+/**
+ * Archives a Work Item. Reversible: sets `archived_at`, keeps `deleted_at`
+ * NULL. Refused while running (cancel first); allowed for pristine/historical.
+ */
+export function archiveWorkItem(workItemId: string, expectedRevision: number, options: { audit?: AuditContext } = {}): WorkItemRow {
+  return withTransaction((database) => {
+    const before = getWorkItemLifecycle(database, workItemId);
+    if (!before) throw new WorkItemNotFoundError(workItemId);
+    assertRevision(workItemId, expectedRevision, before.revision, 'Work Item');
+    if (!canArchive(classifyWorkItemState(database, workItemId))) {
+      throw new EntityRunningError('work_item', workItemId);
+    }
+    database.prepare(
+      `UPDATE backlog_features
+          SET archived_at = COALESCE(archived_at, datetime('now')),
+              revision = revision + 1, updated_at = datetime('now')
+        WHERE feature_id = ?`,
+    ).run(workItemId);
+    const after = getWorkItemLifecycle(database, workItemId);
+    recordAuditEvent(database, options.audit, 'work_item', workItemId, 'archive', before, after);
+    return requireWorkItemAnyState(database, workItemId);
+  });
+}
+
+/**
+ * Logically deletes a Work Item (tombstone). Allowed only for a pristine item
+ * with no downstream `dependsOn`, no topic association and no active gate. The
+ * ID reservation is preserved (the row survives), so IDs are never reused.
+ */
+export function deleteWorkItem(workItemId: string, expectedRevision: number, options: { audit?: AuditContext } = {}): WorkItemRow {
+  return withTransaction((database) => {
+    const before = getWorkItemLifecycle(database, workItemId);
+    if (!before) throw new WorkItemNotFoundError(workItemId);
+    assertRevision(workItemId, expectedRevision, before.revision, 'Work Item');
+    const refs = collectWorkItemReferences(database, workItemId);
+    if (refs.state === 'running') throw new EntityRunningError('work_item', workItemId);
+    if (refs.state === 'historical') throw new EntityHasHistoryError('work_item', workItemId);
+    if (refs.activeGate) throw new EntityInUseError('work_item', workItemId, 'it has an unresolved gate');
+    if (refs.topic) throw new EntityInUseError('work_item', workItemId, 'it has a topic association');
+    if (refs.dependents.length > 0) {
+      throw new EntityInUseError('work_item', workItemId, `it is a dependency of ${refs.dependents.join(', ')}`);
+    }
+    database.prepare(
+      `UPDATE backlog_features
+          SET deleted_at = COALESCE(deleted_at, datetime('now')), archived_at = NULL,
+              revision = revision + 1, updated_at = datetime('now')
+        WHERE feature_id = ?`,
+    ).run(workItemId);
+    const after = getWorkItemLifecycle(database, workItemId);
+    recordAuditEvent(database, options.audit, 'work_item', workItemId, 'delete', before, after);
+    return requireWorkItemAnyState(database, workItemId);
+  });
+}
+
+/** Reverses an archive on a Work Item, clearing `archived_at`. */
+/** Restoring a Work Item requires its repository to still be linked to the same
+ * Project as its Epic — a repo transferred to another Project or unlinked
+ * entirely would otherwise leave the restored item orphaned. Name/position
+ * conflicts never block restore; only this identity/relation check does. */
+function assertWorkItemRepoStillLinked(database: ReturnType<typeof getDb>, workItemId: string): void {
+  const row = database.prepare(
+    `SELECT f.repo_id AS repoId, e.project_id AS epicProjectId, pr.project_id AS repoProjectId
+       FROM backlog_features f
+       JOIN backlog_epics e ON e.epic_id = f.epic_id
+       LEFT JOIN project_repos pr ON pr.repo_id = f.repo_id
+      WHERE f.feature_id = ?`,
+  ).get(workItemId) as { repoId: string; epicProjectId: string; repoProjectId: string | null } | undefined;
+  if (!row) throw new WorkItemNotFoundError(workItemId);
+  if (row.repoProjectId === null || row.repoProjectId !== row.epicProjectId) {
+    throw new RepositoryNotInProjectError(row.repoId, row.epicProjectId);
+  }
+}
+
+export function restoreArchivedWorkItem(workItemId: string, expectedRevision: number, options: { audit?: AuditContext } = {}): WorkItemRow {
+  return withTransaction((database) => {
+    const before = getWorkItemLifecycle(database, workItemId);
+    if (!before) throw new WorkItemNotFoundError(workItemId);
+    assertRevision(workItemId, expectedRevision, before.revision, 'Work Item');
+    const epic = getEpicLifecycle(database, requireWorkItemEpicId(database, workItemId));
+    if (epic && (epic.archivedAt !== null || epic.deletedAt !== null)) {
+      throw new AncestorArchivedError('work_item', workItemId);
+    }
+    assertWorkItemRepoStillLinked(database, workItemId);
+    database.prepare(
+      `UPDATE backlog_features
+          SET archived_at = NULL, revision = revision + 1, updated_at = datetime('now')
+        WHERE feature_id = ?`,
+    ).run(workItemId);
+    const after = getWorkItemLifecycle(database, workItemId);
+    recordAuditEvent(database, options.audit, 'work_item', workItemId, 'restoreArchive', before, after);
+    return requireWorkItemAnyState(database, workItemId);
+  });
+}
+
+/** Archives an Epic (reversible). Children are not touched; effective listings
+ * hide descendants of an archived ancestor. Refused while running. */
+export function archiveEpic(epicId: string, expectedRevision: number, options: { audit?: AuditContext } = {}): EpicRow {
+  return withTransaction((database) => {
+    const before = getEpicLifecycle(database, epicId);
+    if (!before) throw new EpicNotFoundError(epicId);
+    assertRevision(epicId, expectedRevision, before.revision, 'Epic');
+    if (!canArchive(classifyEpicState(database, epicId))) throw new EntityRunningError('epic', epicId);
+    database.prepare(
+      `UPDATE backlog_epics
+          SET archived_at = COALESCE(archived_at, datetime('now')),
+              revision = revision + 1, updated_at = datetime('now')
+        WHERE epic_id = ?`,
+    ).run(epicId);
+    const after = getEpicLifecycle(database, epicId);
+    recordAuditEvent(database, options.audit, 'epic', epicId, 'archive', before, after);
+    return requireEpicAnyState(database, epicId);
+  });
+}
+
+/** Logically deletes an Epic. Allowed only once every Work Item underneath is
+ * already tombstoned and the Epic itself is not running. */
+export function deleteEpic(epicId: string, expectedRevision: number, options: { audit?: AuditContext } = {}): EpicRow {
+  return withTransaction((database) => {
+    const before = getEpicLifecycle(database, epicId);
+    if (!before) throw new EpicNotFoundError(epicId);
+    assertRevision(epicId, expectedRevision, before.revision, 'Epic');
+    const state = classifyEpicState(database, epicId);
+    if (state === 'running') throw new EntityRunningError('epic', epicId);
+    if (state === 'historical') throw new EntityHasHistoryError('epic', epicId);
+    if (epicHasUndeletedWorkItems(database, epicId)) {
+      throw new EntityInUseError('epic', epicId, 'it still has Work Items that are not deleted');
+    }
+    database.prepare(
+      `UPDATE backlog_epics
+          SET deleted_at = COALESCE(deleted_at, datetime('now')), archived_at = NULL,
+              revision = revision + 1, updated_at = datetime('now')
+        WHERE epic_id = ?`,
+    ).run(epicId);
+    const after = getEpicLifecycle(database, epicId);
+    recordAuditEvent(database, options.audit, 'epic', epicId, 'delete', before, after);
+    return requireEpicAnyState(database, epicId);
+  });
+}
+
+/** Reverses an archive on an Epic, refusing while the Project ancestor is
+ * archived/deleted. */
+export function restoreArchivedEpic(epicId: string, expectedRevision: number, options: { audit?: AuditContext } = {}): EpicRow {
+  return withTransaction((database) => {
+    const before = getEpicLifecycle(database, epicId);
+    if (!before) throw new EpicNotFoundError(epicId);
+    assertRevision(epicId, expectedRevision, before.revision, 'Epic');
+    if (before.projectId) {
+      const project = getProjectLifecycle(database, before.projectId);
+      if (project && (project.archivedAt !== null || project.deletedAt !== null)) {
+        throw new AncestorArchivedError('epic', epicId);
+      }
+    }
+    database.prepare(
+      `UPDATE backlog_epics
+          SET archived_at = NULL, revision = revision + 1, updated_at = datetime('now')
+        WHERE epic_id = ?`,
+    ).run(epicId);
+    const after = getEpicLifecycle(database, epicId);
+    recordAuditEvent(database, options.audit, 'epic', epicId, 'restoreArchive', before, after);
+    return requireEpicAnyState(database, epicId);
+  });
+}
+
+/** Archives a Project (reversible). Children untouched. Refused while running. */
+export function archiveProject(projectId: string, expectedRevision: number, options: { audit?: AuditContext } = {}): ProjectRow {
+  return withTransaction((database) => {
+    const before = getProjectLifecycle(database, projectId);
+    if (!before) throw new ProjectNotFoundError(projectId);
+    assertRevision(projectId, expectedRevision, before.revision, 'Project');
+    if (!canArchive(classifyProjectState(database, projectId))) throw new EntityRunningError('project', projectId);
+    database.prepare(
+      `UPDATE projects
+          SET archived_at = COALESCE(archived_at, datetime('now')),
+              revision = revision + 1, updated_at = datetime('now')
+        WHERE project_id = ?`,
+    ).run(projectId);
+    const after = getProjectLifecycle(database, projectId);
+    recordAuditEvent(database, options.audit, 'project', projectId, 'archive', before, after);
+    return requireProjectAnyState(database, projectId);
+  });
+}
+
+/** Logically deletes a Project. Allowed only once every Epic is tombstoned and
+ * every repository is unlinked, and the Project itself is not running. */
+export function deleteProject(projectId: string, expectedRevision: number, options: { audit?: AuditContext } = {}): ProjectRow {
+  return withTransaction((database) => {
+    const before = getProjectLifecycle(database, projectId);
+    if (!before) throw new ProjectNotFoundError(projectId);
+    assertRevision(projectId, expectedRevision, before.revision, 'Project');
+    const state = classifyProjectState(database, projectId);
+    if (state === 'running') throw new EntityRunningError('project', projectId);
+    if (state === 'historical') throw new EntityHasHistoryError('project', projectId);
+    if (projectHasUndeletedEpics(database, projectId)) {
+      throw new EntityInUseError('project', projectId, 'it still has Epics that are not deleted');
+    }
+    if (projectHasLinkedRepos(database, projectId)) {
+      throw new EntityInUseError('project', projectId, 'it still has linked repositories');
+    }
+    database.prepare(
+      `UPDATE projects
+          SET deleted_at = COALESCE(deleted_at, datetime('now')), archived_at = NULL,
+              revision = revision + 1, updated_at = datetime('now')
+        WHERE project_id = ?`,
+    ).run(projectId);
+    const after = getProjectLifecycle(database, projectId);
+    recordAuditEvent(database, options.audit, 'project', projectId, 'delete', before, after);
+    return requireProjectAnyState(database, projectId);
+  });
+}
+
+/** Reverses an archive on a Project. Projects have no ancestor to guard. */
+export function restoreArchivedProject(projectId: string, expectedRevision: number, options: { audit?: AuditContext } = {}): ProjectRow {
+  return withTransaction((database) => {
+    const before = getProjectLifecycle(database, projectId);
+    if (!before) throw new ProjectNotFoundError(projectId);
+    assertRevision(projectId, expectedRevision, before.revision, 'Project');
+    database.prepare(
+      `UPDATE projects
+          SET archived_at = NULL, revision = revision + 1, updated_at = datetime('now')
+        WHERE project_id = ?`,
+    ).run(projectId);
+    const after = getProjectLifecycle(database, projectId);
+    recordAuditEvent(database, options.audit, 'project', projectId, 'restoreArchive', before, after);
+    return requireProjectAnyState(database, projectId);
+  });
+}
+
+/** Row builders that ignore archive/delete filters, for returning a mutated
+ * lifecycle entity to the caller. */
+function requireWorkItemEpicId(database: ReturnType<typeof getDb>, workItemId: string): string {
+  const row = database.prepare(`SELECT epic_id AS epicId FROM backlog_features WHERE feature_id = ?`).get(workItemId) as { epicId: string } | undefined;
+  if (!row) throw new WorkItemNotFoundError(workItemId);
+  return row.epicId;
+}
+
+function requireWorkItemAnyState(database: ReturnType<typeof getDb>, workItemId: string): WorkItemRow {
+  const row = database.prepare(
+    `SELECT feature_id AS workItemId, epic_id AS epicId, repo_id AS repoId, title,
+            description, depends_on AS dependsOn, data_json AS dataJson, archived_at AS archivedAt,
+            deleted_at AS deletedAt, revision, updated_at AS updatedAt
+       FROM backlog_features WHERE feature_id = ?`,
+  ).get(workItemId) as {
+    workItemId: string; epicId: string; repoId: string; title: string; description: string | null;
+    dependsOn: string; dataJson: string; archivedAt: string | null; deletedAt: string | null;
+    revision: number; updatedAt: string;
+  } | undefined;
+  if (!row) throw new WorkItemNotFoundError(workItemId);
+  const stored = JSON.parse(row.dataJson) as Record<string, unknown>;
+  const feature = FeatureSchema.parse(stored);
+  return {
+    ...feature,
+    workItemId: row.workItemId,
+    epicId: row.epicId,
+    repoId: row.repoId,
+    type: stored.type === 'bug' ? 'bug' : 'feature',
+    description: row.description ?? (typeof stored.description === 'string' ? stored.description : undefined),
+    revision: row.revision,
+    createdAt: row.updatedAt,
+    updatedAt: row.updatedAt,
+  };
+}
+
+function requireEpicAnyState(database: ReturnType<typeof getDb>, epicId: string): EpicRow {
+  const row = database.prepare(`${EPIC_SELECT} WHERE epic_id = ?`).get(epicId) as EpicRow | undefined;
+  if (!row) throw new EpicNotFoundError(epicId);
+  return row;
+}
+
+function requireProjectAnyState(database: ReturnType<typeof getDb>, projectId: string): ProjectRow {
+  const row = database.prepare(`${PROJECT_SELECT} WHERE project_id = ?`).get(projectId) as ProjectRow | undefined;
+  if (!row) throw new ProjectNotFoundError(projectId);
+  return row;
+}
+
 export function updateProject(
   projectId: string,
   patch: UpdateProjectPatch,
@@ -654,7 +1059,7 @@ export function listProjectStateSummaries(): ProjectStateSummaryRow[] {
   if (!hasDbFile()) return [];
   return getDb('readonly').prepare(`
     SELECT p.project_id AS projectId, p.name, p.position, p.description, p.revision,
-           p.archived_at AS archivedAt,
+           p.archived_at AS archivedAt, p.updated_at AS updatedAt,
            (SELECT COUNT(*) FROM backlog_epics e
              WHERE e.project_id = p.project_id AND e.archived_at IS NULL AND e.deleted_at IS NULL) AS epicCount,
            (SELECT COUNT(*) FROM backlog_features f JOIN backlog_epics e ON e.epic_id = f.epic_id
@@ -877,6 +1282,33 @@ function recordAuditEvent(
   );
 }
 
+export interface AuditEventRow {
+  id: number;
+  requestId: string | null;
+  actor: string | null;
+  entityKind: string;
+  entityId: string;
+  action: string;
+  beforeJson: string | null;
+  afterJson: string | null;
+  createdAt: string;
+}
+
+/** Audit timeline for one entity, most recent first (PRJ-19). Backed by
+ * `idx_audit_events_entity` so the query stays index-only regardless of the
+ * table's overall size. */
+export function listAuditEvents(entityKind: LifecycleEntityKind, entityId: string, limit = 50): AuditEventRow[] {
+  if (!hasDbFile()) return [];
+  return getDb('readonly').prepare(
+    `SELECT id, request_id AS requestId, actor, entity_kind AS entityKind, entity_id AS entityId,
+            action, before_json AS beforeJson, after_json AS afterJson, created_at AS createdAt
+       FROM audit_events
+      WHERE entity_kind = ? AND entity_id = ?
+      ORDER BY id DESC
+      LIMIT ?`,
+  ).all(entityKind, entityId, limit) as AuditEventRow[];
+}
+
 export type FeatureTopicAssociationState = 'creating' | 'active' | 'invalid' | 'error';
 
 export interface FeatureTopicAssociationRow {
@@ -1061,6 +1493,40 @@ export function finishRun(
   recordRunEvent(runId, status, summary ? { summary } : undefined);
 }
 
+// Persists the adapter's real session id (e.g. the claude/codex session/thread
+// uuid) so a later resume — new process via `msq resume` or an in-process
+// scheduler re-dispatch after a gate/timeout — can pass `--resume <id>`
+// instead of always starting a fresh adapter session. This is distinct from
+// `session_status`/etc. above, which only track heartbeat progress.
+export function updateRunSessionHandle(runId: number, handle: SessionHandle): void {
+  getDb('readwrite')
+    .prepare(`UPDATE runs SET adapter_session_tool = ?, adapter_session_id = ? WHERE id = ?`)
+    .run(handle.tool, handle.sessionId, runId);
+}
+
+export function getLatestRunSessionHandle(
+  pipelineId: number,
+  featureId: string,
+  stage: string,
+): SessionHandle | null {
+  const row = getDb('readonly')
+    .prepare(
+      `SELECT id, adapter_session_tool AS tool, adapter_session_id AS sessionId
+         FROM runs
+        WHERE pipeline_id = ? AND feature_id = ? AND stage = ? AND adapter_session_id IS NOT NULL
+        ORDER BY id DESC
+        LIMIT 1`,
+    )
+    .get(pipelineId, featureId, stage) as { id: number; tool: Tool; sessionId: string } | undefined;
+  if (!row) return null;
+  return {
+    tool: row.tool,
+    sessionId: row.sessionId,
+    capturedFromRunId: row.id,
+    capturedAt: new Date().toISOString(),
+  };
+}
+
 export function updateRunPublishState(runId: number, publish: RunPublishState): void {
   getDb('readwrite')
     .prepare(
@@ -1138,11 +1604,18 @@ export function getLatestPublishedRunForFeature(
 
 export function upsertRunSessionStatus(snapshot: SessionStatusSnapshot): void {
   const database = getDb('readwrite');
+  // `timed_out` deliberately does NOT map to a legacy status here: the run
+  // isn't necessarily "failed" (execute.ts decides — usually `blocked`,
+  // pending a timeout-approval decision). Writing `status='failed'` this
+  // early used to race createTimeoutOccurrence's terminal-status guard
+  // (src/core/runner/execute.ts calls it right after this event fires),
+  // which silently skipped creating the timeout occurrence/approval request
+  // and dropped the Telegram notification for every historical timeout (H31).
   const legacyStatus = snapshot.status === 'completed'
     ? 'done'
     : snapshot.status === 'interrupted'
       ? 'aborted'
-      : snapshot.status === 'failed' || snapshot.status === 'timed_out'
+      : snapshot.status === 'failed'
         ? 'failed'
         : null;
   database.prepare(
@@ -1690,7 +2163,13 @@ export function listRunsForTui(limit = 50, repoId?: string, scope: ProjectScope 
            WHEN psr.id IS NOT NULL THEN 'blocked'
            WHEN p.status IN ('paused', 'blocked') THEN 'blocked'
            WHEN p.status IN ('aborting', 'aborted') THEN 'aborted'
-           WHEN p.status = 'failed' THEN 'failed'
+           -- A terminal pipeline failure only stands in for this run's own
+           -- status while the run itself never reached its own terminal state
+           -- (e.g. the process died mid-flight without calling finishRun). A
+           -- later retry that DID reach its own terminal status (done,
+           -- blocked, failed) must not be masked by an earlier attempt's
+           -- pipeline-level failure.
+           WHEN p.status = 'failed' AND r.status = 'running' THEN 'failed'
            WHEN p.status = 'running' AND r.status = 'done' THEN 'running'
            ELSE r.status
          END           AS status,
@@ -1813,7 +2292,13 @@ export function listRunHistoryForFeature(repoId: string, featureId: string, limi
            WHEN psr.id IS NOT NULL THEN 'blocked'
            WHEN p.status IN ('paused', 'blocked') THEN 'blocked'
            WHEN p.status IN ('aborting', 'aborted') THEN 'aborted'
-           WHEN p.status = 'failed' THEN 'failed'
+           -- A terminal pipeline failure only stands in for this run's own
+           -- status while the run itself never reached its own terminal state
+           -- (e.g. the process died mid-flight without calling finishRun). A
+           -- later retry that DID reach its own terminal status (done,
+           -- blocked, failed) must not be masked by an earlier attempt's
+           -- pipeline-level failure.
+           WHEN p.status = 'failed' AND r.status = 'running' THEN 'failed'
            WHEN p.status = 'running' AND r.status = 'done' THEN 'running'
            ELSE r.status
          END           AS status,

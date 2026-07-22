@@ -72,6 +72,8 @@ export const claudeAdapter: ToolAdapter = {
     let stderr: string;
     const progress = createClaudeProgress();
     const seenToolCalls = new Set<string>();
+    const runtime = resolveRuntimeConfig(opts.cwd);
+    const timeoutMs = Math.max(runtime.toolTimeoutMs, invocation.minTimeoutMs);
 
     msqEventBus.emit('task:started', {
       runId: opts.runId,
@@ -84,8 +86,9 @@ export const claudeAdapter: ToolAdapter = {
       ({ code, stdout, stderr } = await runCli(invocation.command, args, {
         cwd: opts.cwd,
         env: { ...invocation.env, MAX_THINKING_TOKENS: String(maxThinkingTokens) },
-        idleThresholdMs: resolveRuntimeConfig(opts.cwd).idleThresholdMs,
-        heartbeatMs: resolveRuntimeConfig(opts.cwd).heartbeatMs,
+        timeoutMs,
+        idleThresholdMs: runtime.idleThresholdMs,
+        heartbeatMs: runtime.heartbeatMs,
         runId: opts.runId,
         featureId: feature.id,
         tool: feature.tool,
@@ -117,6 +120,7 @@ export const claudeAdapter: ToolAdapter = {
         const partial = summarizePartialOutput(error.stdout, error.stderr, touchedFiles);
         const usage = this.parseUsage?.(error.stdout) ?? undefined;
         if (usage) emitUsage(opts.runId, feature, usage);
+        const session = buildClaudeSessionHandle(error.stdout, assignedSessionId, opts.runId);
         return {
           ok: false,
           summary: `timeout após ${String(Math.round(error.runtimeMs / 1000))}s. ${partial}`,
@@ -126,6 +130,7 @@ export const claudeAdapter: ToolAdapter = {
             runtimeMs: error.runtimeMs,
             ...(error.lastProgress ? { lastProgress: sanitizeTimeoutProgress(error.lastProgress) } : {}),
           },
+          ...(session ? { session } : {}),
         };
       }
       if (error instanceof CliAbortError) {
@@ -160,6 +165,24 @@ export const claudeAdapter: ToolAdapter = {
     const session = buildClaudeSessionHandle(stdout, assignedSessionId, opts.runId);
     const control = parseControlSignal(resultEvent?.result ?? '');
     if (usage) emitUsage(opts.runId, feature, usage);
+
+    // A well-formed protocol control signal is authoritative proof the session
+    // closed cleanly; only fall back to the session-limit text heuristic when
+    // there is none, since it can false-positive on incidental matches (e.g. a
+    // `git log` tool result mentioning "session limit" in a commit message).
+    if (!control) {
+      const limitMessage = detectSessionLimit(stdout, stderr);
+      if (limitMessage) {
+        return {
+          ok: false,
+          blocked: true,
+          summary: `session limit reached: ${limitMessage}`,
+          usage,
+          ...(session ? { session } : {}),
+        };
+      }
+    }
+
     return {
       ok: resultEvent?.subtype !== 'error_max_turns',
       summary: (resultEvent?.result ?? '').slice(0, 200),
@@ -172,9 +195,10 @@ export const claudeAdapter: ToolAdapter = {
   parseUsage(transcript: string): TokenUsage | null {
     const evt = findResultEvent(transcript);
     if (!evt?.usage) return null;
-    const totalInput = evt.usage.input_tokens ?? 0;
+    // In `result` events, `input_tokens` is already the non-cached new input;
+    // `cache_read_input_tokens` is session-cumulative cached reads.
+    const input = evt.usage.input_tokens ?? 0;
     const cachedInput = evt.usage.cache_read_input_tokens ?? 0;
-    const input = totalInput - cachedInput;
     const output = evt.usage.output_tokens ?? 0;
     return { input, cachedInput, output, total: input + cachedInput + output };
   },
@@ -380,9 +404,10 @@ function parseClaudeLine(line: string, stageSkills: Record<string, string[]>): P
 
   if (evt.type === 'result') {
     if (!evt.usage) return [];
-    const totalInput = evt.usage.input_tokens ?? 0;
+    // `result` event: `input_tokens` = new (non-cached) input only;
+    // `cache_read_input_tokens` = session-cumulative cached reads.
+    const input = evt.usage.input_tokens ?? 0;
     const cachedInput = evt.usage.cache_read_input_tokens ?? 0;
-    const input = totalInput - cachedInput;
     const output = evt.usage.output_tokens ?? 0;
     if (input === 0 && cachedInput === 0 && output === 0) return [];
     return [{ usage: { input, cachedInput, output, total: input + cachedInput + output }, usageTotal: true }];

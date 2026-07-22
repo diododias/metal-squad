@@ -15,7 +15,7 @@ const mockCliAbortErrorClass = class CliAbortError extends Error {
 const mockEmit = vi.fn();
 const mockMsqEventBus = { emit: mockEmit };
 const mockParseControlSignal = vi.fn();
-const mockResolveToolInvocation = vi.fn(() => ({ command: 'opencode', baseArgs: [], env: {}, versionCheck: ['--version'] }));
+const mockResolveToolInvocation = vi.fn(() => ({ command: 'opencode', baseArgs: [], env: {}, versionCheck: ['--version'], minTimeoutMs: 0 }));
 
 vi.mock('../../src/core/adapters/spawn.js', () => ({
   runCli: mockRunCli,
@@ -49,7 +49,7 @@ beforeEach(() => {
   mockRunCli.mockReset();
   mockEmit.mockReset();
   mockParseControlSignal.mockReset().mockReturnValue(undefined);
-  mockResolveToolInvocation.mockReturnValue({ command: 'opencode', baseArgs: [], env: {}, versionCheck: ['--version'] });
+  mockResolveToolInvocation.mockReturnValue({ command: 'opencode', baseArgs: [], env: {}, versionCheck: ['--version'], minTimeoutMs: 0 });
 });
 
 describe('opencodeAdapter.effortFlag', () => {
@@ -150,6 +150,28 @@ describe('opencodeAdapter.runFeature', () => {
     expect(args).not.toContain('--model');
   });
 
+  it('passes timeoutMs as max(toolTimeoutMs, minTimeoutMs) to runCli', async () => {
+    mockResolveToolInvocation.mockReturnValue({ command: 'opencode', baseArgs: [], env: {}, versionCheck: ['--version'], minTimeoutMs: 0 });
+    mockRunCli.mockResolvedValue({ code: 0, stdout: JSON.stringify({ response: 'done' }), stderr: '' });
+
+    const { opencodeAdapter } = await import('../../src/core/adapters/opencode.js');
+    await opencodeAdapter.runFeature(MOCK_FEATURE as never, 'prompt', MOCK_OPTS);
+
+    const [, , options] = mockRunCli.mock.calls[0]!;
+    expect((options as { timeoutMs: number }).timeoutMs).toBe(600_000);
+  });
+
+  it('lets a configured minTimeoutMs floor win over a lower toolTimeoutMs', async () => {
+    mockResolveToolInvocation.mockReturnValue({ command: 'opencode', baseArgs: [], env: {}, versionCheck: ['--version'], minTimeoutMs: 900_000 });
+    mockRunCli.mockResolvedValue({ code: 0, stdout: JSON.stringify({ response: 'done' }), stderr: '' });
+
+    const { opencodeAdapter } = await import('../../src/core/adapters/opencode.js');
+    await opencodeAdapter.runFeature(MOCK_FEATURE as never, 'prompt', MOCK_OPTS);
+
+    const [, , options] = mockRunCli.mock.calls[0]!;
+    expect((options as { timeoutMs: number }).timeoutMs).toBe(900_000);
+  });
+
   it('uses --session when resuming a prior opencode session', async () => {
     mockRunCli.mockResolvedValue({ code: 0, stdout: JSON.stringify({ response: 'done' }), stderr: '' });
 
@@ -191,6 +213,53 @@ describe('opencodeAdapter.runFeature', () => {
     expect(result.ok).toBe(false);
     expect(result.aborted).toBe(true);
     expect(result.summary).toContain('30s');
+  });
+
+  it('captures the session id from the partial stdout on timeout so a later resume can continue it', async () => {
+    mockRunCli.mockRejectedValue(Object.assign(new Error('timeout'), {
+      name: 'CliTimeoutError',
+      stdout: JSON.stringify({ sessionID: 'ses_timeout_1' }),
+      stderr: '',
+      timeoutMs: 600_000,
+      runtimeMs: 605_000,
+    }));
+
+    const { opencodeAdapter } = await import('../../src/core/adapters/opencode.js');
+    const result = await opencodeAdapter.runFeature(MOCK_FEATURE as never, 'prompt', MOCK_OPTS);
+
+    expect(result.ok).toBe(false);
+    expect(result.session).toEqual({
+      tool: 'opencode',
+      sessionId: 'ses_timeout_1',
+      capturedFromRunId: MOCK_OPTS.runId,
+      capturedAt: expect.any(String),
+    });
+  });
+
+  it('falls back to the already-resumed session id on timeout when the partial stdout has no session id yet', async () => {
+    mockRunCli.mockRejectedValue(Object.assign(new Error('timeout'), {
+      name: 'CliTimeoutError',
+      stdout: '',
+      stderr: '',
+      timeoutMs: 600_000,
+      runtimeMs: 605_000,
+    }));
+
+    const { opencodeAdapter } = await import('../../src/core/adapters/opencode.js');
+    const result = await opencodeAdapter.runFeature(MOCK_FEATURE as never, 'prompt', {
+      ...MOCK_OPTS,
+      session: {
+        mode: 'resume',
+        handle: {
+          tool: 'opencode',
+          sessionId: 'ses_already_resumed',
+          capturedFromRunId: 1,
+          capturedAt: '2026-07-19T00:00:00Z',
+        },
+      },
+    });
+
+    expect(result.session?.sessionId).toBe('ses_already_resumed');
   });
 
   it('re-throws non-abort errors', async () => {
@@ -316,6 +385,40 @@ describe('opencodeAdapter.runFeature', () => {
     const result = await opencodeAdapter.runFeature(MOCK_FEATURE as never, 'prompt', MOCK_OPTS);
 
     expect(result.control).toEqual({ type: 'needs_input', prompt: 'Enter value' });
+  });
+
+  it('does not block a run whose stdout merely mentions "session limit" when a control signal is present', async () => {
+    mockRunCli.mockResolvedValue({
+      code: 0,
+      stdout: JSON.stringify({
+        response: 'commit 0767d46 feat(notify): suggest and enable adapter fallback resume on Telegram session limit (#218)\nMSQ_DONE: done.',
+      }),
+      stderr: '',
+    });
+    mockParseControlSignal.mockReturnValue({ type: 'done', summary: 'done.' });
+
+    const { opencodeAdapter } = await import('../../src/core/adapters/opencode.js');
+    const result = await opencodeAdapter.runFeature(MOCK_FEATURE as never, 'prompt', MOCK_OPTS);
+
+    expect(result.ok).toBe(true);
+    expect(result.blocked).toBeUndefined();
+    expect(result.control).toEqual({ type: 'done', summary: 'done.' });
+  });
+
+  it('still reports a blocked run when stdout mentions a rate limit and no control signal is present', async () => {
+    mockRunCli.mockResolvedValue({
+      code: 0,
+      stdout: JSON.stringify({ response: 'Error: rate limit exceeded, please retry later' }),
+      stderr: '',
+    });
+    mockParseControlSignal.mockReturnValue(undefined);
+
+    const { opencodeAdapter } = await import('../../src/core/adapters/opencode.js');
+    const result = await opencodeAdapter.runFeature(MOCK_FEATURE as never, 'prompt', MOCK_OPTS);
+
+    expect(result.ok).toBe(false);
+    expect(result.blocked).toBe(true);
+    expect(result.summary).toContain('session limit reached');
   });
 
   it('uses raw stdout as summary when JSON has no response field', async () => {
