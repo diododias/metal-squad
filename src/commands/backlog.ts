@@ -110,7 +110,7 @@ export function registerBacklog(program: Command): void {
         }
       } catch (error) {
         if (error instanceof DbAccessError) {
-          throw new Error(`${error.message}\nCatalogo nao foi atualizado.`);
+          throw new Error(`${error.message}\nCatalog was not updated.`);
         }
         throw error;
       }
