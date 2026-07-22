@@ -9,6 +9,7 @@ import { useWebSocket } from './hooks/useWebSocket.js';
 import { useLocalOutput, type OutputLine } from './hooks/useLocalOutput.js';
 import { ActiveProjectProvider, useActiveProject } from './hooks/useActiveProject.js';
 import { parseHash, type Route } from './lib/routes.js';
+import { hashWithRestoredQuery } from './lib/hashState.js';
 import { BoardPage } from './pages/BoardPage.js';
 import { RunDetailPage } from './pages/RunDetailPage.js';
 import { BacklogItemDetail } from './pages/BacklogItemDetail.js';
@@ -18,6 +19,8 @@ import { AnalyticsPage } from './pages/AnalyticsPage.js';
 import { ConfigPage } from './pages/ConfigPage.js';
 import { ProjectsPage } from './pages/ProjectsPage.js';
 import { ProjectDetailPage } from './pages/ProjectDetailPage.js';
+import { EpicDetailPage } from './pages/EpicDetailPage.js';
+import { ArchivedPage } from './pages/ArchivedPage.js';
 import type { MsqWebState, WebSocketServerMessage, FeatureConfigPatch, FeatureConfigSaveResult, TaskConfigPatch } from '../types.js';
 import type { RunHistoryEntry, TaskRun } from '../../db/repo.js';
 import type { RunBreakdown } from '../../core/stats.js';
@@ -59,6 +62,8 @@ export function App(): React.JSX.Element {
   const [runHistories, setRunHistories] = useState<Record<string, RunHistoryEntry[]>>({});
   const [workflowSaveResults, setWorkflowSaveResults] = useState<Record<string, FeatureConfigSaveResult>>({});
   const [projectActionResults, setProjectActionResults] = useState<Record<string, Extract<WebSocketServerMessage, { type: 'action:result' }>>>({});
+  const [archivedResults, setArchivedResults] = useState<Record<string, Extract<WebSocketServerMessage, { type: 'action:archivedResult' }>>>({});
+  const [auditTrailResults, setAuditTrailResults] = useState<Record<string, Extract<WebSocketServerMessage, { type: 'action:auditTrailResult' }>>>({});
   const { linesByRun, append, clear } = useLocalOutput();
   const hasReceivedStateRef = useRef(false);
 
@@ -188,12 +193,16 @@ export function App(): React.JSX.Element {
         setWorkflowSaveResults((current) => ({ ...current, [message.payload.featureId]: message }));
       } else if (message.type === 'action:result') {
         setProjectActionResults((current) => ({ ...current, [message.payload.requestId]: message }));
+      } else if (message.type === 'action:archivedResult') {
+        setArchivedResults((current) => ({ ...current, [message.payload.requestId]: message }));
+      } else if (message.type === 'action:auditTrailResult') {
+        setAuditTrailResults((current) => ({ ...current, [message.payload.requestId]: message }));
       }
     },
     [append, pushToast],
   );
 
-  const { send, error: connectionError } = useWebSocket(onMessage);
+  const { send, error: connectionError, connected } = useWebSocket(onMessage);
 
   function navigate(path: string): void {
     window.location.hash = path;
@@ -221,6 +230,7 @@ export function App(): React.JSX.Element {
     { path: '/runs', label: 'Runs' },
     { path: '/gates', label: 'Gates', count: state?.gates.length },
     { path: '/analytics', label: 'Analytics' },
+    { path: '/archived', label: 'Archived' },
     { path: '/config', label: 'Settings' },
   ];
 
@@ -314,7 +324,79 @@ export function App(): React.JSX.Element {
   } else if (route.page === 'projects') {
     page = state && <ProjectsPage state={state} send={send} actionResults={projectActionResults} />;
   } else if (route.page === 'project-detail') {
-    page = state && <ProjectDetailPage state={state} projectId={route.projectId} send={send} actionResults={projectActionResults} onBack={() => { navigate('/projects'); }} />;
+    page = state && <ProjectDetailPage state={state} projectId={route.projectId} send={send} actionResults={projectActionResults} archivedResults={archivedResults} onBack={() => { navigate('/projects'); }} onToast={pushToast} connected={connected} />;
+  } else if (route.page === 'epic-detail') {
+    page = state && (
+      <EpicDetailPage
+        state={state}
+        projectId={route.projectId}
+        epicId={route.epicId}
+        send={send}
+        actionResults={projectActionResults}
+        archivedResults={archivedResults}
+        onBack={() => { navigate(hashWithRestoredQuery(`/projects/${route.projectId}`)); }}
+        onOpenBacklogItem={(featureId: string) => { navigate(`/projects/${route.projectId}/epics/${route.epicId}/items/${featureId}`); }}
+        onToast={pushToast}
+        connected={connected}
+      />
+    );
+  } else if (route.page === 'epic-item-detail') {
+    const item = state?.featureCatalog[route.featureId];
+    const epic = state?.epics.find((candidate) => candidate.epicId === route.epicId && candidate.projectId === route.projectId);
+    const project = state?.projects.find((candidate) => candidate.projectId === route.projectId);
+    const epicPath = hashWithRestoredQuery(`/projects/${route.projectId}/epics/${route.epicId}`);
+    if (state && (item?.epicId !== route.epicId || !epic || !project)) {
+      page = (
+        <div style={{ padding: 24 }}>
+          <p>Work Item not found in this Epic.</p>
+          <button onClick={() => { navigate(epicPath); }} style={{ background: 'none', border: '1px solid var(--border-dim)', borderRadius: 'var(--radius-sm)', color: 'var(--accent-info)', padding: '6px 10px', cursor: 'pointer' }}>back to Epic</button>
+        </div>
+      );
+    } else {
+      page = state && epic && project && (
+        <BacklogItemDetail
+          state={state}
+          featureId={route.featureId}
+          runHistories={runHistories}
+          onSubscribeHistory={requestHistorySubscription}
+          onBack={() => { navigate(epicPath); }}
+          onStart={(featureId: string) => {
+            send({ type: 'action:startFeature', featureId });
+            navigate(epicPath);
+          }}
+          onSaveConfig={(featureId: string, patch: FeatureConfigPatch) => {
+            setWorkflowSaveResults((current) => {
+              return Object.fromEntries(
+                Object.entries(current).filter(([resultFeatureId]) => resultFeatureId !== featureId),
+              );
+            });
+            send({ type: 'action:updateFeatureConfig', featureId, patch });
+          }}
+          workflowSaveResult={workflowSaveResults[route.featureId]}
+          onSaveTaskConfig={(featureId: string, taskId: string, patch: TaskConfigPatch) =>
+            { send({ type: 'action:updateTaskConfig', featureId, taskId, patch }); }
+          }
+          onOpenRun={openRun}
+          send={send}
+          actionResults={projectActionResults}
+          breadcrumb={[
+            { label: 'Projects', href: '/projects' },
+            { label: project.name, href: hashWithRestoredQuery(`/projects/${route.projectId}`) },
+            { label: epic.title, href: epicPath },
+          ]}
+        />
+      );
+    }
+  } else if (route.page === 'archived') {
+    page = state && (
+      <ArchivedPage
+        state={state}
+        send={send}
+        actionResults={projectActionResults}
+        archivedResults={archivedResults}
+        auditTrailResults={auditTrailResults}
+      />
+    );
   } else {
     page = state && <ConfigPage state={state} isMobile={isMobile} send={send} />;
   }

@@ -70,9 +70,9 @@ describe('ToastStack', () => {
       { id: `${String(Date.now())}-1`, tone: 'warn', message: 'click me' },
     ];
     const container = renderStack(items, onDismiss);
-    const button = container.querySelector('button');
-    expect(button).not.toBeNull();
-    act(() => { (button as HTMLButtonElement).click(); });
+    const toast = container.querySelector('[title="Dismiss"]');
+    expect(toast).not.toBeNull();
+    act(() => { (toast as HTMLElement).click(); });
     expect(onDismiss).toHaveBeenCalledWith(expect.stringContaining('-1'));
   });
 

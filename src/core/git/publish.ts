@@ -103,12 +103,11 @@ export function verifyPublishContract(
   const forgeAvailable = forge.available();
   const pullRequestResult = forgeAvailable ? forge.viewPullRequest(cwd) : null;
   const pr: ForgePullRequestView | null = pullRequestResult?.ok ? pullRequestResult.value : null;
-  // The effective base is the PR's actual base when it is one of the allowed
-  // branches (agent may have chosen any dependency branch); otherwise fall back
-  // to the primary base for reporting/comparison.
-  const effectiveBase = typeof pr?.baseRefName === 'string' && allowedBases.includes(pr.baseRefName)
-    ? pr.baseRefName
-    : primaryBase;
+  // The effective base is whatever the PR itself declares on GitHub — the
+  // target branch is the requester's call, not something msq polices. Fall
+  // back to the primary configured base only when there is no PR yet to read
+  // a base from (e.g. forge unavailable, no PR opened).
+  const effectiveBase = typeof pr?.baseRefName === 'string' ? pr.baseRefName : primaryBase;
   const evidence: PublishEvidence = {
     branch,
     baseBranch: effectiveBase,
@@ -187,15 +186,6 @@ export function verifyPublishContract(
       ok: false,
       status: 'blocked',
       summary: `publish: no pull request is open for the current branch against ${allowedLabel}.`,
-      evidence,
-    };
-  }
-
-  if (!pr.baseRefName || !allowedBases.includes(pr.baseRefName)) {
-    return {
-      ok: false,
-      status: 'failed',
-      summary: `publish: pull request base is ${pr.baseRefName ?? 'unknown'}, expected ${allowedLabel}.`,
       evidence,
     };
   }

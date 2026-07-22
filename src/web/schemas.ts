@@ -169,6 +169,28 @@ export const WorkflowTemplateActionMessageSchema = z.discriminatedUnion('type', 
 
 export type WorkflowTemplateActionMessage = z.infer<typeof WorkflowTemplateActionMessageSchema>;
 
+/** Fetches a template's full definition on demand (PRJ-26) — `state.workflowTemplates`
+ * only ever carries the lightweight summary. */
+export const WorkflowTemplateDefinitionMessageSchema = z.object({
+  type: z.literal('action:getWorkflowTemplateDefinition'),
+  requestId: RequestIdSchema,
+  templateId: z.string().min(1),
+}).strict();
+
+export type WorkflowTemplateDefinitionMessage = z.infer<typeof WorkflowTemplateDefinitionMessageSchema>;
+
+/** Validates a draft definition against every active repo of a Project before
+ * save/mapping (PRJ-26), returning a repo×skill matrix instead of a single
+ * pass/fail so the UI can pinpoint exactly which repo is missing which skill. */
+export const ValidateWorkflowTemplateMessageSchema = z.object({
+  type: z.literal('action:validateWorkflowTemplate'),
+  requestId: RequestIdSchema,
+  projectId: z.string().min(1),
+  definition: z.unknown(),
+}).strict();
+
+export type ValidateWorkflowTemplateMessage = z.infer<typeof ValidateWorkflowTemplateMessageSchema>;
+
 /** Type change on an existing Work Item. `preview: true` resolves and reports
  * the target snapshot without writing, so the UI can confirm before applying. */
 export const WorkItemTypeChangeMessageSchema = z.object({
@@ -181,3 +203,69 @@ export const WorkItemTypeChangeMessageSchema = z.object({
 }).strict();
 
 export type WorkItemTypeChangeMessage = z.infer<typeof WorkItemTypeChangeMessageSchema>;
+
+/** Lifecycle mutations (PRJ-17): archive / delete / restoreArchive across the
+ * three levels. Each carries `expectedRevision` so a concurrent editor loses
+ * the race deterministically, and the policy engine runs inside the same write
+ * transaction so a concurrent Start cannot slip through. The id field is named
+ * per level (`projectId` / `epicId` / `workItemId`) to match each entity's
+ * existing action contract. */
+const RevisionField = z.number().int().positive();
+
+function projectLifecycle<T extends 'action:archiveProject' | 'action:deleteProject' | 'action:restoreArchivedProject'>(
+  type: T,
+): z.ZodObject<{ type: z.ZodLiteral<T>; requestId: typeof RequestIdSchema; projectId: z.ZodString; expectedRevision: typeof RevisionField }, 'strict'> {
+  return z.object({ type: z.literal(type), requestId: RequestIdSchema, projectId: z.string().min(1), expectedRevision: RevisionField }).strict();
+}
+function epicLifecycle<T extends 'action:archiveEpic' | 'action:deleteEpic' | 'action:restoreArchivedEpic'>(
+  type: T,
+): z.ZodObject<{ type: z.ZodLiteral<T>; requestId: typeof RequestIdSchema; epicId: z.ZodString; expectedRevision: typeof RevisionField }, 'strict'> {
+  return z.object({ type: z.literal(type), requestId: RequestIdSchema, epicId: z.string().min(1), expectedRevision: RevisionField }).strict();
+}
+function workItemLifecycle<T extends 'action:archiveWorkItem' | 'action:deleteWorkItem' | 'action:restoreArchivedWorkItem'>(
+  type: T,
+): z.ZodObject<{ type: z.ZodLiteral<T>; requestId: typeof RequestIdSchema; workItemId: z.ZodString; expectedRevision: typeof RevisionField }, 'strict'> {
+  return z.object({ type: z.literal(type), requestId: RequestIdSchema, workItemId: z.string().min(1), expectedRevision: RevisionField }).strict();
+}
+
+export const LifecycleActionMessageSchema = z.discriminatedUnion('type', [
+  projectLifecycle('action:archiveProject'),
+  projectLifecycle('action:deleteProject'),
+  projectLifecycle('action:restoreArchivedProject'),
+  epicLifecycle('action:archiveEpic'),
+  epicLifecycle('action:deleteEpic'),
+  epicLifecycle('action:restoreArchivedEpic'),
+  workItemLifecycle('action:archiveWorkItem'),
+  workItemLifecycle('action:deleteWorkItem'),
+  workItemLifecycle('action:restoreArchivedWorkItem'),
+]);
+
+/** Runtime boundary for the `/archived` listing query (PRJ-19). `limit` is
+ * capped defensively — the client paginates instead of ever requesting an
+ * unbounded page. */
+export const ArchivedQueryMessageSchema = z.object({
+  type: z.literal('action:queryArchived'),
+  requestId: RequestIdSchema,
+  filters: z.object({
+    projectId: z.string().min(1).optional(),
+    epicId: z.string().min(1).optional(),
+    repoId: z.string().min(1).optional(),
+    kind: z.enum(['project', 'epic', 'work_item']).optional(),
+  }).strict(),
+  limit: z.number().int().positive().max(200),
+  offset: z.number().int().nonnegative(),
+}).strict();
+
+export type ArchivedQueryMessage = z.infer<typeof ArchivedQueryMessageSchema>;
+
+/** Runtime boundary for the per-entity audit timeline query (PRJ-19). */
+export const AuditTrailQueryMessageSchema = z.object({
+  type: z.literal('action:queryAuditTrail'),
+  requestId: RequestIdSchema,
+  entityKind: z.enum(['project', 'epic', 'work_item']),
+  entityId: z.string().min(1),
+}).strict();
+
+export type AuditTrailQueryMessage = z.infer<typeof AuditTrailQueryMessageSchema>;
+
+export type LifecycleActionMessage = z.infer<typeof LifecycleActionMessageSchema>;

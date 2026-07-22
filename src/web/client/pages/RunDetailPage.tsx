@@ -7,6 +7,7 @@ import { QuestionBanner } from '../components/feedback/QuestionBanner.js';
 import { AgentTranscript, type TranscriptEntry } from '../components/transcript/AgentTranscript.js';
 import { RunStatusStrip } from '../components/status/RunStatusStrip.js';
 import { FeatureConfigDetail } from '../components/FeatureConfigDetail.js';
+import { MarkdownView } from '../components/MarkdownView.js';
 import { PageHeader } from '../PageHeader.js';
 import { useActiveProject } from '../hooks/useActiveProject.js';
 import { useIsMobile } from '../Responsive.js';
@@ -287,14 +288,31 @@ export function RunDetailPage({
           </div>
           {run.publishError && (
             <div style={{ gridColumn: '1 / -1' }}>
-              <div style={{ color: 'var(--text-faint)', fontSize: 'var(--text-2xs)', textTransform: 'uppercase' }}>Publish check</div>
-              <div style={{ color: 'var(--accent-danger)', fontSize: 'var(--text-sm)', whiteSpace: 'pre-wrap' }}>{run.publishError}</div>
+              <div style={{ color: 'var(--text-faint)', fontSize: 'var(--text-2xs)', textTransform: 'uppercase' }}>
+                {run.publishVerified ? 'Publish warning' : 'Publish check'}
+              </div>
+              <div
+                style={{
+                  color: run.publishVerified ? 'var(--accent-warn)' : 'var(--accent-danger)',
+                  fontSize: 'var(--text-sm)',
+                  whiteSpace: 'pre-wrap',
+                }}
+              >
+                {run.publishError}
+              </div>
             </div>
           )}
         </div>
       </div>
     ),
-    spec: <div style={{ whiteSpace: 'pre-wrap', color: 'var(--text-dim)', fontSize: 'var(--text-sm)' }}>{feature?.description ?? `No spec declared for ${featureId}.`}</div>,
+    spec: (
+      <div data-testid="run-spec-readonly">
+        <MarkdownView
+          source={feature?.description ?? ''}
+          emptyFallback={`No spec declared for ${featureId}.`}
+        />
+      </div>
+    ),
     workflow: (
       <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
         {(feature?.tasks ?? []).length ? (

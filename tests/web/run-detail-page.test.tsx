@@ -100,6 +100,24 @@ describe('RunDetailPage resume with override', () => {
     expect(container.textContent).toContain('900 tok');
   });
 
+  it('labels a publish note as a warning (not an error) when the publication is already verified', () => {
+    const note = 'note: post-run could not verify whether HEAD descends from the declared base develop. A verified GitHub PR already confirms this publication; treat this only as informational.';
+    const container = renderPage(makeRun({ publishVerified: true, publishError: note, prNumber: 230, prUrl: 'https://example.test/pr/230' }), vi.fn());
+
+    expect(container.textContent).toContain('Publish warning');
+    expect(container.textContent).not.toContain('Publish check');
+    expect(container.textContent).toContain(note);
+  });
+
+  it('labels an unverified publish error as a check failure', () => {
+    const error = 'publish: no pull request is open for the current branch against develop.';
+    const container = renderPage(makeRun({ publishVerified: false, publishError: error }), vi.fn());
+
+    expect(container.textContent).toContain('Publish check');
+    expect(container.textContent).not.toContain('Publish warning');
+    expect(container.textContent).toContain(error);
+  });
+
   it('renders the override controls for a resumable paused pipeline and dispatches overrides', () => {
     const send = vi.fn<(message: WebSocketClientMessage) => void>();
     const container = renderPage(makeRun(), send);
@@ -642,5 +660,101 @@ describe('RunDetailPage heartbeat display', () => {
       roots.length = 0;
       document.body.replaceChildren();
     }
+  });
+});
+
+describe('RunDetailPage spec tab', () => {
+  function makeStateWithSpec(run: RunSummary, description: string | null): MsqWebState {
+    return {
+      runs: [run],
+      featureCatalog: {
+        'feat-1': {
+          id: 'feat-1',
+          title: 'Feature One',
+          description,
+          repoId: 'repo-1',
+          projectId: null,
+          repoLabel: null,
+          tool: 'claude',
+          effort: 'medium',
+          skills: [],
+          dependsOn: [],
+          pendingDependencies: [],
+          workItemType: 'feature',
+          workflow: {
+            mode: 'staged',
+            stages: ['specify'],
+            approvals: { channel: 'telegram', autoAdvance: false },
+            autoAdvance: false,
+            syncTasksToBacklog: true,
+            sessionPolicy: { mode: 'isolated', alwaysIsolatedStages: [] },
+            stepGuidance: {},
+          },
+        },
+      },
+      backlogSettings: { stageSkills: {} },
+      runtimeConfig: {
+        web: { statusSpinner: false },
+        tools: [{ id: 'claude' }, { id: 'codex' }, { id: 'opencode' }],
+        notifications: { channels: [] },
+      },
+    } as unknown as MsqWebState;
+  }
+
+  function openSpecTab(container: HTMLElement): void {
+    const tab = Array.from(container.querySelectorAll('button, [role="tab"]')).find((el) => el.textContent === 'Feature Spec');
+    act(() => { (tab as HTMLElement)?.click(); });
+  }
+
+  it('renders the Feature Spec as markdown on the run detail page', () => {
+    const container = document.createElement('div');
+    document.body.append(container);
+    const root = createRoot(container);
+    roots.push(root);
+    act(() => {
+      root.render(
+        <RunDetailPage
+          state={makeStateWithSpec(makeRun(), '# Spec Title\n\n- [ ] todo one\n- [x] todo two')}
+          featureId="feat-1"
+          runDetails={{}}
+          linesByRun={{}}
+          onSubscribeRun={() => () => undefined}
+          onBack={() => undefined}
+          send={vi.fn()}
+        />,
+      );
+    });
+
+    openSpecTab(container);
+    const spec = container.querySelector('[data-testid="run-spec-readonly"]');
+    expect(spec).not.toBeNull();
+    expect(spec?.querySelector('h1')?.textContent).toBe('Spec Title');
+    expect(spec?.querySelectorAll('input[type="checkbox"]').length).toBe(2);
+    const checkboxes = Array.from(spec?.querySelectorAll('input[type="checkbox"]') ?? []);
+    expect((checkboxes[0] as HTMLInputElement).checked).toBe(false);
+    expect((checkboxes[1] as HTMLInputElement).checked).toBe(true);
+  });
+
+  it('falls back to a clear message when no spec was declared for the run', () => {
+    const container = document.createElement('div');
+    document.body.append(container);
+    const root = createRoot(container);
+    roots.push(root);
+    act(() => {
+      root.render(
+        <RunDetailPage
+          state={makeStateWithSpec(makeRun(), null)}
+          featureId="feat-1"
+          runDetails={{}}
+          linesByRun={{}}
+          onSubscribeRun={() => () => undefined}
+          onBack={() => undefined}
+          send={vi.fn()}
+        />,
+      );
+    });
+
+    openSpecTab(container);
+    expect(container.textContent).toContain('No spec declared for feat-1.');
   });
 });

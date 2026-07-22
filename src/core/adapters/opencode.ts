@@ -106,6 +106,8 @@ export const opencodeAdapter: ToolAdapter = {
     let stderr: string;
     const progress = createOpenCodeProgress();
     const seenToolCalls = new Set<string>();
+    const runtime = resolveRuntimeConfig(opts.cwd);
+    const timeoutMs = Math.max(runtime.toolTimeoutMs, invocation.minTimeoutMs);
     const streamParser = createOpenCodeStreamParser(
       (event) => {
         const update = progress.onEvent(event);
@@ -123,13 +125,14 @@ export const opencodeAdapter: ToolAdapter = {
       ({ code, stdout, stderr } = await runCli(invocation.command, args, {
         cwd: opts.cwd,
         env: invocation.env,
+        timeoutMs,
         signal: opts.signal,
-        heartbeatMs: resolveRuntimeConfig(opts.cwd).heartbeatMs,
+        heartbeatMs: runtime.heartbeatMs,
         logLabel: `opencode ${feature.id}`,
         heartbeatSuffix: () => progress.heartbeatSuffix(),
         progressSnapshot: () => progress.heartbeatSuffix(),
         onHeartbeat: (message) => { emitRunOutput(opts.runId, feature, message, 'stderr', 'heartbeat'); },
-        idleThresholdMs: resolveRuntimeConfig(opts.cwd).idleThresholdMs,
+        idleThresholdMs: runtime.idleThresholdMs,
         runId: opts.runId,
         featureId: feature.id,
         tool: feature.tool,
@@ -145,6 +148,9 @@ export const opencodeAdapter: ToolAdapter = {
       if (isCliTimeoutError(error)) {
         const usage = this.parseUsage?.(error.stdout) ?? undefined;
         if (usage) emitUsage(opts.runId, feature, usage);
+        const partialEvents = extractOpenCodeEvents(error.stdout);
+        const partialJson = safeJson<OpenCodeResponse>(error.stdout) ?? partialEvents[partialEvents.length - 1] ?? null;
+        const session = buildOpenCodeSessionHandle(partialEvents, partialJson, opts, opts.runId);
         return {
           ok: false,
           summary: `timeout após ${String(Math.round(error.runtimeMs / 1000))}s`,
@@ -154,6 +160,7 @@ export const opencodeAdapter: ToolAdapter = {
             runtimeMs: error.runtimeMs,
             ...(error.lastProgress ? { lastProgress: sanitizeTimeoutProgress(error.lastProgress) } : {}),
           },
+          ...(session ? { session } : {}),
         };
       }
       if (error instanceof CliAbortError) {
@@ -204,6 +211,23 @@ export const opencodeAdapter: ToolAdapter = {
     const session = buildOpenCodeSessionHandle(events, json, opts, opts.runId);
     const control = parseControlSignal(finalText);
     if (usage) emitUsage(opts.runId, feature, usage);
+
+    // See claude.ts: a parsed control signal proves the session closed
+    // cleanly, so it takes precedence over the session-limit text heuristic,
+    // which can false-positive on incidental matches in tool output.
+    if (!control) {
+      const limitMessage = detectSessionLimit(stdout, stderr);
+      if (limitMessage) {
+        return {
+          ok: false,
+          blocked: true,
+          summary: `session limit reached: ${limitMessage}`,
+          usage,
+          ...(session ? { session } : {}),
+        };
+      }
+    }
+
     return {
       ok: true,
       summary: finalText.slice(0, 200),

@@ -1,5 +1,9 @@
 import {
+  archiveWorkItem,
   createWorkItem,
+  deleteWorkItem,
+  restoreArchivedWorkItem,
+  type AuditContext,
   type CreateWorkItemInput,
   type WorkItemRow,
   type WorkItemTemplateSnapshot,
@@ -22,6 +26,21 @@ export const workItemService = {
     snapshot?: WorkItemTemplateSnapshot,
   ): ServiceMutationResult<WorkItemRow> {
     const entity = createWorkItem(normalizeInput(input), snapshot);
+    return { entity, revision: entity.revision };
+  },
+
+  archive(workItemId: string, expectedRevision: number, options: { audit?: AuditContext } = {}): ServiceMutationResult<WorkItemRow> {
+    const entity = archiveWorkItem(workItemId, expectedRevision, options);
+    return { entity, revision: entity.revision };
+  },
+
+  delete(workItemId: string, expectedRevision: number, options: { audit?: AuditContext } = {}): ServiceMutationResult<WorkItemRow> {
+    const entity = deleteWorkItem(workItemId, expectedRevision, options);
+    return { entity, revision: entity.revision };
+  },
+
+  restoreArchive(workItemId: string, expectedRevision: number, options: { audit?: AuditContext } = {}): ServiceMutationResult<WorkItemRow> {
+    const entity = restoreArchivedWorkItem(workItemId, expectedRevision, options);
     return { entity, revision: entity.revision };
   },
 };

@@ -251,6 +251,50 @@ describe('claude adapter', () => {
     );
   });
 
+  it('passes timeoutMs as max(toolTimeoutMs, minTimeoutMs) to runCli, respecting the claude registry floor', async () => {
+    mockResolveRuntimeConfig.mockReturnValue({
+      toolTimeoutMs: 600_000,
+      idleThresholdMs: 30_000,
+      tools: DEFAULT_TOOLS,
+    });
+    mockRunCli.mockResolvedValue({ code: 0, stdout: '', stderr: '' });
+    const { claudeAdapter } = await import('../../src/core/adapters/claude.js');
+
+    await claudeAdapter.runFeature(
+      { id: 'feat-1', title: 'Feature', tool: 'claude', effort: 'medium', dependsOn: [], tasks: [] },
+      'PROMPT',
+      { cwd: '/repo', runId: 1 },
+    );
+
+    expect(mockRunCli).toHaveBeenCalledWith(
+      'claude',
+      expect.any(Array),
+      expect.objectContaining({ timeoutMs: 3_600_000 }),
+    );
+  });
+
+  it('lets a repo-configured toolTimeoutMs above the claude floor win', async () => {
+    mockResolveRuntimeConfig.mockReturnValue({
+      toolTimeoutMs: 7_200_000,
+      idleThresholdMs: 30_000,
+      tools: DEFAULT_TOOLS,
+    });
+    mockRunCli.mockResolvedValue({ code: 0, stdout: '', stderr: '' });
+    const { claudeAdapter } = await import('../../src/core/adapters/claude.js');
+
+    await claudeAdapter.runFeature(
+      { id: 'feat-1', title: 'Feature', tool: 'claude', effort: 'medium', dependsOn: [], tasks: [] },
+      'PROMPT',
+      { cwd: '/repo', runId: 1 },
+    );
+
+    expect(mockRunCli).toHaveBeenCalledWith(
+      'claude',
+      expect.any(Array),
+      expect.objectContaining({ timeoutMs: 7_200_000 }),
+    );
+  });
+
   it('handles malformed JSON and max-turn errors', async () => {
     const { claudeAdapter } = await import('../../src/core/adapters/claude.js');
 
@@ -376,6 +420,34 @@ describe('claude adapter', () => {
       output: 50,
       total: 200,
     }));
+  });
+
+  it('result event treats input_tokens as non-cached input (does not subtract cache_read_input_tokens)', async () => {
+    const resultLine = JSON.stringify({
+      type: 'result',
+      subtype: 'success',
+      result: 'done',
+      usage: { input_tokens: 376, cache_read_input_tokens: 35_443_314, output_tokens: 83_895 },
+    });
+    mockRunCli.mockImplementation(async () => ({
+      code: 0,
+      stdout: resultLine,
+      stderr: '',
+    }));
+    const { claudeAdapter } = await import('../../src/core/adapters/claude.js');
+
+    const result = await claudeAdapter.runFeature(
+      { id: 'feat-1', title: 'F', tool: 'claude', effort: 'medium', dependsOn: [], tasks: [] },
+      'PROMPT',
+      { cwd: '/repo', runId: 90 },
+    );
+
+    expect(result.usage).toEqual({
+      input: 376,
+      cachedInput: 35_443_314,
+      output: 83_895,
+      total: 376 + 35_443_314 + 83_895,
+    });
   });
 
   it('transitions tool calls from started to completed when a tool_result user event arrives', async () => {
@@ -624,6 +696,54 @@ describe('claude adapter', () => {
       output: 5,
       total: 13,
     });
+  });
+
+  it('returns a session handle on timeout so a later resume can continue the same claude session', async () => {
+    const { CliTimeoutError } = await import('../../src/core/adapters/spawn.js');
+    mockRunCli.mockRejectedValue(
+      new CliTimeoutError('claude', 600_000, 605_000, '', ''),
+    );
+    const { claudeAdapter } = await import('../../src/core/adapters/claude.js');
+
+    const result = await claudeAdapter.runFeature(
+      { id: 'feat-1', title: 'Feature', tool: 'claude', effort: 'medium', dependsOn: [], tasks: [] },
+      'PROMPT',
+      { cwd: '/repo', runId: 5 },
+    );
+
+    expect(result.ok).toBe(false);
+    expect(result.session?.tool).toBe('claude');
+    expect(result.session?.capturedFromRunId).toBe(5);
+    expect(result.session?.sessionId).toEqual(expect.any(String));
+    expect(result.session?.sessionId.length).toBeGreaterThan(0);
+  });
+
+  it('preserves the already-resumed session id on timeout instead of starting a new one', async () => {
+    const { CliTimeoutError } = await import('../../src/core/adapters/spawn.js');
+    mockRunCli.mockRejectedValue(
+      new CliTimeoutError('claude', 600_000, 605_000, '', ''),
+    );
+    const { claudeAdapter } = await import('../../src/core/adapters/claude.js');
+
+    const result = await claudeAdapter.runFeature(
+      { id: 'feat-1', title: 'Feature', tool: 'claude', effort: 'medium', dependsOn: [], tasks: [] },
+      'PROMPT',
+      {
+        cwd: '/repo',
+        runId: 5,
+        session: {
+          mode: 'resume',
+          handle: {
+            tool: 'claude',
+            sessionId: 'session-already-resumed',
+            capturedFromRunId: 1,
+            capturedAt: '2026-07-19T00:00:00Z',
+          },
+        },
+      },
+    );
+
+    expect(result.session?.sessionId).toBe('session-already-resumed');
   });
 });
 

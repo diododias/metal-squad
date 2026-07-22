@@ -42,6 +42,7 @@ vi.mock('../../src/db/repo.js', () => ({
   listProjectStateSummaries: mocks.listProjectStateSummaries,
   listRepositoryStateSummaries: mocks.listRepositoryStateSummaries,
   listEpics: mocks.listEpics,
+  projectLifecycleActions: () => ({}),
 }));
 
 vi.mock('../../src/ui/catalog.js', () => ({
@@ -430,7 +431,7 @@ describe('buildMsqWebState pendingFeatures projection', () => {
     }]);
     expect(state.repositories).toEqual([{
       repoId: 'repo-1', projectId: 'project-1', label: 'platform',
-      health: 'unchecked', lastCheckedAt: null,
+      health: 'unavailable', lastCheckedAt: expect.any(String),
     }]);
     expect(JSON.stringify(state)).not.toContain('/private/secret/platform');
     expect(state).not.toHaveProperty('activeProjectId');

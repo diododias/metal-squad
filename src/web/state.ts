@@ -1,4 +1,5 @@
-import { basename } from 'node:path';
+import { existsSync } from 'node:fs';
+import { basename, join } from 'node:path';
 import {
   listRunsForTui,
   listCompletedFeatureIds,
@@ -11,6 +12,8 @@ import {
   listRepositoryStateSummaries,
   listRunsForStats,
   listEpics,
+  projectLifecycleActions,
+  type LifecycleProjectionKey,
   type EpicRow,
   type GateRow,
   type StageRequestRow,
@@ -188,6 +191,7 @@ function collectProjectSummaries(): ProjectSummary[] {
       activeRuns: project.activeRuns,
       tokens: { status: 'ready', totalTokens: project.totalTokens, error: null },
       archivedAt: project.archivedAt,
+      updatedAt: project.updatedAt,
     }));
   } catch (error) {
     pushError('web/state.collectProjectSummaries', error);
@@ -199,13 +203,17 @@ function collectProjectSummaries(): ProjectSummary[] {
  * per-repository enrichments and must never turn into N filesystem walks. */
 function collectRepositorySummaries(): RepositorySummary[] {
   try {
-    return listRepositoryStateSummaries().map((repository) => ({
-      repoId: repository.repoId,
-      label: basename(repository.path),
-      projectId: repository.projectId,
-      health: 'unchecked' as const,
-      lastCheckedAt: null,
-    }));
+    const checkedAt = new Date().toISOString();
+    return listRepositoryStateSummaries().map((repository) => {
+      const health = existsSync(join(repository.path, '.git')) ? 'ok' : 'unavailable';
+      return {
+        repoId: repository.repoId,
+        label: basename(repository.path),
+        projectId: repository.projectId,
+        health,
+        lastCheckedAt: checkedAt,
+      };
+    });
   } catch (error) {
     pushError('web/state.collectRepositorySummaries', error);
     return [];
@@ -374,6 +382,29 @@ function collectSkillsCatalog(): Skill[] {
   return value;
 }
 
+/** Projects the policy-permitted lifecycle actions (PRJ-18) for every entity the
+ * web surfaces can act on: Projects, Epics and Work Items. Computed server-side
+ * from the single policy engine so the client only reads flags. */
+function collectLifecycleProjection(
+  projects: ProjectSummary[],
+  epics: EpicRow[],
+  featureCatalog: Record<string, WorkItemCatalogEntry>,
+): Record<string, import('./types.js').AllowedLifecycle> {
+  const keys: LifecycleProjectionKey[] = [];
+  for (const project of projects) keys.push({ kind: 'project', id: project.projectId });
+  for (const epic of epics) keys.push({ kind: 'epic', id: epic.epicId });
+  for (const entry of Object.values(featureCatalog)) {
+    const id = entry.persistedId ?? entry.id;
+    if (id) keys.push({ kind: 'work_item', id });
+  }
+  try {
+    return projectLifecycleActions(keys);
+  } catch (error) {
+    pushError('web/state.collectLifecycleProjection', error);
+    return {};
+  }
+}
+
 export function buildMsqWebState(): MsqWebState {
   snapshotErrors = [];
 
@@ -461,6 +492,7 @@ export function buildMsqWebState(): MsqWebState {
     workflowTemplates,
     workflowTemplateMappings,
     errors,
+    lifecycle: collectLifecycleProjection(projects, epics, featureCatalog),
   };
 }
 

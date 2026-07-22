@@ -13,6 +13,7 @@ const STATUS_COLOR: Record<PillStatus, string> = {
   failed: 'var(--accent-danger)',
   blocked: 'var(--accent-warn)',
   aborted: 'var(--text-dim)',
+  not_started: 'var(--text-faint)',
 };
 
 export function MetricCard({ label, value, status }: MetricCardProps): React.JSX.Element {
