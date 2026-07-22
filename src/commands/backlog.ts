@@ -16,7 +16,7 @@ import {
 
 function printSeedSummary(plan: BacklogSeedPlan | BacklogSeedPlanV3): void {
   const count = (status: string): number => plan.items.filter((item) => item.status === status).length;
-  console.log(`Seed criado:        ${String(count('created'))}`);
+  console.log(`Seed created:       ${String(count('created'))}`);
   console.log(`Seed sem mudanca:   ${String(count('unchanged'))}`);
   console.log(`Seed conflitos:     ${String(count('conflict'))}`);
   console.log(`Seed invalidos:     ${String(count('invalid'))}`);

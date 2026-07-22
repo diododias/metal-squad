@@ -110,7 +110,7 @@ export function EditProjectModal({ open, project, send, actionResults, onClose, 
 
   return <Modal open={open} onClose={pending ? (): void => undefined : onClose} width={520}>
     <div role="dialog" aria-label="Edit Project" style={{ padding: 20, display: 'grid', gap: 12 }}>
-      <h2 style={{ margin: 0, fontFamily: 'var(--font-display)', fontWeight: 400 }}>editar Projeto</h2>
+      <h2 style={{ margin: 0, fontFamily: 'var(--font-display)', fontWeight: 400 }}>Edit Project</h2>
       <EditableTextField id="edit-project-name" label="Name" value={name} initialValue={project.name} onChange={setName} disabled={pending} placeholder="Project name (required)" />
       <EditableTextField id="edit-project-description" label="Description" value={description} initialValue={project.description ?? ''} onChange={setDescription} disabled={pending} placeholder="No description" />
       {error && <p role="alert" style={{ margin: 0, color: 'var(--accent-danger)', fontSize: 'var(--text-xs)' }}>{error}{conflict && ' Your draft is preserved; reload current values or reapply it.'}</p>}

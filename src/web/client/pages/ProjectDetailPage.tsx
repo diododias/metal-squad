@@ -132,9 +132,9 @@ export function ProjectDetailPage({ state, projectId, send, actionResults, archi
         </label>
       </div>}
       actions={<div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-        <Button variant="primary" size="sm" onClick={() => { setShowCreateEpic(true); }}>+ Novo Épico</Button>
-        <Button size="sm" onClick={() => { setShowCreateWorkItem(true); }}>+ Nova Feature</Button>
-        <Button size="sm" onClick={() => { setShowEditProject(true); }}>editar Projeto</Button>
+        <Button variant="primary" size="sm" onClick={() => { setShowCreateEpic(true); }}>+ New Epic</Button>
+        <Button size="sm" onClick={() => { setShowCreateWorkItem(true); }}>+ New Feature</Button>
+        <Button size="sm" onClick={() => { setShowEditProject(true); }}>Edit Project</Button>
         <LifecycleActions
           kind="project"
           id={project.projectId}
@@ -165,7 +165,7 @@ export function ProjectDetailPage({ state, projectId, send, actionResults, archi
       <section>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
           <h2 style={{ ...heading, marginBottom: 0 }}>Epics</h2>
-          <Button variant="primary" size="sm" onClick={() => { setShowCreateEpic(true); }}>+ Novo Épico</Button>
+          <Button variant="primary" size="sm" onClick={() => { setShowCreateEpic(true); }}>+ New Epic</Button>
         </div>
         {epics.length === 0 && <Card>
           <p style={muted}>No Epics yet.</p>
@@ -250,7 +250,7 @@ function EpicRow({ epic, state, projectId }: {
       <div style={{ flex: '1 1 260px', minWidth: 200 }}>
         <h3 style={{ margin: 0 }}>{epic.title}</h3>
         <p style={{ ...muted, marginTop: 4, fontSize: 'var(--text-xs)' }}>
-          criado {new Date(epic.createdAt).toLocaleDateString()} · atualizado {new Date(epic.updatedAt).toLocaleDateString()}
+          created {new Date(epic.createdAt).toLocaleDateString()} · updated {new Date(epic.updatedAt).toLocaleDateString()}
         </p>
         <p style={{ margin: '2px 0 0', color: 'var(--text-faint)', fontFamily: 'var(--font-mono)', fontSize: 'var(--text-xs)' }}>
           {items.length === 0 ? 'no work items yet' : `${String(items.length)} work items`}
