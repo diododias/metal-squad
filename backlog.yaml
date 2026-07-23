@@ -1,27 +1,371 @@
 version: 2
 repo: metal-squad
 epics:
-  - id: m0-governanca
-    title: M0 — Governança, publicação e vocabulário
-    features: []
-  - id: m1-persistencia-bootstrap
-    title: M1 — Persistência e bootstrap recuperável
-    features: []
-  - id: m2-dominio-headless
-    title: "M2 — Domínio headless: Projects, Epics e repos"
-    features: []
-  - id: m3-runtime-multi-repo
-    title: M3 — Catálogo e execução multi-repo reais
-    features: []
-  - id: m4-experiencia-web
-    title: M4 — Experiência web de Projects, Epics e Kanban
-    features: []
-  - id: m5-tipos-templates
-    title: M5 — Work Item types e Workflow Templates
-    features: []
-  - id: m6-ciclo-vida
-    title: M6 — Ciclo de vida, tombstones e restore
-    features: []
-  - id: m7-recovery-encerramento
-    title: M7 — Export, disaster recovery, documentação e E2E
-    features: []
+  - id: analytics-v2
+    title: Analytics v2 — Token consumption, efficiency and waste
+    features:
+      - title: ANA-00 — ADR de métricas, escopo e semântica de tokens
+        tool: codex
+        model: gpt-5.6-terra
+        effort: medium
+        autoStart: true
+        specFile: docs/epics/epico -
+          analytics/features/ANA-00-adr-metricas-escopo-analytics.md
+        context:
+          - docs/epics/epico -
+            analytics/features/ANA-00-adr-metricas-escopo-analytics.md
+          - docs/adr/ADR-001-governanca-fonte-de-verdade-terminologia.md
+          - src/db/repo.ts
+        dependsOn: []
+        skills:
+          - dev-flow
+          - msq-communication-protocol
+        workflow:
+          autoAdvance: true
+          stepGuidance:
+            implement:
+              skills:
+                - dev-flow
+        id: F-DZR7DZ69
+      - title: ANA-01 — Saneamento de telemetria de tokens
+        tool: codex
+        model: gpt-5.6-terra
+        effort: medium
+        autoStart: true
+        specFile: docs/epics/epico -
+          analytics/features/ANA-01-saneamento-telemetria-tokens.md
+        context:
+          - docs/epics/epico -
+            analytics/features/ANA-01-saneamento-telemetria-tokens.md
+          - docs/epics/epico -
+            analytics/features/ANA-00-adr-metricas-escopo-analytics.md
+          - src/db/repo.ts
+          - src/core/runner/execute.ts
+          - src/core/adapters/claude.ts
+          - src/core/adapters/codex.ts
+          - src/core/stats.ts
+        dependsOn: []
+        skills:
+          - dev-flow
+          - msq-communication-protocol
+        workflow:
+          autoAdvance: true
+          stepGuidance:
+            implement:
+              skills:
+                - dev-flow
+        id: F-Q7MWV94E
+      - title: ANA-02 — Snapshots de modelo, effort e perfil de custo na run
+        tool: codex
+        model: gpt-5.6-terra
+        effort: medium
+        autoStart: true
+        specFile: docs/epics/epico -
+          analytics/features/ANA-02-snapshots-modelo-custo-run.md
+        context:
+          - docs/epics/epico -
+            analytics/features/ANA-02-snapshots-modelo-custo-run.md
+          - docs/epics/epico -
+            analytics/features/ANA-00-adr-metricas-escopo-analytics.md
+          - docs/epics/epico -
+            analytics/features/ANA-01-saneamento-telemetria-tokens.md
+          - src/db/index.ts
+          - src/db/repo.ts
+          - src/core/runner/execute.ts
+          - src/core/notify/resume-override.ts
+          - src/commands/resume.ts
+          - src/db/backfill.ts
+        dependsOn: []
+        skills:
+          - dev-flow
+          - msq-communication-protocol
+        workflow:
+          autoAdvance: true
+          stepGuidance:
+            implement:
+              skills:
+                - dev-flow
+        id: F-7VE9DR9Z
+      - title: ANA-03 — Queries agregadas de Analytics
+        tool: codex
+        model: gpt-5.6-terra
+        effort: medium
+        autoStart: true
+        specFile: docs/epics/epico -
+          analytics/features/ANA-03-queries-agregadas-analytics.md
+        context:
+          - docs/epics/epico -
+            analytics/features/ANA-03-queries-agregadas-analytics.md
+          - docs/epics/epico -
+            analytics/features/ANA-01-saneamento-telemetria-tokens.md
+          - docs/epics/epico -
+            analytics/features/ANA-02-snapshots-modelo-custo-run.md
+          - src/db/repo.ts
+          - src/db/index.ts
+          - src/core/stats.ts
+        dependsOn: []
+        skills:
+          - dev-flow
+          - msq-communication-protocol
+        workflow:
+          autoAdvance: true
+          stepGuidance:
+            implement:
+              skills:
+                - dev-flow
+        id: F-5ZDMJBY8
+      - title: ANA-04 — Contrato de state/WS para Analytics
+        tool: codex
+        model: gpt-5.6-terra
+        effort: medium
+        autoStart: true
+        specFile: docs/epics/epico -
+          analytics/features/ANA-04-contrato-state-ws-analytics.md
+        context:
+          - docs/epics/epico -
+            analytics/features/ANA-04-contrato-state-ws-analytics.md
+          - docs/epics/epico -
+            analytics/features/ANA-03-queries-agregadas-analytics.md
+          - src/web/state.ts
+          - src/web/types.ts
+          - src/web/server.ts
+          - src/web/client/hooks/useWebSocket.ts
+        dependsOn: []
+        skills:
+          - dev-flow
+          - msq-communication-protocol
+        workflow:
+          autoAdvance: true
+          stepGuidance:
+            implement:
+              skills:
+                - dev-flow
+        id: F-9PTSYRTM
+      - title: ANA-12 — UX e telas da página Analytics
+        tool: codex
+        model: gpt-5.6-terra
+        effort: medium
+        autoStart: true
+        specFile: docs/epics/epico - analytics/features/ANA-12-ux-telas-analytics.md
+        context:
+          - docs/epics/epico - analytics/features/ANA-12-ux-telas-analytics.md
+          - docs/epics/epico -
+            analytics/features/ANA-00-adr-metricas-escopo-analytics.md
+          - docs/epics/epico -
+            analytics/features/ANA-04-contrato-state-ws-analytics.md
+          - src/web/client/pages/AnalyticsPage.tsx
+          - src/web/client/components/data/MetricCard.tsx
+          - src/web/client/components/data/BarList.tsx
+          - src/web/client/components/data/TrendBars.tsx
+          - src/web/client/components/data/Table.tsx
+          - src/web/types.ts
+        dependsOn: []
+        skills:
+          - dev-flow
+          - msq-communication-protocol
+        workflow:
+          autoAdvance: true
+          stepGuidance:
+            implement:
+              skills:
+                - dev-flow
+        id: F-KN4F5FW6
+      - title: ANA-05 — Listagem completa de Work Items por consumo total
+        tool: codex
+        model: gpt-5.6-terra
+        effort: medium
+        autoStart: true
+        specFile: docs/epics/epico -
+          analytics/features/ANA-05-listagem-features-consumo-total.md
+        context:
+          - docs/epics/epico -
+            analytics/features/ANA-05-listagem-features-consumo-total.md
+          - docs/epics/epico -
+            analytics/features/ANA-04-contrato-state-ws-analytics.md
+          - docs/epics/epico - analytics/features/ANA-12-ux-telas-analytics.md
+          - src/web/client/pages/AnalyticsPage.tsx
+          - src/web/client/components/data/Table.tsx
+          - src/web/client/lib/format.ts
+          - src/web/types.ts
+        dependsOn: []
+        skills:
+          - dev-flow
+          - msq-communication-protocol
+        workflow:
+          autoAdvance: true
+          stepGuidance:
+            implement:
+              skills:
+                - dev-flow
+        id: F-9SR8JYSY
+      - title: ANA-08 — Drilldown por run, stage e task
+        tool: codex
+        model: gpt-5.6-terra
+        effort: medium
+        autoStart: true
+        specFile: docs/epics/epico -
+          analytics/features/ANA-08-drilldown-run-stage-task.md
+        context:
+          - docs/epics/epico -
+            analytics/features/ANA-08-drilldown-run-stage-task.md
+          - docs/epics/epico -
+            analytics/features/ANA-04-contrato-state-ws-analytics.md
+          - docs/epics/epico -
+            analytics/features/ANA-05-listagem-features-consumo-total.md
+          - src/web/server.ts
+          - src/web/client/pages/AnalyticsPage.tsx
+          - src/web/client/pages/RunDetailPage.tsx
+        dependsOn: []
+        skills:
+          - dev-flow
+          - msq-communication-protocol
+        workflow:
+          autoAdvance: true
+          stepGuidance:
+            implement:
+              skills:
+                - dev-flow
+        id: F-5J5NM4FJ
+      - title: ANA-06 — Gráficos por Project, Epic e Work Item
+        tool: codex
+        model: gpt-5.6-terra
+        effort: medium
+        autoStart: true
+        specFile: docs/epics/epico -
+          analytics/features/ANA-06-graficos-projeto-epico-feature.md
+        context:
+          - docs/epics/epico -
+            analytics/features/ANA-06-graficos-projeto-epico-feature.md
+          - docs/epics/epico -
+            analytics/features/ANA-03-queries-agregadas-analytics.md
+          - docs/epics/epico -
+            analytics/features/ANA-04-contrato-state-ws-analytics.md
+          - src/web/client/pages/AnalyticsPage.tsx
+          - src/web/client/components/data/BarList.tsx
+          - src/web/client/components/data/TrendBars.tsx
+          - src/web/client/components/data/MetricCard.tsx
+        dependsOn: []
+        skills:
+          - dev-flow
+          - msq-communication-protocol
+        workflow:
+          autoAdvance: true
+          stepGuidance:
+            implement:
+              skills:
+                - dev-flow
+        id: F-XFNDF8J4
+      - title: ANA-07 — Gráficos por tool, modelo e stage
+        tool: codex
+        model: gpt-5.6-terra
+        effort: medium
+        autoStart: true
+        specFile: docs/epics/epico -
+          analytics/features/ANA-07-graficos-tool-model-stage.md
+        context:
+          - docs/epics/epico -
+            analytics/features/ANA-07-graficos-tool-model-stage.md
+          - docs/epics/epico -
+            analytics/features/ANA-02-snapshots-modelo-custo-run.md
+          - docs/epics/epico -
+            analytics/features/ANA-03-queries-agregadas-analytics.md
+          - docs/epics/epico -
+            analytics/features/ANA-04-contrato-state-ws-analytics.md
+          - src/web/client/pages/AnalyticsPage.tsx
+          - src/web/types.ts
+          - src/db/analytics.ts
+        dependsOn: []
+        skills:
+          - dev-flow
+          - msq-communication-protocol
+        workflow:
+          autoAdvance: true
+          stepGuidance:
+            implement:
+              skills:
+                - dev-flow
+        id: F-M9RV2KEQ
+      - title: ANA-09 — Waste, anomalias e alertas de consumo
+        tool: codex
+        model: gpt-5.6-terra
+        effort: medium
+        autoStart: true
+        specFile: docs/epics/epico -
+          analytics/features/ANA-09-anomalias-waste-e-alertas.md
+        context:
+          - docs/epics/epico -
+            analytics/features/ANA-09-anomalias-waste-e-alertas.md
+          - docs/epics/epico -
+            analytics/features/ANA-03-queries-agregadas-analytics.md
+          - docs/epics/epico -
+            analytics/features/ANA-00-adr-metricas-escopo-analytics.md
+          - src/db/analytics.ts
+          - src/core/stats.ts
+          - src/web/types.ts
+          - src/web/client/pages/AnalyticsPage.tsx
+        dependsOn: []
+        skills:
+          - dev-flow
+          - msq-communication-protocol
+        workflow:
+          autoAdvance: true
+          stepGuidance:
+            implement:
+              skills:
+                - dev-flow
+        id: F-FEYGVC4Q
+      - title: ANA-10 — Forecast de budget e export analítico
+        tool: codex
+        model: gpt-5.6-terra
+        effort: medium
+        autoStart: true
+        specFile: docs/epics/epico - analytics/features/ANA-10-previsao-budget-export.md
+        context:
+          - docs/epics/epico -
+            analytics/features/ANA-10-previsao-budget-export.md
+          - docs/epics/epico -
+            analytics/features/ANA-03-queries-agregadas-analytics.md
+          - docs/epics/epico -
+            analytics/features/ANA-09-anomalias-waste-e-alertas.md
+          - src/db/analytics.ts
+          - src/web/server.ts
+          - src/web/types.ts
+          - src/web/client/pages/AnalyticsPage.tsx
+          - src/core/budget/tracker.ts
+        dependsOn: []
+        skills:
+          - dev-flow
+          - msq-communication-protocol
+        workflow:
+          autoAdvance: true
+          stepGuidance:
+            implement:
+              skills:
+                - dev-flow
+        id: F-Y8ZSFAC3
+      - title: ANA-11 — Performance, testes e regressão E2E
+        tool: codex
+        model: gpt-5.6-terra
+        effort: medium
+        autoStart: true
+        specFile: docs/epics/epico -
+          analytics/features/ANA-11-performance-e-regressao-e2e.md
+        context:
+          - docs/epics/epico -
+            analytics/features/ANA-11-performance-e-regressao-e2e.md
+          - src/db/fixtures.ts
+          - tests/db/analytics.test.ts
+          - tests/web/server.test.ts
+          - tests/web/analytics-page.test.tsx
+          - tests/fixtures/scenarios/settings.backlog.yaml
+        dependsOn: []
+        skills:
+          - dev-flow
+          - msq-communication-protocol
+        workflow:
+          autoAdvance: true
+          stepGuidance:
+            implement:
+              skills:
+                - dev-flow
+        id: F-4C8P47JK

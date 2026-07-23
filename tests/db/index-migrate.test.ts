@@ -81,6 +81,7 @@ function resetAll() {
     { name: 'total_tokens' },
     { name: 'context_window_tokens' },
     { name: 'context_window_percent' },
+    { name: 'token_data_quality' },
   ];
   pragmaPipelinesColumns = [];
   pragmaRetryHistoryColumns = [{ name: 'tool' }, { name: 'model' }];
@@ -113,7 +114,7 @@ describe('getDb migration — column checks', () => {
     const ALL_RUN_COLS = [
       { name: 'summary' }, { name: 'input_tokens' }, { name: 'output_tokens' },
       { name: 'cached_input_tokens' }, { name: 'total_tokens' }, { name: 'pipeline_id' },
-      { name: 'context_window_tokens' }, { name: 'context_window_percent' }, { name: 'stage' },
+      { name: 'context_window_tokens' }, { name: 'context_window_percent' }, { name: 'token_data_quality' }, { name: 'stage' },
       { name: 'publish_verified' }, { name: 'publish_error' }, { name: 'branch_name' },
       { name: 'base_branch' }, { name: 'commit_sha' }, { name: 'remote_branch' },
       { name: 'pr_number' }, { name: 'pr_url' },
@@ -126,7 +127,7 @@ describe('getDb migration — column checks', () => {
       { name: 'tool_version' }, { name: 'pricing_profile_id' }, { name: 'metrics_confidence' },
     ];
     pragmaRunsColumns = ALL_RUN_COLS;
-    pragmaTokenUsageColumns = [{ name: 'cached_input' }];
+    pragmaTokenUsageColumns = [{ name: 'cached_input' }, { name: 'data_quality' }, { name: 'raw_usage_json' }];
     pragmaPipelinesColumns = [
       { name: 'cwd' }, { name: 'plan_json' }, { name: 'done_json' },
       { name: 'pending_json' }, { name: 'active_json' }, { name: 'aborted_json' },

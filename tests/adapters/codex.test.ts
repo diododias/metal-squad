@@ -104,7 +104,7 @@ describe('codexAdapter timeout observability', () => {
     expect(result.summary).toContain(
       'arquivos tocados: src/core/skills/registry.ts, tests/skills/registry.test.ts',
     );
-    expect(result.usage).toEqual({ input: 100, cachedInput: 20, output: 40, total: 160 });
+    expect(result.usage).toMatchObject({ input: 80, cachedInput: 20, output: 40, total: 140 });
     expect(mockRunCli).toHaveBeenCalledWith(
       'codex',
       expect.any(Array),
@@ -120,10 +120,10 @@ describe('codexAdapter timeout observability', () => {
       runId: 7,
       featureId: 'feat-02',
       tool: 'codex',
-      input: 100,
+      input: 80,
       cachedInput: 20,
       output: 40,
-      total: 160,
+      total: 140,
     });
   });
 
@@ -322,5 +322,17 @@ describe('codexAdapter timeout observability', () => {
       createdAt: expect.any(String),
       level: 'error',
     });
+  });
+});
+
+describe('codexAdapter token semantics', () => {
+  it('separates cached input from Codex raw input without producing a negative component', async () => {
+    const { codexAdapter } = await import('../../src/core/adapters/codex.js');
+    const usage = codexAdapter.parseUsage?.(JSON.stringify({
+      type: 'turn.completed',
+      usage: { input_tokens: 10, cached_input_tokens: 30, output_tokens: 4 },
+    }));
+    expect(usage).toMatchObject({ input: 0, cachedInput: 30, output: 4, total: 14 });
+    expect(usage?.rawUsage).toEqual({ input_tokens: 10, cached_input_tokens: 30, output_tokens: 4 });
   });
 });
