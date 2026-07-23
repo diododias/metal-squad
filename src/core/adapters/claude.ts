@@ -216,11 +216,12 @@ function safeJson<T>(s: string): T | null { // eslint-disable-line @typescript-e
 }
 
 function findResultEvent(transcript: string): StreamJsonEvent | null {
+  let last: StreamJsonEvent | null = null;
   for (const line of transcript.split('\n')) {
     const evt = safeJson<StreamJsonEvent>(line);
-    if (evt?.type === 'result') return evt;
+    if (evt?.type === 'result') last = evt;
   }
-  return null;
+  return last;
 }
 
 function findClaudeSessionId(transcript: string): string | null {
