@@ -63,6 +63,15 @@ describe('computeStats', () => {
     expect(stats.successRatePercent).toBeNull();
     expect(stats.topFeaturesByTokens).toEqual([]);
   });
+
+  it('does not aggregate invalid or unknown telemetry', () => {
+    const stats = computeStats([
+      run({ dataQuality: 'valid', totalTokens: 100, inputTokens: 80, outputTokens: 20 }),
+      run({ id: 2, featureId: 'bad', dataQuality: 'invalid', totalTokens: -1, inputTokens: -2, outputTokens: 1 }),
+      run({ id: 3, featureId: 'unknown', dataQuality: 'unknown', totalTokens: null, inputTokens: null, outputTokens: null }),
+    ]);
+    expect(stats.tokens).toEqual({ total: 100, input: 80, cachedInput: 0, output: 20 });
+  });
 });
 
 describe('computeRunBreakdown', () => {
