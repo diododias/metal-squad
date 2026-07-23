@@ -111,6 +111,7 @@ const mocks = vi.hoisted(() => ({
   getAnalyticsSummary: vi.fn(),
   getTokenBreakdowns: vi.fn(),
   getAnalyticsDataQuality: vi.fn(),
+  getAnalyticsInsights: vi.fn(() => []),
   getAnalyticsForecast: vi.fn(),
   getAnalyticsPeriodComparison: vi.fn(),
   getAnalyticsExportDataset: vi.fn(() => ({
@@ -127,6 +128,7 @@ vi.mock('../../src/db/analytics.js', () => ({
   getAnalyticsSummary: mocks.getAnalyticsSummary,
   getTokenBreakdowns: mocks.getTokenBreakdowns,
   getAnalyticsDataQuality: mocks.getAnalyticsDataQuality,
+  getAnalyticsInsights: mocks.getAnalyticsInsights,
   getAnalyticsForecast: mocks.getAnalyticsForecast,
   getAnalyticsPeriodComparison: mocks.getAnalyticsPeriodComparison,
   getAnalyticsExportDataset: mocks.getAnalyticsExportDataset,
@@ -581,6 +583,37 @@ describe('web server', () => {
     expect(result).toMatchObject({ type: 'analytics:export', payload: { requestId: 'analytics-export', ok: true, format: 'json', filename: 'analytics-export-2026-07-23.json' } });
     expect((result.payload as { content: string }).content).not.toMatch(/branch_name|commit_sha|pr_url|\/safe\/repo/);
     expect(mocks.getAnalyticsExportDataset).toHaveBeenCalledWith({ sinceDays: 7 }, undefined);
+    socket.close();
+  });
+
+  it('serves filtered breakdowns, unknown drilldowns, and exports as bounded on-demand messages', async () => {
+    const { createWebServer } = await import('../../src/web/server.js');
+    mocks.getAnalyticsSummary.mockReturnValue({ totalTokens: 160, runs: 1 });
+    mocks.getTokenBreakdowns.mockReturnValue({ byProject: [], byEpic: [], byRepository: [], byWorkItem: [], byTool: [], byModel: [], byStage: [], byEffort: [], byThinking: [], byStatus: [] });
+    mocks.getAnalyticsDataQuality.mockReturnValue({ totalRuns: 1, exactRuns: 0, derivedRuns: 0, unknownRuns: 1, missingTokenRuns: 1, missingProjectSnapshotRuns: 1, missingEpicSnapshotRuns: 1 });
+    mocks.getTokenTimeSeries.mockReturnValue([]);
+    mocks.listAnalyticsRunDrilldown.mockReturnValue([{ runId: 9, workItemId: 'unknown-run', totalTokens: 0, confidence: 'unknown' }]);
+    server = createWebServer({ host: '127.0.0.1', port: 0, auth: 'token', token: 'secret' });
+    await new Promise<void>((resolve) => server!.server.listen(0, '127.0.0.1', resolve));
+    const port = (server!.server.address() as { port: number }).port;
+    const socket = new WebSocket(`ws://127.0.0.1:${port}/ws`);
+    await waitForOpen(socket);
+    socket.send(JSON.stringify({ type: 'auth', token: 'secret' }));
+    await waitForSocketMessage(socket);
+    const filters = { projectId: 'p1', epicId: 'e1', repoId: 'r1', tool: 'codex', model: 'unknown model', sinceDays: 30 };
+
+    socket.send(JSON.stringify({ type: 'action:getAnalyticsBreakdown', requestId: 'filtered-breakdown', filters }));
+    expect(await waitForMatchingMessage(socket, (message) => message.type === 'analytics:breakdown')).toMatchObject({ payload: { requestId: 'filtered-breakdown', ok: true } });
+    expect(mocks.getAnalyticsSummary).toHaveBeenCalledWith(filters);
+    expect(mocks.getTokenBreakdowns).toHaveBeenCalledWith(filters, 20);
+
+    socket.send(JSON.stringify({ type: 'action:getAnalyticsRunDrilldown', requestId: 'unknown-drilldown', filters: { ...filters, dataQuality: 'missing-snapshot' }, pagination: { limit: 25 } }));
+    expect(await waitForMatchingMessage(socket, (message) => message.type === 'analytics:runDrilldown')).toMatchObject({ payload: { requestId: 'unknown-drilldown', ok: true, rows: [expect.objectContaining({ confidence: 'unknown' })] } });
+    expect(mocks.listAnalyticsRunDrilldown).toHaveBeenCalledWith({ ...filters, dataQuality: 'missing-snapshot' }, { limit: 25 });
+
+    socket.send(JSON.stringify({ type: 'action:exportAnalytics', requestId: 'filtered-export', filters, format: 'csv' }));
+    expect(await waitForMatchingMessage(socket, (message) => message.type === 'analytics:export')).toMatchObject({ payload: { requestId: 'filtered-export', ok: true, format: 'csv' } });
+    expect(mocks.getAnalyticsExportDataset).toHaveBeenCalledWith(filters, undefined);
     socket.close();
   });
 

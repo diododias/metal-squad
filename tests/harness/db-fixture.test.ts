@@ -74,4 +74,26 @@ describe('db fixture scenarios', () => {
     expect(second.diff.changedFeatures).toEqual([]);
     expect(second.diff.unchangedFeatures).toHaveLength(2);
   });
+
+  it('seeds the sandboxed analytics volume scenario with stable incomplete telemetry', async () => {
+    const { applyFixtureScenario } = await import('../../src/db/fixtures.js');
+    ({ resetDb } = await import('../../src/db/index.js'));
+    const { getDb } = await import('../../src/db/index.js');
+
+    const result = applyFixtureScenario('analytics-volume');
+    const db = getDb('readonly');
+    const counts = db.prepare(`SELECT
+      (SELECT COUNT(*) FROM projects WHERE project_id LIKE 'fix-ana-project-%') AS projects,
+      (SELECT COUNT(*) FROM backlog_epics WHERE epic_id LIKE 'fix-ana-project-%') AS epics,
+      (SELECT COUNT(*) FROM backlog_features WHERE feature_id LIKE 'fix-ana-project-%') AS workItems,
+      (SELECT COUNT(*) FROM runs WHERE id >= 900000 AND id < 903600) AS runs,
+      (SELECT COUNT(*) FROM runs WHERE id >= 900000 AND id < 903600 AND project_id IS NULL) AS incompleteRuns`).get() as Record<string, number>;
+
+    expect(result.features).toBe(1);
+    expect(counts).toEqual({ projects: 3, epics: 12, workItems: 24, runs: 3600, incompleteRuns: expect.any(Number) });
+    expect(counts.incompleteRuns).toBeGreaterThan(0);
+
+    applyFixtureScenario('analytics-volume');
+    expect(db.prepare(`SELECT COUNT(*) AS count FROM runs WHERE id >= 900000 AND id < 903600`).get()).toEqual({ count: 3600 });
+  });
 });
