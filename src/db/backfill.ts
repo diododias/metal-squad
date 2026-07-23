@@ -20,6 +20,73 @@ export interface BackfillProjectsResult {
   pipelinesBackfilled: number;
 }
 
+/** Materializes historical execution metadata so analytics never needs to
+ * join a run to the feature's mutable current configuration. */
+export function backfillRunExecutionSnapshots(db: Database.Database): void {
+  const rows = db.prepare(`
+    SELECT r.id, r.repo_id AS repoId, r.feature_id AS featureId, r.tool,
+           r.model, r.effort, r.thinking,
+           f.data_json AS featureData, m.defaults_json AS defaultsData
+      FROM runs r
+      LEFT JOIN backlog_features f ON f.repo_id = r.repo_id AND f.feature_id = r.feature_id
+      LEFT JOIN backlog_catalog_meta m ON m.repo_id = r.repo_id
+     WHERE r.metrics_confidence IS NULL
+  `).all() as {
+    id: number; repoId: string; featureId: string; tool: string;
+    model: string | null; effort: string | null; thinking: string | null;
+    featureData: string | null; defaultsData: string | null;
+  }[];
+  if (rows.length === 0) return;
+
+  const retryForRun = db.prepare(`
+    SELECT tool, model FROM retry_history
+     WHERE run_id = ? AND model IS NOT NULL
+     ORDER BY attempt DESC, id DESC
+  `);
+  const eventsForRun = db.prepare(`
+    SELECT metadata FROM run_events
+     WHERE run_id = ? AND metadata IS NOT NULL
+     ORDER BY id DESC
+  `);
+  const update = db.prepare(`
+    UPDATE runs SET model = ?, effort = ?, thinking = ?, metrics_confidence = ? WHERE id = ?
+  `);
+
+  for (const row of rows) {
+    const feature = parseSnapshotObject(row.featureData);
+    const defaults = parseSnapshotObject(row.defaultsData);
+    const retryRows = retryForRun.all(row.id) as { tool: string | null; model: string | null }[];
+    const retry = retryRows.find((candidate) => candidate.tool === row.tool) ?? retryRows[0];
+    const event = findSnapshotEvent(eventsForRun.all(row.id) as { metadata: string }[]);
+    const model = row.model ?? retry?.model ?? stringValue(event.model) ?? stringValue(feature.model) ?? stringValue(defaults.model);
+    const effort = row.effort ?? stringValue(event.effort) ?? stringValue(feature.effort) ?? stringValue(defaults.effort);
+    const thinking = row.thinking ?? stringValue(event.thinking) ?? stringValue(feature.thinking) ?? stringValue(defaults.thinking);
+    update.run(model ?? null, effort ?? null, thinking ?? null, model || effort || thinking ? 'derived' : 'unknown', row.id);
+  }
+}
+
+function parseSnapshotObject(value: string | null): Record<string, unknown> {
+  if (!value) return {};
+  try {
+    const parsed = JSON.parse(value) as unknown;
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed as Record<string, unknown> : {};
+  } catch {
+    return {};
+  }
+}
+
+function findSnapshotEvent(rows: { metadata: string }[]): Record<string, unknown> {
+  for (const row of rows) {
+    const metadata = parseSnapshotObject(row.metadata);
+    if (stringValue(metadata.model) || stringValue(metadata.effort) || stringValue(metadata.thinking)) return metadata;
+  }
+  return {};
+}
+
+function stringValue(value: unknown): string | undefined {
+  return typeof value === 'string' && value.length > 0 ? value : undefined;
+}
+
 /**
  * Migrates every registered repo (including empty ones) to an implicit
  * Project, fills project_id snapshots on epics/runs/pipelines, and rebuilds

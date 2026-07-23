@@ -45,10 +45,12 @@ import {
   updatePipelineStage,
   updateRunSessionHandle,
   updateRunTool,
+  updateRunExecutionSnapshot,
   updateStageTransitionDecisionNextSessionId,
   type PipelineStatus,
   type PipelineWorkflowRevisions,
   type StageRequestRow,
+  type RunExecutionSnapshot,
 } from '../../db/repo.js';
 import { getCatalogFeature, getFeatureIdOwner } from '../../db/backlogCatalog.js';
 import { dispatch } from '../notify/manager.js';
@@ -317,7 +319,18 @@ export async function executeBacklog(
     abortSignal?: AbortSignal,
     session?: RunFeatureOptions['session'],
   ): Promise<{ runId: number; res: RunResult }> => {
-    const runId = createRun(repoId, feature.id, feature.tool, { pipelineId, stage });
+    const resumeOverride = opts.resumeOverride?.featureId === feature.id ? opts.resumeOverride : undefined;
+    const primaryCandidate = buildRetryCandidates(feature, resumeOverride)[0];
+    const runId = createRun(repoId, feature.id, primaryCandidate?.tool ?? feature.tool, {
+      pipelineId,
+      stage,
+      snapshot: buildRunExecutionSnapshot(primaryCandidate ?? {
+        tool: feature.tool,
+        model: feature.model,
+        effort: feature.effort,
+        maxAttempts: 1,
+      }, feature.thinking, config),
+    });
     lastRunIdByFeature.set(feature.id, runId);
     activeRunIds.add(runId);
     msqEventBus.emit('run:start', { runId, featureId: feature.id, tool: feature.tool, stage });
@@ -337,8 +350,9 @@ export async function executeBacklog(
         repoId,
         signal: abortSignal,
         session,
-        resumeOverride: opts.resumeOverride?.featureId === feature.id ? opts.resumeOverride : undefined,
+        resumeOverride,
         stageSkills: effectiveStageSkills,
+        runtimeConfig: config,
       });
       const dependencyPublications = dependencyPublicationsFor(feature.id);
       const publishes = stage !== undefined && stagePublishesResolved(
@@ -1036,6 +1050,7 @@ interface RetryRunOptions {
   session?: RunFeatureOptions['session'];
   resumeOverride?: ResumeOverride;
   stageSkills?: Record<string, string[]>;
+  runtimeConfig: ReturnType<typeof resolveRuntimeConfig>;
 }
 
 interface RetryCandidate {
@@ -1063,6 +1078,21 @@ function buildRetryCandidates(feature: Feature, resumeOverride?: ResumeOverride)
 
 function resolvePrimaryTool(feature: Feature, resumeOverride?: ResumeOverride): Tool {
   return buildRetryCandidates(feature, resumeOverride)[0]?.tool ?? feature.tool;
+}
+
+function buildRunExecutionSnapshot(
+  candidate: RetryCandidate,
+  thinking: Feature['thinking'],
+  config: { tools?: { id: string; command: string }[] },
+): RunExecutionSnapshot {
+  const tool = config.tools?.find((entry) => entry.id === candidate.tool);
+  return {
+    ...(candidate.model ? { model: candidate.model } : {}),
+    effort: candidate.effort,
+    thinking,
+    ...(tool?.command ? { toolName: tool.command } : {}),
+    metricsConfidence: candidate.model ? 'exact' : 'unknown',
+  };
 }
 
 async function runWithRetry(
@@ -1100,6 +1130,7 @@ async function runWithRetry(
 
       if (res.ok || res.control?.type === 'needs_input' || res.control?.type === 'blocked') {
         if (candidate.tool !== feature.tool) updateRunTool(opts.runId, candidate.tool);
+        updateRunExecutionSnapshot(opts.runId, buildRunExecutionSnapshot(candidate, feature.thinking, opts.runtimeConfig));
         return res;
       }
 
@@ -1125,6 +1156,8 @@ async function runWithRetry(
   if (lastCandidateTool && lastCandidateTool !== feature.tool) {
     updateRunTool(opts.runId, lastCandidateTool);
   }
+  const lastCandidate = candidates[candidates.length - 1];
+  if (lastCandidate) updateRunExecutionSnapshot(opts.runId, buildRunExecutionSnapshot(lastCandidate, feature.thinking, opts.runtimeConfig));
 
   if (getOnFailPolicy(feature) === 'gate') {
     createGate(opts.runId, feature.id, opts.repoId);
