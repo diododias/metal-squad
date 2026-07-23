@@ -46,7 +46,7 @@ import {
 import { RevisionConflictError, WorkItemHasHistoryError } from '../db/errors.js';
 import { getAdapter } from '../core/adapters/index.js';
 import { computeRunBreakdown } from '../core/stats.js';
-import { getAnalyticsDataQuality, getAnalyticsSummary, getTokenBreakdowns, getTokenTimeSeries, listAnalyticsRunDrilldown, listAnalyticsWorkItems } from '../db/analytics.js';
+import { getAnalyticsDataQuality, getAnalyticsInsights, getAnalyticsSummary, getTokenBreakdowns, getTokenTimeSeries, listAnalyticsRunDrilldown, listAnalyticsWorkItems } from '../db/analytics.js';
 import { resolveRepo, resolveRepoAllowlist } from '../core/repo.js';
 import { resolveWorkItemExecutionContext } from '../core/workItemExecutionContext.js';
 import { loadBacklogFromCatalog } from '../core/backlog/load.js';
@@ -1156,7 +1156,7 @@ export function createWebServer(options: {
     if (!parsed.success) return { type: 'analytics:breakdown', payload: { requestId: actionResultRequestId(message), ok: false, error: { code: 'INVALID_FILTERS', message: 'Analytics filters are invalid. Use supported filters and bounded rankings.' } } };
     try {
       const { filters, bucket = 'day', rankingLimit = 20 } = parsed.data;
-      return { type: 'analytics:breakdown', payload: { requestId: parsed.data.requestId, ok: true, summary: getAnalyticsSummary(filters), timeSeries: getTokenTimeSeries(filters, bucket), groups: getTokenBreakdowns(filters, rankingLimit), dataQuality: getAnalyticsDataQuality(filters), generatedAt: new Date().toISOString(), revision: getProjectStateRevision() } };
+      return { type: 'analytics:breakdown', payload: { requestId: parsed.data.requestId, ok: true, summary: getAnalyticsSummary(filters), timeSeries: getTokenTimeSeries(filters, bucket), groups: getTokenBreakdowns(filters, rankingLimit), dataQuality: getAnalyticsDataQuality(filters), insights: getAnalyticsInsights(filters), generatedAt: new Date().toISOString(), revision: getProjectStateRevision() } };
     } catch (error) {
       return { type: 'analytics:breakdown', payload: analyticsError(parsed.data.requestId, error) };
     }

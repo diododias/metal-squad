@@ -111,6 +111,22 @@ describe('analytics aggregate queries (ANA-03)', () => {
     ]);
   });
 
+  it('ranks waste, outliers, retry loops and unknown telemetry without pipeline double counting', async () => {
+    const { db, getAnalyticsInsights } = await setup();
+    insertRun(db, { id: 1, startedAt: '2026-07-01 10:00:00', total: 100, status: 'done' });
+    insertRun(db, { id: 2, startedAt: '2026-07-02 10:00:00', total: 1000, status: 'failed' });
+    insertRun(db, { id: 3, startedAt: '2026-07-03 10:00:00', total: 50, confidence: 'unknown' });
+    db.prepare(`INSERT INTO retry_history (run_id, attempt) VALUES (2, 1), (2, 2)`).run();
+    const insights = getAnalyticsInsights();
+    expect(insights).toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: 'waste-2', observedTokens: 1000 }),
+      expect.objectContaining({ id: 'outlier-2', baselineTokens: 1000 }),
+      expect.objectContaining({ id: 'loop-2', observedTokens: 1000 }),
+      expect.objectContaining({ id: 'quality-3', kind: 'data_quality' }),
+    ]));
+    expect(insights.find((insight: { id: string }) => insight.id === 'waste-2')?.observedTokens).toBe(1000);
+  });
+
   it('uses the analytic indexes with a deterministic volume fixture', async () => {
     const { db, getAnalyticsSummary } = await setup();
     const insert = db.prepare(`INSERT INTO runs (repo_id, project_id, epic_id, feature_id, tool, model, stage, status, started_at, total_tokens, metrics_confidence)

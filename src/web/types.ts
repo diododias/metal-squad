@@ -9,7 +9,9 @@ import type { AppConfigPatch as ConfigAppConfigPatch, Config, NotificationChanne
 import type { Skill } from '../core/skills/types.js';
 import type { WorkItemType as MsqWorkItemType } from '../db/workflowTemplates.js';
 import type { AllowedLifecycle } from '../core/lifecyclePolicy.js';
-import type { AnalyticsDataQuality, AnalyticsFilters, AnalyticsRunDrilldownRow, AnalyticsSort, AnalyticsSummary, AnalyticsTokenGroup, AnalyticsWorkItemRow, TokenTimeBucket } from '../db/analytics.js';
+import type { AnalyticsDataQuality, AnalyticsFilters, AnalyticsInsight, AnalyticsRunDrilldownRow, AnalyticsSort, AnalyticsSummary, AnalyticsTokenGroup, AnalyticsWorkItemRow, TokenTimeBucket } from '../db/analytics.js';
+
+export type { AnalyticsInsight } from '../db/analytics.js';
 
 export type { AllowedLifecycle } from '../core/lifecyclePolicy.js';
 
@@ -52,7 +54,7 @@ export interface AnalyticsSnapshot {
 
 export interface AnalyticsActionError { code: 'INVALID_FILTERS' | 'QUERY_FAILED'; message: string; }
 export interface AnalyticsWorkItemsResult { type: 'analytics:workItems'; payload: { requestId: string; ok: true; rows: AnalyticsWorkItemRow[] } | { requestId: string; ok: false; error: AnalyticsActionError }; }
-export interface AnalyticsBreakdownResult { type: 'analytics:breakdown'; payload: { requestId: string; ok: true; summary: AnalyticsSummary; timeSeries: TokenTimeBucket[]; groups: AnalyticsSnapshot['topGroups']; dataQuality: AnalyticsDataQuality; generatedAt: string; revision: number } | { requestId: string; ok: false; error: AnalyticsActionError }; }
+export interface AnalyticsBreakdownResult { type: 'analytics:breakdown'; payload: { requestId: string; ok: true; summary: AnalyticsSummary; timeSeries: TokenTimeBucket[]; groups: AnalyticsSnapshot['topGroups']; dataQuality: AnalyticsDataQuality; insights: AnalyticsInsight[]; generatedAt: string; revision: number } | { requestId: string; ok: false; error: AnalyticsActionError }; }
 export interface AnalyticsRunDrilldownResult { type: 'analytics:runDrilldown'; payload: { requestId: string; ok: true; rows: AnalyticsRunDrilldownRow[] } | { requestId: string; ok: false; error: AnalyticsActionError }; }
 export type AnalyticsQueryFilters = AnalyticsFilters;
 export type AnalyticsQuerySort = AnalyticsSort;

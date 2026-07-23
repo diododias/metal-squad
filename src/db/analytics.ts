@@ -1,6 +1,7 @@
 import { existsSync } from 'node:fs';
 import { resolveDbPath } from '../config/index.js';
 import { getDb } from './index.js';
+import { computeTokenBaseline, isTokenOutlier } from '../core/stats.js';
 
 export type AnalyticsMetricsConfidence = 'exact' | 'derived' | 'unknown';
 export type AnalyticsBucket = 'hour' | 'day' | 'week' | 'month';
@@ -96,6 +97,18 @@ export interface AnalyticsDataQuality {
   missingTokenRuns: number;
   missingProjectSnapshotRuns: number;
   missingEpicSnapshotRuns: number;
+}
+
+export type AnalyticsInsightKind = 'waste' | 'outlier' | 'growth' | 'efficiency' | 'context' | 'data_quality';
+export interface AnalyticsInsight {
+  id: string;
+  kind: AnalyticsInsightKind;
+  severity: 'info' | 'warning' | 'critical';
+  title: string;
+  evidence: string;
+  observedTokens: number;
+  baselineTokens: number | null;
+  filters: Pick<AnalyticsFilters, 'workItemId' | 'tool' | 'model' | 'status'>;
 }
 
 interface FilteredQuery {
@@ -312,6 +325,76 @@ export function getAnalyticsDataQuality(filters: AnalyticsFilters = {}): Analyti
   };
 }
 
+/** Insight ranking intentionally operates on physical runs. A pipeline total is
+ * never joined or added here, so retries/resumes cannot be counted twice. */
+export function getAnalyticsInsights(filters: AnalyticsFilters = {}, limit = 12): AnalyticsInsight[] {
+  if (!databaseExists()) return [];
+  const { cte, params } = filteredRuns(filters);
+  const rows = getDb('readonly').prepare(`${cte}
+    SELECT filtered.*, r.pipeline_id AS pipelineId,
+      (SELECT COUNT(*) FROM retry_history rh WHERE rh.run_id = filtered.id) AS retryCount,
+      (SELECT COUNT(*) FROM run_events re WHERE re.run_id = filtered.id AND re.event IN ('gate_wait', 'retry')) AS loopCount
+    FROM filtered JOIN runs r ON r.id = filtered.id
+    ORDER BY totalTokens DESC, id DESC`).all(...params) as Record<string, unknown>[];
+  const known = rows.filter((row) => row.metricsConfidence !== 'unknown').map((row) => Number(row.totalTokens ?? 0));
+  const baseline = computeTokenBaseline(known);
+  const insights: AnalyticsInsight[] = [];
+  for (const row of rows) {
+    const tokens = Number(row.totalTokens ?? 0);
+    const runId = Number(row.id);
+    const workItemId = stringValue(row.workItemId);
+    const tool = stringValue(row.tool);
+    const model = nullableStringValue(row.model) ?? ANALYTICS_UNKNOWN_MODEL;
+    const status = stringValue(row.status);
+    if (['failed', 'blocked', 'aborted'].includes(status) && tokens > 0) {
+      insights.push({ id: `waste-${String(runId)}`, kind: 'waste', severity: tokens >= (baseline.p95 ?? Infinity) ? 'critical' : 'warning', title: `${status} run consumed ${String(tokens)} tokens`, evidence: `Run ${String(runId)}; status ${status}; counted once as a physical attempt.`, observedTokens: tokens, baselineTokens: baseline.average, filters: { workItemId, tool, model, status } });
+    }
+    if (row.metricsConfidence !== 'unknown' && isTokenOutlier(tokens, baseline)) {
+      insights.push({ id: `outlier-${String(runId)}`, kind: 'outlier', severity: tokens >= (baseline.p99 ?? Infinity) ? 'critical' : 'warning', title: `Run ${String(runId)} is above the P95 token baseline`, evidence: `Observed ${String(tokens)}; period P95 ${String(baseline.p95)}; average ${String(Math.round(baseline.average ?? 0))}.`, observedTokens: tokens, baselineTokens: baseline.p95, filters: { workItemId, tool, model } });
+    }
+    if (Number(row.contextWindowPercent ?? 0) >= 80) {
+      insights.push({ id: `context-${String(runId)}`, kind: 'context', severity: Number(row.contextWindowPercent) >= 95 ? 'critical' : 'warning', title: `Context window reached ${String(Number(row.contextWindowPercent))}%`, evidence: `Run ${String(runId)}; threshold 80%; observed ${String(Number(row.contextWindowPercent))}%.`, observedTokens: tokens, baselineTokens: 80, filters: { workItemId, tool, model } });
+    }
+    if (Number(row.retryCount ?? 0) > 0 || Number(row.loopCount ?? 0) >= 3) {
+      insights.push({ id: `loop-${String(runId)}`, kind: 'waste', severity: Number(row.retryCount ?? 0) >= 2 ? 'critical' : 'warning', title: `Repeated retry/gate activity on run ${String(runId)}`, evidence: `${String(Number(row.retryCount ?? 0))} retries and ${String(Number(row.loopCount ?? 0))} retry/gate events; tokens remain counted only on this run.`, observedTokens: tokens, baselineTokens: baseline.average, filters: { workItemId, tool, model, status } });
+    }
+    if (row.metricsConfidence === 'unknown') {
+      insights.push({ id: `quality-${String(runId)}`, kind: 'data_quality', severity: 'warning', title: `Unknown telemetry on run ${String(runId)}`, evidence: 'Excluded from percentile and average comparisons; the run remains visible for investigation.', observedTokens: tokens, baselineTokens: null, filters: { workItemId, tool, model, status } });
+    }
+  }
+  const comparable = rows.filter((row) => row.metricsConfidence !== 'unknown' && Number(row.totalTokens ?? 0) >= 0);
+  const byToolModel = new Map<string, number[]>();
+  for (const row of comparable) {
+    const key = `${stringValue(row.tool)}\u0000${nullableStringValue(row.model) ?? ANALYTICS_UNKNOWN_MODEL}`;
+    const values = byToolModel.get(key) ?? [];
+    values.push(Number(row.totalTokens ?? 0)); byToolModel.set(key, values);
+  }
+  for (const [key, values] of byToolModel) {
+    const average = values.reduce((sum, value) => sum + value, 0) / values.length;
+    if (values.length >= 2 && baseline.average !== null && average >= baseline.average * 1.5) {
+      const [tool = '', model = ANALYTICS_UNKNOWN_MODEL] = key.split('\u0000');
+      insights.push({ id: `efficiency-${key}`, kind: 'efficiency', severity: average >= baseline.average * 2 ? 'critical' : 'warning', title: `${tool}/${model} has elevated average tokens per run`, evidence: `${String(values.length)} comparable runs; average ${String(Math.round(average))} versus period average ${String(Math.round(baseline.average))}.`, observedTokens: Math.round(average), baselineTokens: baseline.average, filters: { tool, model } });
+    }
+  }
+  const timestamps = comparable.map((row) => Date.parse(stringValue(row.startedAt))).filter(Number.isFinite);
+  if (timestamps.length >= 4) {
+    const midpoint = (Math.min(...timestamps) + Math.max(...timestamps)) / 2;
+    const byWorkItem = new Map<string, { before: number[]; after: number[] }>();
+    for (const row of comparable) {
+      const entry = byWorkItem.get(stringValue(row.workItemId)) ?? { before: [], after: [] };
+      (Date.parse(stringValue(row.startedAt)) >= midpoint ? entry.after : entry.before).push(Number(row.totalTokens ?? 0));
+      byWorkItem.set(stringValue(row.workItemId), entry);
+    }
+    for (const [workItemId, samples] of byWorkItem) {
+      if (!samples.before.length || !samples.after.length) continue;
+      const before = samples.before.reduce((sum, value) => sum + value, 0) / samples.before.length;
+      const after = samples.after.reduce((sum, value) => sum + value, 0) / samples.after.length;
+      if (after >= before * 1.5 && after > 0) insights.push({ id: `growth-${workItemId}`, kind: 'growth', severity: after >= before * 2 ? 'critical' : 'warning', title: `${workItemId} token use grew sharply`, evidence: `Recent-half average ${String(Math.round(after))} versus prior-half average ${String(Math.round(before))}.`, observedTokens: Math.round(after), baselineTokens: Math.round(before), filters: { workItemId } });
+    }
+  }
+  return insights.sort((a, b) => severityRank(b.severity) - severityRank(a.severity) || b.observedTokens - a.observedTokens).slice(0, Math.max(1, limit));
+}
+
 function emptyMetrics(): AnalyticsMetrics {
   return { totalTokens: 0, inputTokens: 0, cachedInputTokens: 0, outputTokens: 0, runs: 0, successRatePercent: null, wasteTokens: 0, contextAvgPercent: null, contextMaxPercent: null, contextP95Percent: null, confidence: 'exact' };
 }
@@ -323,3 +406,5 @@ function stringValue(value: unknown): string {
 function nullableStringValue(value: unknown): string | null {
   return typeof value === 'string' ? value : null;
 }
+
+function severityRank(value: AnalyticsInsight['severity']): number { return value === 'critical' ? 2 : value === 'warning' ? 1 : 0; }

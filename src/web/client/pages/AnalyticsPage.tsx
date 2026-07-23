@@ -12,7 +12,7 @@ import { formatPercent, formatTokens } from '../lib/format.js';
 import { useActiveProject } from '../hooks/useActiveProject.js';
 import { useAnalytics } from '../hooks/useAnalytics.js';
 import type { MsqWebState, WebSocketClientMessage, WebSocketServerMessage } from '../../types.js';
-import type { AnalyticsRunDrilldownRow, AnalyticsTokenGroup, AnalyticsWorkItemRow } from '../../../db/analytics.js';
+import type { AnalyticsInsight, AnalyticsRunDrilldownRow, AnalyticsTokenGroup, AnalyticsWorkItemRow } from '../../../db/analytics.js';
 
 export interface AnalyticsPageProps {
   state: MsqWebState;
@@ -172,12 +172,14 @@ export function AnalyticsPage({ state, send = noopAnalyticsSend, analyticsMessag
   }
 
   function Insights(): React.JSX.Element {
-    const findings = [
-      { title: 'Waste summary', value: `${formatTokens(summary.wasteTokens)} across failed, blocked, and aborted runs.`, tab: 'work-items' as const },
-      { title: 'Outliers', value: summary.contextMaxPercent ? `Context reached ${formatPercent(summary.contextMaxPercent)} at maximum.` : 'No context telemetry captured.', tab: 'breakdowns' as const },
-      { title: 'Data confidence', value: `${String(dataQuality.unknownRuns)} runs are unknown and ${String(dataQuality.derivedRuns)} are derived.`, tab: 'quality' as const },
-    ];
-    return <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: 14 }}>{findings.map((finding) => <button key={finding.title} onClick={() => { setTab(finding.tab); }} style={{ ...sectionStyle, color: 'var(--text-primary)', textAlign: 'left', cursor: 'pointer' }}><strong>{finding.title}</strong><p style={muted}>{finding.value}</p><span style={{ color: 'var(--accent-info)' }}>Investigate →</span></button>)}</div>;
+    const findings = result?.insights ?? [];
+    const investigate = (finding: AnalyticsInsight): void => {
+      setWorkItem(finding.filters.workItemId ?? ''); setTool(finding.filters.tool ?? '');
+      setModel(finding.filters.model ?? ''); setStatus(finding.filters.status ?? '');
+      setTab(finding.kind === 'data_quality' ? 'quality' : 'work-items');
+    };
+    if (!findings.length) return <EmptyState />;
+    return <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: 14 }}>{findings.map((finding) => <button key={finding.id} onClick={() => { investigate(finding); }} style={{ ...sectionStyle, borderLeft: `3px solid ${finding.severity === 'critical' ? 'var(--accent-danger)' : 'var(--accent-warn)'}`, color: 'var(--text-primary)', textAlign: 'left', cursor: 'pointer' }}><strong>{finding.title}</strong><p style={muted}>{finding.evidence}</p><p style={muted}>Observed {formatTokens(finding.observedTokens)}{finding.baselineTokens === null ? '' : ` · baseline ${formatTokens(finding.baselineTokens)}`}</p><span style={{ color: 'var(--accent-info)' }}>Investigate →</span></button>)}</div>;
   }
 
   function Quality(): React.JSX.Element {

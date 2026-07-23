@@ -3,10 +3,12 @@ import {
   aggregateTokens,
   computeRunBreakdown,
   computeStats,
+  computeTokenBaseline,
   formatBreakdown,
   formatDurationMs,
   formatTokensCompact,
   renderUsageBar,
+  isTokenOutlier,
 } from '../../src/core/stats.js';
 import { parsePeriodDays } from '../../src/commands/stats.js';
 import type { RunEventRow, StatsRunRow } from '../../src/db/repo.js';
@@ -62,6 +64,14 @@ describe('computeStats', () => {
     expect(stats.avgDurationMs).toBeNull();
     expect(stats.successRatePercent).toBeNull();
     expect(stats.topFeaturesByTokens).toEqual([]);
+  });
+});
+
+describe('token baselines', () => {
+  it('excludes invalid values while retaining a stable nearest-rank percentile', () => {
+    const baseline = computeTokenBaseline([10, 20, Number.NaN, -1, 100]);
+    expect(baseline).toEqual({ count: 3, average: 130 / 3, p95: 100, p99: 100 });
+    expect(isTokenOutlier(100, baseline)).toBe(true);
   });
 });
 
