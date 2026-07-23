@@ -350,6 +350,38 @@ query param). The password is resolved in this order:
 Programmatic clients can still authenticate with `Authorization: Bearer
 <password>` or by sending `{ type: 'auth', token: '...' }` over WebSocket.
 
+#### Analytics
+
+Open **Analytics** in the web dashboard to inspect token consumption, efficiency,
+and operational waste. The initial state contains only a seven-day summary and
+the top five groups; detailed breakdowns, Work Items, drilldowns, and CSV/JSON
+exports are requested on demand, so a normal state push does not grow with the
+total run history.
+
+Use the Project context by default, or select **All projects** and refine by
+Epic, Repository, Work Item, tool, model, stage, status, or data quality.
+Click a Tool, Model, or Stage group to apply that filter; select a Work Item to
+open its bounded run drilldown; export always applies the current filters.
+
+`unknown/unscoped` means an older run lacks a Project or Epic snapshot;
+`unknown model` means its model was not recorded; and `derived` values were
+reconstructed from historical telemetry. These rows remain in totals so the
+breakdowns reconcile with the summary, but comparisons involving them can be
+partial. Exports contain aggregate analytics only and omit repository paths,
+branch names, commit SHAs, and PR URLs.
+
+For repeatable Analytics performance checks, use the sandbox-only fixture:
+
+```bash
+rtk node scripts/with-sandbox-db.mjs npm run db:fixture -- --scenario analytics-volume
+```
+
+It creates 3 Projects, 6 Repositories, 12 Epics, 24 Work Items, and 3,600
+deterministic telemetry rows, including incomplete historical data. The
+regression baseline exercises summary, breakdown, and ranking queries in under
+1.5 seconds and checks the relevant SQLite index plan; it never writes the
+global catalog.
+
 ### `msq daemon`
 
 Manages a background web daemon.

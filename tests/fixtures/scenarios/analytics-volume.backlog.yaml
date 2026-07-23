@@ -1,0 +1,11 @@
+# Deterministic volume source for Analytics performance and WebSocket regressions.
+# src/db/fixtures.ts expands this catalog into three Projects, six Repositories,
+# twelve Epics, twenty-four Work Items and 3,600 telemetry rows. It is sandbox-only.
+version: 2
+repo: msq-fixture-analytics-volume
+epics:
+  - id: fix-ana-volume-catalog
+    title: Analytics volume fixture catalog anchor
+    features:
+      - id: fix-ana-volume-anchor
+        title: Stable catalog anchor for the analytics volume fixture

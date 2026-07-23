@@ -137,6 +137,12 @@ describe('buildMsqWebState pendingFeatures projection', () => {
     expect(mocks.getTokenBreakdowns).toHaveBeenCalledWith({ sinceDays: 7 }, 5);
   });
 
+  it('keeps the standard Analytics state push bounded to top-five groups', async () => {
+    const { buildMsqWebState } = await import('../../src/web/state.js');
+    buildMsqWebState();
+    expect(mocks.getTokenBreakdowns).toHaveBeenCalledWith({ sinceDays: 7 }, 5);
+  });
+
   it('removes newly started running features from pendingFeatures', async () => {
     const { buildMsqWebState } = await import('../../src/web/state.js');
     mocks.listRunsForTui.mockReturnValue([

@@ -67,6 +67,20 @@ describe('analytics aggregate queries (ANA-03)', () => {
     expect(breakdowns.byTool).toEqual(expect.arrayContaining([expect.objectContaining({ key: 'codex', totalTokens: 300 })]));
   });
 
+  it('keeps every breakdown total consistent with the summary for the same filter', async () => {
+    const { db, getAnalyticsSummary, getTokenBreakdowns } = await setup();
+    insertRun(db, { id: 1, startedAt: '2026-07-01 10:00:00', tool: 'codex', total: 100 });
+    insertRun(db, { id: 2, startedAt: '2026-07-01 11:00:00', workItemId: 'w2', tool: 'claude', model: 'opus', total: 200 });
+    insertRun(db, { id: 3, startedAt: '2026-07-02 10:00:00', repoId: 'r2', projectId: null, epicId: null, workItemId: 'legacy', model: null, total: 300, confidence: 'unknown' });
+
+    const summary = getAnalyticsSummary();
+    const groups = getTokenBreakdowns({}, 50);
+    for (const values of Object.values(groups)) {
+      expect(values.reduce((total, group) => total + group.totalTokens, 0)).toBe(summary.totalTokens);
+      expect(values.reduce((runs, group) => runs + group.runs, 0)).toBe(summary.runs);
+    }
+  });
+
   it('paginates sortable work-item rankings and filters data quality', async () => {
     const { db, listAnalyticsWorkItems, getAnalyticsDataQuality } = await setup();
     insertRun(db, { id: 1, startedAt: '2026-07-01 10:00:00', workItemId: 'w1', total: 100 });
@@ -145,16 +159,17 @@ describe('analytics aggregate queries (ANA-03)', () => {
     expect(JSON.stringify(exported)).not.toMatch(/branch_name|commit_sha|pr_url|\/tmp\/r1/);
   });
 
-  it('uses the analytic indexes with a deterministic volume fixture', async () => {
-    const { db, getAnalyticsSummary } = await setup();
-    const insert = db.prepare(`INSERT INTO runs (repo_id, project_id, epic_id, feature_id, tool, model, stage, status, started_at, total_tokens, metrics_confidence)
-      VALUES ('r1', 'p1', 'e1', 'w1', 'codex', 'gpt-5', 'implement', 'done', ?, 10, 'exact')`);
-    const seed = db.transaction(() => {
-      for (let index = 0; index < 3000; index += 1) insert.run(`2026-07-${String((index % 28) + 1).padStart(2, '0')} 10:00:00`);
-    });
-    seed();
-    expect(getAnalyticsSummary({ projectId: 'p1', tool: 'codex', stage: 'implement' })).toMatchObject({ runs: 3000, totalTokens: 30000 });
-    const plan = db.prepare(`EXPLAIN QUERY PLAN SELECT * FROM runs WHERE project_id = ? AND started_at >= ? ORDER BY started_at DESC`).all('p1', '2026-07-01') as Array<{ detail: string }>;
+  it('uses analytic indexes and finishes the documented volume baseline within 1.5 seconds', async () => {
+    const { db, getAnalyticsSummary, getTokenBreakdowns, listAnalyticsWorkItems } = await setup();
+    const { applyFixtureScenario } = await import('../../src/db/fixtures.js');
+    applyFixtureScenario('analytics-volume');
+    const filters = { projectId: 'fix-ana-project-1', tool: 'codex', stage: 'plan' };
+    const startedAt = performance.now();
+    expect(getAnalyticsSummary(filters).runs).toBeGreaterThan(0);
+    expect(getTokenBreakdowns(filters, 20).byWorkItem.length).toBeGreaterThan(0);
+    expect(listAnalyticsWorkItems(filters, { limit: 50 }).length).toBeGreaterThan(0);
+    expect(performance.now() - startedAt).toBeLessThan(1500);
+    const plan = db.prepare(`EXPLAIN QUERY PLAN SELECT * FROM runs WHERE project_id = ? AND started_at >= ? ORDER BY started_at DESC`).all('fix-ana-project-1', '2026-07-01') as Array<{ detail: string }>;
     expect(plan.map((row) => row.detail).join('\n')).toMatch(/idx_runs_project_started_at|idx_runs_project_status/);
   });
 });
