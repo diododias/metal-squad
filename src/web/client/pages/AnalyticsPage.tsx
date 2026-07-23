@@ -68,8 +68,8 @@ export function AnalyticsPage({ state, send = noopAnalyticsSend, analyticsMessag
   const [search, setSearch] = useState('');
   const [selectedWorkItem, setSelectedWorkItem] = useState<AnalyticsWorkItemRow | null>(null);
   const {
-    workItems: workItemsResult, breakdown: breakdownResult, runDrilldown: runDrilldownResult,
-    requestWorkItems, requestBreakdown, requestRunDrilldown, onAnalyticsMessage,
+    workItems: workItemsResult, breakdown: breakdownResult, runDrilldown: runDrilldownResult, exportResult,
+    requestWorkItems, requestBreakdown, requestRunDrilldown, requestExport, onAnalyticsMessage,
   } = useAnalytics(send);
 
   const filters = useMemo(() => ({
@@ -82,6 +82,11 @@ export function AnalyticsPage({ state, send = noopAnalyticsSend, analyticsMessag
   useEffect(() => { requestBreakdown(filters); }, [filters, requestBreakdown]);
   useEffect(() => { if (tab === 'work-items') requestWorkItems(filters, { limit: 50 }, { by: 'totalTokens', direction: 'desc' }); }, [filters, requestWorkItems, tab]);
   useEffect(() => { if (selectedWorkItem) requestRunDrilldown({ ...filters, workItemId: selectedWorkItem.workItemId }, { limit: 50 }); }, [filters, requestRunDrilldown, selectedWorkItem]);
+  useEffect(() => {
+    if (!exportResult?.ok) return;
+    const href = URL.createObjectURL(new Blob([exportResult.content], { type: exportResult.format === 'json' ? 'application/json' : 'text/csv' }));
+    const link = document.createElement('a'); link.href = href; link.download = exportResult.filename; link.click(); URL.revokeObjectURL(href);
+  }, [exportResult]);
 
   const result = breakdownResult?.ok ? breakdownResult : null;
   const summary = result?.summary ?? state.analytics.summary;
@@ -97,12 +102,7 @@ export function AnalyticsPage({ state, send = noopAnalyticsSend, analyticsMessag
   const isPartial = dataQuality.derivedRuns > 0 || dataQuality.unknownRuns > 0 || dataQuality.missingTokenRuns > 0;
 
   const clearFilters = (): void => { setAllProjects(false); setEpic(''); setRepository(''); setWorkItem(''); setTool(''); setModel(''); setStage(''); setStatus(''); setQuality(''); setSearch(''); };
-  const exportCurrentView = (format: 'csv' | 'json'): void => {
-    const payload = { filters, period, generatedAt: new Date().toISOString(), schemaVersion: 1, totals: summary, dataQuality, rows: tab === 'work-items' ? workItems : groups.byWorkItem };
-    const content = format === 'json' ? JSON.stringify(payload, null, 2) : ['workItemId,totalTokens,wasteTokens,runs,dataQuality', ...workItems.map((row) => `${row.workItemId},${String(row.totalTokens)},${String(row.wasteTokens)},${String(row.runs)},${row.confidence}`)].join('\n');
-    const href = URL.createObjectURL(new Blob([content], { type: format === 'json' ? 'application/json' : 'text/csv' }));
-    const link = document.createElement('a'); link.href = href; link.download = `analytics-${tab}.${format}`; link.click(); URL.revokeObjectURL(href);
-  };
+  const exportCurrentView = (format: 'csv' | 'json'): void => { requestExport(filters, format); };
 
   const trend: TrendPoint[] = (result?.timeSeries ?? []).map((bucket) => ({ label: bucket.bucket.slice(5), value: bucket.totalTokens }));
   const workItemColumns: TableColumn<AnalyticsWorkItemRow & { id: string }>[] = [
@@ -146,6 +146,8 @@ export function AnalyticsPage({ state, send = noopAnalyticsSend, analyticsMessag
         <Section title="Top consumers"><BarList items={groups.byWorkItem.map((group) => ({ id: group.key, label: group.key, value: group.totalTokens }))} valueFormatter={formatTokens} /></Section>
         <Section title="Token breakdown"><dl style={{ margin: 0, display: 'grid', gridTemplateColumns: '1fr auto', gap: 8 }}><dt>Input</dt><dd>{formatTokens(summary.inputTokens)}</dd><dt>Cached input</dt><dd>{formatTokens(summary.cachedInputTokens)}</dd><dt>Output</dt><dd>{formatTokens(summary.outputTokens)}</dd></dl></Section>
       </div>
+      {result?.forecast && <Section title="Budget forecast"><div style={{ display: 'grid', gridTemplateColumns: '1fr auto', gap: 8 }}><span>Burn rate / day</span><strong>{formatTokens(Math.round(result.forecast.tokensPerDay))}</strong><span>Burn rate / week</span><strong>{formatTokens(Math.round(result.forecast.tokensPerWeek))}</strong><span>Tokens / completed Work Item</span><strong>{result.forecast.tokensPerDoneWorkItem === null ? '—' : formatTokens(Math.round(result.forecast.tokensPerDoneWorkItem))}</strong><span>Budget</span><strong>{result.forecast.budgetLimitTokens === null ? 'No configured limit' : `${formatTokens(result.forecast.remainingTokens ?? 0)} remaining`}</strong><span>Forecast</span><strong>{result.forecast.status === 'exceeded' ? 'Budget exceeded' : result.forecast.estimatedDaysToLimit === null ? 'Unavailable' : `${String(result.forecast.estimatedDaysToLimit)} days to limit`}</strong><span>Cost</span><strong>Cost unavailable</strong></div></Section>}
+      {comparePrevious && result?.comparison && <Section title="Compared with previous period"><div style={{ display: 'grid', gridTemplateColumns: '1fr auto', gap: 8 }}><span>Total tokens</span><strong>{formatTokens(result.comparison.totalTokensDelta)}</strong><span>Avg / run</span><strong>{result.comparison.averageTokensPerRunDelta === null ? '—' : formatTokens(Math.round(result.comparison.averageTokensPerRunDelta))}</strong><span>Waste</span><strong>{formatTokens(result.comparison.wasteTokensDelta)}</strong><span>Success rate</span><strong>{result.comparison.successRatePercentDelta === null ? '—' : formatPercent(result.comparison.successRatePercentDelta)}</strong></div></Section>}
     </div>;
   }
 

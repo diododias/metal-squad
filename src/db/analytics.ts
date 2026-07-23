@@ -99,6 +99,40 @@ export interface AnalyticsDataQuality {
   missingEpicSnapshotRuns: number;
 }
 
+export interface AnalyticsPeriodComparison {
+  current: AnalyticsSummary;
+  previous: AnalyticsSummary;
+  totalTokensDelta: number;
+  averageTokensPerRunDelta: number | null;
+  wasteTokensDelta: number;
+  successRatePercentDelta: number | null;
+}
+
+export interface AnalyticsForecast {
+  periodDays: number;
+  tokensPerDay: number;
+  tokensPerWeek: number;
+  tokensPerDoneWorkItem: number | null;
+  doneWorkItems: number;
+  budgetLimitTokens: number | null;
+  remainingTokens: number | null;
+  estimatedDaysToLimit: number | null;
+  estimatedLimitAt: string | null;
+  status: 'available' | 'unavailable' | 'exceeded';
+  cost: { status: 'unavailable'; amount: null; currency: null };
+}
+
+export interface AnalyticsExportDataset {
+  schemaVersion: 1;
+  generatedAt: string;
+  filters: AnalyticsFilters;
+  summary: AnalyticsSummary;
+  dataQuality: AnalyticsDataQuality;
+  forecast: AnalyticsForecast;
+  comparison: AnalyticsPeriodComparison;
+  workItems: AnalyticsWorkItemRow[];
+}
+
 export type AnalyticsInsightKind = 'waste' | 'outlier' | 'growth' | 'efficiency' | 'context' | 'data_quality';
 export interface AnalyticsInsight {
   id: string;
@@ -147,8 +181,8 @@ function filteredRuns(filters: AnalyticsFilters): FilteredQuery {
     clauses.push(`r.started_at >= datetime('now', '-' || ? || ' days')`);
     params.push(filters.sinceDays);
   }
-  if (filters.from) { clauses.push('r.started_at >= ?'); params.push(filters.from); }
-  if (filters.to) { clauses.push('r.started_at <= ?'); params.push(filters.to); }
+  if (filters.from) { clauses.push('r.started_at >= datetime(?)'); params.push(filters.from); }
+  if (filters.to) { clauses.push('r.started_at <= datetime(?)'); params.push(filters.to); }
   add('r.project_id', filters.projectId);
   add('r.epic_id', filters.epicId);
   add('r.repo_id', filters.repoId);
@@ -322,6 +356,89 @@ export function getAnalyticsDataQuality(filters: AnalyticsFilters = {}): Analyti
   return {
     totalRuns: Number(row.totalRuns ?? 0), exactRuns: Number(row.exactRuns ?? 0), derivedRuns: Number(row.derivedRuns ?? 0), unknownRuns: Number(row.unknownRuns ?? 0),
     missingTokenRuns: Number(row.missingTokenRuns ?? 0), missingProjectSnapshotRuns: Number(row.missingProjectSnapshotRuns ?? 0), missingEpicSnapshotRuns: Number(row.missingEpicSnapshotRuns ?? 0),
+  };
+}
+
+function periodDays(filters: AnalyticsFilters): number {
+  if (filters.sinceDays !== undefined) return Math.max(1, filters.sinceDays);
+  if (filters.from && filters.to) {
+    const from = Date.parse(filters.from);
+    const to = Date.parse(filters.to);
+    if (Number.isFinite(from) && Number.isFinite(to) && to >= from) return Math.max(1, Math.ceil((to - from) / 86_400_000));
+  }
+  return 1;
+}
+
+function previousPeriodFilters(filters: AnalyticsFilters): AnalyticsFilters {
+  const days = periodDays(filters);
+  if (filters.sinceDays !== undefined) {
+    const end = new Date(Date.now() - days * 86_400_000).toISOString();
+    const start = new Date(Date.now() - days * 2 * 86_400_000).toISOString();
+    const { sinceDays: _sinceDays, ...rest } = filters;
+    return { ...rest, from: start, to: end };
+  }
+  if (filters.from && filters.to) {
+    const from = Date.parse(filters.from);
+    const to = Date.parse(filters.to);
+    if (Number.isFinite(from) && Number.isFinite(to)) {
+      const duration = to - from;
+      const { from: _from, to: _to, ...rest } = filters;
+      return { ...rest, from: new Date(from - duration).toISOString(), to: new Date(from).toISOString() };
+    }
+  }
+  return { ...filters, from: new Date(Date.now() - 2 * 86_400_000).toISOString(), to: new Date(Date.now() - 86_400_000).toISOString() };
+}
+
+export function getAnalyticsForecast(filters: AnalyticsFilters = {}, budgetLimitTokens?: number): AnalyticsForecast {
+  const summary = getAnalyticsSummary(filters);
+  const days = periodDays(filters);
+  const perDay = summary.totalTokens / days;
+  let doneWorkItems = 0;
+  if (databaseExists()) {
+    const { cte, params } = filteredRuns(filters);
+    const row = getDb('readonly').prepare(`${cte}
+      SELECT COUNT(DISTINCT workItemId) AS doneWorkItems FROM filtered
+      WHERE status = 'done' AND workItemId IS NOT NULL`).get(...params) as Record<string, unknown>;
+    doneWorkItems = Number(row.doneWorkItems ?? 0);
+  }
+  const limit = budgetLimitTokens ?? null;
+  const remaining = limit === null ? null : Math.max(0, limit - summary.totalTokens);
+  const exceeded = limit !== null && summary.totalTokens >= limit;
+  const estimatedDays = limit === null || perDay <= 0 || exceeded ? null : Math.ceil((remaining ?? 0) / perDay);
+  return {
+    periodDays: days, tokensPerDay: perDay, tokensPerWeek: perDay * 7,
+    tokensPerDoneWorkItem: doneWorkItems ? summary.totalTokens / doneWorkItems : null,
+    doneWorkItems, budgetLimitTokens: limit, remainingTokens: remaining,
+    estimatedDaysToLimit: estimatedDays,
+    estimatedLimitAt: estimatedDays === null ? null : new Date(Date.now() + estimatedDays * 86_400_000).toISOString(),
+    status: exceeded ? 'exceeded' : limit === null ? 'unavailable' : 'available',
+    // Pricing profiles are intentionally not inferred: ANA-02 must provide a versioned table.
+    cost: { status: 'unavailable', amount: null, currency: null },
+  };
+}
+
+export function getAnalyticsPeriodComparison(filters: AnalyticsFilters = {}): AnalyticsPeriodComparison {
+  const current = getAnalyticsSummary(filters);
+  const previous = getAnalyticsSummary(previousPeriodFilters(filters));
+  const currentAverage = current.runs ? current.totalTokens / current.runs : null;
+  const previousAverage = previous.runs ? previous.totalTokens / previous.runs : null;
+  return {
+    current, previous,
+    totalTokensDelta: current.totalTokens - previous.totalTokens,
+    averageTokensPerRunDelta: currentAverage === null || previousAverage === null ? null : currentAverage - previousAverage,
+    wasteTokensDelta: current.wasteTokens - previous.wasteTokens,
+    successRatePercentDelta: current.successRatePercent === null || previous.successRatePercent === null ? null : current.successRatePercent - previous.successRatePercent,
+  };
+}
+
+/** Export intentionally projects analytics aggregates only. Physical run fields
+ * (branch, commit, PR URL and local paths) never enter this dataset. */
+export function getAnalyticsExportDataset(filters: AnalyticsFilters = {}, budgetLimitTokens?: number): AnalyticsExportDataset {
+  return {
+    schemaVersion: 1, generatedAt: new Date().toISOString(), filters,
+    summary: getAnalyticsSummary(filters), dataQuality: getAnalyticsDataQuality(filters),
+    forecast: getAnalyticsForecast(filters, budgetLimitTokens), comparison: getAnalyticsPeriodComparison(filters),
+    workItems: listAnalyticsWorkItems(filters, { limit: 200 }, { by: 'totalTokens', direction: 'desc' }),
   };
 }
 

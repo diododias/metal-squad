@@ -28,9 +28,14 @@ export const AnalyticsRunDrilldownMessageSchema = z.object({
   type: z.literal('action:getAnalyticsRunDrilldown'), requestId: RequestIdSchema, filters: AnalyticsFiltersSchema,
   pagination: AnalyticsPaginationSchema.optional(),
 }).strict();
+export const AnalyticsExportMessageSchema = z.object({
+  type: z.literal('action:exportAnalytics'), requestId: RequestIdSchema, filters: AnalyticsFiltersSchema,
+  format: z.enum(['csv', 'json']),
+}).strict();
 export type AnalyticsWorkItemsMessage = z.infer<typeof AnalyticsWorkItemsMessageSchema>;
 export type AnalyticsBreakdownMessage = z.infer<typeof AnalyticsBreakdownMessageSchema>;
 export type AnalyticsRunDrilldownMessage = z.infer<typeof AnalyticsRunDrilldownMessageSchema>;
+export type AnalyticsExportMessage = z.infer<typeof AnalyticsExportMessageSchema>;
 
 const ProjectPatchSchema = z.object({
   name: z.string().optional(),

@@ -46,7 +46,8 @@ import {
 import { RevisionConflictError, WorkItemHasHistoryError } from '../db/errors.js';
 import { getAdapter } from '../core/adapters/index.js';
 import { computeRunBreakdown } from '../core/stats.js';
-import { getAnalyticsDataQuality, getAnalyticsInsights, getAnalyticsSummary, getTokenBreakdowns, getTokenTimeSeries, listAnalyticsRunDrilldown, listAnalyticsWorkItems } from '../db/analytics.js';
+import { getAnalyticsDataQuality, getAnalyticsExportDataset, getAnalyticsForecast, getAnalyticsInsights, getAnalyticsPeriodComparison, getAnalyticsSummary, getTokenBreakdowns, getTokenTimeSeries, listAnalyticsRunDrilldown, listAnalyticsWorkItems } from '../db/analytics.js';
+import { resolveBudgetLimits } from '../core/budget/tracker.js';
 import { resolveRepo, resolveRepoAllowlist } from '../core/repo.js';
 import { resolveWorkItemExecutionContext } from '../core/workItemExecutionContext.js';
 import { loadBacklogFromCatalog } from '../core/backlog/load.js';
@@ -62,7 +63,7 @@ import { workItemService } from '../core/workItemService.js';
 import { projectService, repoLinkService } from '../core/projectService.js';
 import { buildMsqWebState, appendNotification, resetWebStateCaches, invalidateWorkflowTemplatesCache } from './state.js';
 import { createWebAuth, isAllowedHostHeader, isAllowedOrigin, timingSafeEqualStrings } from './auth.js';
-import { EpicActionMessageSchema, LifecycleActionMessageSchema, ProjectActionMessageSchema, RepositoryActionMessageSchema, WorkItemActionMessageSchema, WorkflowTemplateActionMessageSchema, WorkItemTypeChangeMessageSchema, ResolveWorkflowTemplateMessageSchema, WorkflowTemplateDefinitionMessageSchema, ValidateWorkflowTemplateMessageSchema, ArchivedQueryMessageSchema, AuditTrailQueryMessageSchema, AnalyticsWorkItemsMessageSchema, AnalyticsBreakdownMessageSchema, AnalyticsRunDrilldownMessageSchema } from './schemas.js';
+import { EpicActionMessageSchema, LifecycleActionMessageSchema, ProjectActionMessageSchema, RepositoryActionMessageSchema, WorkItemActionMessageSchema, WorkflowTemplateActionMessageSchema, WorkItemTypeChangeMessageSchema, ResolveWorkflowTemplateMessageSchema, WorkflowTemplateDefinitionMessageSchema, ValidateWorkflowTemplateMessageSchema, ArchivedQueryMessageSchema, AuditTrailQueryMessageSchema, AnalyticsWorkItemsMessageSchema, AnalyticsBreakdownMessageSchema, AnalyticsRunDrilldownMessageSchema, AnalyticsExportMessageSchema } from './schemas.js';
 import {
   archiveWorkflowTemplate,
   createWorkflowTemplate,
@@ -82,6 +83,7 @@ import type {
   AuditTimelineEntry,
   AuditTrailQueryResult,
   AnalyticsBreakdownResult,
+  AnalyticsExportResult,
   AnalyticsRunDrilldownResult,
   AnalyticsWorkItemsResult,
   EpicActionError,
@@ -107,6 +109,7 @@ import type {
   WebSocketClientMessage,
   WebSocketServerMessage,
 } from './types.js';
+import { getBacklogSettings } from '../ui/catalog.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -936,6 +939,10 @@ export function createWebServer(options: {
         sendTo(client, handleAnalyticsRunDrilldown(message));
         break;
       }
+      case 'action:exportAnalytics': {
+        sendTo(client, handleAnalyticsExport(message));
+        break;
+      }
       case 'action:resolveWorkflowTemplate': {
         const result = handleResolveWorkflowTemplate(message);
         sendTo(client, result);
@@ -1156,7 +1163,8 @@ export function createWebServer(options: {
     if (!parsed.success) return { type: 'analytics:breakdown', payload: { requestId: actionResultRequestId(message), ok: false, error: { code: 'INVALID_FILTERS', message: 'Analytics filters are invalid. Use supported filters and bounded rankings.' } } };
     try {
       const { filters, bucket = 'day', rankingLimit = 20 } = parsed.data;
-      return { type: 'analytics:breakdown', payload: { requestId: parsed.data.requestId, ok: true, summary: getAnalyticsSummary(filters), timeSeries: getTokenTimeSeries(filters, bucket), groups: getTokenBreakdowns(filters, rankingLimit), dataQuality: getAnalyticsDataQuality(filters), insights: getAnalyticsInsights(filters), generatedAt: new Date().toISOString(), revision: getProjectStateRevision() } };
+      const budgetLimit = analyticsBudgetLimit();
+      return { type: 'analytics:breakdown', payload: { requestId: parsed.data.requestId, ok: true, summary: getAnalyticsSummary(filters), timeSeries: getTokenTimeSeries(filters, bucket), groups: getTokenBreakdowns(filters, rankingLimit), dataQuality: getAnalyticsDataQuality(filters), insights: getAnalyticsInsights(filters), forecast: getAnalyticsForecast(filters, budgetLimit), comparison: getAnalyticsPeriodComparison(filters), generatedAt: new Date().toISOString(), revision: getProjectStateRevision() } };
     } catch (error) {
       return { type: 'analytics:breakdown', payload: analyticsError(parsed.data.requestId, error) };
     }
@@ -1169,6 +1177,42 @@ export function createWebServer(options: {
       return { type: 'analytics:runDrilldown', payload: { requestId: parsed.data.requestId, ok: true, rows: listAnalyticsRunDrilldown(parsed.data.filters, parsed.data.pagination) } };
     } catch (error) {
       return { type: 'analytics:runDrilldown', payload: analyticsError(parsed.data.requestId, error) };
+    }
+  }
+
+  function analyticsBudgetLimit(): number | undefined {
+    const settings = getBacklogSettings(cwd);
+    return resolveBudgetLimits(settings.budget, loadConfig().budget).maxTokens;
+  }
+
+  function csvCell(value: unknown): string {
+    const string = value === null || value === undefined ? ''
+      : typeof value === 'string' ? value
+        : typeof value === 'number' || typeof value === 'boolean' ? String(value)
+          : JSON.stringify(value);
+    return /[",\n\r]/.test(string) ? `"${string.replaceAll('"', '""')}"` : string;
+  }
+
+  function exportCsv(dataset: ReturnType<typeof getAnalyticsExportDataset>): string {
+    const metadata = [
+      ['schemaVersion', dataset.schemaVersion], ['generatedAt', dataset.generatedAt],
+      ['filters', JSON.stringify(dataset.filters)], ['dataQuality', JSON.stringify(dataset.dataQuality)],
+      ['forecast', JSON.stringify(dataset.forecast)], ['comparison', JSON.stringify(dataset.comparison)],
+    ].map((row) => row.map(csvCell).join(','));
+    const header = ['workItemId', 'projectId', 'epicId', 'repoId', 'totalTokens', 'inputTokens', 'cachedInputTokens', 'outputTokens', 'runs', 'successRatePercent', 'wasteTokens', 'contextAvgPercent', 'contextMaxPercent', 'contextP95Percent', 'confidence'];
+    const rows = dataset.workItems.map((row) => header.map((key) => csvCell(row[key as keyof typeof row])).join(','));
+    return [...metadata, '', header.join(','), ...rows].join('\n');
+  }
+
+  function handleAnalyticsExport(message: unknown): AnalyticsExportResult {
+    const parsed = AnalyticsExportMessageSchema.safeParse(message);
+    if (!parsed.success) return { type: 'analytics:export', payload: { requestId: actionResultRequestId(message), ok: false, error: { code: 'INVALID_FILTERS', message: 'Analytics export filters are invalid.' } } };
+    try {
+      const dataset = getAnalyticsExportDataset(parsed.data.filters, analyticsBudgetLimit());
+      const content = parsed.data.format === 'json' ? JSON.stringify(dataset, null, 2) : exportCsv(dataset);
+      return { type: 'analytics:export', payload: { requestId: parsed.data.requestId, ok: true, format: parsed.data.format, filename: `analytics-export-${dataset.generatedAt.slice(0, 10)}.${parsed.data.format}`, content, dataset } };
+    } catch (error) {
+      return { type: 'analytics:export', payload: analyticsError(parsed.data.requestId, error) };
     }
   }
 
