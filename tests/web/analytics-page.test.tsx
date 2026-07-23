@@ -1,7 +1,7 @@
 import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
-import { AnalyticsPage } from '../../src/web/client/pages/AnalyticsPage.js';
+import { AnalyticsPage, WorkItemDrilldownDrawer } from '../../src/web/client/pages/AnalyticsPage.js';
 import { ActiveProjectContext } from '../../src/web/client/hooks/useActiveProject.js';
 import type { MsqWebState } from '../../src/web/types.js';
 
@@ -43,5 +43,28 @@ describe('AnalyticsPage UX contract', () => {
 
   it('renders the prescribed empty state when the active selection has no telemetry', () => {
     expect(renderAnalytics(stateWith(0))).toContain('No token usage for this filter.');
+  });
+
+  it('renders a pipeline-grouped drawer with telemetry gaps, task tokens and the existing Run Detail route', () => {
+    const workItem = {
+      workItemId: 'F-123', totalTokens: 120, wasteTokens: 20, runs: 2, contextMaxPercent: 72,
+    } as Parameters<typeof WorkItemDrilldownDrawer>[0]['workItem'];
+    const runs = [{
+      runId: 7, pipelineId: 3, workItemId: 'F-123', projectId: 'project-a', epicId: 'epic-a', repoId: 'repo-a', tool: 'codex', model: 'gpt-5', status: 'done', stage: 'implement',
+      startedAt: '2026-07-23T10:00:00.000Z', endedAt: '2026-07-23T10:02:00.000Z', durationMs: 120000, summary: 'Implemented the drawer', totalTokens: 120, inputTokens: 80, cachedInputTokens: 10, outputTokens: 30,
+      usefulTokens: 120, wasteTokens: 0, hasTokenTelemetry: true, contextWindowPercent: 72, confidence: 'exact',
+      tasks: [{ taskId: 'T1', title: 'Wire drawer', status: 'done', stage: 'implement', startedAt: null, endedAt: null, totalTokens: 80, inputTokens: 50, cachedInputTokens: 10, outputTokens: 20, contextWindowPercent: 60 }],
+      retries: [{ attempt: 2, tool: 'claude', model: 'sonnet', error: 'timeout', retriedAt: '2026-07-23T10:01:00.000Z' }], events: [{ event: 'gate_wait', createdAt: '2026-07-23T10:00:30.000Z' }],
+    }, {
+      runId: 8, pipelineId: 3, workItemId: 'F-123', projectId: 'project-a', epicId: 'epic-a', repoId: 'repo-a', tool: 'codex', model: null, status: 'running', stage: 'implement',
+      startedAt: '2026-07-23T10:03:00.000Z', endedAt: null, durationMs: null, summary: null, totalTokens: 0, inputTokens: 0, cachedInputTokens: 0, outputTokens: 0,
+      usefulTokens: 0, wasteTokens: 0, hasTokenTelemetry: false, contextWindowPercent: null, confidence: 'unknown', tasks: [], retries: [], events: [{ event: 'blocked_resumed', createdAt: '2026-07-23T10:03:00.000Z' }],
+    }] as Parameters<typeof WorkItemDrilldownDrawer>[0]['runs'];
+    const html = renderToStaticMarkup(<WorkItemDrilldownDrawer workItem={workItem} runs={runs} loading={false} onClose={() => {}} />);
+    expect(html).toContain('Pipeline #3');
+    expect(html).toContain('No token telemetry captured');
+    expect(html).toContain('Task token breakdown');
+    expect(html).toContain('Gate wait');
+    expect(html).toContain('#/runs/F-123');
   });
 });
