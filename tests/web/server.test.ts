@@ -90,6 +90,7 @@ const mocks = vi.hoisted(() => ({
   })),
   isWorkItemPristine: vi.fn(() => true),
   changeWorkItemType: vi.fn(),
+  projectLifecycleActions: vi.fn(() => ({})),
   resolveTemplate: vi.fn((): {
     templateId: string; name: string; version: number; origin: string;
     definition: { workflow: { stages: string[] }; stageSkills: Record<string, string[]> };
@@ -196,6 +197,7 @@ vi.mock('../../src/db/repo.js', () => ({
   getWorkItemTemplateTarget: mocks.getWorkItemTemplateTarget,
   isWorkItemPristine: mocks.isWorkItemPristine,
   changeWorkItemType: mocks.changeWorkItemType,
+  projectLifecycleActions: mocks.projectLifecycleActions,
 }));
 
 vi.mock('../../src/db/workflowTemplates.js', () => ({
