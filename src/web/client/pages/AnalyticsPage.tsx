@@ -12,7 +12,7 @@ import { formatPercent, formatTokens } from '../lib/format.js';
 import { useActiveProject } from '../hooks/useActiveProject.js';
 import { useAnalytics } from '../hooks/useAnalytics.js';
 import type { MsqWebState, WebSocketClientMessage, WebSocketServerMessage } from '../../types.js';
-import type { AnalyticsRunDrilldownRow, AnalyticsWorkItemRow } from '../../../db/analytics.js';
+import type { AnalyticsRunDrilldownRow, AnalyticsTokenGroup, AnalyticsWorkItemRow } from '../../../db/analytics.js';
 
 export interface AnalyticsPageProps {
   state: MsqWebState;
@@ -118,6 +118,16 @@ export function AnalyticsPage({ state, send = noopAnalyticsSend, analyticsMessag
   ];
   const filteredWorkItems = workItems.filter((row) => row.workItemId.toLowerCase().includes(search.toLowerCase()));
 
+  const groupLabel = (group: AnalyticsTokenGroup, kind: 'tool' | 'model' | 'stage' | 'effort' | 'thinking'): React.JSX.Element => <span>
+    <strong>{group.key}</strong><span style={muted}> · {formatTokens(group.totalTokens)} · {group.runs} runs · avg {formatTokens(Math.round(group.totalTokens / Math.max(group.runs, 1)))} · waste {formatTokens(group.wasteTokens)} · success {group.successRatePercent === null ? '—' : formatPercent(group.successRatePercent)}{kind === 'model' ? ` · ${qualityLabel(group.confidence)}` : ''}{kind === 'tool' && group.fallbackRuns > 0 ? ` · ${String(group.fallbackRuns)} fallback/retry` : ''}</span>
+  </span>;
+
+  const selectBreakdown = (kind: 'tool' | 'model' | 'stage', key: string): void => {
+    if (kind === 'tool') setTool(key);
+    if (kind === 'model') setModel(key);
+    if (kind === 'stage') setStage(key);
+  };
+
   function Overview(): React.JSX.Element {
     if (summary.runs === 0 && !breakdownResult) return <EmptyState />;
     return <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
@@ -149,8 +159,16 @@ export function AnalyticsPage({ state, send = noopAnalyticsSend, analyticsMessag
   }
 
   function Breakdowns(): React.JSX.Element {
-    const cards = [['Project', groups.byProject], ['Epic', groups.byEpic], ['Tool', groups.byTool], ['Model', groups.byModel], ['Stage', groups.byStage], ['Status', groups.byStatus]] as const;
-    return <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: 14 }}>{cards.map(([label, values]) => <Section key={label} title={`Tokens by ${label}`}><BarList items={values.map((group) => ({ id: group.key, label: group.key, value: group.totalTokens }))} valueFormatter={formatTokens} /></Section>)}</div>;
+    const passiveCards = [['Project', groups.byProject], ['Epic', groups.byEpic], ['Status', groups.byStatus]] as const;
+    const interactiveCards: [string, AnalyticsTokenGroup[], 'tool' | 'model' | 'stage'][] = [
+      ['Tool', groups.byTool, 'tool' as const], ['Model', groups.byModel, 'model' as const], ['Stage', groups.byStage, 'stage' as const],
+    ];
+    const secondaryCards: [string, AnalyticsTokenGroup[], 'effort' | 'thinking'][] = [['Effort', groups.byEffort ?? [], 'effort'], ['Thinking', groups.byThinking ?? [], 'thinking']];
+    return <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: 14 }}>
+      {interactiveCards.map(([label, values, kind]) => <Section key={label} title={`Tokens by ${label}`} action={<span style={muted}>Click to filter</span>}><BarList items={values.map((group) => ({ id: group.key, label: groupLabel(group, kind), value: group.totalTokens, ariaLabel: `Filter by ${label} ${group.key}`, onClick: (): void => { selectBreakdown(kind, group.key); } }))} valueFormatter={formatTokens} /></Section>)}
+      {secondaryCards.filter(([, values]) => values.length > 0).map(([label, values, kind]) => <Section key={label} title={`${label} breakdown`}><BarList items={values.map((group) => ({ id: group.key, label: groupLabel(group, kind), value: group.totalTokens }))} valueFormatter={formatTokens} /></Section>)}
+      {passiveCards.map(([label, values]) => <Section key={label} title={`Tokens by ${label}`}><BarList items={values.map((group) => ({ id: group.key, label: group.key, value: group.totalTokens }))} valueFormatter={formatTokens} /></Section>)}
+    </div>;
   }
 
   function Insights(): React.JSX.Element {

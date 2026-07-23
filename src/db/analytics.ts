@@ -6,6 +6,8 @@ export type AnalyticsMetricsConfidence = 'exact' | 'derived' | 'unknown';
 export type AnalyticsBucket = 'hour' | 'day' | 'week' | 'month';
 export type AnalyticsDataQualityFilter = AnalyticsMetricsConfidence | 'missing-snapshot' | 'missing-tokens';
 export const ANALYTICS_UNSCOPED = 'unknown/unscoped';
+export const ANALYTICS_UNKNOWN_MODEL = 'unknown model';
+export const ANALYTICS_UNKNOWN_STAGE = 'unknown stage';
 
 /** Filters intentionally separate from StatsFilters: analytics has a broader,
  * stable contract and must not alter the legacy TUI/stats scope. */
@@ -73,9 +75,14 @@ export type AnalyticsWorkItemSort = keyof Pick<AnalyticsWorkItemRow,
   'workItemId' | 'totalTokens' | 'inputTokens' | 'cachedInputTokens' | 'outputTokens' | 'runs' | 'wasteTokens' | 'successRatePercent'>;
 export interface AnalyticsSort { by?: AnalyticsWorkItemSort; direction?: 'asc' | 'desc'; }
 
-export interface TokenGroup extends AnalyticsMetrics {
+export interface AnalyticsTokenGroup extends AnalyticsMetrics {
   key: string;
+  /** Runs whose retry history records a different tool from the final tool. */
+  fallbackRuns: number;
 }
+
+/** @deprecated Use AnalyticsTokenGroup for new analytics contracts. */
+export type TokenGroup = AnalyticsTokenGroup;
 
 export interface TokenTimeBucket extends AnalyticsMetrics {
   bucket: string;
@@ -134,9 +141,11 @@ function filteredRuns(filters: AnalyticsFilters): FilteredQuery {
   add('r.repo_id', filters.repoId);
   add('r.feature_id', filters.workItemId);
   add('r.tool', filters.tool);
-  add('r.model', filters.model);
+  if (filters.model === ANALYTICS_UNKNOWN_MODEL) clauses.push(`(r.model IS NULL OR r.model = '')`);
+  else add('r.model', filters.model);
   add('r.status', filters.status);
-  add('r.stage', filters.stage);
+  if (filters.stage === ANALYTICS_UNKNOWN_STAGE) clauses.push(`(r.stage IS NULL OR r.stage = '')`);
+  else add('r.stage', filters.stage);
   if (filters.dataQuality === 'missing-snapshot') clauses.push('(r.project_id IS NULL OR r.epic_id IS NULL)');
   else if (filters.dataQuality === 'missing-tokens') clauses.push('(r.total_tokens IS NULL AND lu.total IS NULL)');
   else if (filters.dataQuality) { clauses.push('r.metrics_confidence = ?'); params.push(filters.dataQuality); }
@@ -149,13 +158,17 @@ function filteredRuns(filters: AnalyticsFilters): FilteredQuery {
       JOIN (SELECT run_id, MAX(id) AS id FROM token_usage GROUP BY run_id) latest ON latest.id = u.id
     ), filtered AS (
       SELECT r.id, r.repo_id AS repoId, r.project_id AS projectId, r.epic_id AS epicId,
-             r.feature_id AS workItemId, r.tool, r.model, r.status, r.stage, r.started_at AS startedAt,
+             r.feature_id AS workItemId, r.tool, r.model, r.effort, r.thinking, r.status, r.stage, r.started_at AS startedAt,
              COALESCE(r.input_tokens, lu.input, 0) AS inputTokens,
              COALESCE(r.cached_input_tokens, lu.cachedInput, 0) AS cachedInputTokens,
              COALESCE(r.output_tokens, lu.output, 0) AS outputTokens,
              COALESCE(r.total_tokens, lu.total, 0) AS totalTokens,
              CASE WHEN r.total_tokens IS NULL AND lu.total IS NULL THEN 1 ELSE 0 END AS missingTokens,
              r.context_window_percent AS contextWindowPercent,
+             CASE WHEN EXISTS (
+               SELECT 1 FROM retry_history rh
+               WHERE rh.run_id = r.id AND rh.tool IS NOT NULL AND rh.tool != r.tool
+             ) THEN 1 ELSE 0 END AS hasFallback,
              COALESCE(r.metrics_confidence, 'unknown') AS metricsConfidence
       FROM runs r LEFT JOIN latest_usage lu ON lu.runId = r.id
       ${where}
@@ -187,7 +200,7 @@ function aggregateQuery(groupExpression: string, filters: AnalyticsFilters, orde
     params: limit === undefined ? params : [...params, limit],
     sql: `${cte}, grouped AS (
       SELECT ${groupExpression} AS groupKey, MIN(projectId) AS projectId, MIN(epicId) AS epicId,
-             MIN(repoId) AS repoId, ${METRICS_COLUMNS}
+             MIN(repoId) AS repoId, ${METRICS_COLUMNS}, SUM(hasFallback) AS fallbackRuns
       FROM filtered GROUP BY ${groupExpression}
     ), contexts AS (
       SELECT ${groupExpression} AS groupKey, contextWindowPercent,
@@ -259,23 +272,24 @@ export function getTokenTimeSeries(filters: AnalyticsFilters = {}, bucket: Analy
 }
 
 export function getTokenBreakdowns(filters: AnalyticsFilters = {}, rankingLimit = 100): {
-  byProject: TokenGroup[]; byEpic: TokenGroup[]; byRepository: TokenGroup[]; byWorkItem: TokenGroup[];
-  byTool: TokenGroup[]; byModel: TokenGroup[]; byStage: TokenGroup[]; byStatus: TokenGroup[];
+  byProject: AnalyticsTokenGroup[]; byEpic: AnalyticsTokenGroup[]; byRepository: AnalyticsTokenGroup[]; byWorkItem: AnalyticsTokenGroup[];
+  byTool: AnalyticsTokenGroup[]; byModel: AnalyticsTokenGroup[]; byStage: AnalyticsTokenGroup[]; byEffort: AnalyticsTokenGroup[]; byThinking: AnalyticsTokenGroup[]; byStatus: AnalyticsTokenGroup[];
 } {
   const limit = Math.max(1, Math.min(rankingLimit, 500));
   const groups: Record<string, string> = {
     byProject: `COALESCE(projectId, '${ANALYTICS_UNSCOPED}')`, byEpic: `COALESCE(epicId, '${ANALYTICS_UNSCOPED}')`,
     byRepository: 'repoId', byWorkItem: 'workItemId', byTool: 'tool',
-    byModel: `COALESCE(model, '${ANALYTICS_UNSCOPED}')`, byStage: `COALESCE(stage, '${ANALYTICS_UNSCOPED}')`, byStatus: 'status',
+    byModel: `COALESCE(NULLIF(model, ''), '${ANALYTICS_UNKNOWN_MODEL}')`, byStage: `COALESCE(NULLIF(stage, ''), '${ANALYTICS_UNKNOWN_STAGE}')`,
+    byEffort: `COALESCE(NULLIF(effort, ''), 'unknown effort')`, byThinking: `COALESCE(NULLIF(thinking, ''), 'unknown thinking')`, byStatus: 'status',
   };
-  const result: Record<string, TokenGroup[]> = {};
+  const result: Record<string, AnalyticsTokenGroup[]> = {};
   if (!databaseExists()) return {
-    byProject: [], byEpic: [], byRepository: [], byWorkItem: [], byTool: [], byModel: [], byStage: [], byStatus: [],
+    byProject: [], byEpic: [], byRepository: [], byWorkItem: [], byTool: [], byModel: [], byStage: [], byEffort: [], byThinking: [], byStatus: [],
   };
   for (const [name, expression] of Object.entries(groups)) {
     const query = aggregateQuery(expression, filters, 'totalTokens DESC, groupKey ASC', limit);
     const rows = getDb('readonly').prepare(query.sql).all(...query.params) as Record<string, unknown>[];
-    result[name] = rows.map((row) => ({ ...toMetrics(row), key: stringValue(row.groupKey) }));
+    result[name] = rows.map((row) => ({ ...toMetrics(row), key: stringValue(row.groupKey), fallbackRuns: Number(row.fallbackRuns ?? 0) }));
   }
   return result as ReturnType<typeof getTokenBreakdowns>;
 }

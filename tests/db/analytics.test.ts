@@ -36,16 +36,16 @@ describe('analytics aggregate queries (ANA-03)', () => {
 
   function insertRun(db: { prepare: (sql: string) => { run: (...args: unknown[]) => unknown } }, values: {
     id: number; repoId?: string; projectId?: string | null; epicId?: string | null; workItemId?: string;
-    tool?: string; model?: string | null; stage?: string | null; status?: string; startedAt: string;
+    tool?: string; model?: string | null; stage?: string | null; effort?: string | null; thinking?: string | null; status?: string; startedAt: string;
     input?: number | null; cached?: number | null; output?: number | null; total?: number | null; context?: number | null;
     confidence?: string;
   }) {
-    db.prepare(`INSERT INTO runs (id, repo_id, project_id, epic_id, feature_id, tool, model, stage, status, started_at,
+    db.prepare(`INSERT INTO runs (id, repo_id, project_id, epic_id, feature_id, tool, model, stage, effort, thinking, status, started_at,
       input_tokens, cached_input_tokens, output_tokens, total_tokens, context_window_percent, metrics_confidence)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(
       values.id, values.repoId ?? 'r1', values.projectId === undefined ? 'p1' : values.projectId,
-      values.epicId === undefined ? 'e1' : values.epicId, values.workItemId ?? 'w1', values.tool ?? 'codex', values.model ?? 'gpt-5',
-      values.stage ?? 'implement', values.status ?? 'done', values.startedAt, values.input === undefined ? 100 : values.input, values.cached === undefined ? 20 : values.cached,
+      values.epicId === undefined ? 'e1' : values.epicId, values.workItemId ?? 'w1', values.tool ?? 'codex', values.model === undefined ? 'gpt-5' : values.model,
+      values.stage ?? 'implement', values.effort ?? null, values.thinking ?? null, values.status ?? 'done', values.startedAt, values.input === undefined ? 100 : values.input, values.cached === undefined ? 20 : values.cached,
       values.output === undefined ? 50 : values.output, values.total === undefined ? 150 : values.total, values.context === undefined ? 25 : values.context, values.confidence ?? 'exact',
     );
   }
@@ -80,6 +80,25 @@ describe('analytics aggregate queries (ANA-03)', () => {
       expect.objectContaining({ workItemId: 'legacy', epicId: 'unknown/unscoped', projectId: 'unknown/unscoped' }),
     ]);
     expect(getAnalyticsDataQuality()).toMatchObject({ totalRuns: 3, exactRuns: 1, derivedRuns: 1, unknownRuns: 1, missingTokenRuns: 1, missingProjectSnapshotRuns: 1, missingEpicSnapshotRuns: 1 });
+  });
+
+  it('keeps unknown models separate, groups effort/thinking, and exposes tool fallbacks', async () => {
+    const { db, getTokenBreakdowns } = await setup();
+    insertRun(db, { id: 1, startedAt: '2026-07-01 10:00:00', tool: 'codex', model: 'gpt-5', stage: 'implement', effort: 'high', thinking: 'extended', total: 100 });
+    insertRun(db, { id: 2, startedAt: '2026-07-01 11:00:00', tool: 'claude', model: null, stage: 'custom-review', total: 50, confidence: 'unknown' });
+    db.prepare(`INSERT INTO retry_history (run_id, attempt, tool, model) VALUES (1, 1, 'claude', 'opus')`).run();
+
+    const breakdowns = getTokenBreakdowns();
+    expect(breakdowns.byModel).toEqual(expect.arrayContaining([
+      expect.objectContaining({ key: 'gpt-5', totalTokens: 100, confidence: 'exact' }),
+      expect.objectContaining({ key: 'unknown model', totalTokens: 50, confidence: 'unknown' }),
+    ]));
+    expect(breakdowns.byStage).toEqual(expect.arrayContaining([expect.objectContaining({ key: 'custom-review', totalTokens: 50 })]));
+    expect(breakdowns.byEffort).toEqual(expect.arrayContaining([expect.objectContaining({ key: 'high', totalTokens: 100 })]));
+    expect(breakdowns.byThinking).toEqual(expect.arrayContaining([expect.objectContaining({ key: 'extended', totalTokens: 100 })]));
+    expect(breakdowns.byTool).toEqual(expect.arrayContaining([expect.objectContaining({ key: 'codex', fallbackRuns: 1 })]));
+    expect(getTokenBreakdowns({ model: 'unknown model' }).byModel).toEqual([expect.objectContaining({ key: 'unknown model', runs: 1 })]);
+    expect(getTokenBreakdowns({ stage: 'custom-review' }).byStage).toEqual([expect.objectContaining({ key: 'custom-review', runs: 1 })]);
   });
 
   it('returns a bounded, newest-first run drilldown only on demand', async () => {

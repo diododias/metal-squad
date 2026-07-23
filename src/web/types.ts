@@ -9,7 +9,7 @@ import type { AppConfigPatch as ConfigAppConfigPatch, Config, NotificationChanne
 import type { Skill } from '../core/skills/types.js';
 import type { WorkItemType as MsqWorkItemType } from '../db/workflowTemplates.js';
 import type { AllowedLifecycle } from '../core/lifecyclePolicy.js';
-import type { AnalyticsDataQuality, AnalyticsFilters, AnalyticsRunDrilldownRow, AnalyticsSort, AnalyticsSummary, AnalyticsWorkItemRow, TokenGroup, TokenTimeBucket } from '../db/analytics.js';
+import type { AnalyticsDataQuality, AnalyticsFilters, AnalyticsRunDrilldownRow, AnalyticsSort, AnalyticsSummary, AnalyticsTokenGroup, AnalyticsWorkItemRow, TokenTimeBucket } from '../db/analytics.js';
 
 export type { AllowedLifecycle } from '../core/lifecyclePolicy.js';
 
@@ -44,7 +44,7 @@ export interface TokenStats {
 export interface AnalyticsSnapshot {
   period: { sinceDays: number };
   summary: AnalyticsSummary;
-  topGroups: { byProject: TokenGroup[]; byEpic: TokenGroup[]; byRepository: TokenGroup[]; byWorkItem: TokenGroup[]; byTool: TokenGroup[]; byModel: TokenGroup[]; byStage: TokenGroup[]; byStatus: TokenGroup[] };
+  topGroups: { byProject: AnalyticsTokenGroup[]; byEpic: AnalyticsTokenGroup[]; byRepository: AnalyticsTokenGroup[]; byWorkItem: AnalyticsTokenGroup[]; byTool: AnalyticsTokenGroup[]; byModel: AnalyticsTokenGroup[]; byStage: AnalyticsTokenGroup[]; byEffort?: AnalyticsTokenGroup[]; byThinking?: AnalyticsTokenGroup[]; byStatus: AnalyticsTokenGroup[] };
   dataQuality: AnalyticsDataQuality;
   generatedAt: string;
   revision: number;
