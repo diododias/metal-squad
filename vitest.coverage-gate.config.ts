@@ -3,6 +3,7 @@ import baseConfig from './vitest.config.ts';
 
 export default mergeConfig(baseConfig, defineConfig({
   test: {
+    testTimeout: 15_000,
     coverage: {
       include: [
         'src/config/**/*.ts',

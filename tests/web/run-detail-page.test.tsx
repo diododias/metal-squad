@@ -100,7 +100,7 @@ describe('RunDetailPage resume with override', () => {
     expect(container.textContent).toContain('900 tok');
   });
 
-  it('labels a publish note as a warning (not an error) when the publication is already verified', () => {
+  it('labels a publish note as a notice (not an error) when the publication is already verified', () => {
     const note = 'note: post-run could not verify whether HEAD descends from the declared base develop. A verified GitHub PR already confirms this publication; treat this only as informational.';
     const container = renderPage(makeRun({ publishVerified: true, publishError: note, prNumber: 230, prUrl: 'https://example.test/pr/230' }), vi.fn());
 

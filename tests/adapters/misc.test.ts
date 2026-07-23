@@ -450,6 +450,31 @@ describe('claude adapter', () => {
     });
   });
 
+  it('parseUsage returns the LAST result event when transcript has multiple result events', async () => {
+    const { claudeAdapter } = await import('../../src/core/adapters/claude.js');
+
+    const firstResult = JSON.stringify({
+      type: 'result',
+      subtype: 'success',
+      result: 'intermediate',
+      usage: { input_tokens: 100, cache_read_input_tokens: 0, output_tokens: 500 },
+    });
+    const lastResult = JSON.stringify({
+      type: 'result',
+      subtype: 'success',
+      result: 'done',
+      usage: { input_tokens: 200, cache_read_input_tokens: 50_000, output_tokens: 3_000 },
+    });
+    const transcript = [firstResult, lastResult].join('\n');
+
+    expect(claudeAdapter.parseUsage?.(transcript)).toEqual({
+      input: 200,
+      cachedInput: 50_000,
+      output: 3_000,
+      total: 200 + 50_000 + 3_000,
+    });
+  });
+
   it('transitions tool calls from started to completed when a tool_result user event arrives', async () => {
     const toolUseId = 'toolu_01abc';
     const assistant = JSON.stringify({
