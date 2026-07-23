@@ -46,7 +46,7 @@ import {
 import { RevisionConflictError, WorkItemHasHistoryError } from '../db/errors.js';
 import { getAdapter } from '../core/adapters/index.js';
 import { computeRunBreakdown } from '../core/stats.js';
-import { getAnalyticsDataQuality, getAnalyticsInsights, getAnalyticsSummary, getTokenBreakdowns, getTokenTimeSeries, listAnalyticsRunDrilldown, listAnalyticsWorkItems } from '../db/analytics.js';
+import { countAnalyticsWorkItems, getAnalyticsDataQuality, getAnalyticsInsights, getAnalyticsSummary, getTokenBreakdowns, getTokenTimeSeries, listAnalyticsRunDrilldown, listAnalyticsWorkItems } from '../db/analytics.js';
 import { resolveRepo, resolveRepoAllowlist } from '../core/repo.js';
 import { resolveWorkItemExecutionContext } from '../core/workItemExecutionContext.js';
 import { loadBacklogFromCatalog } from '../core/backlog/load.js';
@@ -1145,7 +1145,7 @@ export function createWebServer(options: {
     const parsed = AnalyticsWorkItemsMessageSchema.safeParse(message);
     if (!parsed.success) return { type: 'analytics:workItems', payload: { requestId: actionResultRequestId(message), ok: false, error: { code: 'INVALID_FILTERS', message: 'Analytics filters are invalid. Use supported filters and bounded pagination.' } } };
     try {
-      return { type: 'analytics:workItems', payload: { requestId: parsed.data.requestId, ok: true, rows: listAnalyticsWorkItems(parsed.data.filters, parsed.data.pagination, parsed.data.sort) } };
+      return { type: 'analytics:workItems', payload: { requestId: parsed.data.requestId, ok: true, rows: listAnalyticsWorkItems(parsed.data.filters, parsed.data.pagination, parsed.data.sort), total: countAnalyticsWorkItems(parsed.data.filters) } };
     } catch (error) {
       return { type: 'analytics:workItems', payload: analyticsError(parsed.data.requestId, error) };
     }

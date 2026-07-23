@@ -53,7 +53,7 @@ export interface AnalyticsSnapshot {
 }
 
 export interface AnalyticsActionError { code: 'INVALID_FILTERS' | 'QUERY_FAILED'; message: string; }
-export interface AnalyticsWorkItemsResult { type: 'analytics:workItems'; payload: { requestId: string; ok: true; rows: AnalyticsWorkItemRow[] } | { requestId: string; ok: false; error: AnalyticsActionError }; }
+export interface AnalyticsWorkItemsResult { type: 'analytics:workItems'; payload: { requestId: string; ok: true; rows: AnalyticsWorkItemRow[]; total: number } | { requestId: string; ok: false; error: AnalyticsActionError }; }
 export interface AnalyticsBreakdownResult { type: 'analytics:breakdown'; payload: { requestId: string; ok: true; summary: AnalyticsSummary; timeSeries: TokenTimeBucket[]; groups: AnalyticsSnapshot['topGroups']; dataQuality: AnalyticsDataQuality; insights: AnalyticsInsight[]; generatedAt: string; revision: number } | { requestId: string; ok: false; error: AnalyticsActionError }; }
 export interface AnalyticsRunDrilldownResult { type: 'analytics:runDrilldown'; payload: { requestId: string; ok: true; rows: AnalyticsRunDrilldownRow[] } | { requestId: string; ok: false; error: AnalyticsActionError }; }
 export type AnalyticsQueryFilters = AnalyticsFilters;
