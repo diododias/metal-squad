@@ -134,7 +134,7 @@ export function App(): React.JSX.Element {
 
   const onMessage = useCallback(
     (message: WebSocketServerMessage) => {
-      if (message.type === 'analytics:workItems' || message.type === 'analytics:breakdown' || message.type === 'analytics:runDrilldown') {
+      if (message.type === 'analytics:workItems' || message.type === 'analytics:breakdown' || message.type === 'analytics:runDrilldown' || message.type === 'analytics:export') {
         setAnalyticsMessage(message);
       } else if (message.type === 'state:full') {
         const arrivedNotifications = message.payload.notifications;

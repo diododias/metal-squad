@@ -133,6 +133,24 @@ describe('analytics aggregate queries (ANA-03)', () => {
     expect(insights.find((insight: { id: string }) => insight.id === 'waste-2')?.observedTokens).toBe(1000);
   });
 
+  it('builds burn forecast, previous-period comparison, and a sanitized aggregate export', async () => {
+    const { db, getAnalyticsForecast, getAnalyticsPeriodComparison, getAnalyticsExportDataset } = await setup();
+    insertRun(db, { id: 1, startedAt: '2026-07-01 10:00:00', total: 700, status: 'done' });
+    insertRun(db, { id: 2, startedAt: '2026-06-24 10:00:00', total: 350, status: 'failed' });
+
+    const filters = { from: '2026-07-01 00:00:00', to: '2026-07-08 00:00:00' };
+    expect(getAnalyticsForecast(filters, 1_000)).toMatchObject({
+      periodDays: 7, tokensPerDay: 100, tokensPerWeek: 700, tokensPerDoneWorkItem: 700,
+      budgetLimitTokens: 1_000, remainingTokens: 300, estimatedDaysToLimit: 3, status: 'available',
+      cost: { status: 'unavailable', amount: null, currency: null },
+    });
+    expect(getAnalyticsPeriodComparison(filters)).toMatchObject({ totalTokensDelta: 350, wasteTokensDelta: -350 });
+    const exported = getAnalyticsExportDataset(filters, 1_000);
+    expect(exported.summary.totalTokens).toBe(700);
+    expect(exported.workItems).toEqual([expect.objectContaining({ workItemId: 'w1', totalTokens: 700 })]);
+    expect(JSON.stringify(exported)).not.toMatch(/branch_name|commit_sha|pr_url|\/tmp\/r1/);
+  });
+
   it('projects task tokens, relevant events, retries and explicit telemetry gaps per pipeline run', async () => {
     const { db, listAnalyticsRunDrilldown } = await setup();
     db.prepare(`INSERT INTO pipelines (id, repo_id, feature_id, plan_json, done_json, pending_json, active_json, aborted_json, workflow_snapshot_json)

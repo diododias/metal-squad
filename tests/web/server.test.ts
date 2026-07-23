@@ -27,7 +27,7 @@ const mocks = vi.hoisted(() => ({
   listTaskRunsForRun: vi.fn(),
   listRunEvents: vi.fn(),
   getFeatureCatalog: vi.fn(),
-  getBacklogSettings: vi.fn(),
+  getBacklogSettings: vi.fn(() => ({ budget: undefined })),
   pausePipeline: vi.fn(),
   resumePipeline: vi.fn(),
   abortPipeline: vi.fn(),
@@ -45,7 +45,7 @@ const mocks = vi.hoisted(() => ({
   getFeatureIdOwner: vi.fn(),
   loadBacklogFromCatalog: vi.fn(),
   validateBacklogSkills: vi.fn(),
-  loadConfig: vi.fn(),
+  loadConfig: vi.fn(() => ({ budget: {} })),
   resolveRuntimeConfig: vi.fn(),
   saveConfig: vi.fn(),
   saveNotificationsPatch: vi.fn(),
@@ -111,6 +111,12 @@ const mocks = vi.hoisted(() => ({
   getAnalyticsSummary: vi.fn(),
   getTokenBreakdowns: vi.fn(),
   getAnalyticsDataQuality: vi.fn(),
+  getAnalyticsForecast: vi.fn(),
+  getAnalyticsPeriodComparison: vi.fn(),
+  getAnalyticsExportDataset: vi.fn(() => ({
+    schemaVersion: 1, generatedAt: '2026-07-23T12:00:00.000Z', filters: { sinceDays: 7 },
+    summary: { totalTokens: 700 }, dataQuality: {}, forecast: {}, comparison: {}, workItems: [{ workItemId: 'w1', totalTokens: 700 }],
+  })),
   getTokenTimeSeries: vi.fn(),
   listAnalyticsWorkItems: vi.fn(),
   countAnalyticsWorkItems: vi.fn(() => 1),
@@ -121,6 +127,9 @@ vi.mock('../../src/db/analytics.js', () => ({
   getAnalyticsSummary: mocks.getAnalyticsSummary,
   getTokenBreakdowns: mocks.getTokenBreakdowns,
   getAnalyticsDataQuality: mocks.getAnalyticsDataQuality,
+  getAnalyticsForecast: mocks.getAnalyticsForecast,
+  getAnalyticsPeriodComparison: mocks.getAnalyticsPeriodComparison,
+  getAnalyticsExportDataset: mocks.getAnalyticsExportDataset,
   getTokenTimeSeries: mocks.getTokenTimeSeries,
   listAnalyticsWorkItems: mocks.listAnalyticsWorkItems,
   countAnalyticsWorkItems: mocks.countAnalyticsWorkItems,
@@ -555,6 +564,23 @@ describe('web server', () => {
     socket.send(JSON.stringify({ type: 'action:getAnalyticsBreakdown', requestId: 'analytics-invalid', filters: { sinceDays: 7, from: '2026-01-01T00:00:00.000Z' } }));
     const result = await waitForMatchingMessage(socket, (message) => message.type === 'analytics:breakdown');
     expect(result).toMatchObject({ type: 'analytics:breakdown', payload: { requestId: 'analytics-invalid', ok: false, error: { code: 'INVALID_FILTERS' } } });
+    socket.close();
+  });
+
+  it('exports sanitized server-side analytics aggregates in the requested format', async () => {
+    const { createWebServer } = await import('../../src/web/server.js');
+    server = createWebServer({ host: '127.0.0.1', port: 0, auth: 'token', token: 'secret' });
+    await new Promise<void>((resolve) => server!.server.listen(0, '127.0.0.1', resolve));
+    const port = (server!.server.address() as { port: number }).port;
+    const socket = new WebSocket(`ws://127.0.0.1:${port}/ws`);
+    await waitForOpen(socket);
+    socket.send(JSON.stringify({ type: 'auth', token: 'secret' }));
+    await waitForSocketMessage(socket);
+    socket.send(JSON.stringify({ type: 'action:exportAnalytics', requestId: 'analytics-export', filters: { sinceDays: 7 }, format: 'json' }));
+    const result = await waitForMatchingMessage(socket, (message) => message.type === 'analytics:export');
+    expect(result).toMatchObject({ type: 'analytics:export', payload: { requestId: 'analytics-export', ok: true, format: 'json', filename: 'analytics-export-2026-07-23.json' } });
+    expect((result.payload as { content: string }).content).not.toMatch(/branch_name|commit_sha|pr_url|\/safe\/repo/);
+    expect(mocks.getAnalyticsExportDataset).toHaveBeenCalledWith({ sinceDays: 7 }, undefined);
     socket.close();
   });
 
