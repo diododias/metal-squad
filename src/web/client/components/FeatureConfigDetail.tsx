@@ -299,7 +299,7 @@ export function FeatureConfigDetail({ feature, backlogSettings, approvalChannels
         stages: nextStages,
         stepGuidance: nextGuidance,
         sessionPolicy: {
-          alwaysIsolatedStages: feature.workflow.sessionPolicy.alwaysIsolatedStages.filter((candidate) => candidate !== stage),
+          alwaysIsolatedStages: (feature.workflow.sessionPolicy?.alwaysIsolatedStages ?? []).filter((candidate) => candidate !== stage),
         },
       },
     });
@@ -532,7 +532,7 @@ export function FeatureConfigDetail({ feature, backlogSettings, approvalChannels
           ))}
           {canSaveWorkflow && <div><Button variant="primary" size="sm" onClick={saveWorkflow}>save workflow</Button></div>}
         </div>
-        <ConfigField label="sessionPolicy.mode" value={feature.workflow.sessionPolicy.mode} />
+        <ConfigField label="sessionPolicy.mode" value={feature.workflow.sessionPolicy?.mode ?? 'isolated'} />
       </ConfigCard>
 
       {feature.retry && (
