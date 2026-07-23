@@ -231,6 +231,20 @@ describe('live run persistence helpers', () => {
     expect(mockRun).toHaveBeenCalledWith(10, null, 4, 14, 9);
   });
 
+  it('corrects invalid usage before persisting and keeps the raw snapshot audit trail', async () => {
+    const { updateRunUsage } = await import('../../src/db/repo.js');
+    updateRunUsage(9, { input: -10, cachedInput: 30, output: 4, total: 12 });
+    expect(mockRun).toHaveBeenCalledWith(0, 30, 4, 34, 9);
+    expect(mockRun).toHaveBeenCalledWith('corrected', 9);
+    expect(mockRun).toHaveBeenCalledWith(9, 0, 30, 4, 34, 'corrected', JSON.stringify({ input: -10, cachedInput: 30, output: 4, total: 12 }));
+  });
+
+  it('exposes the non-destructive historical token quality report', async () => {
+    mockGet.mockReturnValue({ negativeRows: 1, nullComponentRows: 2, totalLessThanBreakdownRows: 3, runsWithoutUsage: 4 });
+    const { getTokenDataQualityReport } = await import('../../src/db/repo.js');
+    expect(getTokenDataQualityReport()).toEqual({ negativeRows: 1, nullComponentRows: 2, totalLessThanBreakdownRows: 3, runsWithoutUsage: 4 });
+  });
+
   it('appends streamed output rows', async () => {
     const { appendRunOutput } = await import('../../src/db/repo.js');
     appendRunOutput({

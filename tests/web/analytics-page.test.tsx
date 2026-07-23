@@ -3,6 +3,7 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
 import { AnalyticsPage } from '../../src/web/client/pages/AnalyticsPage.js';
 import { BarList } from '../../src/web/client/components/data/BarList.js';
+import { shouldShowRepositoryBreakdown, WorkItemDrilldownDrawer } from '../../src/web/client/pages/AnalyticsPage.js';
 import { ActiveProjectContext } from '../../src/web/client/hooks/useActiveProject.js';
 import type { MsqWebState } from '../../src/web/types.js';
 
@@ -33,7 +34,7 @@ describe('AnalyticsPage UX contract', () => {
     expect(html).toContain('Insights');
     expect(html).toContain('Data Quality');
     expect(html).toContain('Total tokens');
-    expect(html).toContain('Top consumers');
+    expect(html).toContain('Top Work Items');
   });
 
   it('renders the partial-data warning when confidence is incomplete', () => {
@@ -50,5 +51,44 @@ describe('AnalyticsPage UX contract', () => {
     const html = renderToStaticMarkup(<BarList items={[{ id: 'codex', label: 'codex · 1 fallback/retry', value: 12_000, ariaLabel: 'Filter by Tool codex', onClick: () => {} }]} />);
     expect(html).toContain('aria-label="Filter by Tool codex"');
     expect(html).toContain('1 fallback/retry');
+  });
+
+  it('shows the repository chart only for multi-repository Projects and retains zero-run Epics', () => {
+    const state = stateWith();
+    state.analytics.topGroups.byProject = [
+      { ...state.analytics.topGroups.byWorkItem[0], key: 'project-a' },
+      { ...state.analytics.topGroups.byWorkItem[0], key: 'unknown/unscoped', totalTokens: 400 },
+    ];
+    state.analytics.topGroups.byEpic = [{ ...state.analytics.topGroups.byWorkItem[0], key: 'epic-empty', runs: 0, totalTokens: 0 }];
+    state.analytics.topGroups.byRepository = [
+      { ...state.analytics.topGroups.byWorkItem[0], key: 'repo-a' },
+      { ...state.analytics.topGroups.byWorkItem[0], key: 'repo-b', totalTokens: 6_000 },
+    ];
+    expect(shouldShowRepositoryBreakdown(state.analytics.topGroups.byRepository)).toBe(true);
+    expect(state.analytics.topGroups.byEpic).toContainEqual(expect.objectContaining({ key: 'epic-empty', runs: 0 }));
+    expect(shouldShowRepositoryBreakdown([{ key: 'repo-a' }, { key: 'unknown/unscoped' }])).toBe(false);
+  });
+
+  it('renders a pipeline-grouped drawer with telemetry gaps, task tokens and the existing Run Detail route', () => {
+    const workItem = {
+      workItemId: 'F-123', totalTokens: 120, wasteTokens: 20, runs: 2, contextMaxPercent: 72,
+    } as Parameters<typeof WorkItemDrilldownDrawer>[0]['workItem'];
+    const runs = [{
+      runId: 7, pipelineId: 3, workItemId: 'F-123', projectId: 'project-a', epicId: 'epic-a', repoId: 'repo-a', tool: 'codex', model: 'gpt-5', status: 'done', stage: 'implement',
+      startedAt: '2026-07-23T10:00:00.000Z', endedAt: '2026-07-23T10:02:00.000Z', durationMs: 120000, summary: 'Implemented the drawer', totalTokens: 120, inputTokens: 80, cachedInputTokens: 10, outputTokens: 30,
+      usefulTokens: 120, wasteTokens: 0, hasTokenTelemetry: true, contextWindowPercent: 72, confidence: 'exact',
+      tasks: [{ taskId: 'T1', title: 'Wire drawer', status: 'done', stage: 'implement', startedAt: null, endedAt: null, totalTokens: 80, inputTokens: 50, cachedInputTokens: 10, outputTokens: 20, contextWindowPercent: 60 }],
+      retries: [{ attempt: 2, tool: 'claude', model: 'sonnet', error: 'timeout', retriedAt: '2026-07-23T10:01:00.000Z' }], events: [{ event: 'gate_wait', createdAt: '2026-07-23T10:00:30.000Z' }],
+    }, {
+      runId: 8, pipelineId: 3, workItemId: 'F-123', projectId: 'project-a', epicId: 'epic-a', repoId: 'repo-a', tool: 'codex', model: null, status: 'running', stage: 'implement',
+      startedAt: '2026-07-23T10:03:00.000Z', endedAt: null, durationMs: null, summary: null, totalTokens: 0, inputTokens: 0, cachedInputTokens: 0, outputTokens: 0,
+      usefulTokens: 0, wasteTokens: 0, hasTokenTelemetry: false, contextWindowPercent: null, confidence: 'unknown', tasks: [], retries: [], events: [{ event: 'blocked_resumed', createdAt: '2026-07-23T10:03:00.000Z' }],
+    }] as Parameters<typeof WorkItemDrilldownDrawer>[0]['runs'];
+    const html = renderToStaticMarkup(<WorkItemDrilldownDrawer workItem={workItem} runs={runs} loading={false} onClose={() => {}} />);
+    expect(html).toContain('Pipeline #3');
+    expect(html).toContain('No token telemetry captured');
+    expect(html).toContain('Task token breakdown');
+    expect(html).toContain('Gate wait');
+    expect(html).toContain('#/runs/F-123');
   });
 });

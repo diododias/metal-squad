@@ -211,10 +211,20 @@ export const codexAdapter: ToolAdapter = {
     for (const line of transcript.split('\n')) {
       const evt = safeJson<CodexEvent>(line);
       if (evt?.type === 'turn.completed' && evt.usage) {
-        const input = evt.usage.input_tokens ?? 0;
+        // Codex reports cached input as a subset of input_tokens. Persist the
+        // canonical non-cached component rather than subtracting at a later
+        // aggregation boundary (which used to create negative rows).
+        const rawInput = evt.usage.input_tokens ?? 0;
         const cachedInput = evt.usage.cached_input_tokens ?? 0;
+        const input = Math.max(0, rawInput - cachedInput);
         const output = (evt.usage.output_tokens ?? 0) + (evt.usage.reasoning_output_tokens ?? 0);
-        usage = { input, cachedInput, output, total: input + cachedInput + output };
+        usage = {
+          input,
+          cachedInput,
+          output,
+          total: Math.max(0, rawInput) + output,
+          ...(cachedInput > 0 ? { rawUsage: evt.usage } : {}),
+        };
       }
     }
     return usage;

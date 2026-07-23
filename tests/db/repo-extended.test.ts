@@ -209,17 +209,18 @@ describe('recordUsage', () => {
     recordUsage(1, { input: 100, output: 50, total: 150, cachedInput: 10 });
     // First run() call is from updateRunUsage
     expect(mockRun.mock.calls[0]).toContain(100);
-    // Second run() call inserts into token_usage
-    expect(mockRun.mock.calls[1]).toContain(1); // run_id
-    expect(mockRun.mock.calls[1]).toContain(10); // cached_input
-    expect(mockRun.mock.calls[1]).toContain(150); // total
+    // Third run() call inserts the corrected, auditable snapshot.
+    expect(mockRun.mock.calls[2]).toContain(1); // run_id
+    expect(mockRun.mock.calls[2]).toContain(10); // cached_input
+    expect(mockRun.mock.calls[2]).toContain(160); // total
+    expect(mockRun.mock.calls[2]).toContain('corrected');
   });
 
   it('defaults cachedInput to 0 when not provided', async () => {
     const { recordUsage } = await import('../../src/db/repo.js');
     recordUsage(2, { input: 100, output: 50, total: 150 });
-    // Second call is token_usage insert — cachedInput defaults to 0
-    expect(mockRun.mock.calls[1]).toContain(0);
+    // Third call is token_usage insert — cachedInput defaults to 0
+    expect(mockRun.mock.calls[2]).toContain(0);
   });
 });
 
@@ -227,7 +228,7 @@ describe('updateRunUsage', () => {
   it('calls run with token fields and runId', async () => {
     const { updateRunUsage } = await import('../../src/db/repo.js');
     updateRunUsage(9, { input: 10, output: 4, total: 14, cachedInput: 2 });
-    expect(mockRun).toHaveBeenCalledWith(10, 2, 4, 14, 9);
+    expect(mockRun).toHaveBeenCalledWith(10, 2, 4, 16, 9);
   });
 
   it('defaults cachedInput to null when undefined', async () => {

@@ -2,7 +2,7 @@ import { useCallback, useRef, useState } from 'react';
 import type { AnalyticsBreakdownResult, AnalyticsExportResult, AnalyticsQueryFilters, AnalyticsQuerySort, AnalyticsRunDrilldownResult, AnalyticsWorkItemsResult, WebSocketClientMessage, WebSocketServerMessage } from '../../types.js';
 
 type AnalyticsResult = AnalyticsWorkItemsResult | AnalyticsBreakdownResult | AnalyticsRunDrilldownResult | AnalyticsExportResult;
-type QueryKind = 'workItems' | 'breakdown' | 'runDrilldown' | 'export';
+type QueryKind = 'workItems' | 'breakdown' | 'comparison' | 'runDrilldown' | 'export';
 
 /**
  * Analytics requests share the existing WebSocket transport. A request id is
@@ -12,16 +12,19 @@ type QueryKind = 'workItems' | 'breakdown' | 'runDrilldown' | 'export';
 export function useAnalytics(send: (message: WebSocketClientMessage) => void): {
   workItems: AnalyticsWorkItemsResult['payload'] | null;
   breakdown: AnalyticsBreakdownResult['payload'] | null;
+  comparison: AnalyticsBreakdownResult['payload'] | null;
   runDrilldown: AnalyticsRunDrilldownResult['payload'] | null;
   exportResult: AnalyticsExportResult['payload'] | null;
   requestWorkItems: (filters: AnalyticsQueryFilters, pagination?: { limit?: number; offset?: number }, sort?: AnalyticsQuerySort) => string;
   requestBreakdown: (filters: AnalyticsQueryFilters, bucket?: 'hour' | 'day' | 'week' | 'month', rankingLimit?: number) => string;
+  requestComparisonBreakdown: (filters: AnalyticsQueryFilters, bucket?: 'hour' | 'day' | 'week' | 'month', rankingLimit?: number) => string;
   requestRunDrilldown: (filters: AnalyticsQueryFilters, pagination?: { limit?: number; offset?: number }) => string;
   requestExport: (filters: AnalyticsQueryFilters, format: 'csv' | 'json') => string;
   onAnalyticsMessage: (message: WebSocketServerMessage) => void;
 } {
   const [workItems, setWorkItems] = useState<AnalyticsWorkItemsResult['payload'] | null>(null);
   const [breakdown, setBreakdown] = useState<AnalyticsBreakdownResult['payload'] | null>(null);
+  const [comparison, setComparison] = useState<AnalyticsBreakdownResult['payload'] | null>(null);
   const [runDrilldown, setRunDrilldown] = useState<AnalyticsRunDrilldownResult['payload'] | null>(null);
   const [exportResult, setExportResult] = useState<AnalyticsExportResult['payload'] | null>(null);
   const sequence = useRef(0);
@@ -43,6 +46,11 @@ export function useAnalytics(send: (message: WebSocketClientMessage) => void): {
     send({ type: 'action:getAnalyticsBreakdown', requestId: id, filters, bucket, rankingLimit });
     return id;
   }, [requestId, send]);
+  const requestComparisonBreakdown = useCallback((filters: AnalyticsQueryFilters, bucket?: 'hour' | 'day' | 'week' | 'month', rankingLimit?: number): string => {
+    const id = requestId('comparison');
+    send({ type: 'action:getAnalyticsBreakdown', requestId: id, filters, bucket, rankingLimit });
+    return id;
+  }, [requestId, send]);
   const requestRunDrilldown = useCallback((filters: AnalyticsQueryFilters, pagination?: { limit?: number; offset?: number }): string => {
     const id = requestId('runDrilldown');
     send({ type: 'action:getAnalyticsRunDrilldown', requestId: id, filters, pagination });
@@ -57,13 +65,17 @@ export function useAnalytics(send: (message: WebSocketClientMessage) => void): {
   const onAnalyticsMessage = useCallback((message: WebSocketServerMessage): void => {
     const result: AnalyticsResult | null = message.type === 'analytics:workItems' || message.type === 'analytics:breakdown' || message.type === 'analytics:runDrilldown' || message.type === 'analytics:export' ? message : null;
     if (!result) return;
-    const kind: QueryKind = result.type === 'analytics:workItems' ? 'workItems' : result.type === 'analytics:breakdown' ? 'breakdown' : result.type === 'analytics:runDrilldown' ? 'runDrilldown' : 'export';
+    const kind: QueryKind = result.type === 'analytics:workItems' ? 'workItems'
+      : result.type === 'analytics:runDrilldown' ? 'runDrilldown'
+        : result.type === 'analytics:export' ? 'export'
+          : latest.current.comparison === result.payload.requestId ? 'comparison' : 'breakdown';
     if (latest.current[kind] !== result.payload.requestId) return;
     if (kind === 'workItems') setWorkItems(result.payload as AnalyticsWorkItemsResult['payload']);
     else if (kind === 'breakdown') setBreakdown(result.payload as AnalyticsBreakdownResult['payload']);
+    else if (kind === 'comparison') setComparison(result.payload as AnalyticsBreakdownResult['payload']);
     else if (kind === 'runDrilldown') setRunDrilldown(result.payload as AnalyticsRunDrilldownResult['payload']);
     else setExportResult(result.payload as AnalyticsExportResult['payload']);
   }, []);
 
-  return { workItems, breakdown, runDrilldown, exportResult, requestWorkItems, requestBreakdown, requestRunDrilldown, requestExport, onAnalyticsMessage };
+  return { workItems, breakdown, comparison, runDrilldown, exportResult, requestWorkItems, requestBreakdown, requestComparisonBreakdown, requestRunDrilldown, requestExport, onAnalyticsMessage };
 }
