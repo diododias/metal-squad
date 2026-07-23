@@ -1485,12 +1485,13 @@ export function createRun(
   const info = getDb('readwrite')
     .prepare(
       `INSERT INTO runs (
-         repo_id, project_id, feature_id, tool, pipeline_id, stage,
+         repo_id, project_id, feature_id, epic_id, tool, pipeline_id, stage,
          model, effort, thinking, tool_name, tool_version, pricing_profile_id, metrics_confidence
-       ) VALUES (?, (SELECT project_id FROM project_repos WHERE repo_id = ?), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+       ) VALUES (?, (SELECT project_id FROM project_repos WHERE repo_id = ?), ?,
+                 (SELECT epic_id FROM backlog_features WHERE feature_id = ?), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     )
     .run(
-      repoId, repoId, featureId, tool, opts.pipelineId ?? null, opts.stage ?? null,
+      repoId, repoId, featureId, featureId, tool, opts.pipelineId ?? null, opts.stage ?? null,
       opts.snapshot?.model ?? null, opts.snapshot?.effort ?? null, opts.snapshot?.thinking ?? null,
       opts.snapshot?.toolName ?? null, opts.snapshot?.toolVersion ?? null,
       opts.snapshot?.pricingProfileId ?? null, opts.snapshot?.metricsConfidence ?? 'unknown',

@@ -191,6 +191,7 @@ function migrate(d: Database.Database): void {
       id         INTEGER PRIMARY KEY AUTOINCREMENT,
       repo_id    TEXT NOT NULL REFERENCES repos(repo_id),
       feature_id TEXT NOT NULL,
+      epic_id    TEXT REFERENCES backlog_epics(epic_id),
       tool       TEXT NOT NULL,
       pipeline_id INTEGER REFERENCES pipelines(id),
       stage      TEXT,
@@ -742,9 +743,19 @@ function migrate(d: Database.Database): void {
   d.exec(`CREATE INDEX IF NOT EXISTS idx_backlog_features_repo_epic_lifecycle ON backlog_features(repo_id, epic_id, archived_at, deleted_at, position)`);
 
   ensureRunColumn('project_id', `ALTER TABLE runs ADD COLUMN project_id TEXT REFERENCES projects(project_id)`);
+  ensureRunColumn('epic_id', `ALTER TABLE runs ADD COLUMN epic_id TEXT REFERENCES backlog_epics(epic_id)`);
   d.exec(`CREATE INDEX IF NOT EXISTS idx_runs_project ON runs(project_id)`);
   d.exec(`CREATE INDEX IF NOT EXISTS idx_runs_project_status ON runs(project_id, status, id DESC)`);
   d.exec(`CREATE INDEX IF NOT EXISTS idx_runs_model_confidence ON runs(model, metrics_confidence, started_at DESC)`);
+  d.exec(`CREATE INDEX IF NOT EXISTS idx_runs_started_at ON runs(started_at DESC)`);
+  d.exec(`CREATE INDEX IF NOT EXISTS idx_runs_repo_started_at ON runs(repo_id, started_at DESC)`);
+  d.exec(`CREATE INDEX IF NOT EXISTS idx_runs_project_started_at ON runs(project_id, started_at DESC)`);
+  d.exec(`CREATE INDEX IF NOT EXISTS idx_runs_epic_started_at ON runs(epic_id, started_at DESC)`);
+  d.exec(`CREATE INDEX IF NOT EXISTS idx_runs_feature_started_at ON runs(feature_id, started_at DESC)`);
+  d.exec(`CREATE INDEX IF NOT EXISTS idx_runs_tool_started_at ON runs(tool, started_at DESC)`);
+  d.exec(`CREATE INDEX IF NOT EXISTS idx_runs_model_started_at ON runs(model, started_at DESC)`);
+  d.exec(`CREATE INDEX IF NOT EXISTS idx_runs_status_started_at ON runs(status, started_at DESC)`);
+  d.exec(`CREATE INDEX IF NOT EXISTS idx_runs_stage_started_at ON runs(stage, started_at DESC)`);
 
   ensurePipelineColumn('project_id', `ALTER TABLE pipelines ADD COLUMN project_id TEXT REFERENCES projects(project_id)`);
   d.exec(`CREATE INDEX IF NOT EXISTS idx_pipelines_project ON pipelines(project_id)`);
