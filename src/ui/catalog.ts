@@ -128,7 +128,7 @@ export function getFeatureCatalog(scope: WorkItemScope = {}): Record<string, Wor
     return Object.fromEntries(listWorkItemsByScope(scope).map((row) => {
       const feature = JSON.parse(row.dataJson) as {
         id: string; title: string; skills?: string[]; tool: string; model?: string; effort: string;
-        thinking?: string; spec?: string; tasks?: Task[]; dependsOn: string[]; workflow: Workflow;
+        thinking?: string; spec?: string; tasks?: Task[]; dependsOn: string[]; workflow?: Partial<Workflow>;
         retry?: Retry; specFile?: string; context?: string[]; maxTokens?: number; autoStart?: boolean;
         templateId?: string; templateVersion?: number;
       };
