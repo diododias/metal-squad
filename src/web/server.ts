@@ -13,6 +13,7 @@ import {
   forceResolveGate,
   getPipeline,
   getRun,
+  getProjectStateRevision,
   listCompletedFeatureIds,
   listRunEvents,
   listRunHistoryForFeature,
@@ -45,6 +46,7 @@ import {
 import { RevisionConflictError, WorkItemHasHistoryError } from '../db/errors.js';
 import { getAdapter } from '../core/adapters/index.js';
 import { computeRunBreakdown } from '../core/stats.js';
+import { getAnalyticsDataQuality, getAnalyticsSummary, getTokenBreakdowns, getTokenTimeSeries, listAnalyticsRunDrilldown, listAnalyticsWorkItems } from '../db/analytics.js';
 import { resolveRepo, resolveRepoAllowlist } from '../core/repo.js';
 import { resolveWorkItemExecutionContext } from '../core/workItemExecutionContext.js';
 import { loadBacklogFromCatalog } from '../core/backlog/load.js';
@@ -60,7 +62,7 @@ import { workItemService } from '../core/workItemService.js';
 import { projectService, repoLinkService } from '../core/projectService.js';
 import { buildMsqWebState, appendNotification, resetWebStateCaches, invalidateWorkflowTemplatesCache } from './state.js';
 import { createWebAuth, isAllowedHostHeader, isAllowedOrigin, timingSafeEqualStrings } from './auth.js';
-import { EpicActionMessageSchema, LifecycleActionMessageSchema, ProjectActionMessageSchema, RepositoryActionMessageSchema, WorkItemActionMessageSchema, WorkflowTemplateActionMessageSchema, WorkItemTypeChangeMessageSchema, ResolveWorkflowTemplateMessageSchema, WorkflowTemplateDefinitionMessageSchema, ValidateWorkflowTemplateMessageSchema, ArchivedQueryMessageSchema, AuditTrailQueryMessageSchema } from './schemas.js';
+import { EpicActionMessageSchema, LifecycleActionMessageSchema, ProjectActionMessageSchema, RepositoryActionMessageSchema, WorkItemActionMessageSchema, WorkflowTemplateActionMessageSchema, WorkItemTypeChangeMessageSchema, ResolveWorkflowTemplateMessageSchema, WorkflowTemplateDefinitionMessageSchema, ValidateWorkflowTemplateMessageSchema, ArchivedQueryMessageSchema, AuditTrailQueryMessageSchema, AnalyticsWorkItemsMessageSchema, AnalyticsBreakdownMessageSchema, AnalyticsRunDrilldownMessageSchema } from './schemas.js';
 import {
   archiveWorkflowTemplate,
   createWorkflowTemplate,
@@ -79,6 +81,9 @@ import type {
   ArchivedQueryResult,
   AuditTimelineEntry,
   AuditTrailQueryResult,
+  AnalyticsBreakdownResult,
+  AnalyticsRunDrilldownResult,
+  AnalyticsWorkItemsResult,
   EpicActionError,
   EpicActionResult,
   LifecycleActionError,
@@ -919,6 +924,18 @@ export function createWebServer(options: {
         sendTo(client, handleQueryAuditTrail(message));
         break;
       }
+      case 'action:getAnalyticsWorkItems': {
+        sendTo(client, handleAnalyticsWorkItems(message));
+        break;
+      }
+      case 'action:getAnalyticsBreakdown': {
+        sendTo(client, handleAnalyticsBreakdown(message));
+        break;
+      }
+      case 'action:getAnalyticsRunDrilldown': {
+        sendTo(client, handleAnalyticsRunDrilldown(message));
+        break;
+      }
       case 'action:resolveWorkflowTemplate': {
         const result = handleResolveWorkflowTemplate(message);
         sendTo(client, result);
@@ -1117,6 +1134,42 @@ export function createWebServer(options: {
     if (typeof message !== 'object' || message === null) return '';
     const requestId = (message as { requestId?: unknown }).requestId;
     return typeof requestId === 'string' ? requestId : '';
+  }
+
+  function analyticsError(requestId: string, error: unknown): { requestId: string; ok: false; error: { code: 'QUERY_FAILED'; message: string } } {
+    logCaughtError('web/server.analytics', error);
+    return { requestId, ok: false, error: { code: 'QUERY_FAILED', message: 'Analytics query could not be completed. Try a narrower period or refresh.' } };
+  }
+
+  function handleAnalyticsWorkItems(message: unknown): AnalyticsWorkItemsResult {
+    const parsed = AnalyticsWorkItemsMessageSchema.safeParse(message);
+    if (!parsed.success) return { type: 'analytics:workItems', payload: { requestId: actionResultRequestId(message), ok: false, error: { code: 'INVALID_FILTERS', message: 'Analytics filters are invalid. Use supported filters and bounded pagination.' } } };
+    try {
+      return { type: 'analytics:workItems', payload: { requestId: parsed.data.requestId, ok: true, rows: listAnalyticsWorkItems(parsed.data.filters, parsed.data.pagination, parsed.data.sort) } };
+    } catch (error) {
+      return { type: 'analytics:workItems', payload: analyticsError(parsed.data.requestId, error) };
+    }
+  }
+
+  function handleAnalyticsBreakdown(message: unknown): AnalyticsBreakdownResult {
+    const parsed = AnalyticsBreakdownMessageSchema.safeParse(message);
+    if (!parsed.success) return { type: 'analytics:breakdown', payload: { requestId: actionResultRequestId(message), ok: false, error: { code: 'INVALID_FILTERS', message: 'Analytics filters are invalid. Use supported filters and bounded rankings.' } } };
+    try {
+      const { filters, bucket = 'day', rankingLimit = 20 } = parsed.data;
+      return { type: 'analytics:breakdown', payload: { requestId: parsed.data.requestId, ok: true, summary: getAnalyticsSummary(filters), timeSeries: getTokenTimeSeries(filters, bucket), groups: getTokenBreakdowns(filters, rankingLimit), dataQuality: getAnalyticsDataQuality(filters), generatedAt: new Date().toISOString(), revision: getProjectStateRevision() } };
+    } catch (error) {
+      return { type: 'analytics:breakdown', payload: analyticsError(parsed.data.requestId, error) };
+    }
+  }
+
+  function handleAnalyticsRunDrilldown(message: unknown): AnalyticsRunDrilldownResult {
+    const parsed = AnalyticsRunDrilldownMessageSchema.safeParse(message);
+    if (!parsed.success) return { type: 'analytics:runDrilldown', payload: { requestId: actionResultRequestId(message), ok: false, error: { code: 'INVALID_FILTERS', message: 'Analytics filters are invalid. Use supported filters and bounded pagination.' } } };
+    try {
+      return { type: 'analytics:runDrilldown', payload: { requestId: parsed.data.requestId, ok: true, rows: listAnalyticsRunDrilldown(parsed.data.filters, parsed.data.pagination) } };
+    } catch (error) {
+      return { type: 'analytics:runDrilldown', payload: analyticsError(parsed.data.requestId, error) };
+    }
   }
 
   function projectActionError(error: unknown): ProjectActionError {

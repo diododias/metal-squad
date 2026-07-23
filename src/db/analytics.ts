@@ -47,6 +47,27 @@ export interface AnalyticsWorkItemRow extends AnalyticsMetrics {
   repoId: string;
 }
 
+/** A deliberately bounded raw-run projection used only by the Analytics
+ * drilldown action. It never belongs in the regular WebSocket snapshot. */
+export interface AnalyticsRunDrilldownRow {
+  runId: number;
+  workItemId: string;
+  projectId: string | null;
+  epicId: string | null;
+  repoId: string;
+  tool: string;
+  model: string | null;
+  status: string;
+  stage: string | null;
+  startedAt: string;
+  totalTokens: number;
+  inputTokens: number;
+  cachedInputTokens: number;
+  outputTokens: number;
+  contextWindowPercent: number | null;
+  confidence: AnalyticsMetricsConfidence;
+}
+
 export interface AnalyticsPagination { limit?: number; offset?: number; }
 export type AnalyticsWorkItemSort = keyof Pick<AnalyticsWorkItemRow,
   'workItemId' | 'totalTokens' | 'inputTokens' | 'cachedInputTokens' | 'outputTokens' | 'runs' | 'wasteTokens' | 'successRatePercent'>;
@@ -209,6 +230,26 @@ export function listAnalyticsWorkItems(filters: AnalyticsFilters = {}, paginatio
   }));
 }
 
+export function listAnalyticsRunDrilldown(filters: AnalyticsFilters = {}, pagination: AnalyticsPagination = {}): AnalyticsRunDrilldownRow[] {
+  if (!databaseExists()) return [];
+  const limit = Math.max(1, Math.min(pagination.limit ?? 50, 200));
+  const offset = Math.max(0, pagination.offset ?? 0);
+  const { cte, params } = filteredRuns(filters);
+  const rows = getDb('readonly').prepare(`${cte}
+    SELECT id AS runId, workItemId, projectId, epicId, repoId, tool, model, status, stage, startedAt,
+      totalTokens, inputTokens, cachedInputTokens, outputTokens, contextWindowPercent, metricsConfidence
+    FROM filtered ORDER BY startedAt DESC, runId DESC LIMIT ? OFFSET ?`).all(...params, limit, offset) as Record<string, unknown>[];
+  return rows.map((row) => ({
+    runId: Number(row.runId), workItemId: stringValue(row.workItemId),
+    projectId: nullableStringValue(row.projectId), epicId: nullableStringValue(row.epicId), repoId: stringValue(row.repoId),
+    tool: stringValue(row.tool), model: nullableStringValue(row.model), status: stringValue(row.status), stage: nullableStringValue(row.stage),
+    startedAt: stringValue(row.startedAt), totalTokens: Number(row.totalTokens ?? 0), inputTokens: Number(row.inputTokens ?? 0),
+    cachedInputTokens: Number(row.cachedInputTokens ?? 0), outputTokens: Number(row.outputTokens ?? 0),
+    contextWindowPercent: row.contextWindowPercent === null ? null : Number(row.contextWindowPercent ?? 0),
+    confidence: row.metricsConfidence === 'derived' || row.metricsConfidence === 'unknown' ? row.metricsConfidence : 'exact',
+  }));
+}
+
 export function getTokenTimeSeries(filters: AnalyticsFilters = {}, bucket: AnalyticsBucket = 'day'): TokenTimeBucket[] {
   if (!databaseExists()) return [];
   const format: Record<AnalyticsBucket, string> = { hour: '%Y-%m-%d %H:00:00', day: '%Y-%m-%d', week: '%Y-W%W', month: '%Y-%m' };
@@ -263,4 +304,8 @@ function emptyMetrics(): AnalyticsMetrics {
 
 function stringValue(value: unknown): string {
   return typeof value === 'string' ? value : ANALYTICS_UNSCOPED;
+}
+
+function nullableStringValue(value: unknown): string | null {
+  return typeof value === 'string' ? value : null;
 }

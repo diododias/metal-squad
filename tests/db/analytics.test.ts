@@ -82,6 +82,16 @@ describe('analytics aggregate queries (ANA-03)', () => {
     expect(getAnalyticsDataQuality()).toMatchObject({ totalRuns: 3, exactRuns: 1, derivedRuns: 1, unknownRuns: 1, missingTokenRuns: 1, missingProjectSnapshotRuns: 1, missingEpicSnapshotRuns: 1 });
   });
 
+  it('returns a bounded, newest-first run drilldown only on demand', async () => {
+    const { db, listAnalyticsRunDrilldown } = await setup();
+    insertRun(db, { id: 1, startedAt: '2026-07-01 10:00:00', total: 100 });
+    insertRun(db, { id: 2, startedAt: '2026-07-02 10:00:00', workItemId: 'w2', total: 300, confidence: 'derived' });
+
+    expect(listAnalyticsRunDrilldown({ projectId: 'p1' }, { limit: 1, offset: 0 })).toEqual([
+      expect.objectContaining({ runId: 2, workItemId: 'w2', totalTokens: 300, confidence: 'derived' }),
+    ]);
+  });
+
   it('uses the analytic indexes with a deterministic volume fixture', async () => {
     const { db, getAnalyticsSummary } = await setup();
     const insert = db.prepare(`INSERT INTO runs (repo_id, project_id, epic_id, feature_id, tool, model, stage, status, started_at, total_tokens, metrics_confidence)
