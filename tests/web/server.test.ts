@@ -526,6 +526,23 @@ describe('web server', () => {
     socket.close();
   });
 
+  it('serves the Work Item run drilldown only when the drawer requests it', async () => {
+    mocks.listAnalyticsRunDrilldown.mockReturnValue([{ runId: 4, pipelineId: 2, workItemId: 'feat-1', tasks: [], retries: [], events: [] }]);
+    const { createWebServer } = await import('../../src/web/server.js');
+    server = createWebServer({ host: '127.0.0.1', port: 0, auth: 'token', token: 'secret' });
+    await new Promise<void>((resolve) => server!.server.listen(0, '127.0.0.1', resolve));
+    const port = (server!.server.address() as { port: number }).port;
+    const socket = new WebSocket(`ws://127.0.0.1:${port}/ws`);
+    await waitForOpen(socket);
+    socket.send(JSON.stringify({ type: 'auth', token: 'secret' }));
+    await waitForSocketMessage(socket);
+    socket.send(JSON.stringify({ type: 'action:getAnalyticsRunDrilldown', requestId: 'drilldown-1', filters: { workItemId: 'feat-1' }, pagination: { limit: 50 } }));
+    const result = await waitForMatchingMessage(socket, (message) => message.type === 'analytics:runDrilldown');
+    expect(result).toMatchObject({ type: 'analytics:runDrilldown', payload: { requestId: 'drilldown-1', ok: true, rows: [{ runId: 4, pipelineId: 2 }] } });
+    expect(mocks.listAnalyticsRunDrilldown).toHaveBeenCalledWith({ workItemId: 'feat-1' }, { limit: 50 });
+    socket.close();
+  });
+
   it('rejects invalid Analytics filters with an actionable typed error', async () => {
     const { createWebServer } = await import('../../src/web/server.js');
     server = createWebServer({ host: '127.0.0.1', port: 0, auth: 'token', token: 'secret' });

@@ -38,15 +38,16 @@ describe('analytics aggregate queries (ANA-03)', () => {
     id: number; repoId?: string; projectId?: string | null; epicId?: string | null; workItemId?: string;
     tool?: string; model?: string | null; stage?: string | null; status?: string; startedAt: string;
     input?: number | null; cached?: number | null; output?: number | null; total?: number | null; context?: number | null;
-    confidence?: string;
+    confidence?: string; pipelineId?: number | null; endedAt?: string | null; summary?: string | null; publishError?: string | null;
   }) {
     db.prepare(`INSERT INTO runs (id, repo_id, project_id, epic_id, feature_id, tool, model, stage, status, started_at,
-      input_tokens, cached_input_tokens, output_tokens, total_tokens, context_window_percent, metrics_confidence)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(
+      input_tokens, cached_input_tokens, output_tokens, total_tokens, context_window_percent, metrics_confidence, pipeline_id, ended_at, summary, publish_error)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(
       values.id, values.repoId ?? 'r1', values.projectId === undefined ? 'p1' : values.projectId,
       values.epicId === undefined ? 'e1' : values.epicId, values.workItemId ?? 'w1', values.tool ?? 'codex', values.model ?? 'gpt-5',
       values.stage ?? 'implement', values.status ?? 'done', values.startedAt, values.input === undefined ? 100 : values.input, values.cached === undefined ? 20 : values.cached,
       values.output === undefined ? 50 : values.output, values.total === undefined ? 150 : values.total, values.context === undefined ? 25 : values.context, values.confidence ?? 'exact',
+      values.pipelineId ?? null, values.endedAt ?? null, values.summary ?? null, values.publishError ?? null,
     );
   }
 
@@ -94,6 +95,29 @@ describe('analytics aggregate queries (ANA-03)', () => {
     expect(listAnalyticsRunDrilldown({ projectId: 'p1' }, { limit: 1, offset: 0 })).toEqual([
       expect.objectContaining({ runId: 2, workItemId: 'w2', totalTokens: 300, confidence: 'derived' }),
     ]);
+  });
+
+  it('projects task tokens, relevant events, retries and explicit telemetry gaps per pipeline run', async () => {
+    const { db, listAnalyticsRunDrilldown } = await setup();
+    db.prepare(`INSERT INTO pipelines (id, repo_id, feature_id, plan_json, done_json, pending_json, active_json, aborted_json, workflow_snapshot_json)
+      VALUES (7, 'r1', 'w1', '[]', '[]', '[]', '[]', '[]', '{}')`).run();
+    insertRun(db, { id: 1, startedAt: '2026-07-01 10:00:00', endedAt: '2026-07-01 10:02:00', pipelineId: 7, summary: 'Implemented drawer', publishError: 'PR failed', total: 120 });
+    insertRun(db, { id: 2, startedAt: '2026-07-01 10:03:00', pipelineId: 7, total: null, input: null, cached: null, output: null });
+    db.prepare(`INSERT INTO task_runs (run_id, task_id, title, status, stage, input_tokens, cached_input_tokens, output_tokens, total_tokens, context_window_percent)
+      VALUES (1, 'T1', 'Wire the drawer', 'done', 'implement', 50, 10, 20, 80, 40)`).run();
+    db.prepare(`INSERT INTO retry_history (run_id, attempt, error, tool, model) VALUES (1, 2, 'timeout', 'claude', 'sonnet')`).run();
+    db.prepare(`INSERT INTO run_events (run_id, event) VALUES (1, 'gate_wait'), (1, 'timeout:approval-created'), (2, 'blocked_resumed')`).run();
+
+    const rows = listAnalyticsRunDrilldown({ workItemId: 'w1' });
+    expect(rows).toEqual(expect.arrayContaining([
+      expect.objectContaining({ runId: 1, pipelineId: 7, durationMs: 120000, summary: 'Implemented drawer', usefulTokens: 120, wasteTokens: 0, hasTokenTelemetry: true,
+        tasks: [expect.objectContaining({ taskId: 'T1', totalTokens: 80 })], retries: [expect.objectContaining({ attempt: 2, tool: 'claude', model: 'sonnet' })],
+        events: expect.arrayContaining([
+          expect.objectContaining({ event: 'gate_wait' }), expect.objectContaining({ event: 'timeout:approval-created' }), expect.objectContaining({ event: 'publish_failure' }),
+        ]) }),
+      expect.objectContaining({ runId: 2, pipelineId: 7, endedAt: null, durationMs: null, hasTokenTelemetry: false,
+        events: [expect.objectContaining({ event: 'blocked_resumed' })] }),
+    ]));
   });
 
   it('uses the analytic indexes with a deterministic volume fixture', async () => {
