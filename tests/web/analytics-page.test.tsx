@@ -5,62 +5,43 @@ import { AnalyticsPage } from '../../src/web/client/pages/AnalyticsPage.js';
 import { ActiveProjectContext } from '../../src/web/client/hooks/useActiveProject.js';
 import type { MsqWebState } from '../../src/web/types.js';
 
-function project(projectId: string, position: number): NonNullable<MsqWebState['projects']>[number] {
-  return { projectId, name: `Project ${projectId}`, position, description: null, revision: 1, counts: { epics: 0, workItems: 0, archived: 0 }, activeRuns: 0, tokens: { status: 'ready', totalTokens: 0, error: null }, archivedAt: null };
-}
-
-const now = new Date().toISOString();
-
-function stateWith(rows: unknown[], runs: unknown[] = []): MsqWebState {
+function stateWith(totalTokens = 12_000): MsqWebState {
   return {
-    projects: [project('project-a', 0), project('project-b', 1)],
-    featureCatalog: {
-      'feat-a': { id: 'feat-a', title: 'Feature A', projectId: 'project-a', tool: 'codex' },
-      'feat-b': { id: 'feat-b', title: 'Feature B', projectId: 'project-b', tool: 'codex' },
+    projects: [{ projectId: 'project-a', name: 'Metal Squad', position: 0, description: null, revision: 1, counts: { epics: 0, workItems: 0, archived: 0 }, activeRuns: 0, tokens: { status: 'ready', totalTokens, error: null }, archivedAt: null }],
+    analytics: {
+      period: { sinceDays: 30 }, generatedAt: new Date().toISOString(), revision: 1,
+      summary: { totalTokens, inputTokens: 8_000, cachedInputTokens: 2_000, outputTokens: 2_000, runs: totalTokens ? 3 : 0, successRatePercent: 100, wasteTokens: 1_000, contextAvgPercent: 20, contextMaxPercent: 42, contextP95Percent: 38, confidence: 'exact' },
+      topGroups: { byProject: [], byEpic: [], byRepository: [], byWorkItem: [{ key: 'F-123', totalTokens, inputTokens: 8_000, cachedInputTokens: 2_000, outputTokens: 2_000, runs: 3, successRatePercent: 100, wasteTokens: 1_000, contextAvgPercent: 20, contextMaxPercent: 42, contextP95Percent: 38, confidence: 'exact' }], byTool: [], byModel: [], byStage: [], byStatus: [] },
+      dataQuality: { totalRuns: 3, exactRuns: 3, derivedRuns: 0, unknownRuns: 0, missingTokenRuns: 0, missingProjectSnapshotRuns: 0, missingEpicSnapshotRuns: 0 },
     },
-    runs,
-    dashboard: { rows },
   } as unknown as MsqWebState;
 }
 
-const rows = [
-  { featureId: 'feat-a', totalTokens: 1000, startedAt: now },
-  { featureId: 'feat-b', totalTokens: 5000, startedAt: now },
-];
-
-function renderAnalytics(state: MsqWebState, activeProjectId: string | null): string {
-  return renderToStaticMarkup(
-    <ActiveProjectContext.Provider value={{ activeProjectId, activeProject: null, setActiveProject: () => {}, selectionInvalidated: false }}>
-      <AnalyticsPage state={state} />
-    </ActiveProjectContext.Provider>,
-  );
+function renderAnalytics(state: MsqWebState): string {
+  return renderToStaticMarkup(<ActiveProjectContext.Provider value={{ activeProjectId: 'project-a', activeProject: null, setActiveProject: () => {}, selectionInvalidated: false }}><AnalyticsPage state={state} /></ActiveProjectContext.Provider>);
 }
 
-describe('AnalyticsPage Project scope', () => {
-  it('aggregates tokens and sessions only for the active Project', () => {
-    const html = renderAnalytics(stateWith(rows), 'project-a');
-    expect(html).toContain('1k');
-    expect(html).not.toContain('5k');
+describe('AnalyticsPage UX contract', () => {
+  it('renders the investigation hierarchy, global filters, and all internal tabs', () => {
+    const html = renderAnalytics(stateWith());
+    expect(html).toContain('Token consumption, efficiency and operational waste');
+    expect(html).toContain('Project: Metal Squad');
+    expect(html).toContain('Overview');
+    expect(html).toContain('Work Items');
+    expect(html).toContain('Breakdowns');
+    expect(html).toContain('Insights');
+    expect(html).toContain('Data Quality');
+    expect(html).toContain('Total tokens');
+    expect(html).toContain('Top consumers');
   });
 
-  it('switches the aggregate when the active Project changes', () => {
-    const html = renderAnalytics(stateWith(rows), 'project-b');
-    expect(html).toContain('5k');
-    expect(html).not.toContain('1k');
+  it('renders the partial-data warning when confidence is incomplete', () => {
+    const state = stateWith();
+    state.analytics.dataQuality.unknownRuns = 2;
+    expect(renderAnalytics(state)).toContain('Some historical runs are classified as unknown or derived.');
   });
 
-  it('shows no data for the period when Projects exist but none is selected', () => {
-    const html = renderAnalytics(stateWith(rows), null);
-    expect(html).toContain('No data for this period.');
-  });
-
-  it('scopes the active-features count to the active Project', () => {
-    const runs = [
-      { runId: 1, featureId: 'feat-a', status: 'running' },
-      { runId: 2, featureId: 'feat-b', status: 'running' },
-    ];
-    const afterLabel = renderAnalytics(stateWith(rows, runs), 'project-a').split('Active features')[1] ?? '';
-    // feat-a is the only run scoped to project-a, so exactly one active feature.
-    expect(afterLabel.replace(/<[^>]*>/g, '').trimStart().startsWith('1')).toBe(true);
+  it('renders the prescribed empty state when the active selection has no telemetry', () => {
+    expect(renderAnalytics(stateWith(0))).toContain('No token usage for this filter.');
   });
 });
