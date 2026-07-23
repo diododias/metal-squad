@@ -19,6 +19,15 @@ const mocks = vi.hoisted(() => ({
   collectEnvironmentInfo: vi.fn(),
   listWorkflowTemplates: vi.fn((): Record<string, unknown>[] => []),
   listProjectTemplateMappings: vi.fn((): Record<string, unknown>[] => []),
+  getAnalyticsSummary: vi.fn(),
+  getTokenBreakdowns: vi.fn(),
+  getAnalyticsDataQuality: vi.fn(),
+}));
+
+vi.mock('../../src/db/analytics.js', () => ({
+  getAnalyticsSummary: mocks.getAnalyticsSummary,
+  getTokenBreakdowns: mocks.getTokenBreakdowns,
+  getAnalyticsDataQuality: mocks.getAnalyticsDataQuality,
 }));
 
 vi.mock('../../src/db/workflowTemplates.js', () => ({
@@ -80,6 +89,9 @@ describe('buildMsqWebState pendingFeatures projection', () => {
     mocks.listProjectStateSummaries.mockReturnValue([]);
     mocks.listRepositoryStateSummaries.mockReturnValue([]);
     mocks.listEpics.mockReturnValue([]);
+    mocks.getAnalyticsSummary.mockReturnValue({ totalTokens: 120, inputTokens: 50, cachedInputTokens: 10, outputTokens: 60, runs: 2, successRatePercent: 100, wasteTokens: 0, contextAvgPercent: null, contextMaxPercent: null, contextP95Percent: null, confidence: 'exact' });
+    mocks.getTokenBreakdowns.mockReturnValue({ byProject: [], byEpic: [], byRepository: [], byWorkItem: [], byTool: [], byModel: [], byStage: [], byStatus: [] });
+    mocks.getAnalyticsDataQuality.mockReturnValue({ totalRuns: 2, exactRuns: 2, derivedRuns: 0, unknownRuns: 0, missingTokenRuns: 0, missingProjectSnapshotRuns: 0, missingEpicSnapshotRuns: 0 });
     mocks.getFeatureCatalog.mockReturnValue({
       'feat-1': {
         id: 'feat-1',
@@ -114,6 +126,15 @@ describe('buildMsqWebState pendingFeatures projection', () => {
       budget: { alertAtPercent: 80 },
       web: { host: '127.0.0.1', port: 8743, auth: 'token' },
     });
+  });
+
+  it('adds a lightweight aggregate Analytics snapshot without using dashboard rows as its source', async () => {
+    const { buildMsqWebState } = await import('../../src/web/state.js');
+    const state = buildMsqWebState();
+    expect(state.analytics).toMatchObject({ period: { sinceDays: 7 }, summary: { totalTokens: 120, runs: 2 }, dataQuality: { exactRuns: 2 }, revision: 7 });
+    expect(state.analytics.topGroups.byWorkItem).toEqual([]);
+    expect(mocks.getAnalyticsSummary).toHaveBeenCalledWith({ sinceDays: 7 });
+    expect(mocks.getTokenBreakdowns).toHaveBeenCalledWith({ sinceDays: 7 }, 5);
   });
 
   it('removes newly started running features from pendingFeatures', async () => {
