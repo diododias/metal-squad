@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { MetricCard } from '../components/data/MetricCard.js';
-import { BarList } from '../components/data/BarList.js';
+import { BarList, type BarListItem } from '../components/data/BarList.js';
 import { TrendBars, type TrendPoint } from '../components/data/TrendBars.js';
 import { Table, type TableColumn } from '../components/data/Table.js';
 import { Button } from '../components/core/Button.js';
@@ -12,7 +12,7 @@ import { formatPercent, formatTokens } from '../lib/format.js';
 import { useActiveProject } from '../hooks/useActiveProject.js';
 import { useAnalytics } from '../hooks/useAnalytics.js';
 import type { MsqWebState, WebSocketClientMessage, WebSocketServerMessage } from '../../types.js';
-import type { AnalyticsRunDrilldownRow, AnalyticsSort, AnalyticsWorkItemRow } from '../../../db/analytics.js';
+import type { AnalyticsRunDrilldownRow, AnalyticsSort, AnalyticsWorkItemRow, TokenGroup } from '../../../db/analytics.js';
 
 export interface AnalyticsPageProps {
   state: MsqWebState;
@@ -34,6 +34,10 @@ const muted: React.CSSProperties = { color: 'var(--text-dim)', fontSize: 'var(--
 const noopAnalyticsSend = (): void => undefined;
 const WORK_ITEM_PAGE_SIZE = 25;
 
+export function shouldShowRepositoryBreakdown(groups: readonly { key: string }[]): boolean {
+  return groups.filter((group) => group.key !== 'unknown/unscoped').length > 1;
+}
+
 function Section({ title, action, children }: { title: string; action?: React.ReactNode; children: React.ReactNode }): React.JSX.Element {
   return <section style={sectionStyle} aria-label={title}>
     <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, alignItems: 'baseline', marginBottom: 12 }}>
@@ -53,11 +57,12 @@ function LoadingState({ label = 'Updating analytics…' }: { label?: string }): 
 function qualityLabel(confidence: 'exact' | 'derived' | 'unknown'): string { return confidence === 'exact' ? 'exact' : confidence === 'derived' ? 'derived' : 'unknown'; }
 
 export function AnalyticsPage({ state, send = noopAnalyticsSend, analyticsMessage = null }: AnalyticsPageProps): React.JSX.Element {
-  const { activeProjectId } = useActiveProject();
+  const { activeProjectId, setActiveProject } = useActiveProject();
   const [tab, setTab] = useState<AnalyticsTab>('overview');
   const [period, setPeriod] = useState<Period>(30);
   const [allProjects, setAllProjects] = useState(false);
   const [comparePrevious, setComparePrevious] = useState(true);
+  const [showTokenMix, setShowTokenMix] = useState(false);
   const [epic, setEpic] = useState('');
   const [repository, setRepository] = useState('');
   const [workItem, setWorkItem] = useState('');
@@ -70,8 +75,8 @@ export function AnalyticsPage({ state, send = noopAnalyticsSend, analyticsMessag
   const [workItemSort, setWorkItemSort] = useState<Required<AnalyticsSort>>({ by: 'totalTokens', direction: 'desc' });
   const [selectedWorkItem, setSelectedWorkItem] = useState<AnalyticsWorkItemRow | null>(null);
   const {
-    workItems: workItemsResult, breakdown: breakdownResult, runDrilldown: runDrilldownResult,
-    requestWorkItems, requestBreakdown, requestRunDrilldown, onAnalyticsMessage,
+    workItems: workItemsResult, breakdown: breakdownResult, comparison: comparisonResult, runDrilldown: runDrilldownResult,
+    requestWorkItems, requestBreakdown, requestComparisonBreakdown, requestRunDrilldown, onAnalyticsMessage,
   } = useAnalytics(send);
 
   const filters = useMemo(() => ({
@@ -82,11 +87,20 @@ export function AnalyticsPage({ state, send = noopAnalyticsSend, analyticsMessag
 
   useEffect(() => { if (analyticsMessage) onAnalyticsMessage(analyticsMessage); }, [analyticsMessage, onAnalyticsMessage]);
   useEffect(() => { requestBreakdown(filters); }, [filters, requestBreakdown]);
+  const previousPeriodFilters = useMemo(() => {
+    if (!comparePrevious) return null;
+    const end = new Date(Date.now() - period * 24 * 60 * 60 * 1000);
+    const start = new Date(end.getTime() - period * 24 * 60 * 60 * 1000);
+    const { sinceDays: _sinceDays, ...scope } = filters;
+    return { ...scope, from: start.toISOString(), to: end.toISOString() };
+  }, [comparePrevious, filters, period]);
+  useEffect(() => { if (previousPeriodFilters) requestComparisonBreakdown(previousPeriodFilters); }, [previousPeriodFilters, requestComparisonBreakdown]);
   useEffect(() => { setWorkItemPage(0); }, [filters]);
   useEffect(() => { if (tab === 'work-items') requestWorkItems(filters, { limit: WORK_ITEM_PAGE_SIZE, offset: workItemPage * WORK_ITEM_PAGE_SIZE }, workItemSort); }, [filters, requestWorkItems, tab, workItemPage, workItemSort]);
   useEffect(() => { if (selectedWorkItem) requestRunDrilldown({ ...filters, workItemId: selectedWorkItem.workItemId }, { limit: 50 }); }, [filters, requestRunDrilldown, selectedWorkItem]);
 
   const result = breakdownResult?.ok ? breakdownResult : null;
+  const comparison = comparePrevious && comparisonResult?.ok ? comparisonResult : null;
   const summary = result?.summary ?? state.analytics.summary;
   const groups = result?.groups ?? state.analytics.topGroups;
   const dataQuality = result?.dataQuality ?? state.analytics.dataQuality;
@@ -107,7 +121,15 @@ export function AnalyticsPage({ state, send = noopAnalyticsSend, analyticsMessag
     const link = document.createElement('a'); link.href = href; link.download = `analytics-${tab}.${format}`; link.click(); URL.revokeObjectURL(href);
   };
 
-  const trend: TrendPoint[] = (result?.timeSeries ?? []).map((bucket) => ({ label: bucket.bucket.slice(5), value: bucket.totalTokens }));
+  const trend: TrendPoint[] = (result?.timeSeries ?? []).map((bucket, index) => ({ label: bucket.bucket.slice(5), value: bucket.totalTokens, comparisonValue: comparison?.timeSeries[index]?.totalTokens }));
+  const tokenSegments = (group: { inputTokens: number; cachedInputTokens: number; outputTokens: number }): { value: number; color: string; label: string }[] | undefined => showTokenMix ? [
+    { value: group.inputTokens, color: 'var(--accent-info)', label: 'Input' },
+    { value: group.cachedInputTokens, color: 'var(--accent-warn)', label: 'Cached input' },
+    { value: group.outputTokens, color: 'var(--accent-ok)', label: 'Output' },
+  ] : undefined;
+  const scopedGroups = (values: TokenGroup[]): TokenGroup[] => values.filter((group) => group.key !== 'unknown/unscoped');
+  const unscopedGroups = (values: TokenGroup[]): TokenGroup[] => values.filter((group) => group.key === 'unknown/unscoped');
+  const groupItems = (values: TokenGroup[]): BarListItem[] => scopedGroups(values).map((group) => ({ id: group.key, label: group.key, value: group.totalTokens, segments: tokenSegments(group) }));
   const workItemColumns: TableColumn<AnalyticsWorkItemRow & { id: string }>[] = [
     { key: 'projectId', label: 'Project' }, { key: 'epicId', label: 'Epic' }, { key: 'repoId', label: 'Repository' },
     { key: 'workItemId', label: 'Work Item', sortable: true, render: (row): React.JSX.Element => { const catalogItem = state.featureCatalog[row.workItemId]; return <><strong>{row.workItemId}</strong><br /><span style={muted}>{catalogItem ? `${catalogItem.title} · ${catalogItem.workItemType}` : 'unknown'}</span></>; } },
@@ -135,17 +157,18 @@ export function AnalyticsPage({ state, send = noopAnalyticsSend, analyticsMessag
     return <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: 8 }}>
         <MetricCard label="Total tokens" value={formatTokens(summary.totalTokens)} />
-        <MetricCard label="Useful tokens" value={formatTokens(Math.max(0, summary.totalTokens - summary.wasteTokens))} />
+        <MetricCard label="Runs" value={summary.runs} />
         <MetricCard label="Waste" value={`${formatTokens(summary.wasteTokens)} (${summary.totalTokens ? formatPercent((summary.wasteTokens / summary.totalTokens) * 100) : '—'})`} />
         <MetricCard label="Avg / run" value={summary.runs ? formatTokens(Math.round(summary.totalTokens / summary.runs)) : '—'} />
+        <MetricCard label="Success rate" value={formatPercent(summary.successRatePercent)} />
         <MetricCard label="Context P95" value={formatPercent(summary.contextP95Percent)} />
       </div>
       {isPartial && <div role="status" style={{ borderLeft: '3px solid var(--accent-warn)', background: 'var(--accent-warn-10)', padding: '9px 12px', ...muted }}>Some historical runs are classified as unknown or derived. Charts remain useful, but model/project comparisons may be partial.</div>}
       <Section title="Tokens over time" action={breakdownResult && !result ? <LoadingState /> : undefined}>
-        {trend.length ? <><TrendBars points={trend} valueFormatter={formatTokens} /><p style={muted}>Text equivalent: {trend.map((point) => `${point.label} ${formatTokens(point.value)}`).join(', ')}</p></> : <p style={muted}>Trend will populate when the selected period has telemetry.</p>}
+        {trend.length ? <><TrendBars points={trend} valueFormatter={formatTokens} /><p style={muted}>{comparePrevious ? 'Grey bars show the previous period. ' : ''}Text equivalent: {trend.map((point) => `${point.label} ${formatTokens(point.value)}`).join(', ')}</p></> : <p style={muted}>Trend will populate when the selected period has telemetry.</p>}
       </Section>
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(290px, 1fr))', gap: 14 }}>
-        <Section title="Top consumers"><BarList items={groups.byWorkItem.map((group) => ({ id: group.key, label: group.key, value: group.totalTokens }))} valueFormatter={formatTokens} /></Section>
+        <Section title="Top Work Items" action={<Button size="sm" onClick={() => { setTab('work-items'); }}>View all</Button>}><BarList items={groupItems(groups.byWorkItem)} valueFormatter={formatTokens} /></Section>
         <Section title="Token breakdown"><dl style={{ margin: 0, display: 'grid', gridTemplateColumns: '1fr auto', gap: 8 }}><dt>Input</dt><dd>{formatTokens(summary.inputTokens)}</dd><dt>Cached input</dt><dd>{formatTokens(summary.cachedInputTokens)}</dd><dt>Output</dt><dd>{formatTokens(summary.outputTokens)}</dd></dl></Section>
       </div>
     </div>;
@@ -161,8 +184,13 @@ export function AnalyticsPage({ state, send = noopAnalyticsSend, analyticsMessag
   }
 
   function Breakdowns(): React.JSX.Element {
-    const cards = [['Project', groups.byProject], ['Epic', groups.byEpic], ['Tool', groups.byTool], ['Model', groups.byModel], ['Stage', groups.byStage], ['Status', groups.byStatus]] as const;
-    return <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: 14 }}>{cards.map(([label, values]) => <Section key={label} title={`Tokens by ${label}`}><BarList items={values.map((group) => ({ id: group.key, label: group.key, value: group.totalTokens }))} valueFormatter={formatTokens} /></Section>)}</div>;
+    const cards = [['Project', groups.byProject], ['Epic', groups.byEpic], ...(shouldShowRepositoryBreakdown(groups.byRepository) ? [['Repository', groups.byRepository] as const] : []), ['Tool', groups.byTool], ['Model', groups.byModel], ['Stage', groups.byStage], ['Status', groups.byStatus]] as const;
+    const unscoped = [...unscopedGroups(groups.byProject), ...unscopedGroups(groups.byEpic), ...unscopedGroups(groups.byRepository), ...unscopedGroups(groups.byWorkItem)];
+    return <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+      <label style={muted}><input type="checkbox" checked={showTokenMix} onChange={(event) => { setShowTokenMix(event.target.checked); }} /> Show input / cached input / output mix</label>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: 14 }}>{cards.map(([label, values]) => <Section key={label} title={`Tokens by ${label}`}><BarList items={groupItems(values)} valueFormatter={formatTokens} /></Section>)}</div>
+      {unscoped.length > 0 && <Section title="Data quality: unknown / unscoped"><p style={muted}>These runs are included in totals but could not be placed reliably in the product hierarchy.</p><BarList items={unscoped.map((group, index) => ({ id: `${group.key}-${String(index)}`, label: `Unscoped ${formatTokens(group.totalTokens)}`, value: group.totalTokens, color: 'var(--accent-warn)', segments: tokenSegments(group) }))} valueFormatter={formatTokens} /></Section>}
+    </div>;
   }
 
   function Insights(): React.JSX.Element {
@@ -181,7 +209,7 @@ export function AnalyticsPage({ state, send = noopAnalyticsSend, analyticsMessag
 
   return <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
     <PageHeader title="Analytics" description="Token consumption, efficiency and operational waste" actions={<div style={{ display: 'flex', gap: 6 }}><Button size="sm" onClick={() => { exportCurrentView('csv'); }}>Export CSV</Button><Button size="sm" onClick={() => { exportCurrentView('json'); }}>Export JSON</Button></div>} filters={<div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}><label>Period <select value={period} onChange={(event) => { setPeriod(Number(event.target.value) as Period); }}><option value={7}>Last 7 days</option><option value={30}>Last 30 days</option><option value={90}>Last 90 days</option></select></label><label><input type="checkbox" checked={comparePrevious} onChange={(event) => { setComparePrevious(event.target.checked); }} /> Compare previous period</label><label><input type="checkbox" checked={allProjects} onChange={(event) => { setAllProjects(event.target.checked); }} /> All projects</label><label>Epic <input value={epic} onChange={(event) => { setEpic(event.target.value); }} placeholder="any" /></label><label>Repository <input value={repository} onChange={(event) => { setRepository(event.target.value); }} placeholder="any" /></label><label>Work Item <input value={workItem} onChange={(event) => { setWorkItem(event.target.value); }} placeholder="any" /></label><label>Tool <input value={tool} onChange={(event) => { setTool(event.target.value); }} placeholder="any" /></label><label>Model <input value={model} onChange={(event) => { setModel(event.target.value); }} placeholder="any" /></label><label>Stage <input value={stage} onChange={(event) => { setStage(event.target.value); }} placeholder="any" /></label><label>Status <input value={status} onChange={(event) => { setStatus(event.target.value); }} placeholder="any" /></label><label>Quality <select value={quality} onChange={(event) => { setQuality(event.target.value as typeof quality); }}><option value="">all</option><option value="exact">exact</option><option value="derived">derived</option><option value="unknown">unknown</option></select></label></div>
+      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}><label>Project <select value={activeProjectId ?? ''} onChange={(event) => { setActiveProject(event.target.value || null); setAllProjects(false); }}><option value="">Select project</option>{state.projects.map((project) => <option key={project.projectId} value={project.projectId}>{project.name}</option>)}</select></label><label>Period <select value={period} onChange={(event) => { setPeriod(Number(event.target.value) as Period); }}><option value={7}>Last 7 days</option><option value={30}>Last 30 days</option><option value={90}>Last 90 days</option></select></label><label><input type="checkbox" checked={comparePrevious} onChange={(event) => { setComparePrevious(event.target.checked); }} /> Compare previous period</label><label><input type="checkbox" checked={allProjects} onChange={(event) => { setAllProjects(event.target.checked); }} /> All projects</label><label>Epic <input value={epic} onChange={(event) => { setEpic(event.target.value); }} placeholder="any" /></label><label>Repository <input value={repository} onChange={(event) => { setRepository(event.target.value); }} placeholder="any" /></label><label>Work Item <input value={workItem} onChange={(event) => { setWorkItem(event.target.value); }} placeholder="any" /></label><label>Tool <input value={tool} onChange={(event) => { setTool(event.target.value); }} placeholder="any" /></label><label>Model <input value={model} onChange={(event) => { setModel(event.target.value); }} placeholder="any" /></label><label>Stage <input value={stage} onChange={(event) => { setStage(event.target.value); }} placeholder="any" /></label><label>Status <input value={status} onChange={(event) => { setStatus(event.target.value); }} placeholder="any" /></label><label>Quality <select value={quality} onChange={(event) => { setQuality(event.target.value as typeof quality); }}><option value="">all</option><option value="exact">exact</option><option value="derived">derived</option><option value="unknown">unknown</option></select></label></div>
       <div aria-label="Active filters" style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>{activeChips.map((chip) => <Tag key={chip}>{chip} ×</Tag>)}{activeChips.length > 0 && <button onClick={clearFilters} style={{ background: 'none', border: 0, color: 'var(--accent-info)', cursor: 'pointer' }}>Clear all</button>}</div>
     </div>} />
     <div style={{ flex: 1, overflow: 'auto', padding: 20, display: 'flex', flexDirection: 'column', gap: 14 }}>
