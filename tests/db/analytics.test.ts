@@ -117,6 +117,22 @@ describe('analytics aggregate queries (ANA-03)', () => {
     ]);
   });
 
+  it('ranks waste, outliers, retry loops and unknown telemetry without pipeline double counting', async () => {
+    const { db, getAnalyticsInsights } = await setup();
+    insertRun(db, { id: 1, startedAt: '2026-07-01 10:00:00', total: 100, status: 'done' });
+    insertRun(db, { id: 2, startedAt: '2026-07-02 10:00:00', total: 1000, status: 'failed' });
+    insertRun(db, { id: 3, startedAt: '2026-07-03 10:00:00', total: 50, confidence: 'unknown' });
+    db.prepare(`INSERT INTO retry_history (run_id, attempt) VALUES (2, 1), (2, 2)`).run();
+    const insights = getAnalyticsInsights();
+    expect(insights).toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: 'waste-2', observedTokens: 1000 }),
+      expect.objectContaining({ id: 'outlier-2', baselineTokens: 1000 }),
+      expect.objectContaining({ id: 'loop-2', observedTokens: 1000 }),
+      expect.objectContaining({ id: 'quality-3', kind: 'data_quality' }),
+    ]));
+    expect(insights.find((insight: { id: string }) => insight.id === 'waste-2')?.observedTokens).toBe(1000);
+  });
+
   it('projects task tokens, relevant events, retries and explicit telemetry gaps per pipeline run', async () => {
     const { db, listAnalyticsRunDrilldown } = await setup();
     db.prepare(`INSERT INTO pipelines (id, repo_id, feature_id, plan_json, done_json, pending_json, active_json, aborted_json, workflow_snapshot_json)

@@ -167,6 +167,37 @@ export function formatTokensCompact(total: number): string {
   return String(total);
 }
 
+/** Returns the nearest-rank percentile. Invalid values are deliberately
+ * ignored: callers can retain their count as a data-quality signal without
+ * allowing unknown telemetry to distort a comparison baseline. */
+export function percentile(values: readonly number[], percent: number): number | null {
+  const valid = values.filter((value) => Number.isFinite(value)).sort((a, b) => a - b);
+  if (!valid.length) return null;
+  const rank = Math.max(1, Math.min(valid.length, Math.ceil((percent / 100) * valid.length)));
+  return valid[rank - 1] ?? null;
+}
+
+export interface TokenBaseline {
+  count: number;
+  average: number | null;
+  p95: number | null;
+  p99: number | null;
+}
+
+export function computeTokenBaseline(values: readonly number[]): TokenBaseline {
+  const valid = values.filter((value) => Number.isFinite(value) && value >= 0);
+  return {
+    count: valid.length,
+    average: valid.length ? valid.reduce((sum, value) => sum + value, 0) / valid.length : null,
+    p95: percentile(valid, 95),
+    p99: percentile(valid, 99),
+  };
+}
+
+export function isTokenOutlier(value: number, baseline: TokenBaseline): boolean {
+  return Number.isFinite(value) && baseline.p95 !== null && value >= baseline.p95 && value > (baseline.average ?? 0);
+}
+
 function gateKey(event: RunEventRow): number | string {
   const gateId = event.metadata?.gateId;
   return typeof gateId === 'number' ? gateId : 'gate';
