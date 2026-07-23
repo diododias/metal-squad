@@ -1442,6 +1442,17 @@ export function recordFeatureTopicAssociationError(
 export interface CreateRunOptions {
   pipelineId?: number;
   stage?: string;
+  snapshot?: RunExecutionSnapshot;
+}
+
+export interface RunExecutionSnapshot {
+  model?: string;
+  effort?: string;
+  thinking?: string;
+  toolName?: string;
+  toolVersion?: string;
+  pricingProfileId?: string;
+  metricsConfidence: 'exact' | 'derived' | 'unknown';
 }
 
 export type RunStatus = 'running' | 'done' | 'failed' | 'blocked' | 'aborted';
@@ -1473,10 +1484,17 @@ export function createRun(
 ): number {
   const info = getDb('readwrite')
     .prepare(
-      `INSERT INTO runs (repo_id, project_id, feature_id, tool, pipeline_id, stage)
-       VALUES (?, (SELECT project_id FROM project_repos WHERE repo_id = ?), ?, ?, ?, ?)`,
+      `INSERT INTO runs (
+         repo_id, project_id, feature_id, tool, pipeline_id, stage,
+         model, effort, thinking, tool_name, tool_version, pricing_profile_id, metrics_confidence
+       ) VALUES (?, (SELECT project_id FROM project_repos WHERE repo_id = ?), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     )
-    .run(repoId, repoId, featureId, tool, opts.pipelineId ?? null, opts.stage ?? null);
+    .run(
+      repoId, repoId, featureId, tool, opts.pipelineId ?? null, opts.stage ?? null,
+      opts.snapshot?.model ?? null, opts.snapshot?.effort ?? null, opts.snapshot?.thinking ?? null,
+      opts.snapshot?.toolName ?? null, opts.snapshot?.toolVersion ?? null,
+      opts.snapshot?.pricingProfileId ?? null, opts.snapshot?.metricsConfidence ?? 'unknown',
+    );
   const runId = Number(info.lastInsertRowid);
   recordRunEvent(runId, 'started', opts.stage ? { stage: opts.stage } : undefined);
   return runId;
@@ -2556,6 +2574,22 @@ export function updateRunTool(runId: number, tool: Tool): void {
     .run(tool, runId);
 }
 
+/** Replaces the run-local profile when retry/fallback selects the real winner. */
+export function updateRunExecutionSnapshot(runId: number, snapshot: RunExecutionSnapshot): void {
+  getDb('readwrite')
+    .prepare(
+      `UPDATE runs
+          SET model = ?, effort = ?, thinking = ?, tool_name = ?, tool_version = ?,
+              pricing_profile_id = ?, metrics_confidence = ?
+        WHERE id = ?`,
+    )
+    .run(
+      snapshot.model ?? null, snapshot.effort ?? null, snapshot.thinking ?? null,
+      snapshot.toolName ?? null, snapshot.toolVersion ?? null,
+      snapshot.pricingProfileId ?? null, snapshot.metricsConfidence, runId,
+    );
+}
+
 export interface RetryHistoryRow {
   attempt: number;
   error: string | null;
@@ -2660,6 +2694,13 @@ export interface StatsRunRow {
   integrityIssue?: string;
   featureId: string;
   tool: string;
+  model: string | null;
+  effort: string | null;
+  thinking: string | null;
+  toolName: string | null;
+  toolVersion: string | null;
+  pricingProfileId: string | null;
+  metricsConfidence: 'exact' | 'derived' | 'unknown';
   status: string;
   startedAt: string;
   endedAt: string | null;
@@ -2719,6 +2760,13 @@ export function listRunsForStats(filters: StatsFilters = {}): StatsRunRow[] {
          r.project_id AS projectId,
          r.feature_id AS featureId,
          r.tool,
+         r.model,
+         r.effort,
+         r.thinking,
+         r.tool_name AS toolName,
+         r.tool_version AS toolVersion,
+         r.pricing_profile_id AS pricingProfileId,
+         r.metrics_confidence AS metricsConfidence,
          r.status,
          r.started_at AS startedAt,
          r.ended_at AS endedAt,

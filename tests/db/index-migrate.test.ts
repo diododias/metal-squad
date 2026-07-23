@@ -122,6 +122,8 @@ describe('getDb migration — column checks', () => {
       { name: 'session_elapsed_ms' }, { name: 'session_last_output_at' }, { name: 'session_idle_ms' },
       { name: 'session_reason' }, { name: 'session_terminal' }, { name: 'project_id' },
       { name: 'adapter_session_tool' }, { name: 'adapter_session_id' },
+      { name: 'model' }, { name: 'effort' }, { name: 'thinking' }, { name: 'tool_name' },
+      { name: 'tool_version' }, { name: 'pricing_profile_id' }, { name: 'metrics_confidence' },
     ];
     pragmaRunsColumns = ALL_RUN_COLS;
     pragmaTokenUsageColumns = [{ name: 'cached_input' }, { name: 'data_quality' }, { name: 'raw_usage_json' }];
@@ -390,6 +392,15 @@ describe('getDb migration — column checks', () => {
     const alterCalls = mockExecCalls.filter((s) => s.trim().startsWith('ALTER'));
     expect(alterCalls.some((s) => s.includes('ALTER TABLE retry_history ADD COLUMN tool'))).toBe(true);
     expect(alterCalls.some((s) => s.includes('ALTER TABLE retry_history ADD COLUMN model'))).toBe(true);
+  });
+
+  it('adds run execution snapshot columns when they are missing', async () => {
+    pragmaRunsColumns = [{ name: 'summary' }];
+    const { getDb } = await import('../../src/db/index.js');
+    getDb('readwrite');
+    const alterCalls = mockExecCalls.filter((s) => s.trim().startsWith('ALTER'));
+    expect(alterCalls.some((s) => s.includes('ADD COLUMN model TEXT'))).toBe(true);
+    expect(alterCalls.some((s) => s.includes('ADD COLUMN metrics_confidence TEXT'))).toBe(true);
   });
 
   it('does not alter retry_history when tool/model already exist', async () => {

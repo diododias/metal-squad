@@ -468,6 +468,16 @@ describe('updateRunTool', () => {
   });
 });
 
+describe('updateRunExecutionSnapshot', () => {
+  it('persists the effective winner profile independently of the backlog', async () => {
+    const { updateRunExecutionSnapshot } = await import('../../src/db/repo.js');
+    updateRunExecutionSnapshot(7, {
+      model: 'gpt-4o', effort: 'high', thinking: 'off', toolName: 'codex', metricsConfidence: 'exact',
+    });
+    expect(mockRun).toHaveBeenCalledWith('gpt-4o', 'high', 'off', 'codex', null, null, 'exact', 7);
+  });
+});
+
 describe('listRetryHistory', () => {
   it('returns empty array when no attempts recorded', async () => {
     mockAll.mockReturnValue([]);

@@ -3,6 +3,7 @@ import { dirname } from 'node:path';
 import Database from 'better-sqlite3';
 import { DB_PATH_ENV, resolveDbPath, ensureDataDir } from '../config/index.js';
 import { BUILTIN_WORKFLOW_TEMPLATES } from '../core/workflow/stageSkills.js';
+import { backfillRunExecutionSnapshots } from './backfill.js';
 
 let db: Database.Database | null = null;
 let dbMode: 'readonly' | 'readwrite' | null = null;
@@ -220,7 +221,14 @@ function migrate(d: Database.Database): void {
       session_reason TEXT,
       session_terminal INTEGER NOT NULL DEFAULT 0,
       adapter_session_tool TEXT,
-      adapter_session_id TEXT
+      adapter_session_id TEXT,
+      model TEXT,
+      effort TEXT,
+      thinking TEXT,
+      tool_name TEXT,
+      tool_version TEXT,
+      pricing_profile_id TEXT,
+      metrics_confidence TEXT DEFAULT 'unknown'
     );
 
     CREATE TABLE IF NOT EXISTS token_usage (
@@ -571,6 +579,13 @@ function migrate(d: Database.Database): void {
   ensureRunColumn('remote_branch', `ALTER TABLE runs ADD COLUMN remote_branch TEXT`);
   ensureRunColumn('pr_number', `ALTER TABLE runs ADD COLUMN pr_number INTEGER`);
   ensureRunColumn('pr_url', `ALTER TABLE runs ADD COLUMN pr_url TEXT`);
+  ensureRunColumn('model', `ALTER TABLE runs ADD COLUMN model TEXT`);
+  ensureRunColumn('effort', `ALTER TABLE runs ADD COLUMN effort TEXT`);
+  ensureRunColumn('thinking', `ALTER TABLE runs ADD COLUMN thinking TEXT`);
+  ensureRunColumn('tool_name', `ALTER TABLE runs ADD COLUMN tool_name TEXT`);
+  ensureRunColumn('tool_version', `ALTER TABLE runs ADD COLUMN tool_version TEXT`);
+  ensureRunColumn('pricing_profile_id', `ALTER TABLE runs ADD COLUMN pricing_profile_id TEXT`);
+  ensureRunColumn('metrics_confidence', `ALTER TABLE runs ADD COLUMN metrics_confidence TEXT`);
   ensureRunColumn('token_data_quality', `ALTER TABLE runs ADD COLUMN token_data_quality TEXT`);
 
   const usageColumns = d
@@ -663,6 +678,7 @@ function migrate(d: Database.Database): void {
   };
   ensureRetryHistoryColumn('tool', `ALTER TABLE retry_history ADD COLUMN tool TEXT`);
   ensureRetryHistoryColumn('model', `ALTER TABLE retry_history ADD COLUMN model TEXT`);
+  backfillRunExecutionSnapshots(d);
 
   const stageRequestColumns = d
     .prepare(`PRAGMA table_info(stage_requests)`)
@@ -740,6 +756,7 @@ function migrate(d: Database.Database): void {
   ensureRunColumn('project_id', `ALTER TABLE runs ADD COLUMN project_id TEXT REFERENCES projects(project_id)`);
   d.exec(`CREATE INDEX IF NOT EXISTS idx_runs_project ON runs(project_id)`);
   d.exec(`CREATE INDEX IF NOT EXISTS idx_runs_project_status ON runs(project_id, status, id DESC)`);
+  d.exec(`CREATE INDEX IF NOT EXISTS idx_runs_model_confidence ON runs(model, metrics_confidence, started_at DESC)`);
 
   ensurePipelineColumn('project_id', `ALTER TABLE pipelines ADD COLUMN project_id TEXT REFERENCES projects(project_id)`);
   d.exec(`CREATE INDEX IF NOT EXISTS idx_pipelines_project ON pipelines(project_id)`);

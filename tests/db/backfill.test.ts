@@ -184,3 +184,29 @@ describe('backfillProjects', () => {
     expect(existsSync(result.backupPath!)).toBe(true);
   });
 });
+
+describe('backfillRunExecutionSnapshots', () => {
+  it('derives old metadata once and leaves evidence-free runs unknown', async () => {
+    const previous = process.env['MSQ_DB_PATH'];
+    const directory = mkdtempSync(join(tmpdir(), 'msq-run-snapshot-'));
+    process.env['MSQ_DB_PATH'] = join(directory, 'app.db');
+    try {
+      const { getDb, resetDb } = await import('../../src/db/index.js');
+      const { backfillRunExecutionSnapshots } = await import('../../src/db/backfill.js');
+      const db = getDb();
+      db.prepare(`INSERT INTO repos (repo_id, path) VALUES ('repo', '/tmp/repo')`).run();
+      db.prepare(`INSERT INTO projects (project_id, name, position) VALUES ('project', 'Project', 0)`).run();
+      db.prepare(`INSERT INTO backlog_epics (epic_id, project_id, title, position, data_json) VALUES ('epic', 'project', 'Epic', 0, '{}')`).run();
+      db.prepare(`INSERT INTO backlog_features (feature_id, epic_id, repo_id, title, position, data_json) VALUES ('feature', 'epic', 'repo', 'Feature', 0, '{"model":"gpt-4o","effort":"high","thinking":"on"}')`).run();
+      db.prepare(`INSERT INTO runs (repo_id, feature_id, tool, metrics_confidence) VALUES ('repo', 'feature', 'codex', NULL)`).run();
+      db.prepare(`INSERT INTO runs (repo_id, feature_id, tool, metrics_confidence) VALUES ('repo', 'missing', 'codex', NULL)`).run();
+      backfillRunExecutionSnapshots(db);
+      expect(db.prepare(`SELECT model, effort, thinking, metrics_confidence FROM runs WHERE feature_id = 'feature'`).get()).toEqual({ model: 'gpt-4o', effort: 'high', thinking: 'on', metrics_confidence: 'derived' });
+      expect(db.prepare(`SELECT model, metrics_confidence FROM runs WHERE feature_id = 'missing'`).get()).toEqual({ model: null, metrics_confidence: 'unknown' });
+      resetDb();
+    } finally {
+      if (previous === undefined) delete process.env['MSQ_DB_PATH']; else process.env['MSQ_DB_PATH'] = previous;
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+});
