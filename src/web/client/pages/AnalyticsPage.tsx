@@ -8,7 +8,7 @@ import { StatusPill } from '../components/core/StatusPill.js';
 import { Tag } from '../components/core/Tag.js';
 import { Tabs } from '../components/navigation/Tabs.js';
 import { PageHeader } from '../PageHeader.js';
-import { formatPercent, formatTokens } from '../lib/format.js';
+import { formatDurationMs, formatPercent, formatTokens } from '../lib/format.js';
 import { useActiveProject } from '../hooks/useActiveProject.js';
 import { useAnalytics } from '../hooks/useAnalytics.js';
 import type { MsqWebState, WebSocketClientMessage, WebSocketServerMessage } from '../../types.js';
@@ -55,6 +55,50 @@ function LoadingState({ label = 'Updating analytics…' }: { label?: string }): 
 }
 
 function qualityLabel(confidence: 'exact' | 'derived' | 'unknown'): string { return confidence === 'exact' ? 'exact' : confidence === 'derived' ? 'derived' : 'unknown'; }
+
+function eventLabel(event: string): string {
+  const labels: Record<string, string> = {
+    retry: 'Retry', blocked_resumed: 'Resume', resume_override: 'Resume override', gate_wait: 'Gate wait',
+    'timeout:approval-created': 'Timeout', 'timeout:approval-resolved': 'Timeout resolved', blocked: 'Blocked',
+    failed: 'Failed', publish_failure: 'Publish failure',
+  };
+  return labels[event] ?? event;
+}
+
+export function WorkItemDrilldownDrawer({
+  workItem, runs, loading, onClose,
+}: {
+  workItem: AnalyticsWorkItemRow;
+  runs: AnalyticsRunDrilldownRow[];
+  loading: boolean;
+  onClose: () => void;
+}): React.JSX.Element {
+  const pipelines = new Map<string, AnalyticsRunDrilldownRow[]>();
+  for (const run of runs) {
+    const key = run.pipelineId === null ? `run-${String(run.runId)}` : `pipeline-${String(run.pipelineId)}`;
+    const grouped = pipelines.get(key) ?? [];
+    grouped.push(run);
+    pipelines.set(key, grouped);
+  }
+  return <aside role="dialog" aria-label={`Work Item ${workItem.workItemId}`} style={{ position: 'fixed', inset: '60px 0 0 auto', width: 'min(620px, 100%)', overflow: 'auto', background: 'var(--bg-base)', borderLeft: '1px solid var(--border-strong)', padding: 20, boxShadow: '-8px 0 24px rgba(0,0,0,.25)' }}>
+    <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10 }}><h2 style={{ marginTop: 0 }}>Work Item {workItem.workItemId}</h2><Button size="sm" onClick={onClose}>Close</Button></div>
+    <p style={muted}>Total {formatTokens(workItem.totalTokens)} · Useful {formatTokens(Math.max(0, workItem.totalTokens - workItem.wasteTokens))} · Waste {formatTokens(workItem.wasteTokens)} · {workItem.runs} runs · context max {formatPercent(workItem.contextMaxPercent)}</p>
+    <h3>Run timeline</h3>
+    {loading ? <LoadingState label="Loading run detail…" /> : runs.length === 0 ? <p style={muted}>No runs match this Work Item.</p> : [...pipelines.entries()].map(([key, pipelineRuns]) => <section key={key} style={{ borderTop: '1px solid var(--border-dim)', paddingTop: 10, marginTop: 10 }}>
+      <h4 style={{ margin: '0 0 8px' }}>{pipelineRuns[0]?.pipelineId === null ? 'Standalone run' : `Pipeline #${String(pipelineRuns[0]?.pipelineId)}`}</h4>
+      {pipelineRuns.map((run) => <article key={run.runId} style={{ padding: '8px 0', borderTop: '1px solid var(--border-dim)' }}>
+        <div><StatusPill status={run.status} spinner={false} /> <strong>Run #{run.runId}</strong> · {run.stage ?? 'No stage'} · {run.tool}/{run.model ?? 'Unknown Model'}</div>
+        <div style={muted}>Started {new Date(run.startedAt).toLocaleString()} · {run.endedAt ? `duration ${formatDurationMs(run.durationMs)}` : 'Still running — completion time pending'} · context {formatPercent(run.contextWindowPercent)}</div>
+        {!run.hasTokenTelemetry ? <p style={{ ...muted, margin: '5px 0' }}><em>No token telemetry captured</em></p> : <p style={{ ...muted, margin: '5px 0' }}>Total {formatTokens(run.totalTokens)} · Useful {formatTokens(run.usefulTokens)} · Waste {formatTokens(run.wasteTokens)}</p>}
+        {run.summary && <p style={{ ...muted, margin: '5px 0' }}>Output summary: {run.summary}</p>}
+        {run.retries.length > 0 && <div style={muted}>Attempts: {run.retries.map((retry) => `#${String(retry.attempt)} ${retry.tool ?? run.tool}/${retry.model ?? run.model ?? 'Unknown Model'}`).join(', ')}</div>}
+        {run.tasks.length > 0 && <details><summary>Task token breakdown ({String(run.tasks.length)})</summary><ul style={{ ...muted, paddingLeft: 18 }}>{run.tasks.map((task) => <li key={task.taskId}>{task.title} · {task.stage ?? '—'} · {task.status} · {formatTokens(task.totalTokens)} · context {formatPercent(task.contextWindowPercent)}</li>)}</ul></details>}
+        {run.events.length > 0 && <div style={{ ...muted, marginTop: 5 }}>Events: {run.events.map((event) => eventLabel(event.event)).join(' · ')}</div>}
+      </article>)}
+    </section>)}
+    <a href={`#/runs/${workItem.workItemId}`} style={{ display: 'inline-block', marginTop: 14, color: 'var(--accent-info)' }}>Open Run Detail</a>
+  </aside>;
+}
 
 export function AnalyticsPage({ state, send = noopAnalyticsSend, analyticsMessage = null }: AnalyticsPageProps): React.JSX.Element {
   const { activeProjectId, setActiveProject } = useActiveProject();
@@ -216,6 +260,6 @@ export function AnalyticsPage({ state, send = noopAnalyticsSend, analyticsMessag
       <Tabs tabs={[...TABS]} activeId={tab} onSelect={(id) => { setTab(id as AnalyticsTab); }} />
       {tab === 'overview' && <Overview />}{tab === 'work-items' && <WorkItems />}{tab === 'breakdowns' && <Breakdowns />}{tab === 'insights' && <Insights />}{tab === 'quality' && <Quality />}
     </div>
-    {selectedWorkItem && <aside role="dialog" aria-label={`Work Item ${selectedWorkItem.workItemId}`} style={{ position: 'fixed', inset: '60px 0 0 auto', width: 'min(520px, 100%)', overflow: 'auto', background: 'var(--bg-base)', borderLeft: '1px solid var(--border-strong)', padding: 20, boxShadow: '-8px 0 24px rgba(0,0,0,.25)' }}><div style={{ display: 'flex', justifyContent: 'space-between', gap: 10 }}><h2 style={{ marginTop: 0 }}>Work Item {selectedWorkItem.workItemId}</h2><Button size="sm" onClick={() => { setSelectedWorkItem(null); }}>Close</Button></div><p style={muted}>Total {formatTokens(selectedWorkItem.totalTokens)} · Waste {formatTokens(selectedWorkItem.wasteTokens)} · {selectedWorkItem.runs} runs · context max {formatPercent(selectedWorkItem.contextMaxPercent)}</p><h3>Run timeline</h3>{runDrilldownResult === null ? <LoadingState label="Loading run detail…" /> : runs.length ? <ul style={{ paddingLeft: 18 }}>{runs.map((run: AnalyticsRunDrilldownRow) => <li key={run.runId} style={{ marginBottom: 9 }}><StatusPill status={run.status} spinner={false} /> #{run.runId} {run.tool}/{run.model ?? 'Unknown Model'} · {run.stage ?? '—'} · {formatTokens(run.totalTokens)} · context {formatPercent(run.contextWindowPercent)} {run.totalTokens === 0 && <em> No token telemetry captured</em>}</li>)}</ul> : <p style={muted}>No runs match this Work Item.</p>}<Button size="sm" onClick={() => { window.location.hash = `/runs/${selectedWorkItem.workItemId}`; }}>Open Run Detail</Button></aside>}
+    {selectedWorkItem && <WorkItemDrilldownDrawer workItem={selectedWorkItem} runs={runs} loading={runDrilldownResult === null} onClose={() => { setSelectedWorkItem(null); }} />}
   </div>;
 }

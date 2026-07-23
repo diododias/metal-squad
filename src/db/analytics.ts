@@ -59,6 +59,7 @@ export interface AnalyticsWorkItemRow extends AnalyticsMetrics {
  * drilldown action. It never belongs in the regular WebSocket snapshot. */
 export interface AnalyticsRunDrilldownRow {
   runId: number;
+  pipelineId: number | null;
   workItemId: string;
   projectId: string | null;
   epicId: string | null;
@@ -68,12 +69,48 @@ export interface AnalyticsRunDrilldownRow {
   status: string;
   stage: string | null;
   startedAt: string;
+  endedAt: string | null;
+  durationMs: number | null;
+  summary: string | null;
+  totalTokens: number;
+  inputTokens: number;
+  cachedInputTokens: number;
+  outputTokens: number;
+  usefulTokens: number;
+  wasteTokens: number;
+  hasTokenTelemetry: boolean;
+  contextWindowPercent: number | null;
+  confidence: AnalyticsMetricsConfidence;
+  tasks: AnalyticsTaskDrilldownRow[];
+  retries: AnalyticsRetryDrilldownRow[];
+  events: AnalyticsRunEventDrilldownRow[];
+}
+
+export interface AnalyticsTaskDrilldownRow {
+  taskId: string;
+  title: string;
+  status: string;
+  stage: string | null;
+  startedAt: string | null;
+  endedAt: string | null;
   totalTokens: number;
   inputTokens: number;
   cachedInputTokens: number;
   outputTokens: number;
   contextWindowPercent: number | null;
-  confidence: AnalyticsMetricsConfidence;
+}
+
+export interface AnalyticsRetryDrilldownRow {
+  attempt: number;
+  tool: string | null;
+  model: string | null;
+  error: string | null;
+  retriedAt: string;
+}
+
+export interface AnalyticsRunEventDrilldownRow {
+  event: string;
+  createdAt: string;
 }
 
 export interface AnalyticsPagination { limit?: number; offset?: number; }
@@ -156,8 +193,9 @@ function filteredRuns(filters: AnalyticsFilters): FilteredQuery {
       FROM token_usage u
       JOIN (SELECT run_id, MAX(id) AS id FROM token_usage GROUP BY run_id) latest ON latest.id = u.id
     ), filtered AS (
-      SELECT r.id, r.repo_id AS repoId, r.project_id AS projectId, r.epic_id AS epicId,
+      SELECT r.id, r.pipeline_id AS pipelineId, r.repo_id AS repoId, r.project_id AS projectId, r.epic_id AS epicId,
              r.feature_id AS workItemId, r.tool, r.model, r.status, r.stage, r.started_at AS startedAt,
+             r.ended_at AS endedAt, r.summary, r.publish_error AS publishError,
              COALESCE(r.input_tokens, lu.input, 0) AS inputTokens,
              COALESCE(r.cached_input_tokens, lu.cachedInput, 0) AS cachedInputTokens,
              COALESCE(r.output_tokens, lu.output, 0) AS outputTokens,
@@ -285,19 +323,69 @@ export function listAnalyticsRunDrilldown(filters: AnalyticsFilters = {}, pagina
   const limit = Math.max(1, Math.min(pagination.limit ?? 50, 200));
   const offset = Math.max(0, pagination.offset ?? 0);
   const { cte, params } = filteredRuns(filters);
-  const rows = getDb('readonly').prepare(`${cte}
-    SELECT id AS runId, workItemId, projectId, epicId, repoId, tool, model, status, stage, startedAt,
-      totalTokens, inputTokens, cachedInputTokens, outputTokens, contextWindowPercent, metricsConfidence
+  const database = getDb('readonly');
+  const rows = database.prepare(`${cte}
+    SELECT id AS runId, pipelineId, workItemId, projectId, epicId, repoId, tool, model, status, stage, startedAt, endedAt, summary, publishError,
+      totalTokens, inputTokens, cachedInputTokens, outputTokens, missingTokens, contextWindowPercent, metricsConfidence,
+      CASE WHEN endedAt IS NULL THEN NULL ELSE CAST((julianday(endedAt) - julianday(startedAt)) * 86400000 AS INTEGER) END AS durationMs
     FROM filtered ORDER BY startedAt DESC, runId DESC LIMIT ? OFFSET ?`).all(...params, limit, offset) as Record<string, unknown>[];
-  return rows.map((row) => ({
-    runId: Number(row.runId), workItemId: stringValue(row.workItemId),
+  if (rows.length === 0) return [];
+  const runIds = rows.map((row) => Number(row.runId));
+  const placeholders = runIds.map(() => '?').join(', ');
+  const taskRows = database.prepare(`SELECT run_id AS runId, task_id AS taskId, title, status, stage, started_at AS startedAt, ended_at AS endedAt,
+    input_tokens AS inputTokens, cached_input_tokens AS cachedInputTokens, output_tokens AS outputTokens, total_tokens AS totalTokens,
+    context_window_percent AS contextWindowPercent
+    FROM task_runs
+    WHERE run_id IN (${placeholders}) AND (input_tokens > 0 OR cached_input_tokens > 0 OR output_tokens > 0 OR total_tokens > 0)
+    ORDER BY run_id DESC, id ASC`).all(...runIds) as Record<string, unknown>[];
+  const retryRows = database.prepare(`SELECT run_id AS runId, attempt, tool, model, error, retried_at AS retriedAt
+    FROM retry_history WHERE run_id IN (${placeholders}) ORDER BY run_id DESC, attempt ASC`).all(...runIds) as Record<string, unknown>[];
+  const eventRows = database.prepare(`SELECT run_id AS runId, event, created_at AS createdAt
+    FROM run_events WHERE run_id IN (${placeholders})
+      AND event IN ('retry', 'blocked_resumed', 'resume_override', 'gate_wait', 'timeout:approval-created', 'timeout:approval-resolved', 'blocked', 'failed')
+    ORDER BY run_id DESC, id ASC`).all(...runIds) as Record<string, unknown>[];
+  const tasksByRun = new Map<number, AnalyticsTaskDrilldownRow[]>();
+  for (const task of taskRows) {
+    const runId = Number(task.runId);
+    const values = tasksByRun.get(runId) ?? [];
+    values.push({ taskId: stringValue(task.taskId), title: stringValue(task.title), status: stringValue(task.status), stage: nullableStringValue(task.stage),
+      startedAt: nullableStringValue(task.startedAt), endedAt: nullableStringValue(task.endedAt), totalTokens: Number(task.totalTokens ?? 0),
+      inputTokens: Number(task.inputTokens ?? 0), cachedInputTokens: Number(task.cachedInputTokens ?? 0), outputTokens: Number(task.outputTokens ?? 0),
+      contextWindowPercent: task.contextWindowPercent === null ? null : Number(task.contextWindowPercent ?? 0) });
+    tasksByRun.set(runId, values);
+  }
+  const retriesByRun = new Map<number, AnalyticsRetryDrilldownRow[]>();
+  for (const retry of retryRows) {
+    const runId = Number(retry.runId);
+    const values = retriesByRun.get(runId) ?? [];
+    values.push({ attempt: Number(retry.attempt), tool: nullableStringValue(retry.tool), model: nullableStringValue(retry.model), error: nullableStringValue(retry.error), retriedAt: stringValue(retry.retriedAt) });
+    retriesByRun.set(runId, values);
+  }
+  const eventsByRun = new Map<number, AnalyticsRunEventDrilldownRow[]>();
+  for (const event of eventRows) {
+    const runId = Number(event.runId);
+    const values = eventsByRun.get(runId) ?? [];
+    values.push({ event: stringValue(event.event), createdAt: stringValue(event.createdAt) });
+    eventsByRun.set(runId, values);
+  }
+  return rows.map((row) => {
+    const runId = Number(row.runId);
+    const totalTokens = Number(row.totalTokens ?? 0);
+    const isWaste = ['failed', 'blocked', 'aborted'].includes(stringValue(row.status));
+    const events = eventsByRun.get(runId) ?? [];
+    if (nullableStringValue(row.publishError)) events.push({ event: 'publish_failure', createdAt: nullableStringValue(row.endedAt) ?? stringValue(row.startedAt) });
+    return {
+    runId, pipelineId: row.pipelineId === null ? null : Number(row.pipelineId), workItemId: stringValue(row.workItemId),
     projectId: nullableStringValue(row.projectId), epicId: nullableStringValue(row.epicId), repoId: stringValue(row.repoId),
     tool: stringValue(row.tool), model: nullableStringValue(row.model), status: stringValue(row.status), stage: nullableStringValue(row.stage),
-    startedAt: stringValue(row.startedAt), totalTokens: Number(row.totalTokens ?? 0), inputTokens: Number(row.inputTokens ?? 0),
+    startedAt: stringValue(row.startedAt), endedAt: nullableStringValue(row.endedAt), durationMs: row.durationMs === null ? null : Number(row.durationMs), summary: nullableStringValue(row.summary), totalTokens, inputTokens: Number(row.inputTokens ?? 0),
     cachedInputTokens: Number(row.cachedInputTokens ?? 0), outputTokens: Number(row.outputTokens ?? 0),
+    usefulTokens: isWaste ? 0 : totalTokens, wasteTokens: isWaste ? totalTokens : 0, hasTokenTelemetry: Number(row.missingTokens ?? 0) === 0,
     contextWindowPercent: row.contextWindowPercent === null ? null : Number(row.contextWindowPercent ?? 0),
     confidence: row.metricsConfidence === 'derived' || row.metricsConfidence === 'unknown' ? row.metricsConfidence : 'exact',
-  }));
+    tasks: tasksByRun.get(runId) ?? [], retries: retriesByRun.get(runId) ?? [], events,
+  };
+  });
 }
 
 export function getTokenTimeSeries(filters: AnalyticsFilters = {}, bucket: AnalyticsBucket = 'day'): TokenTimeBucket[] {
