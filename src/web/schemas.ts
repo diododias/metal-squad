@@ -18,7 +18,7 @@ const AnalyticsPaginationSchema = z.object({ limit: z.number().int().positive().
 export const AnalyticsWorkItemsMessageSchema = z.object({
   type: z.literal('action:getAnalyticsWorkItems'), requestId: RequestIdSchema, filters: AnalyticsFiltersSchema,
   pagination: AnalyticsPaginationSchema.optional(),
-  sort: z.object({ by: z.enum(['workItemId', 'totalTokens', 'inputTokens', 'cachedInputTokens', 'outputTokens', 'runs', 'wasteTokens', 'successRatePercent']).optional(), direction: z.enum(['asc', 'desc']).optional() }).strict().optional(),
+  sort: z.object({ by: z.enum(['workItemId', 'totalTokens', 'inputTokens', 'cachedInputTokens', 'outputTokens', 'runs', 'wasteTokens', 'successRatePercent', 'lastRunAt', 'contextMaxPercent']).optional(), direction: z.enum(['asc', 'desc']).optional() }).strict().optional(),
 }).strict();
 export const AnalyticsBreakdownMessageSchema = z.object({
   type: z.literal('action:getAnalyticsBreakdown'), requestId: RequestIdSchema, filters: AnalyticsFiltersSchema,

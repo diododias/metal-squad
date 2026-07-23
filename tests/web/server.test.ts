@@ -113,6 +113,7 @@ const mocks = vi.hoisted(() => ({
   getAnalyticsDataQuality: vi.fn(),
   getTokenTimeSeries: vi.fn(),
   listAnalyticsWorkItems: vi.fn(),
+  countAnalyticsWorkItems: vi.fn(() => 1),
   listAnalyticsRunDrilldown: vi.fn(),
 }));
 
@@ -122,6 +123,7 @@ vi.mock('../../src/db/analytics.js', () => ({
   getAnalyticsDataQuality: mocks.getAnalyticsDataQuality,
   getTokenTimeSeries: mocks.getTokenTimeSeries,
   listAnalyticsWorkItems: mocks.listAnalyticsWorkItems,
+  countAnalyticsWorkItems: mocks.countAnalyticsWorkItems,
   listAnalyticsRunDrilldown: mocks.listAnalyticsRunDrilldown,
 }));
 
@@ -435,7 +437,7 @@ describe('web server', () => {
     mocks.getTokenBreakdowns.mockReturnValue({ byProject: [], byEpic: [], byRepository: [], byWorkItem: [], byTool: [], byModel: [], byStage: [], byStatus: [] });
     mocks.getAnalyticsDataQuality.mockReturnValue({ totalRuns: 2, exactRuns: 2, derivedRuns: 0, unknownRuns: 0, missingTokenRuns: 0, missingProjectSnapshotRuns: 0, missingEpicSnapshotRuns: 0 });
     mocks.getTokenTimeSeries.mockReturnValue([]);
-    mocks.listAnalyticsWorkItems.mockReturnValue([{ workItemId: 'feat-1', projectId: 'project-1', epicId: 'epic-1', repoId: 'repo-1', totalTokens: 120, inputTokens: 50, cachedInputTokens: 10, outputTokens: 60, runs: 2, successRatePercent: 100, wasteTokens: 0, contextAvgPercent: null, contextMaxPercent: null, contextP95Percent: null, confidence: 'exact' }]);
+    mocks.listAnalyticsWorkItems.mockReturnValue([{ workItemId: 'feat-1', projectId: 'project-1', epicId: 'epic-1', repoId: 'repo-1', totalTokens: 120, inputTokens: 50, cachedInputTokens: 10, outputTokens: 60, runs: 2, successRatePercent: 100, wasteTokens: 0, contextAvgPercent: null, contextMaxPercent: null, contextP95Percent: null, confidence: 'exact', doneRuns: 2, failedRuns: 0, blockedRuns: 0, abortedRuns: 0, lastRunAt: '2026-07-23T12:00:00.000Z', derivedStatus: 'done', dominantTool: 'codex', dominantModel: 'gpt-5' }]);
     mocks.listAnalyticsRunDrilldown.mockReturnValue([]);
   });
 
@@ -520,6 +522,7 @@ describe('web server', () => {
     const result = await waitForMatchingMessage(socket, (message) => message.type === 'analytics:workItems');
     expect(result).toMatchObject({ type: 'analytics:workItems', payload: { requestId: 'analytics-2', ok: true } });
     expect(mocks.listAnalyticsWorkItems).toHaveBeenCalledWith({ sinceDays: 7 }, { limit: 10, offset: 0 }, undefined);
+    expect(mocks.countAnalyticsWorkItems).toHaveBeenCalledWith({ sinceDays: 7 });
     socket.close();
   });
 
