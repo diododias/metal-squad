@@ -175,7 +175,7 @@ function collectAnalyticsSnapshot(revision: number): MsqWebState['analytics'] {
     return {
       period: filters,
       summary: { totalTokens: 0, inputTokens: 0, cachedInputTokens: 0, outputTokens: 0, runs: 0, successRatePercent: null, wasteTokens: 0, contextAvgPercent: null, contextMaxPercent: null, contextP95Percent: null, confidence: 'unknown' },
-      topGroups: { byProject: [], byEpic: [], byRepository: [], byWorkItem: [], byTool: [], byModel: [], byStage: [], byStatus: [] },
+      topGroups: { byProject: [], byEpic: [], byRepository: [], byWorkItem: [], byTool: [], byModel: [], byStage: [], byEffort: [], byThinking: [], byStatus: [] },
       dataQuality: { totalRuns: 0, exactRuns: 0, derivedRuns: 0, unknownRuns: 0, missingTokenRuns: 0, missingProjectSnapshotRuns: 0, missingEpicSnapshotRuns: 0 },
       generatedAt: new Date().toISOString(), revision,
     };

@@ -12,7 +12,7 @@ import { formatDurationMs, formatPercent, formatTokens } from '../lib/format.js'
 import { useActiveProject } from '../hooks/useActiveProject.js';
 import { useAnalytics } from '../hooks/useAnalytics.js';
 import type { MsqWebState, WebSocketClientMessage, WebSocketServerMessage } from '../../types.js';
-import type { AnalyticsRunDrilldownRow, AnalyticsSort, AnalyticsWorkItemRow, TokenGroup } from '../../../db/analytics.js';
+import type { AnalyticsRunDrilldownRow, AnalyticsSort, AnalyticsTokenGroup, AnalyticsWorkItemRow } from '../../../db/analytics.js';
 
 export interface AnalyticsPageProps {
   state: MsqWebState;
@@ -171,9 +171,9 @@ export function AnalyticsPage({ state, send = noopAnalyticsSend, analyticsMessag
     { value: group.cachedInputTokens, color: 'var(--accent-warn)', label: 'Cached input' },
     { value: group.outputTokens, color: 'var(--accent-ok)', label: 'Output' },
   ] : undefined;
-  const scopedGroups = (values: TokenGroup[]): TokenGroup[] => values.filter((group) => group.key !== 'unknown/unscoped');
-  const unscopedGroups = (values: TokenGroup[]): TokenGroup[] => values.filter((group) => group.key === 'unknown/unscoped');
-  const groupItems = (values: TokenGroup[]): BarListItem[] => scopedGroups(values).map((group) => ({ id: group.key, label: group.key, value: group.totalTokens, segments: tokenSegments(group) }));
+  const scopedGroups = (values: AnalyticsTokenGroup[]): AnalyticsTokenGroup[] => values.filter((group) => group.key !== 'unknown/unscoped');
+  const unscopedGroups = (values: AnalyticsTokenGroup[]): AnalyticsTokenGroup[] => values.filter((group) => group.key === 'unknown/unscoped');
+  const groupItems = (values: AnalyticsTokenGroup[]): BarListItem[] => scopedGroups(values).map((group) => ({ id: group.key, label: group.key, value: group.totalTokens, segments: tokenSegments(group) }));
   const workItemColumns: TableColumn<AnalyticsWorkItemRow & { id: string }>[] = [
     { key: 'projectId', label: 'Project' }, { key: 'epicId', label: 'Epic' }, { key: 'repoId', label: 'Repository' },
     { key: 'workItemId', label: 'Work Item', sortable: true, render: (row): React.JSX.Element => { const catalogItem = state.featureCatalog[row.workItemId]; return <><strong>{row.workItemId}</strong><br /><span style={muted}>{catalogItem ? `${catalogItem.title} · ${catalogItem.workItemType}` : 'unknown'}</span></>; } },
@@ -194,6 +194,16 @@ export function AnalyticsPage({ state, send = noopAnalyticsSend, analyticsMessag
     if (!by) return;
     setWorkItemSort((current) => ({ by, direction: current.by === by && current.direction === 'desc' ? 'asc' : 'desc' }));
     setWorkItemPage(0);
+  };
+
+  const groupLabel = (group: AnalyticsTokenGroup, kind: 'tool' | 'model' | 'stage' | 'effort' | 'thinking'): React.JSX.Element => <span>
+    <strong>{group.key}</strong><span style={muted}> · {formatTokens(group.totalTokens)} · {group.runs} runs · avg {formatTokens(Math.round(group.totalTokens / Math.max(group.runs, 1)))} · waste {formatTokens(group.wasteTokens)} · success {group.successRatePercent === null ? '—' : formatPercent(group.successRatePercent)}{kind === 'model' ? ` · ${qualityLabel(group.confidence)}` : ''}{kind === 'tool' && group.fallbackRuns > 0 ? ` · ${String(group.fallbackRuns)} fallback/retry` : ''}</span>
+  </span>;
+
+  const selectBreakdown = (kind: 'tool' | 'model' | 'stage', key: string): void => {
+    if (kind === 'tool') setTool(key);
+    if (kind === 'model') setModel(key);
+    if (kind === 'stage') setStage(key);
   };
 
   function Overview(): React.JSX.Element {
@@ -228,11 +238,19 @@ export function AnalyticsPage({ state, send = noopAnalyticsSend, analyticsMessag
   }
 
   function Breakdowns(): React.JSX.Element {
-    const cards = [['Project', groups.byProject], ['Epic', groups.byEpic], ...(shouldShowRepositoryBreakdown(groups.byRepository) ? [['Repository', groups.byRepository] as const] : []), ['Tool', groups.byTool], ['Model', groups.byModel], ['Stage', groups.byStage], ['Status', groups.byStatus]] as const;
+    const passiveCards: [string, AnalyticsTokenGroup[]][] = [['Project', groups.byProject], ['Epic', groups.byEpic], ...(shouldShowRepositoryBreakdown(groups.byRepository) ? [['Repository', groups.byRepository] as [string, AnalyticsTokenGroup[]]] : []), ['Status', groups.byStatus]];
+    const interactiveCards: [string, AnalyticsTokenGroup[], 'tool' | 'model' | 'stage'][] = [
+      ['Tool', groups.byTool, 'tool' as const], ['Model', groups.byModel, 'model' as const], ['Stage', groups.byStage, 'stage' as const],
+    ];
+    const secondaryCards: [string, AnalyticsTokenGroup[], 'effort' | 'thinking'][] = [['Effort', groups.byEffort ?? [], 'effort'], ['Thinking', groups.byThinking ?? [], 'thinking']];
     const unscoped = [...unscopedGroups(groups.byProject), ...unscopedGroups(groups.byEpic), ...unscopedGroups(groups.byRepository), ...unscopedGroups(groups.byWorkItem)];
     return <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
       <label style={muted}><input type="checkbox" checked={showTokenMix} onChange={(event) => { setShowTokenMix(event.target.checked); }} /> Show input / cached input / output mix</label>
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: 14 }}>{cards.map(([label, values]) => <Section key={label} title={`Tokens by ${label}`}><BarList items={groupItems(values)} valueFormatter={formatTokens} /></Section>)}</div>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: 14 }}>
+        {interactiveCards.map(([label, values, kind]) => <Section key={label} title={`Tokens by ${label}`} action={<span style={muted}>Click to filter</span>}><BarList items={values.map((group) => ({ id: group.key, label: groupLabel(group, kind), value: group.totalTokens, ariaLabel: `Filter by ${label} ${group.key}`, onClick: (): void => { selectBreakdown(kind, group.key); }, segments: tokenSegments(group) }))} valueFormatter={formatTokens} /></Section>)}
+        {secondaryCards.filter(([, values]) => values.length > 0).map(([label, values, kind]) => <Section key={label} title={`${label} breakdown`}><BarList items={values.map((group) => ({ id: group.key, label: groupLabel(group, kind), value: group.totalTokens, segments: tokenSegments(group) }))} valueFormatter={formatTokens} /></Section>)}
+        {passiveCards.map(([label, values]) => <Section key={label} title={`Tokens by ${label}`}><BarList items={groupItems(values)} valueFormatter={formatTokens} /></Section>)}
+      </div>
       {unscoped.length > 0 && <Section title="Data quality: unknown / unscoped"><p style={muted}>These runs are included in totals but could not be placed reliably in the product hierarchy.</p><BarList items={unscoped.map((group, index) => ({ id: `${group.key}-${String(index)}`, label: `Unscoped ${formatTokens(group.totalTokens)}`, value: group.totalTokens, color: 'var(--accent-warn)', segments: tokenSegments(group) }))} valueFormatter={formatTokens} /></Section>}
     </div>;
   }
