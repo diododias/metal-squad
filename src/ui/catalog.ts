@@ -154,7 +154,7 @@ export function getFeatureCatalog(scope: WorkItemScope = {}): Record<string, Wor
         description: feature.spec ?? null,
         tasks: feature.tasks,
         dependsOn: feature.dependsOn,
-        workflow: WorkflowSchema.parse(feature.workflow ?? {}),
+        workflow: WorkflowSchema.parse(feature.workflow),
         retry: feature.retry,
         specFile: feature.specFile,
         context: feature.context,
