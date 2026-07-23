@@ -12,7 +12,7 @@ import { formatPercent, formatTokens } from '../lib/format.js';
 import { useActiveProject } from '../hooks/useActiveProject.js';
 import { useAnalytics } from '../hooks/useAnalytics.js';
 import type { MsqWebState, WebSocketClientMessage, WebSocketServerMessage } from '../../types.js';
-import type { AnalyticsRunDrilldownRow, AnalyticsWorkItemRow } from '../../../db/analytics.js';
+import type { AnalyticsRunDrilldownRow, AnalyticsSort, AnalyticsWorkItemRow } from '../../../db/analytics.js';
 
 export interface AnalyticsPageProps {
   state: MsqWebState;
@@ -32,6 +32,7 @@ const TABS = [
 const sectionStyle: React.CSSProperties = { background: 'var(--bg-panel)', border: '1px solid var(--border-dim)', borderRadius: 'var(--radius-md)', padding: 16 };
 const muted: React.CSSProperties = { color: 'var(--text-dim)', fontSize: 'var(--text-sm)' };
 const noopAnalyticsSend = (): void => undefined;
+const WORK_ITEM_PAGE_SIZE = 25;
 
 function Section({ title, action, children }: { title: string; action?: React.ReactNode; children: React.ReactNode }): React.JSX.Element {
   return <section style={sectionStyle} aria-label={title}>
@@ -65,7 +66,8 @@ export function AnalyticsPage({ state, send = noopAnalyticsSend, analyticsMessag
   const [stage, setStage] = useState('');
   const [status, setStatus] = useState('');
   const [quality, setQuality] = useState<'exact' | 'derived' | 'unknown' | ''>('');
-  const [search, setSearch] = useState('');
+  const [workItemPage, setWorkItemPage] = useState(0);
+  const [workItemSort, setWorkItemSort] = useState<Required<AnalyticsSort>>({ by: 'totalTokens', direction: 'desc' });
   const [selectedWorkItem, setSelectedWorkItem] = useState<AnalyticsWorkItemRow | null>(null);
   const {
     workItems: workItemsResult, breakdown: breakdownResult, runDrilldown: runDrilldownResult,
@@ -80,7 +82,8 @@ export function AnalyticsPage({ state, send = noopAnalyticsSend, analyticsMessag
 
   useEffect(() => { if (analyticsMessage) onAnalyticsMessage(analyticsMessage); }, [analyticsMessage, onAnalyticsMessage]);
   useEffect(() => { requestBreakdown(filters); }, [filters, requestBreakdown]);
-  useEffect(() => { if (tab === 'work-items') requestWorkItems(filters, { limit: 50 }, { by: 'totalTokens', direction: 'desc' }); }, [filters, requestWorkItems, tab]);
+  useEffect(() => { setWorkItemPage(0); }, [filters]);
+  useEffect(() => { if (tab === 'work-items') requestWorkItems(filters, { limit: WORK_ITEM_PAGE_SIZE, offset: workItemPage * WORK_ITEM_PAGE_SIZE }, workItemSort); }, [filters, requestWorkItems, tab, workItemPage, workItemSort]);
   useEffect(() => { if (selectedWorkItem) requestRunDrilldown({ ...filters, workItemId: selectedWorkItem.workItemId }, { limit: 50 }); }, [filters, requestRunDrilldown, selectedWorkItem]);
 
   const result = breakdownResult?.ok ? breakdownResult : null;
@@ -96,7 +99,7 @@ export function AnalyticsPage({ state, send = noopAnalyticsSend, analyticsMessag
   ].filter((chip): chip is string => Boolean(chip));
   const isPartial = dataQuality.derivedRuns > 0 || dataQuality.unknownRuns > 0 || dataQuality.missingTokenRuns > 0;
 
-  const clearFilters = (): void => { setAllProjects(false); setEpic(''); setRepository(''); setWorkItem(''); setTool(''); setModel(''); setStage(''); setStatus(''); setQuality(''); setSearch(''); };
+  const clearFilters = (): void => { setAllProjects(false); setEpic(''); setRepository(''); setWorkItem(''); setTool(''); setModel(''); setStage(''); setStatus(''); setQuality(''); };
   const exportCurrentView = (format: 'csv' | 'json'): void => {
     const payload = { filters, period, generatedAt: new Date().toISOString(), schemaVersion: 1, totals: summary, dataQuality, rows: tab === 'work-items' ? workItems : groups.byWorkItem };
     const content = format === 'json' ? JSON.stringify(payload, null, 2) : ['workItemId,totalTokens,wasteTokens,runs,dataQuality', ...workItems.map((row) => `${row.workItemId},${String(row.totalTokens)},${String(row.wasteTokens)},${String(row.runs)},${row.confidence}`)].join('\n');
@@ -106,17 +109,26 @@ export function AnalyticsPage({ state, send = noopAnalyticsSend, analyticsMessag
 
   const trend: TrendPoint[] = (result?.timeSeries ?? []).map((bucket) => ({ label: bucket.bucket.slice(5), value: bucket.totalTokens }));
   const workItemColumns: TableColumn<AnalyticsWorkItemRow & { id: string }>[] = [
-    { key: 'workItemId', label: 'Work Item', render: (row) => <strong>{row.workItemId}</strong> },
-    { key: 'projectId', label: 'Project' }, { key: 'epicId', label: 'Epic' }, { key: 'repoId', label: 'Repo' },
-    { key: 'totalTokens', label: 'Total', align: 'right', render: (row) => formatTokens(row.totalTokens) },
-    { key: 'inputTokens', label: 'Input', align: 'right', render: (row) => formatTokens(row.inputTokens) },
-    { key: 'cachedInputTokens', label: 'Cached', align: 'right', render: (row) => formatTokens(row.cachedInputTokens) },
-    { key: 'outputTokens', label: 'Output', align: 'right', render: (row) => formatTokens(row.outputTokens) },
-    { key: 'wasteTokens', label: 'Waste', align: 'right', render: (row) => formatTokens(row.wasteTokens) },
-    { key: 'runs', label: 'Runs', align: 'right' },
+    { key: 'projectId', label: 'Project' }, { key: 'epicId', label: 'Epic' }, { key: 'repoId', label: 'Repository' },
+    { key: 'workItemId', label: 'Work Item', sortable: true, render: (row): React.JSX.Element => { const catalogItem = state.featureCatalog[row.workItemId]; return <><strong>{row.workItemId}</strong><br /><span style={muted}>{catalogItem ? `${catalogItem.title} · ${catalogItem.workItemType}` : 'unknown'}</span></>; } },
+    { key: 'derivedStatus', label: 'Status', render: (row) => <span>{row.derivedStatus === 'unknown/unscoped' ? 'unknown' : row.derivedStatus}<br /><span style={muted}>{`${String(row.doneRuns)} done · ${String(row.failedRuns)} failed · ${String(row.blockedRuns)} blocked · ${String(row.abortedRuns)} aborted`}</span></span> },
+    { key: 'totalTokens', label: 'Total', sortable: true, align: 'right', render: (row) => formatTokens(row.totalTokens) },
+    { key: 'inputTokens', label: 'Input', sortable: true, align: 'right', render: (row) => formatTokens(row.inputTokens) },
+    { key: 'cachedInputTokens', label: 'Cached', sortable: true, align: 'right', render: (row) => formatTokens(row.cachedInputTokens) },
+    { key: 'outputTokens', label: 'Output', sortable: true, align: 'right', render: (row) => formatTokens(row.outputTokens) },
+    { key: 'runs', label: 'Runs', sortable: true, align: 'right' }, { key: 'wasteTokens', label: 'Waste', sortable: true, align: 'right', render: (row) => formatTokens(row.wasteTokens) },
+    { key: 'lastRunAt', label: 'Last run', sortable: true, render: (row) => row.lastRunAt ? new Date(row.lastRunAt).toLocaleDateString() : '—' },
+    { key: 'dominantTool', label: 'Tool / model', render: (row) => `${row.dominantTool === 'unknown/unscoped' ? 'unknown' : row.dominantTool} / ${row.dominantModel === 'unknown/unscoped' ? 'unknown' : row.dominantModel}` },
+    { key: 'contextMaxPercent', label: 'Context max', sortable: true, align: 'right', render: (row) => formatPercent(row.contextMaxPercent) },
     { key: 'confidence', label: 'Quality', render: (row) => <Tag tone={row.confidence === 'exact' ? 'accent' : 'default'}>{qualityLabel(row.confidence)}</Tag> },
   ];
-  const filteredWorkItems = workItems.filter((row) => row.workItemId.toLowerCase().includes(search.toLowerCase()));
+
+  const setServerSort = (key: string): void => {
+    const by = key as AnalyticsSort['by'];
+    if (!by) return;
+    setWorkItemSort((current) => ({ by, direction: current.by === by && current.direction === 'desc' ? 'asc' : 'desc' }));
+    setWorkItemPage(0);
+  };
 
   function Overview(): React.JSX.Element {
     if (summary.runs === 0 && !breakdownResult) return <EmptyState />;
@@ -142,9 +154,9 @@ export function AnalyticsPage({ state, send = noopAnalyticsSend, analyticsMessag
   function WorkItems(): React.JSX.Element {
     const error = workItemsResult && !workItemsResult.ok ? workItemsResult.error : null;
     return <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}><input aria-label="Search Work Item" value={search} onChange={(event) => { setSearch(event.target.value); }} placeholder="Search Work Item…" style={{ padding: 8, background: 'var(--bg-panel)', color: 'var(--text-primary)', border: '1px solid var(--border-dim)', borderRadius: 'var(--radius-sm)' }} /><span style={muted}>Sort: Tokens desc · server-side</span></div>
-      {error ? <div role="alert" style={{ color: 'var(--accent-danger)' }}>Work Items could not load: {error.message}</div> : workItemsResult === null ? <LoadingState label="Loading Work Items…" /> : filteredWorkItems.length ? <div style={{ overflowX: 'auto' }}><Table columns={workItemColumns} rows={filteredWorkItems.map((row) => ({ ...row, id: row.workItemId }))} onRowClick={setSelectedWorkItem} /></div> : <EmptyState />}
-      <span style={muted}>1–{filteredWorkItems.length} of {filteredWorkItems.length} · Work Items without tokens remain visible as — when returned by the query.</span>
+      <span style={muted}>Select a column heading to sort the complete ledger on the server.</span>
+      {error ? <div role="alert" style={{ color: 'var(--accent-danger)' }}>Work Items could not load: {error.message}</div> : workItemsResult === null ? <LoadingState label="Loading Work Items…" /> : workItems.length ? <div style={{ overflowX: 'auto' }}><Table columns={workItemColumns} rows={workItems.map((row) => ({ ...row, id: row.workItemId }))} onRowClick={setSelectedWorkItem} sort={{ key: workItemSort.by, direction: workItemSort.direction }} onSort={setServerSort} /></div> : <EmptyState />}
+      {workItemsResult?.ok && <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8 }}><span style={muted}>{workItemsResult.total ? `${String(workItemPage * WORK_ITEM_PAGE_SIZE + 1)}–${String(Math.min((workItemPage + 1) * WORK_ITEM_PAGE_SIZE, workItemsResult.total))} of ${String(workItemsResult.total)}` : '0 Work Items'} · Work Items without tokens remain visible as —.</span><span style={{ display: 'flex', gap: 6 }}><Button size="sm" disabled={workItemPage === 0} onClick={() => { setWorkItemPage((page) => Math.max(0, page - 1)); }}>Previous</Button><Button size="sm" disabled={(workItemPage + 1) * WORK_ITEM_PAGE_SIZE >= workItemsResult.total} onClick={() => { setWorkItemPage((page) => page + 1); }}>Next</Button></span></div>}
     </div>;
   }
 

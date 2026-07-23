@@ -45,6 +45,14 @@ export interface AnalyticsWorkItemRow extends AnalyticsMetrics {
   projectId: string;
   epicId: string;
   repoId: string;
+  doneRuns: number;
+  failedRuns: number;
+  blockedRuns: number;
+  abortedRuns: number;
+  lastRunAt: string | null;
+  derivedStatus: string;
+  dominantTool: string;
+  dominantModel: string;
 }
 
 /** A deliberately bounded raw-run projection used only by the Analytics
@@ -70,7 +78,7 @@ export interface AnalyticsRunDrilldownRow {
 
 export interface AnalyticsPagination { limit?: number; offset?: number; }
 export type AnalyticsWorkItemSort = keyof Pick<AnalyticsWorkItemRow,
-  'workItemId' | 'totalTokens' | 'inputTokens' | 'cachedInputTokens' | 'outputTokens' | 'runs' | 'wasteTokens' | 'successRatePercent'>;
+  'workItemId' | 'totalTokens' | 'inputTokens' | 'cachedInputTokens' | 'outputTokens' | 'runs' | 'wasteTokens' | 'successRatePercent' | 'lastRunAt' | 'contextMaxPercent'>;
 export interface AnalyticsSort { by?: AnalyticsWorkItemSort; direction?: 'asc' | 'desc'; }
 
 export interface TokenGroup extends AnalyticsMetrics {
@@ -217,17 +225,59 @@ export function listAnalyticsWorkItems(filters: AnalyticsFilters = {}, paginatio
   const sortable: Record<AnalyticsWorkItemSort, string> = {
     workItemId: 'groupKey', totalTokens: 'totalTokens', inputTokens: 'inputTokens',
     cachedInputTokens: 'cachedInputTokens', outputTokens: 'outputTokens', runs: 'runs',
-    wasteTokens: 'wasteTokens', successRatePercent: 'successRatePercent',
+    wasteTokens: 'wasteTokens', successRatePercent: 'successRatePercent', lastRunAt: 'lastRunAt', contextMaxPercent: 'contextMaxPercent',
   };
   const by = sortable[sort.by ?? 'totalTokens'];
   const direction = sort.direction === 'asc' ? 'ASC' : 'DESC';
-  const query = aggregateQuery('workItemId', filters, `${by} ${direction}, groupKey ASC`);
-  const sql = `${query.sql} LIMIT ? OFFSET ?`;
-  const rows = getDb('readonly').prepare(sql).all(...query.params, limit, offset) as Record<string, unknown>[];
+  const { cte, params } = filteredRuns(filters);
+  const rows = getDb('readonly').prepare(`${cte}, grouped AS (
+    SELECT workItemId AS groupKey, MIN(projectId) AS projectId, MIN(epicId) AS epicId, MIN(repoId) AS repoId,
+      ${METRICS_COLUMNS},
+      SUM(CASE WHEN status = 'done' THEN 1 ELSE 0 END) AS doneRuns,
+      SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END) AS failedRuns,
+      SUM(CASE WHEN status = 'blocked' THEN 1 ELSE 0 END) AS blockedRuns,
+      SUM(CASE WHEN status = 'aborted' THEN 1 ELSE 0 END) AS abortedRuns
+    FROM filtered GROUP BY workItemId
+  ), contexts AS (
+    SELECT workItemId AS groupKey, contextWindowPercent,
+      ROW_NUMBER() OVER (PARTITION BY workItemId ORDER BY contextWindowPercent) AS rowNumber,
+      COUNT(*) OVER (PARTITION BY workItemId) AS contextCount
+    FROM filtered WHERE contextWindowPercent IS NOT NULL
+  ), p95 AS (
+    SELECT groupKey, MAX(CASE WHEN rowNumber = CAST((contextCount * 95 + 99) / 100 AS INTEGER)
+      THEN contextWindowPercent END) AS contextP95Percent FROM contexts GROUP BY groupKey
+  ), latest AS (
+    SELECT workItemId AS groupKey, startedAt AS lastRunAt, status AS derivedStatus,
+      ROW_NUMBER() OVER (PARTITION BY workItemId ORDER BY startedAt DESC, id DESC) AS rowNumber FROM filtered
+  ), toolRank AS (
+    SELECT workItemId AS groupKey, tool,
+      ROW_NUMBER() OVER (PARTITION BY workItemId ORDER BY COUNT(*) DESC, tool ASC) AS rowNumber FROM filtered GROUP BY workItemId, tool
+  ), modelRank AS (
+    SELECT workItemId AS groupKey, COALESCE(model, '${ANALYTICS_UNSCOPED}') AS model,
+      ROW_NUMBER() OVER (PARTITION BY workItemId ORDER BY COUNT(*) DESC, COALESCE(model, '${ANALYTICS_UNSCOPED}') ASC) AS rowNumber FROM filtered GROUP BY workItemId, COALESCE(model, '${ANALYTICS_UNSCOPED}')
+  )
+  SELECT grouped.*, p95.contextP95Percent, latest.lastRunAt, latest.derivedStatus,
+    toolRank.tool AS dominantTool, modelRank.model AS dominantModel
+  FROM grouped
+  LEFT JOIN p95 ON p95.groupKey IS grouped.groupKey
+  LEFT JOIN latest ON latest.groupKey IS grouped.groupKey AND latest.rowNumber = 1
+  LEFT JOIN toolRank ON toolRank.groupKey IS grouped.groupKey AND toolRank.rowNumber = 1
+  LEFT JOIN modelRank ON modelRank.groupKey IS grouped.groupKey AND modelRank.rowNumber = 1
+  ORDER BY ${by} ${direction}, groupKey ASC LIMIT ? OFFSET ?`).all(...params, limit, offset) as Record<string, unknown>[];
   return rows.map((row) => ({
     ...toMetrics(row), workItemId: stringValue(row.groupKey), projectId: stringValue(row.projectId),
     epicId: stringValue(row.epicId), repoId: stringValue(row.repoId),
+    doneRuns: Number(row.doneRuns ?? 0), failedRuns: Number(row.failedRuns ?? 0), blockedRuns: Number(row.blockedRuns ?? 0), abortedRuns: Number(row.abortedRuns ?? 0),
+    lastRunAt: nullableStringValue(row.lastRunAt), derivedStatus: stringValue(row.derivedStatus),
+    dominantTool: stringValue(row.dominantTool), dominantModel: stringValue(row.dominantModel),
   }));
+}
+
+export function countAnalyticsWorkItems(filters: AnalyticsFilters = {}): number {
+  if (!databaseExists()) return 0;
+  const { cte, params } = filteredRuns(filters);
+  const row = getDb('readonly').prepare(`${cte} SELECT COUNT(*) AS total FROM (SELECT workItemId FROM filtered GROUP BY workItemId)`).get(...params) as Record<string, unknown>;
+  return Number(row.total ?? 0);
 }
 
 export function listAnalyticsRunDrilldown(filters: AnalyticsFilters = {}, pagination: AnalyticsPagination = {}): AnalyticsRunDrilldownRow[] {

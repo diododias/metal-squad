@@ -68,17 +68,21 @@ describe('analytics aggregate queries (ANA-03)', () => {
   });
 
   it('paginates sortable work-item rankings and filters data quality', async () => {
-    const { db, listAnalyticsWorkItems, getAnalyticsDataQuality } = await setup();
+    const { db, listAnalyticsWorkItems, countAnalyticsWorkItems, getAnalyticsDataQuality } = await setup();
     insertRun(db, { id: 1, startedAt: '2026-07-01 10:00:00', workItemId: 'w1', total: 100 });
-    insertRun(db, { id: 2, startedAt: '2026-07-02 10:00:00', workItemId: 'w2', total: 300, confidence: 'derived' });
+    insertRun(db, { id: 2, startedAt: '2026-07-02 10:00:00', workItemId: 'w2', total: 300, context: 90, confidence: 'derived' });
     insertRun(db, { id: 3, startedAt: '2026-07-03 10:00:00', workItemId: 'legacy', epicId: null, projectId: null, total: null, confidence: 'unknown' });
 
     expect(listAnalyticsWorkItems({}, { limit: 1, offset: 1 }, { by: 'totalTokens', direction: 'desc' })).toEqual([
-      expect.objectContaining({ workItemId: 'w1', totalTokens: 100, epicId: 'e1' }),
+      expect.objectContaining({ workItemId: 'w1', totalTokens: 100, epicId: 'e1', doneRuns: 1, failedRuns: 0, blockedRuns: 0, abortedRuns: 0, derivedStatus: 'done', dominantTool: 'codex', dominantModel: 'gpt-5' }),
     ]);
     expect(listAnalyticsWorkItems({ dataQuality: 'missing-snapshot' })).toEqual([
       expect.objectContaining({ workItemId: 'legacy', epicId: 'unknown/unscoped', projectId: 'unknown/unscoped' }),
     ]);
+    expect(listAnalyticsWorkItems({}, { limit: 1 }, { by: 'contextMaxPercent', direction: 'desc' })).toEqual([
+      expect.objectContaining({ workItemId: 'w2', contextMaxPercent: 90, lastRunAt: '2026-07-02 10:00:00' }),
+    ]);
+    expect(countAnalyticsWorkItems()).toBe(3);
     expect(getAnalyticsDataQuality()).toMatchObject({ totalRuns: 3, exactRuns: 1, derivedRuns: 1, unknownRuns: 1, missingTokenRuns: 1, missingProjectSnapshotRuns: 1, missingEpicSnapshotRuns: 1 });
   });
 
