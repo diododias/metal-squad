@@ -3,7 +3,7 @@
 - **Status**: Accepted
 - **Date**: 2026-07-17
 - **Scope**: Épico Projetos / PRJ-00
-- **Related**: [Roadmap Projetos](../epics/epico%20-%20projetos/ROADMAP.md), [PRJ-00](../epics/epico%20-%20projetos/features/PRJ-00-adr-governanca-terminologia.md)
+- **Related**: [Roadmap Projetos](../epics/epico%20-%20projetos/ROADMAP.md), [PRJ-00](../epics/epico%20-%20projetos/features/PRJ-00-adr-governanca-terminologia.md), [ADR-002 — Métricas, escopo e semântica de tokens para Analytics](ADR-002-metricas-tokens-analytics.md)
 
 ## Contexto
 

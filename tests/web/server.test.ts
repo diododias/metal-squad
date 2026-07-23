@@ -120,6 +120,7 @@ const mocks = vi.hoisted(() => ({
   })),
   getTokenTimeSeries: vi.fn(),
   listAnalyticsWorkItems: vi.fn(),
+  countAnalyticsWorkItems: vi.fn(() => 1),
   listAnalyticsRunDrilldown: vi.fn(),
 }));
 
@@ -133,6 +134,7 @@ vi.mock('../../src/db/analytics.js', () => ({
   getAnalyticsExportDataset: mocks.getAnalyticsExportDataset,
   getTokenTimeSeries: mocks.getTokenTimeSeries,
   listAnalyticsWorkItems: mocks.listAnalyticsWorkItems,
+  countAnalyticsWorkItems: mocks.countAnalyticsWorkItems,
   listAnalyticsRunDrilldown: mocks.listAnalyticsRunDrilldown,
 }));
 
@@ -446,7 +448,7 @@ describe('web server', () => {
     mocks.getTokenBreakdowns.mockReturnValue({ byProject: [], byEpic: [], byRepository: [], byWorkItem: [], byTool: [], byModel: [], byStage: [], byStatus: [] });
     mocks.getAnalyticsDataQuality.mockReturnValue({ totalRuns: 2, exactRuns: 2, derivedRuns: 0, unknownRuns: 0, missingTokenRuns: 0, missingProjectSnapshotRuns: 0, missingEpicSnapshotRuns: 0 });
     mocks.getTokenTimeSeries.mockReturnValue([]);
-    mocks.listAnalyticsWorkItems.mockReturnValue([{ workItemId: 'feat-1', projectId: 'project-1', epicId: 'epic-1', repoId: 'repo-1', totalTokens: 120, inputTokens: 50, cachedInputTokens: 10, outputTokens: 60, runs: 2, successRatePercent: 100, wasteTokens: 0, contextAvgPercent: null, contextMaxPercent: null, contextP95Percent: null, confidence: 'exact' }]);
+    mocks.listAnalyticsWorkItems.mockReturnValue([{ workItemId: 'feat-1', projectId: 'project-1', epicId: 'epic-1', repoId: 'repo-1', totalTokens: 120, inputTokens: 50, cachedInputTokens: 10, outputTokens: 60, runs: 2, successRatePercent: 100, wasteTokens: 0, contextAvgPercent: null, contextMaxPercent: null, contextP95Percent: null, confidence: 'exact', doneRuns: 2, failedRuns: 0, blockedRuns: 0, abortedRuns: 0, lastRunAt: '2026-07-23T12:00:00.000Z', derivedStatus: 'done', dominantTool: 'codex', dominantModel: 'gpt-5' }]);
     mocks.listAnalyticsRunDrilldown.mockReturnValue([]);
   });
 
@@ -531,6 +533,24 @@ describe('web server', () => {
     const result = await waitForMatchingMessage(socket, (message) => message.type === 'analytics:workItems');
     expect(result).toMatchObject({ type: 'analytics:workItems', payload: { requestId: 'analytics-2', ok: true } });
     expect(mocks.listAnalyticsWorkItems).toHaveBeenCalledWith({ sinceDays: 7 }, { limit: 10, offset: 0 }, undefined);
+    expect(mocks.countAnalyticsWorkItems).toHaveBeenCalledWith({ sinceDays: 7 });
+    socket.close();
+  });
+
+  it('serves the Work Item run drilldown only when the drawer requests it', async () => {
+    mocks.listAnalyticsRunDrilldown.mockReturnValue([{ runId: 4, pipelineId: 2, workItemId: 'feat-1', tasks: [], retries: [], events: [] }]);
+    const { createWebServer } = await import('../../src/web/server.js');
+    server = createWebServer({ host: '127.0.0.1', port: 0, auth: 'token', token: 'secret' });
+    await new Promise<void>((resolve) => server!.server.listen(0, '127.0.0.1', resolve));
+    const port = (server!.server.address() as { port: number }).port;
+    const socket = new WebSocket(`ws://127.0.0.1:${port}/ws`);
+    await waitForOpen(socket);
+    socket.send(JSON.stringify({ type: 'auth', token: 'secret' }));
+    await waitForSocketMessage(socket);
+    socket.send(JSON.stringify({ type: 'action:getAnalyticsRunDrilldown', requestId: 'drilldown-1', filters: { workItemId: 'feat-1' }, pagination: { limit: 50 } }));
+    const result = await waitForMatchingMessage(socket, (message) => message.type === 'analytics:runDrilldown');
+    expect(result).toMatchObject({ type: 'analytics:runDrilldown', payload: { requestId: 'drilldown-1', ok: true, rows: [{ runId: 4, pipelineId: 2 }] } });
+    expect(mocks.listAnalyticsRunDrilldown).toHaveBeenCalledWith({ workItemId: 'feat-1' }, { limit: 50 });
     socket.close();
   });
 

@@ -102,10 +102,52 @@ export function sanitizeToolCallRecord(record: ToolCallRecord): ToolCallRecord {
 }
 
 export interface TokenUsage {
+  /** Tokens de entrada não servidos do cache (semântica ANA-00). */
   input: number;
   cachedInput?: number;
   output: number;
   total: number;
+  /** Payload do adapter quando a semântica exigiu transformação. Não persiste em `runs`. */
+  rawUsage?: unknown;
+}
+
+export const TOKEN_DATA_QUALITIES = ['valid', 'corrected', 'invalid', 'unknown'] as const;
+export type TokenDataQuality = (typeof TOKEN_DATA_QUALITIES)[number];
+
+export interface NormalizedTokenUsage {
+  usage: TokenUsage;
+  dataQuality: Extract<TokenDataQuality, 'valid' | 'corrected'>;
+  /** Snapshot do adapter antes da correção, somente para auditoria. */
+  rawUsageJson: string | null;
+}
+
+/**
+ * Faz da fronteira de persistência o último guardrail contra payloads de
+ * adapter inconsistentes. `total` continua autoritativo quando comporta o
+ * breakdown; quando não comporta, é elevado ao mínimo auditável.
+ */
+export function normalizeTokenUsage(usage: TokenUsage): NormalizedTokenUsage {
+  const original = { ...usage };
+  const integer = (value: number | undefined): number =>
+    Number.isFinite(value) ? Math.max(0, Math.trunc(value ?? 0)) : 0;
+  const input = integer(usage.input);
+  const output = integer(usage.output);
+  const cachedInput = usage.cachedInput === undefined ? undefined : integer(usage.cachedInput);
+  const breakdown = input + (cachedInput ?? 0) + output;
+  const declaredTotal = integer(usage.total);
+  const total = Math.max(declaredTotal, breakdown);
+  const normalized = { input, ...(cachedInput === undefined ? {} : { cachedInput }), output, total };
+  const corrected = input !== usage.input
+    || output !== usage.output
+    || (cachedInput !== undefined && cachedInput !== usage.cachedInput)
+    || total !== usage.total;
+  return {
+    usage: normalized,
+    dataQuality: corrected ? 'corrected' : 'valid',
+    rawUsageJson: corrected || usage.rawUsage !== undefined
+      ? JSON.stringify(usage.rawUsage ?? original)
+      : null,
+  };
 }
 
 export interface RunControlNeedsInput {

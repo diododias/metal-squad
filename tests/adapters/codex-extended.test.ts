@@ -123,8 +123,8 @@ describe('codexAdapter.parseUsage', () => {
       type: 'turn.completed',
       usage: { input_tokens: 100, cached_input_tokens: 20, output_tokens: 50, reasoning_output_tokens: 10 },
     });
-    expect(codexAdapter.parseUsage?.(transcript)).toEqual({
-      input: 100, cachedInput: 20, output: 60, total: 180,
+    expect(codexAdapter.parseUsage?.(transcript)).toMatchObject({
+      input: 80, cachedInput: 20, output: 60, total: 160,
     });
   });
 
