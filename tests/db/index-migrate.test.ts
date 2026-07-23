@@ -121,6 +121,7 @@ describe('getDb migration — column checks', () => {
       { name: 'session_status' }, { name: 'session_started_at' }, { name: 'session_updated_at' },
       { name: 'session_elapsed_ms' }, { name: 'session_last_output_at' }, { name: 'session_idle_ms' },
       { name: 'session_reason' }, { name: 'session_terminal' }, { name: 'project_id' },
+      { name: 'epic_id' },
       { name: 'adapter_session_tool' }, { name: 'adapter_session_id' },
       { name: 'model' }, { name: 'effort' }, { name: 'thinking' }, { name: 'tool_name' },
       { name: 'tool_version' }, { name: 'pricing_profile_id' }, { name: 'metrics_confidence' },
