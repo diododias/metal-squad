@@ -171,7 +171,7 @@ export function ProjectDetailPage({ state, projectId, send, actionResults, archi
           <p style={muted}>No Epics yet.</p>
         </Card>}
         {epics.length > 0 && filteredEpics.length === 0 && <Card><p style={muted}>No matching Epics.</p></Card>}
-        {visible.map((epic) => <EpicRow key={epic.epicId} epic={epic} state={state} projectId={projectId} />)}
+        {visible.map((epic) => <EpicRow key={epic.epicId} epic={epic} state={state} projectId={projectId} send={send} actionResults={actionResults} onToast={onToast} />)}
         {filteredEpics.length > PAGE_SIZE && <div style={{ marginTop: 10, display: 'flex', gap: 8 }}>
           <Button size="sm" disabled={page === 0} onClick={() => { setPage(page - 1); }}>previous</Button>
           <Button size="sm" disabled={(page + 1) * PAGE_SIZE >= filteredEpics.length} onClick={() => { setPage(page + 1); }}>next</Button>
@@ -230,8 +230,11 @@ export function ProjectDetailPage({ state, projectId, send, actionResults, archi
   </div>;
 }
 
-function EpicRow({ epic, state, projectId }: {
+function EpicRow({ epic, state, projectId, send, actionResults, onToast }: {
   epic: EpicRowData; state: MsqWebState; projectId: string;
+  send: (message: WebSocketClientMessage) => void;
+  actionResults: Record<string, Extract<WebSocketServerMessage, { type: 'action:result' }>>;
+  onToast?: (item: ToastStackItem) => void;
 }): React.JSX.Element {
   const items = useMemo(() => Object.values(state.featureCatalog).filter((item) => item.epicId === epic.epicId), [epic.epicId, state.featureCatalog]);
   const navigateToEpic = (): void => { window.location.hash = `/projects/${projectId}/epics/${epic.epicId}`; };
@@ -258,6 +261,18 @@ function EpicRow({ epic, state, projectId }: {
       </div>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
         <StatusPill status={epic.status === 'done' ? 'done' : epic.status === 'in_progress' ? 'running' : 'not_started'} spinner={false} />
+        <div role="none" onClick={(e) => { e.stopPropagation(); }} onKeyDown={(e) => { e.stopPropagation(); }}>
+          <LifecycleActions
+            kind="epic"
+            id={epic.epicId}
+            name={epic.title}
+            revision={epic.revision}
+            allowed={state.lifecycle?.[`epic:${epic.epicId}`]}
+            send={send}
+            actionResults={actionResults}
+            onToast={onToast}
+          />
+        </div>
         <span style={{ color: 'var(--text-faint)', fontSize: 'var(--text-sm)' }}>›</span>
       </div>
     </div>
