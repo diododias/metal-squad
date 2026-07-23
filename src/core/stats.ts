@@ -36,10 +36,11 @@ export function computeStats(rows: StatsRunRow[], topN = 5): RunStats {
 
   for (const row of rows) {
     if (row.status in runs) runs[row.status as keyof typeof runs] += 1;
-    tokens.total += row.totalTokens ?? 0;
-    tokens.input += row.inputTokens ?? 0;
-    tokens.cachedInput += row.cachedInputTokens ?? 0;
-    tokens.output += row.outputTokens ?? 0;
+    const usableTokens = row.dataQuality === undefined || row.dataQuality === 'valid' || row.dataQuality === 'corrected';
+    tokens.total += usableTokens ? row.totalTokens ?? 0 : 0;
+    tokens.input += usableTokens ? row.inputTokens ?? 0 : 0;
+    tokens.cachedInput += usableTokens ? row.cachedInputTokens ?? 0 : 0;
+    tokens.output += usableTokens ? row.outputTokens ?? 0 : 0;
     if (row.contextWindowPercent !== null && row.contextWindowPercent !== undefined) {
       contextPercentTotal += row.contextWindowPercent;
       contextPercentCount += 1;
@@ -49,7 +50,7 @@ export function computeStats(rows: StatsRunRow[], topN = 5): RunStats {
     }
 
     const feature = byFeature.get(row.featureId) ?? { tokens: 0, runs: 0 };
-    feature.tokens += row.totalTokens ?? 0;
+    feature.tokens += usableTokens ? row.totalTokens ?? 0 : 0;
     feature.runs += 1;
     byFeature.set(row.featureId, feature);
 
@@ -199,7 +200,9 @@ export function aggregateTokens(rows: StatsRunRow[]): TokenAggregates {
   let totalTokens = 0;
 
   for (const row of rows) {
-    const tokens = row.totalTokens ?? 0;
+    const tokens = row.dataQuality === undefined || row.dataQuality === 'valid' || row.dataQuality === 'corrected'
+      ? row.totalTokens ?? 0
+      : 0;
     totalTokens += tokens;
 
     const repoToolKey = `${row.repoId} ${row.tool}`;

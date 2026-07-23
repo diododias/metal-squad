@@ -2,7 +2,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import { resolve, dirname, join } from 'node:path';
 import { spawn } from 'node:child_process';
 import type { Backlog, Effort, Feature, OnFail, Tool } from '../backlog/schema.js';
-import type { DeclaredPublication, PublishEvidence, RunFeatureOptions, RunResult } from '../adapters/types.js';
+import { normalizeTokenUsage, type DeclaredPublication, type PublishEvidence, type RunFeatureOptions, type RunResult } from '../adapters/types.js';
 import { assertNoCrossRepositoryDependencies, topoOrder, selectStartableFeaturePlan } from '../orchestrator/graph.js';
 import { schedule } from '../orchestrator/scheduler.js';
 import {
@@ -373,8 +373,9 @@ export async function executeBacklog(
         // session instead of always starting fresh.
         if (res.session) updateRunSessionHandle(runId, res.session);
         if (res.usage) {
-          recordUsage(runId, res.usage);
-          applyBudgetUsage(feature, res.usage, runId);
+          const normalizedUsage = normalizeTokenUsage(res.usage).usage;
+          recordUsage(runId, normalizedUsage);
+          applyBudgetUsage(feature, normalizedUsage, runId);
         }
         if (res.control?.type === 'done' && res.control.publication) {
           updateRunPublishState(runId, {

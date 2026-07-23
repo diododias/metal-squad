@@ -200,6 +200,7 @@ function migrate(d: Database.Database): void {
       cached_input_tokens INTEGER,
       output_tokens INTEGER,
       total_tokens INTEGER,
+      token_data_quality TEXT,
       context_window_tokens INTEGER,
       context_window_percent REAL,
       publish_verified INTEGER,
@@ -228,7 +229,9 @@ function migrate(d: Database.Database): void {
       input     INTEGER NOT NULL DEFAULT 0,
       cached_input INTEGER NOT NULL DEFAULT 0,
       output    INTEGER NOT NULL DEFAULT 0,
-      total     INTEGER NOT NULL DEFAULT 0
+      total     INTEGER NOT NULL DEFAULT 0,
+      data_quality TEXT,
+      raw_usage_json TEXT
     );
 
     CREATE TABLE IF NOT EXISTS gates (
@@ -306,6 +309,7 @@ function migrate(d: Database.Database): void {
       cached_input_tokens INTEGER NOT NULL DEFAULT 0,
       output_tokens INTEGER NOT NULL DEFAULT 0,
       total_tokens INTEGER NOT NULL DEFAULT 0,
+      token_data_quality TEXT,
       context_window_tokens INTEGER,
       context_window_percent REAL
     );
@@ -567,6 +571,7 @@ function migrate(d: Database.Database): void {
   ensureRunColumn('remote_branch', `ALTER TABLE runs ADD COLUMN remote_branch TEXT`);
   ensureRunColumn('pr_number', `ALTER TABLE runs ADD COLUMN pr_number INTEGER`);
   ensureRunColumn('pr_url', `ALTER TABLE runs ADD COLUMN pr_url TEXT`);
+  ensureRunColumn('token_data_quality', `ALTER TABLE runs ADD COLUMN token_data_quality TEXT`);
 
   const usageColumns = d
     .prepare(`PRAGMA table_info(token_usage)`)
@@ -574,6 +579,12 @@ function migrate(d: Database.Database): void {
   const hasCachedInputUsage = usageColumns.some((column) => column.name === 'cached_input');
   if (!hasCachedInputUsage) {
     d.exec(`ALTER TABLE token_usage ADD COLUMN cached_input INTEGER NOT NULL DEFAULT 0`);
+  }
+  if (!usageColumns.some((column) => column.name === 'data_quality')) {
+    d.exec(`ALTER TABLE token_usage ADD COLUMN data_quality TEXT`);
+  }
+  if (!usageColumns.some((column) => column.name === 'raw_usage_json')) {
+    d.exec(`ALTER TABLE token_usage ADD COLUMN raw_usage_json TEXT`);
   }
 
   const taskRunColumns = d
@@ -588,6 +599,7 @@ function migrate(d: Database.Database): void {
   ensureTaskRunColumn('cached_input_tokens', `ALTER TABLE task_runs ADD COLUMN cached_input_tokens INTEGER NOT NULL DEFAULT 0`);
   ensureTaskRunColumn('output_tokens', `ALTER TABLE task_runs ADD COLUMN output_tokens INTEGER NOT NULL DEFAULT 0`);
   ensureTaskRunColumn('total_tokens', `ALTER TABLE task_runs ADD COLUMN total_tokens INTEGER NOT NULL DEFAULT 0`);
+  ensureTaskRunColumn('token_data_quality', `ALTER TABLE task_runs ADD COLUMN token_data_quality TEXT`);
   ensureTaskRunColumn('context_window_tokens', `ALTER TABLE task_runs ADD COLUMN context_window_tokens INTEGER`);
   ensureTaskRunColumn('context_window_percent', `ALTER TABLE task_runs ADD COLUMN context_window_percent REAL`);
 
