@@ -39,6 +39,7 @@ function run(command, args, options = {}) {
     /MaxListenersExceededWarning/i,
     /Use emitter\.setMaxListeners\(\) to increase limit/i,
     /\(Use `node --trace-warnings/i,
+    /The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set\./i,
   ];
   const unexpectedWarnings = warnings.filter(
     (line) => !allowedWarnings.some((pattern) => pattern.test(line)),
