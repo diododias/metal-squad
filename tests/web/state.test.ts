@@ -303,6 +303,49 @@ describe('buildMsqWebState pendingFeatures projection', () => {
     ]);
   });
 
+  it('projects a validation-blocked run and its open gate for Web recovery', async () => {
+    const { buildMsqWebState } = await import('../../src/web/state.js');
+    mocks.openGates.mockReturnValue([{
+      id: 7,
+      runId: 42,
+      featureId: 'feat-1',
+      repoId: 'repo-1',
+      createdAt: '2026-07-14T12:00:00.000Z',
+      resolvedAt: null,
+      decision: null,
+    }]);
+    mocks.listRunsForTui.mockReturnValue([{
+      runId: 42,
+      repoId: 'repo-1',
+      featureId: 'feat-1',
+      tool: 'codex',
+      pipelineId: 99,
+      stage: 'implement',
+      rawStatus: 'blocked',
+      status: 'blocked',
+      startedAt: '2026-07-14T11:00:00.000Z',
+      endedAt: '2026-07-14T12:00:00.000Z',
+      totalTokens: 100,
+      inputTokens: 50,
+      outputTokens: 50,
+      gateId: 7,
+      gateDecision: null,
+      pipelineStatus: 'blocked',
+      pipelineCurrentStage: 'implement',
+      pipelineResumeSummary: null,
+      pendingStageRequestId: null,
+      pendingStageRequestKind: null,
+      pendingStageRequestPrompt: null,
+      pendingStageRequestCreatedAt: null,
+    }]);
+
+    const state = buildMsqWebState();
+    expect(state.gates).toEqual(expect.arrayContaining([
+      expect.objectContaining({ kind: 'gate', id: 7, featureId: 'feat-1' }),
+    ]));
+    expect(state.runs[0]).toEqual(expect.objectContaining({ runId: 42, gateId: 7, status: 'blocked' }));
+  });
+
   it('removes blocked execution-owned features from pendingFeatures', async () => {
     const { buildMsqWebState } = await import('../../src/web/state.js');
     mocks.listRunsForTui.mockReturnValue([
