@@ -217,7 +217,7 @@ export function EpicDetailPage({ state, projectId, epicId, send, actionResults, 
               label={`derived progress: ${String(completed)}/${String(items.length)}`}
             />
           </div>
-          <StatusPill status={pillStatus({ status: epic.status })} label={`manual: ${epic.status}`} spinner={false} />
+          <StatusPill status={pillStatus({ status: epic.status })} label={epic.status} spinner={false} />
         </div>
         <div style={tags}>{[...repoCounts].map(([label, count]) => <Tag key={label}>{label}: {count}</Tag>)}</div>
       </Card>

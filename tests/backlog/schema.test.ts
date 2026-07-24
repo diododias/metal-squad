@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { BacklogInputSchema, BacklogSchema, BacklogV1Schema, BacklogV2Schema, BacklogV3Schema, createRegisteredToolSchema, dependencyType, EpicSchema, FallbackAlternativeSchema, FeatureInputSchema, FeatureSchema, RetrySchema, stackDependencies, WorkItemTypeSchema } from '../../src/core/backlog/schema.js';
+import { BacklogInputSchema, BacklogSchema, BacklogV1Schema, BacklogV2Schema, BacklogV3Schema, createRegisteredToolSchema, dependencyType, EpicSchema, EpicStatusSchema, FallbackAlternativeSchema, FeatureInputSchema, FeatureSchema, RetrySchema, stackDependencies, WorkItemTypeSchema } from '../../src/core/backlog/schema.js';
 import { stagePublishesResolved } from '../../src/core/workflow/stagePublishes.js';
 
 const V1_YAML_OBJ = {
@@ -604,6 +604,11 @@ describe('feature authoring identity boundary', () => {
 
   it('keeps EpicSchema IDs independent from feature registration', () => {
     expect(EpicSchema.parse({ id: 'epic-legacy', title: 'Epic', features: [] }).id).toBe('epic-legacy');
+  });
+
+  it('accepts the derived in_review and archived Epic lifecycle states', () => {
+    expect(EpicStatusSchema.parse('in_review')).toBe('in_review');
+    expect(EpicStatusSchema.parse('archived')).toBe('archived');
   });
 });
 

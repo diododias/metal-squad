@@ -1,6 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { Button } from '../components/core/Button.js';
-import { EditableSelectField } from '../components/core/EditableSelectField.js';
 import { EditableTextField } from '../components/core/EditableTextField.js';
 import { StatusPill } from '../components/core/StatusPill.js';
 import { Tag } from '../components/core/Tag.js';
@@ -14,24 +13,16 @@ interface EpicDraft {
   title: string;
   description: string;
   position: string;
-  status: EpicRow['status'];
   expectedRevision: number;
   pendingRequestId?: string;
   error?: string;
 }
-
-const manualStatusOptions = [
-  { value: 'todo', label: 'To do' },
-  { value: 'in_progress', label: 'In progress' },
-  { value: 'done', label: 'Done' },
-] as const;
 
 function toDraft(epic: EpicRow): EpicDraft {
   return {
     title: epic.title,
     description: epic.description ?? '',
     position: String(epic.position),
-    status: epic.status,
     expectedRevision: epic.revision,
   };
 }
@@ -39,8 +30,7 @@ function toDraft(epic: EpicRow): EpicDraft {
 function isDirty(draft: EpicDraft, epic: EpicRow): boolean {
   return draft.title !== epic.title
     || draft.description !== (epic.description ?? '')
-    || draft.position !== String(epic.position)
-    || draft.status !== epic.status;
+    || draft.position !== String(epic.position);
 }
 
 export interface EpicEditorProps {
@@ -106,11 +96,10 @@ export function EpicEditor({ epic, completedWorkItems, totalWorkItems, send, act
       setDraft((current) => ({ ...current, error: 'Position must be a non-negative whole number.' }));
       return;
     }
-    const patch: { title?: string; description?: string | null; position?: number; status?: EpicRow['status'] } = {};
+    const patch: { title?: string; description?: string | null; position?: number } = {};
     if (title !== epic.title) patch.title = title;
     if (draft.description !== (epic.description ?? '')) patch.description = draft.description || null;
     if (position !== epic.position) patch.position = position;
-    if (draft.status !== epic.status) patch.status = draft.status;
     if (!Object.keys(patch).length) return;
     const id = requestId('epic-update');
     setDraft((current) => ({ ...current, pendingRequestId: id, error: undefined }));
@@ -124,14 +113,13 @@ export function EpicEditor({ epic, completedWorkItems, totalWorkItems, send, act
       <div style={{ flex: '1 1 260px' }}>
         <EditableTextField id={`epic-${epic.epicId}-title`} label="Title" value={draft.title} initialValue={epic.title} disabled={Boolean(draft.pendingRequestId)} onChange={(value) => { update({ title: value }); }} />
       </div>
-      <StatusPill status={draft.status === 'done' ? 'done' : draft.status === 'in_progress' ? 'running' : 'not_started'} label={`manual: ${draft.status}`} spinner={false} />
+      <StatusPill status={epic.status === 'done' ? 'done' : epic.status === 'in_progress' ? 'running' : epic.status === 'in_review' ? 'in_review' : epic.status === 'archived' ? 'archived' : 'not_started'} label={epic.status} spinner={false} />
     </div>
     <EditableTextField id={`epic-${epic.epicId}-description`} label="Description" value={draft.description} initialValue={epic.description ?? ''} disabled={Boolean(draft.pendingRequestId)} placeholder="No description" onChange={(value) => { update({ description: value }); }} />
-    <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) minmax(0, 1fr)', gap: 10 }}>
+    <div style={{ display: 'grid', gap: 10 }}>
       <EditableTextField id={`epic-${epic.epicId}-position`} label="Position" value={draft.position} initialValue={String(epic.position)} disabled={Boolean(draft.pendingRequestId)} onChange={(value) => { update({ position: value }); }} />
-      <EditableSelectField id={`epic-${epic.epicId}-status`} label="Manual status" value={draft.status} initialValue={epic.status} options={manualStatusOptions} disabled={Boolean(draft.pendingRequestId)} onChange={(value) => { update({ status: (value ?? 'todo') as EpicRow['status'] }); }} />
     </div>
-    <div style={tags}><Tag>derived progress: {completedWorkItems}/{totalWorkItems}</Tag><Tag>run status does not change manual status</Tag></div>
+    <div style={tags}><Tag>derived progress: {completedWorkItems}/{totalWorkItems}</Tag><Tag>status follows Work Item execution</Tag></div>
     {draft.error && <div role="alert" style={errorStyle}>{draft.error}{conflict && ' Your draft is preserved; reload current values or reapply it.'}</div>}
     {conflict && <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
       <Button size="sm" onClick={() => { setDraft(toDraft(epic)); }}>reload current values</Button>

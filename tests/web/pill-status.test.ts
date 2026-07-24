@@ -22,9 +22,11 @@ describe('pillStatus', () => {
     expect(pillStatus({ status: 'failed' })).toBe('failed');
   });
 
-  it('keeps manual Epic states visually compatible', () => {
+  it('maps derived Epic lifecycle states', () => {
     expect(pillStatus({ status: 'todo' })).toBe('not_started');
     expect(pillStatus({ status: 'in_progress' })).toBe('running');
+    expect(pillStatus({ status: 'in_review' })).toBe('in_review');
     expect(pillStatus({ status: 'done' })).toBe('done');
+    expect(pillStatus({ status: 'archived' })).toBe('archived');
   });
 });

@@ -1,6 +1,6 @@
 import React from 'react';
 
-export type PillStatus = 'running' | 'done' | 'failed' | 'blocked' | 'aborted' | 'not_started';
+export type PillStatus = 'running' | 'in_review' | 'done' | 'failed' | 'blocked' | 'aborted' | 'archived' | 'not_started';
 
 export interface StatusPillProps {
   status: PillStatus | (string & {});
@@ -9,21 +9,25 @@ export interface StatusPillProps {
   spinner?: boolean;
 }
 
-const ICON: Record<string, string> = { running: '⟳', done: '✓', failed: '✗', blocked: '⊘', aborted: '■', not_started: '·' };
+const ICON: Record<string, string> = { running: '⟳', in_review: '◌', done: '✓', failed: '✗', blocked: '⊘', aborted: '■', archived: '□', not_started: '·' };
 const COLOR: Record<string, string> = {
   running: 'var(--accent-info)',
+  in_review: 'var(--accent-warn)',
   done: 'var(--accent-ok)',
   failed: 'var(--accent-danger)',
   blocked: 'var(--accent-warn)',
   aborted: 'var(--text-dim)',
+  archived: 'var(--text-dim)',
   not_started: 'var(--text-faint)',
 };
 const BG: Record<string, string> = {
   running: 'var(--accent-info-10)',
+  in_review: 'var(--accent-warn-10)',
   done: 'var(--accent-ok-10)',
   failed: 'var(--accent-danger-10)',
   blocked: 'var(--accent-warn-10)',
   aborted: 'transparent',
+  archived: 'transparent',
   not_started: 'transparent',
 };
 const BORDER: Record<string, string> = { not_started: 'var(--border-dim)' };

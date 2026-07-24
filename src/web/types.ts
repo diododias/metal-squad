@@ -583,7 +583,7 @@ export type WebSocketClientMessage =
       requestId: string;
       epicId: string;
       expectedRevision: number;
-      patch: { title?: string; description?: string | null; status?: 'todo' | 'in_progress' | 'done'; position?: number };
+      patch: { title?: string; description?: string | null; status?: 'todo' | 'in_progress' | 'in_review' | 'done' | 'archived'; position?: number };
     }
   | { type: 'action:updateBudgetConfig'; patch: BudgetConfigPatch }
   | { type: 'action:updateNotifications'; patch: NotificationsPatch }

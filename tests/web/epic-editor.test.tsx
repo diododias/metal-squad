@@ -43,20 +43,19 @@ function setValue(control: HTMLInputElement | HTMLSelectElement, value: string):
 afterEach(() => { act(() => { roots.splice(0).forEach((root) => root.unmount()); }); document.body.replaceChildren(); });
 
 describe('EpicEditor', () => {
-  it('sends a sparse update with title, description, position, manual status, and the expected revision', () => {
+  it('sends a sparse metadata update with the expected revision', () => {
     const send = vi.fn<(message: WebSocketClientMessage) => void>();
     const view = mount({ send });
     act(() => {
       setValue(view.container.querySelector('#epic-epic-1-title') as HTMLInputElement, 'Launch');
       setValue(view.container.querySelector('#epic-epic-1-description') as HTMLInputElement, 'Updated scope');
       setValue(view.container.querySelector('#epic-epic-1-position') as HTMLInputElement, '5');
-      setValue(view.container.querySelector('#epic-epic-1-status') as HTMLSelectElement, 'in_progress');
       Array.from(view.container.querySelectorAll('button')).find((button) => button.textContent === 'save Epic')?.click();
     });
 
     expect(send).toHaveBeenCalledWith({
       type: 'action:updateEpic', requestId: 'epic-update-1', epicId: 'epic-1', expectedRevision: 1,
-      patch: { title: 'Launch', description: 'Updated scope', position: 5, status: 'in_progress' },
+      patch: { title: 'Launch', description: 'Updated scope', position: 5 },
     });
   });
 
@@ -82,11 +81,12 @@ describe('EpicEditor', () => {
     });
   });
 
-  it('keeps derived progress distinct from the editable manual status', () => {
+  it('shows derived progress and lifecycle status without manual editing', () => {
     const view = mount({ epic: epic({ status: 'done' }), completedWorkItems: 1, totalWorkItems: 3 });
 
-    expect(view.container.textContent).toContain('manual: done');
+    expect(view.container.textContent).toContain('done');
     expect(view.container.textContent).toContain('derived progress: 1/3');
-    expect(view.container.textContent).toContain('run status does not change manual status');
+    expect(view.container.textContent).toContain('status follows Work Item execution');
+    expect(view.container.querySelector('#epic-epic-1-status')).toBeNull();
   });
 });

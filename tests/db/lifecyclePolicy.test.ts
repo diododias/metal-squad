@@ -84,6 +84,37 @@ describe('Lifecycle policy engine (archive/delete/restore)', () => {
     return (db.prepare(`SELECT revision FROM ${table} WHERE ${idCol} = ?`).get(id) as { revision: number }).revision;
   }
 
+  it('derives Epic status atomically from Work Item run transitions', async () => {
+    const env = await setup();
+    const { db, createRun, createWorkItem, finishRun, getEpic } = env;
+    const first = await seed(env);
+    const second = createWorkItem({ epicId: first.epicId, repoId: first.repoId, title: 'Second Work Item' });
+
+    const firstRun = createRun(first.repoId, first.workItemId, 'codex');
+    expect(getEpic(first.epicId)?.status).toBe('in_progress');
+
+    finishRun(firstRun, 'done');
+    expect(getEpic(first.epicId)?.status).toBe('in_progress');
+
+    const secondRun = createRun(first.repoId, second.workItemId, 'codex');
+    finishRun(secondRun, 'done');
+    expect(getEpic(first.epicId)?.status).toBe('in_review');
+
+    const persisted = db.prepare(`SELECT status, data_json FROM backlog_epics WHERE epic_id = ?`).get(first.epicId) as { status: string; data_json: string };
+    expect(persisted.status).toBe('in_review');
+    expect(JSON.parse(persisted.data_json)).toMatchObject({ status: 'in_review' });
+  });
+
+  it('preserves a legacy done Epic while runs are migrated into the new lifecycle', async () => {
+    const env = await setup();
+    const { db, createRun, getEpic } = env;
+    const fixture = await seed(env);
+    db.prepare(`UPDATE backlog_epics SET status = 'done' WHERE epic_id = ?`).run(fixture.epicId);
+
+    createRun(fixture.repoId, fixture.workItemId, 'codex');
+    expect(getEpic(fixture.epicId)?.status).toBe('done');
+  });
+
   // --- Work Item matrix ---------------------------------------------------
 
   it('archives and deletes a pristine Work Item, keeping the ID reserved', async () => {

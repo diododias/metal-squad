@@ -133,11 +133,11 @@ describe('EpicDetailPage', () => {
     expect(window.location.hash).toBe('#/projects');
   });
 
-  it('renders the epic summary with derived progress and manual status', () => {
+  it('renders the epic summary with derived progress and lifecycle status', () => {
     const container = render(baseState());
     expect(container.textContent).toContain('Epic One');
     expect(container.textContent).toContain('derived progress: 1/3');
-    expect(container.textContent).toContain('manual: in_progress');
+    expect(container.textContent).toContain('in_progress');
     expect(container.textContent).toContain('The first epic.');
   });
 
@@ -238,17 +238,11 @@ describe('EpicDetailPage edit modal (PF-06)', () => {
     expect((dialog?.querySelector('#epic-epic-1-title') as HTMLInputElement).value).toBe('Epic One');
   });
 
-  it('saves the manual status via action:updateEpic with expectedRevision', () => {
+  it('does not expose manual status editing', () => {
     const view = renderWithSend(baseState());
     openEditor(view.container);
-    const statusSelect = view.container.querySelector('#epic-epic-1-status') as HTMLSelectElement;
-    Object.getOwnPropertyDescriptor(Object.getPrototypeOf(statusSelect), 'value')?.set?.call(statusSelect, 'done');
-    act(() => { statusSelect.dispatchEvent(new Event('change', { bubbles: true })); });
-    const save = [...view.container.querySelectorAll('button')].find((item) => item.textContent?.startsWith('save'));
-    act(() => { save?.click(); });
-    const message = view.send.mock.calls.map((call) => call[0] as { type: string; patch?: { status?: string }; expectedRevision?: number }).find((item) => item.type === 'action:updateEpic');
-    expect(message?.patch?.status).toBe('done');
-    expect(message?.expectedRevision).toBe(1);
+    expect(view.container.querySelector('#epic-epic-1-status')).toBeNull();
+    expect(view.container.textContent).toContain('status follows Work Item execution');
   });
 
   it('surfaces the revision-conflict recovery actions inside the modal', () => {
