@@ -87,6 +87,29 @@ describe('listRunsForTui', () => {
     expect(result[0]!.status).toBe('done');
   });
 
+  it('projects spent tokens as waste for an aborted run', async () => {
+    const row = {
+      runId: 3,
+      repoId: 'repo1',
+      featureId: 'feat-3',
+      tool: 'codex',
+      status: 'aborted',
+      startedAt: '2026-07-06T10:00:00',
+      endedAt: '2026-07-06T10:05:00',
+      totalTokens: 1200,
+      wasteTokens: 1200,
+      inputTokens: 900,
+      outputTokens: 300,
+      gateId: null,
+      gateDecision: null,
+    };
+    mockAll.mockReturnValue([row]);
+    const { listRunsForTui } = await import('../../src/db/repo.js');
+
+    expect(listRunsForTui()[0]).toMatchObject({ status: 'aborted', totalTokens: 1200, wasteTokens: 1200 });
+    expect(mockPrepare).toHaveBeenCalledWith(expect.stringContaining("WHEN r.status = 'aborted' OR p.status IN ('aborting', 'aborted')"));
+  });
+
   it('decodes pendingStageRequestOptions JSON into a string array', async () => {
     const row = {
       runId: 3,

@@ -9,6 +9,8 @@ export interface RunStatusStripProps {
   tool?: string | null;
   model?: string | null;
   tokens?: string | null;
+  /** Whether the displayed tokens were consumed by an aborted run. */
+  tokensAreWaste?: boolean;
   contextPercent?: string | null;
   elapsed?: string | null;
 }
@@ -23,13 +25,14 @@ export function RunStatusStrip({
   tool,
   model,
   tokens,
+  tokensAreWaste = false,
   contextPercent,
   elapsed,
 }: RunStatusStripProps): React.JSX.Element {
   const items: React.ReactNode[] = [];
   if (tool) items.push(<span key="tool">{tool}</span>);
   if (model) items.push(<span key="model">{model}</span>);
-  if (tokens && tokens !== '—') items.push(<span key="tokens" style={{ color: 'var(--text-primary)', fontWeight: 600 }}>{tokens} tok</span>);
+  if (tokens && tokens !== '—') items.push(<span key="tokens" style={{ color: tokensAreWaste ? 'var(--accent-warn)' : 'var(--text-primary)', fontWeight: 600 }}>{tokens} tok{tokensAreWaste ? ' · WASTE' : ''}</span>);
   if (contextPercent && contextPercent !== '—') items.push(<span key="ctx">ctx {contextPercent}</span>);
   if (elapsed && elapsed !== '—') items.push(<span key="elapsed" style={{ color: 'var(--text-primary)', fontWeight: 600 }}>{elapsed}</span>);
 

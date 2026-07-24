@@ -100,6 +100,15 @@ describe('RunDetailPage resume with override', () => {
     expect(container.textContent).toContain('900 tok');
   });
 
+  it('labels aborted run tokens as waste instead of pipeline totals', () => {
+    const container = renderPage(makeRun({
+      status: 'aborted', rawStatus: 'aborted', pipelineStatus: 'aborted', totalTokens: 1200, pipelineTotalTokens: 9000, wasteTokens: 1200,
+    }), vi.fn());
+
+    expect(container.textContent).toContain('1.2k tok · WASTE');
+    expect(container.textContent).not.toContain('9k tok');
+  });
+
   it('labels a publish note as a notice (not an error) when the publication is already verified', () => {
     const note = 'note: post-run could not verify whether HEAD descends from the declared base develop. A verified GitHub PR already confirms this publication; treat this only as informational.';
     const container = renderPage(makeRun({ publishVerified: true, publishError: note, prNumber: 230, prUrl: 'https://example.test/pr/230' }), vi.fn());
