@@ -1,5 +1,6 @@
 import type Database from 'better-sqlite3';
 import type { LifecycleEntityKind } from '../db/errors.js';
+import type { EpicStatus } from './backlog/schema.js';
 
 /**
  * Single lifecycle policy engine (PRJ-17).
@@ -142,6 +143,33 @@ export function classifyEpicState(db: Database.Database, epicId: string): Lifecy
     if (state === 'historical') historical = true;
   }
   return historical ? 'historical' : 'pristine';
+}
+
+/**
+ * Computes the persisted lifecycle status of an Epic from its active Work
+ * Items. A Work Item is complete only when it has a successful (`done`) run;
+ * an active execution always takes precedence over prior successful history.
+ * Legacy Epics explicitly marked `done` are preserved by the repository
+ * caller, because that terminal state predates `in_review`.
+ */
+export function deriveEpicStatus(db: Database.Database, epicId: string): Exclude<EpicStatus, 'done' | 'archived'> {
+  const workItems = db.prepare(
+    `SELECT feature_id AS featureId
+       FROM backlog_features
+      WHERE epic_id = ? AND archived_at IS NULL AND deleted_at IS NULL`,
+  ).all(epicId) as { featureId: string }[];
+
+  if (workItems.length === 0) return 'todo';
+
+  let everyWorkItemDone = true;
+  for (const workItem of workItems) {
+    if (classifyWorkItemState(db, workItem.featureId) === 'running') return 'in_progress';
+    const completed = db.prepare(
+      `SELECT 1 FROM runs WHERE feature_id = ? AND status = 'done' LIMIT 1`,
+    ).get(workItem.featureId);
+    if (!completed) everyWorkItemDone = false;
+  }
+  return everyWorkItemDone ? 'in_review' : 'in_progress';
 }
 
 /** Whether a Project still has Epics that are not tombstoned. */

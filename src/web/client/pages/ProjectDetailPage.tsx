@@ -40,7 +40,7 @@ export function ProjectDetailPage({ state, projectId, send, actionResults, archi
   const [query, setQuery] = useState(() => initialParams.get('q') ?? '');
   const [statusFilter, setStatusFilter] = useState(() => {
     const status = initialParams.get('status');
-    return status && ['todo', 'in_progress', 'done'].includes(status) ? status : 'all';
+    return status && ['todo', 'in_progress', 'in_review', 'done', 'archived'].includes(status) ? status : 'all';
   });
   const [order, setOrder] = useState(() => {
     const v = initialParams.get('order');

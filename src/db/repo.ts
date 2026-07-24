@@ -27,6 +27,7 @@ import {
   classifyProjectState,
   classifyWorkItemState,
   collectWorkItemReferences,
+  deriveEpicStatus,
   epicHasUndeletedWorkItems,
   projectHasLinkedRepos,
   projectHasUndeletedEpics,
@@ -1217,6 +1218,33 @@ function epicEntity(input: { epicId: string; title: string; description: string 
   });
 }
 
+/** Reconciles an Epic after a Work Item execution transition. The caller owns
+ * the transaction, so the run write and derived status are atomically visible
+ * to the WebSocket snapshot. Legacy `done` and explicitly archived Epics are
+ * never rewritten by this automatic policy. */
+function syncEpicStatusForWorkItem(database: ReturnType<typeof getDb>, workItemId: string): void {
+  const workItem = database.prepare(
+    `SELECT epic_id AS epicId FROM backlog_features WHERE feature_id = ?`,
+  ).get(workItemId) as { epicId: string } | undefined;
+  if (!workItem) return;
+
+  const epic = database.prepare(
+    `SELECT epic_id AS epicId, title, description, status, archived_at AS archivedAt
+       FROM backlog_epics WHERE epic_id = ?`,
+  ).get(workItem.epicId) as { epicId: string; title: string; description: string | null; status: EpicStatus; archivedAt: string | null } | undefined;
+  if (!epic) return;
+  if (epic.archivedAt !== null || epic.status === 'done' || epic.status === 'archived') return;
+
+  const status = deriveEpicStatus(database, epic.epicId);
+  if (status === epic.status) return;
+  const entity = epicEntity({ epicId: epic.epicId, title: epic.title, description: epic.description, status });
+  database.prepare(
+    `UPDATE backlog_epics
+        SET status = ?, data_json = ?, revision = revision + 1, updated_at = datetime('now')
+      WHERE epic_id = ?`,
+  ).run(status, JSON.stringify(entity), epic.epicId);
+}
+
 function getProjectRepoLink(database: ReturnType<typeof getDb>, repoId: string): ProjectRepoLinkRow | null {
   return (database.prepare(`${PROJECT_REPO_LINK_SELECT} WHERE repo_id = ?`).get(repoId) as ProjectRepoLinkRow | undefined) ?? null;
 }
@@ -1482,8 +1510,8 @@ export function createRun(
   tool: string,
   opts: CreateRunOptions = {},
 ): number {
-  const info = getDb('readwrite')
-    .prepare(
+  return withTransaction((database) => {
+    const info = database.prepare(
       `INSERT INTO runs (
          repo_id, project_id, feature_id, epic_id, tool, pipeline_id, stage,
          model, effort, thinking, tool_name, tool_version, pricing_profile_id, metrics_confidence
@@ -1495,10 +1523,12 @@ export function createRun(
       opts.snapshot?.model ?? null, opts.snapshot?.effort ?? null, opts.snapshot?.thinking ?? null,
       opts.snapshot?.toolName ?? null, opts.snapshot?.toolVersion ?? null,
       opts.snapshot?.pricingProfileId ?? null, opts.snapshot?.metricsConfidence ?? 'unknown',
-    );
-  const runId = Number(info.lastInsertRowid);
-  recordRunEvent(runId, 'started', opts.stage ? { stage: opts.stage } : undefined);
-  return runId;
+      );
+    const runId = Number(info.lastInsertRowid);
+    syncEpicStatusForWorkItem(database, featureId);
+    recordRunEvent(runId, 'started', opts.stage ? { stage: opts.stage } : undefined);
+    return runId;
+  });
 }
 
 export function finishRun(
@@ -1506,10 +1536,13 @@ export function finishRun(
   status: RunStatus,
   summary?: string,
 ): void {
-  getDb('readwrite')
-    .prepare(`UPDATE runs SET status = ?, summary = ?, ended_at = datetime('now') WHERE id = ?`)
-    .run(status, summary ?? null, runId);
-  recordRunEvent(runId, status, summary ? { summary } : undefined);
+  withTransaction((database) => {
+    database.prepare(`UPDATE runs SET status = ?, summary = ?, ended_at = datetime('now') WHERE id = ?`)
+      .run(status, summary ?? null, runId);
+    const workItem = database.prepare(`SELECT feature_id AS featureId FROM runs WHERE id = ?`).get(runId) as { featureId: string | null } | undefined;
+    if (workItem?.featureId) syncEpicStatusForWorkItem(database, workItem.featureId);
+    recordRunEvent(runId, status, summary ? { summary } : undefined);
+  });
 }
 
 // Persists the adapter's real session id (e.g. the claude/codex session/thread

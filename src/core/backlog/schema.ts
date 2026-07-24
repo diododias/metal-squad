@@ -274,7 +274,7 @@ const FeatureInputSchemaShape = z.object({
 
 export const FeatureInputSchema = FeatureInputSchemaShape.superRefine(validateDependencyTypes);
 
-export const EpicStatusSchema = z.enum(['todo', 'in_progress', 'done']);
+export const EpicStatusSchema = z.enum(['todo', 'in_progress', 'in_review', 'done', 'archived']);
 
 export const EpicSchema = z.object({
   id: z.string(),

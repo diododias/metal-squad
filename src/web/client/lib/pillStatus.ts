@@ -4,7 +4,7 @@ import type { PillStatus } from '../components/core/StatusPill.js';
 /** Raw state needed to derive the visual status for a Work Item. */
 export interface PillStatusInput {
   /** `null`/`undefined` means the Work Item has not been run yet. */
-  status?: RunStatus | 'todo' | 'in_progress' | null;
+  status?: RunStatus | 'todo' | 'in_progress' | 'in_review' | 'archived' | null;
   pipelineStatus?: PipelineStatus | null;
   blockedReason?: string | null;
 }
@@ -45,6 +45,10 @@ export function pillStatus({ status, pipelineStatus }: PillStatusInput): PillSta
       return status;
     case 'in_progress':
       return 'running';
+    case 'in_review':
+      return 'in_review';
+    case 'archived':
+      return 'archived';
     case 'todo':
     case null:
     case undefined:

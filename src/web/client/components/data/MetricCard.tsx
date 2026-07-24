@@ -9,10 +9,12 @@ export interface MetricCardProps {
 
 const STATUS_COLOR: Record<PillStatus, string> = {
   running: 'var(--accent-info)',
+  in_review: 'var(--accent-warn)',
   done: 'var(--accent-ok)',
   failed: 'var(--accent-danger)',
   blocked: 'var(--accent-warn)',
   aborted: 'var(--text-dim)',
+  archived: 'var(--text-dim)',
   not_started: 'var(--text-faint)',
 };
 
