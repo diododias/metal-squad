@@ -338,7 +338,7 @@ export function EpicDetailPage({ state, projectId, epicId, send, actionResults, 
           tone: 'ok',
           message: `Work Item "${title}" created (${workItemId}).`,
           source: 'Work Items',
-          action: workItemId ? { label: 'abrir detalhe', onSelect: (): void => { window.location.hash = `/projects/${projectId}/epics/${createdEpicId}/items/${workItemId}`; } } : undefined,
+          action: workItemId ? { label: 'open details', onSelect: (): void => { window.location.hash = `/projects/${projectId}/epics/${createdEpicId}/items/${workItemId}`; } } : undefined,
         });
       }}
       connected={connected}
@@ -355,7 +355,7 @@ export function EpicDetailPage({ state, projectId, epicId, send, actionResults, 
           onSaved={() => { onToast?.({ id: `${String(Date.now())}-epic-updated`, tone: 'ok', message: `Epic "${epic.title}" updated.`, source: 'Epics' }); }}
         />
         <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
-          <Button size="sm" onClick={() => { setShowEditEpic(false); }}>fechar</Button>
+          <Button size="sm" onClick={() => { setShowEditEpic(false); }}>close</Button>
         </div>
       </div>
     </Modal>

@@ -221,7 +221,7 @@ describe('Create Epic modal from ProjectDetailPage (PF-04, PF-07)', () => {
     openCreateEpicModal(el);
     expect(el.querySelector('[aria-label="Create Epic"]')).not.toBeNull();
     fillTitle(el, 'My New Epic');
-    const save = [...el.querySelectorAll('button')].find((b) => b.textContent === 'criar');
+    const save = [...el.querySelectorAll('button')].find((b) => b.textContent === 'create');
     act(() => { save?.click(); });
     const msg = send.mock.calls
       .map((c) => c[0] as { type: string; title?: string })
@@ -233,7 +233,7 @@ describe('Create Epic modal from ProjectDetailPage (PF-04, PF-07)', () => {
     const { el, send, rerender } = setupProject();
     openCreateEpicModal(el);
     fillTitle(el, 'Fail Epic');
-    const save = [...el.querySelectorAll('button')].find((b) => b.textContent === 'criar');
+    const save = [...el.querySelectorAll('button')].find((b) => b.textContent === 'create');
     act(() => { save?.click(); });
     const requestId = send.mock.calls
       .map((c) => c[0] as { type: string; requestId?: string })

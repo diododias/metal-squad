@@ -10,7 +10,7 @@ export interface ToastStackItem {
   /** Auto-dismiss after this many ms. 0 keeps the toast until dismissed. */
   ttlMs?: number;
   /** Optional secondary action rendered as a button inside the toast (e.g.
-   * "abrir detalhe" after a creation). Selecting it also dismisses the toast. */
+   * "open details" after a creation). Selecting it also dismisses the toast. */
   action?: { label: string; onSelect: () => void };
 }
 

@@ -38,11 +38,11 @@ export interface CreateWorkItemModalProps {
 }
 
 /**
- * Modal form behind `+ Nova Feature` on the project and epic detail pages.
+ * Modal form behind `+ New Feature` on the project and epic detail pages.
  * Migrates the former inline "Create Work Item" flow: draft fields, workflow
  * template preview via `action:resolveWorkflowTemplate` (re-resolved whenever
  * epic+repo+type change), and creation via the existing `action:createWorkItem`.
- * `criar` only enables with title + epic + repo + a valid preview. The Work
+ * `create` only enables with title + epic + repo + a valid preview. The Work
  * Item → repo link is final at creation; type changes later live in the
  * backlog item detail (`action:changeWorkItemType`).
  */
@@ -154,7 +154,7 @@ export function CreateWorkItemModal({ open, projectId, defaultEpicId, initialDra
       <h2 style={{ margin: 0, fontFamily: 'var(--font-display)', fontWeight: 400 }}>{initialDraft ? 'Clone Work Item' : '+ New Feature'}</h2>
       {repos.length === 0 ? <>
         <p style={{ margin: 0, color: 'var(--text-dim)' }}>Link a repository before creating a Work Item. The server rejects targets outside this Project.</p>
-        <div style={{ display: 'flex', justifyContent: 'flex-end' }}><Button size="sm" onClick={onClose}>fechar</Button></div>
+        <div style={{ display: 'flex', justifyContent: 'flex-end' }}><Button size="sm" onClick={onClose}>close</Button></div>
       </> : <>
         <EditableTextField id="create-work-item-title" label="Title" value={title} initialValue="" onChange={setTitle} disabled={pending} placeholder="Work Item title (required)" />
         <select aria-label="Epic" value={epicId} disabled={pending} onChange={(event) => { setEpicId(event.target.value); }} style={control}>
@@ -187,8 +187,8 @@ export function CreateWorkItemModal({ open, projectId, defaultEpicId, initialDra
         )}
         {error && <p role="alert" style={{ margin: 0, color: 'var(--accent-danger)', fontSize: 'var(--text-xs)' }}>{error}</p>}
         <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
-          <Button size="sm" disabled={pending} onClick={onClose}>cancelar</Button>
-          <Button variant="primary" size="sm" disabled={pending || !title.trim() || !epicId || !repoId || !previewValid} onClick={createWorkItem}>{pending ? 'creating…' : 'criar'}</Button>
+          <Button size="sm" disabled={pending} onClick={onClose}>cancel</Button>
+          <Button variant="primary" size="sm" disabled={pending || !title.trim() || !epicId || !repoId || !previewValid} onClick={createWorkItem}>{pending ? 'creating…' : 'create'}</Button>
         </div>
       </>}
     </div>

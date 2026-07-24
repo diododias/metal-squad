@@ -118,7 +118,7 @@ export function ProjectsPage({ state, send, actionResults }: ProjectsPageProps):
         description={`${String(totalProjects)} project${totalProjects !== 1 ? 's' : ''} tracked by msq`}
         actions={
           <Button variant="primary" size="sm" onClick={() => { setShowCreate((c) => !c); }}>
-            {showCreate ? 'cancel' : '+ Novo Projeto'}
+            {showCreate ? 'cancel' : '+ New Project'}
           </Button>
         }
         filters={

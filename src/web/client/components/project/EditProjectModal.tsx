@@ -21,7 +21,7 @@ export interface EditProjectModalProps {
 }
 
 /**
- * Modal form behind `editar Projeto` on the project detail header. Edits name
+ * Modal form behind `Edit Project` on the project detail header. Edits name
  * and description over the existing `action:updateProject` with
  * `expectedRevision`; a revision conflict keeps the draft and offers
  * "reload current values" / "reapply draft" (same recovery as EpicEditor).
@@ -119,8 +119,8 @@ export function EditProjectModal({ open, project, send, actionResults, onClose, 
         <Button size="sm" variant="recovery" disabled={pending} onClick={reapplyDraft}>reapply draft</Button>
       </div>}
       <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
-        <Button size="sm" disabled={pending} onClick={onClose}>cancelar</Button>
-        <Button variant="primary" size="sm" disabled={pending || !dirty || !name.trim()} onClick={() => { save(); }}>{pending ? 'saving…' : 'salvar'}</Button>
+        <Button size="sm" disabled={pending} onClick={onClose}>cancel</Button>
+        <Button variant="primary" size="sm" disabled={pending || !dirty || !name.trim()} onClick={() => { save(); }}>{pending ? 'saving…' : 'save'}</Button>
       </div>
     </div>
   </Modal>;

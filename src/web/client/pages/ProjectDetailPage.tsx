@@ -215,7 +215,7 @@ export function ProjectDetailPage({ state, projectId, send, actionResults, archi
           tone: 'ok',
           message: `Work Item "${title}" created (${workItemId}).`,
           source: 'Work Items',
-          action: workItemId ? { label: 'abrir detalhe', onSelect: (): void => { window.location.hash = `/projects/${projectId}/epics/${epicId}/items/${workItemId}`; } } : undefined,
+          action: workItemId ? { label: 'open details', onSelect: (): void => { window.location.hash = `/projects/${projectId}/epics/${epicId}/items/${workItemId}`; } } : undefined,
         });
       }}
       connected={connected}

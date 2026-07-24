@@ -69,21 +69,21 @@ describe('CreateEpicModal', () => {
     expect(view.container.querySelector('[role="dialog"]')).toBeNull();
   });
 
-  it('disables criar without a title and does not send', () => {
+  it('disables create without a title and does not send', () => {
     const send = vi.fn();
     const view = render({ send });
-    const criar = buttonByText(view.container, 'criar');
-    expect(criar.disabled).toBe(true);
-    act(() => { criar.click(); });
+    const create = buttonByText(view.container, 'create');
+    expect(create.disabled).toBe(true);
+    act(() => { create.click(); });
     expect(send).not.toHaveBeenCalled();
   });
 
-  it('cancelar closes without emitting action:createEpic', () => {
+  it('cancel closes without emitting action:createEpic', () => {
     const send = vi.fn();
     const onClose = vi.fn();
     const view = render({ send, onClose });
     act(() => { setValue(titleInput(view.container), 'Drafted title'); });
-    act(() => { buttonByText(view.container, 'cancelar').click(); });
+    act(() => { buttonByText(view.container, 'cancel').click(); });
     expect(onClose).toHaveBeenCalledTimes(1);
     expect(send).not.toHaveBeenCalled();
   });
@@ -92,7 +92,7 @@ describe('CreateEpicModal', () => {
     const send = vi.fn();
     const view = render({ send });
     act(() => { setValue(titleInput(view.container), '  Epic title  '); });
-    act(() => { buttonByText(view.container, 'criar').click(); });
+    act(() => { buttonByText(view.container, 'create').click(); });
     expect(send).toHaveBeenCalledTimes(1);
     const message = send.mock.calls[0]?.[0] as Extract<WebSocketClientMessage, { type: 'action:createEpic' }>;
     expect(message.type).toBe('action:createEpic');
@@ -108,7 +108,7 @@ describe('CreateEpicModal', () => {
     const view = render({ send });
     act(() => { setValue(titleInput(view.container), 'Epic'); });
     act(() => { setValue(view.container.querySelector('#create-epic-description') as HTMLInputElement, 'Scope notes'); });
-    act(() => { buttonByText(view.container, 'criar').click(); });
+    act(() => { buttonByText(view.container, 'create').click(); });
     const message = send.mock.calls[0]?.[0] as Extract<WebSocketClientMessage, { type: 'action:createEpic' }>;
     expect(message.description).toBe('Scope notes');
   });
@@ -119,7 +119,7 @@ describe('CreateEpicModal', () => {
     const onCreated = vi.fn();
     const view = render({ send, onClose, onCreated });
     act(() => { setValue(titleInput(view.container), 'Epic'); });
-    act(() => { buttonByText(view.container, 'criar').click(); });
+    act(() => { buttonByText(view.container, 'create').click(); });
     const { requestId } = send.mock.calls[0]?.[0] as { requestId: string };
     view.rerender({ [requestId]: { type: 'action:result', payload: { requestId, ok: true, entity: {} } } as unknown as ActionResult });
     expect(onCreated).toHaveBeenCalledWith('Epic');
@@ -131,13 +131,13 @@ describe('CreateEpicModal', () => {
     const onClose = vi.fn();
     const view = render({ send, onClose });
     act(() => { setValue(titleInput(view.container), 'Epic'); });
-    act(() => { buttonByText(view.container, 'criar').click(); });
+    act(() => { buttonByText(view.container, 'create').click(); });
     const { requestId } = send.mock.calls[0]?.[0] as { requestId: string };
     view.rerender({ [requestId]: { type: 'action:result', payload: { requestId, ok: false, error: { code: 'validation', message: 'title already exists in project' } } } as unknown as ActionResult });
     expect(onClose).not.toHaveBeenCalled();
     const alert = view.container.querySelector('[role="alert"]');
     expect(alert?.textContent).toBe('title already exists in project');
-    expect(buttonByText(view.container, 'criar').disabled).toBe(false);
+    expect(buttonByText(view.container, 'create').disabled).toBe(false);
   });
 
   it('closes on Escape while idle', () => {
