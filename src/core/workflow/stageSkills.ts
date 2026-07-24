@@ -68,8 +68,12 @@ export function collectEffectiveStageSkills(
   repoStageSkills: Record<string, string[]> = {},
   configStageSkills: Record<string, string[]> = {},
 ): Record<string, string[]> {
+  const builtinBase = Object.assign(
+    {},
+    ...BUILTIN_WORKFLOW_TEMPLATES.map((t) => t.definition.stageSkills),
+  ) as Record<string, string[]>;
   return {
-    ...DEFAULT_PROJECT_TEMPLATE.stageSkills,
+    ...builtinBase,
     ...configStageSkills,
     ...repoStageSkills,
   };
