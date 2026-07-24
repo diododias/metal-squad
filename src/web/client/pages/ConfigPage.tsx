@@ -14,6 +14,7 @@ export interface ConfigPageProps {
   state: MsqWebState;
   isMobile: boolean;
   send: (message: WebSocketClientMessage) => void;
+  onDirtyStateChange?: (isDirty: boolean) => void;
 }
 
 const SUB_TABS = [
@@ -643,9 +644,14 @@ function BudgetTab({ state, send, registerPageSave }: { state: MsqWebState; send
   );
 }
 
-export function ConfigPage({ state, send }: ConfigPageProps): React.JSX.Element {
+export function ConfigPage({ state, send, onDirtyStateChange }: ConfigPageProps): React.JSX.Element {
   const [tab, setTab] = useState('runtime');
   const pageSave = usePageDirtyState();
+
+  useEffect(() => {
+    onDirtyStateChange?.(pageSave.isDirty);
+    return (): void => { onDirtyStateChange?.(false); };
+  }, [onDirtyStateChange, pageSave.isDirty]);
 
   const selectTab = useCallback((nextTab: string): void => {
     pageSave.clear();

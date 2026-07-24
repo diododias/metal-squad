@@ -7,6 +7,7 @@ import type { ToastTone } from './components/feedback/Toast.js';
 import { useIsMobile, MobileTopBar, MobileTabBar } from './Responsive.js';
 import { useWebSocket } from './hooks/useWebSocket.js';
 import { useLocalOutput, type OutputLine } from './hooks/useLocalOutput.js';
+import { useUnsavedGuard } from './hooks/useUnsavedGuard.js';
 import { ActiveProjectProvider, useActiveProject } from './hooks/useActiveProject.js';
 import { parseHash, type Route } from './lib/routes.js';
 import { hashWithRestoredQuery } from './lib/hashState.js';
@@ -65,6 +66,7 @@ export function App(): React.JSX.Element {
   const [archivedResults, setArchivedResults] = useState<Record<string, Extract<WebSocketServerMessage, { type: 'action:archivedResult' }>>>({});
   const [auditTrailResults, setAuditTrailResults] = useState<Record<string, Extract<WebSocketServerMessage, { type: 'action:auditTrailResult' }>>>({});
   const [analyticsMessage, setAnalyticsMessage] = useState<WebSocketServerMessage | null>(null);
+  const [configIsDirty, setConfigIsDirty] = useState(false);
   const { linesByRun, append, clear } = useLocalOutput();
   const hasReceivedStateRef = useRef(false);
 
@@ -122,15 +124,17 @@ export function App(): React.JSX.Element {
     };
   }, [pushToast]);
 
+  const unsavedGuard = useUnsavedGuard(configIsDirty, () => { setConfigIsDirty(false); });
+
   useEffect(() => {
     function onHashChange(): void {
-      setRoute(parseHash(window.location.hash));
+      if (unsavedGuard.onHashChange()) setRoute(parseHash(window.location.hash));
     }
     window.addEventListener('hashchange', onHashChange);
     return (): void => {
       window.removeEventListener('hashchange', onHashChange);
     };
-  }, []);
+  }, [unsavedGuard]);
 
   const onMessage = useCallback(
     (message: WebSocketServerMessage) => {
@@ -208,7 +212,7 @@ export function App(): React.JSX.Element {
   const { send, error: connectionError, connected } = useWebSocket(onMessage);
 
   function navigate(path: string): void {
-    window.location.hash = path;
+    unsavedGuard.navigate(path);
   }
   function logout(): void {
     fetch('/logout', { method: 'POST' })
@@ -218,10 +222,10 @@ export function App(): React.JSX.Element {
       });
   }
   function openRun(featureId: string): void {
-    window.location.hash = `/runs/${featureId}`;
+    navigate(`/runs/${featureId}`);
   }
   function openBacklogItem(featureId: string): void {
-    window.location.hash = `/backlog/${featureId}`;
+    navigate(`/backlog/${featureId}`);
   }
 
   const activePathPrefix =
@@ -401,7 +405,7 @@ export function App(): React.JSX.Element {
       />
     );
   } else {
-    page = state && <ConfigPage state={state} isMobile={isMobile} send={send} />;
+    page = state && <ConfigPage state={state} isMobile={isMobile} send={send} onDirtyStateChange={setConfigIsDirty} />;
   }
 
   return (
@@ -426,6 +430,16 @@ export function App(): React.JSX.Element {
         onCloseNotifications={() => { setNotificationsOpen(false); }}
       />
       <ToastStack items={toasts} onDismiss={dismissToast} />
+      <Modal open={unsavedGuard.isConfirmingLeave} onClose={unsavedGuard.cancel} width={460}>
+        <div style={{ padding: 20, display: 'flex', flexDirection: 'column', gap: 12 }}>
+          <strong style={{ fontSize: 'var(--text-sm)' }}>Discard changes?</strong>
+          <p style={{ margin: 0, color: 'var(--text-muted)', fontSize: 'var(--text-xs)', lineHeight: 1.5 }}>Your unsaved changes will be lost.</p>
+          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
+            <button type="button" onClick={unsavedGuard.cancel}>Cancel</button>
+            <button type="button" onClick={unsavedGuard.discard} style={{ color: 'var(--accent-danger)' }}>Discard</button>
+          </div>
+        </div>
+      </Modal>
     </ActiveProjectProvider>
   );
 }
