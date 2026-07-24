@@ -35,6 +35,12 @@ describe('BoardPage view', () => {
     expect(html).toContain('FAILED / ABORTED');
   });
 
+  it('desktop grid enforces a min-width so columns do not compress below legible width', () => {
+    const html = renderBoard();
+    expect(html).toMatch(/min-width:\s*\d+px/);
+    expect(html).toMatch(/minmax\(260px/);
+  });
+
   it('does not render any workflow stage columns', () => {
     const html = renderBoard();
     for (const stage of ['specify', 'plan', 'tasks', 'implement', 'validate']) {
