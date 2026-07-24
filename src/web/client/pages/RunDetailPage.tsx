@@ -317,7 +317,10 @@ export function RunDetailPage({
       </div>
     ),
     spec: (
-      <div data-testid="run-spec-readonly">
+      <div
+        data-testid="run-spec-readonly"
+        style={{ background: 'var(--bg-panel)', border: '1px solid var(--border-dim)', borderRadius: 'var(--radius-sm)', padding: 14 }}
+      >
         <MarkdownView
           source={feature?.description ?? ''}
           emptyFallback={`No spec declared for ${featureId}.`}

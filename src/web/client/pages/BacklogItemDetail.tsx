@@ -176,7 +176,7 @@ export function BacklogItemDetail({
           ) : (
             <div
               data-testid="spec-preview"
-              style={{ width: '100%', minHeight: 280, boxSizing: 'border-box', background: 'var(--bg-sunken)', border: '1px solid var(--border-dim)', borderRadius: 'var(--radius-sm)', padding: 14, overflow: 'auto' }}
+              style={{ width: '100%', minHeight: 280, boxSizing: 'border-box', background: 'var(--bg-panel)', border: '1px solid var(--border-dim)', borderRadius: 'var(--radius-sm)', padding: 14, overflow: 'auto' }}
             >
               <MarkdownView
                 source={specPreviewSource}
