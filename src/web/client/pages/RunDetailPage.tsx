@@ -505,7 +505,8 @@ export function RunDetailPage({
             spinnerEnabled={state.runtimeConfig.web.statusSpinner}
             tool={run.tool}
             model={feature?.model}
-            tokens={formatTokens(run.pipelineTotalTokens ?? run.totalTokens)}
+            tokens={formatTokens(run.wasteTokens != null && run.wasteTokens > 0 ? run.wasteTokens : run.pipelineTotalTokens ?? run.totalTokens)}
+            tokensAreWaste={run.wasteTokens != null && run.wasteTokens > 0}
             contextPercent={formatPercent(run.contextWindowPercent)}
             elapsed={formatElapsed(run.startedAt, run.endedAt)}
           />

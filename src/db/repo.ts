@@ -2051,6 +2051,8 @@ export interface RunSummary {
   startedAt: string;
   endedAt: string | null;
   totalTokens: number | null;
+  /** Tokens already consumed by an aborted run. Derived at read time; never persisted separately. */
+  wasteTokens?: number | null;
   inputTokens: number | null;
   cachedInputTokens?: number | null;
   outputTokens: number | null;
@@ -2199,6 +2201,11 @@ export function listRunsForTui(limit = 50, repoId?: string, scope: ProjectScope 
          r.started_at  AS startedAt,
          r.ended_at      AS endedAt,
          COALESCE(r.total_tokens, lu.total) AS totalTokens,
+         CASE
+           WHEN r.status = 'aborted' OR p.status IN ('aborting', 'aborted')
+             THEN COALESCE(r.total_tokens, lu.total)
+           ELSE NULL
+         END AS wasteTokens,
          COALESCE(r.input_tokens, lu.input) AS inputTokens,
          COALESCE(r.cached_input_tokens, lu.cachedInput) AS cachedInputTokens,
          COALESCE(r.output_tokens, lu.output) AS outputTokens,

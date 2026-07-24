@@ -80,6 +80,14 @@ describe('KanbanCard status and indicators', () => {
     expect(html).toContain('1000k tok');
   });
 
+  it('labels tokens from an aborted run as waste', () => {
+    const html = renderToStaticMarkup(
+      <KanbanCard run={{ ...run, status: 'aborted', tokens: 1_000, wasteTokens: 1_000 }} />,
+    );
+    expect(html).toContain('1k tok · WASTE');
+    expect(html).toContain('var(--accent-warn)');
+  });
+
   it('renders a paused pipeline as blocked instead of running', () => {
     const html = renderToStaticMarkup(
       <KanbanCard run={{ ...run, status: 'running', pipelineStatus: 'paused' }} />,

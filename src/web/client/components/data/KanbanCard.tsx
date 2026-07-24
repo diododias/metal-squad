@@ -42,6 +42,7 @@ export interface KanbanCardRun {
   autoAdvance?: boolean;
   elapsed?: string | null;
   tokens?: number | null;
+  wasteTokens?: number | null;
   tasksTotal?: number | null;
   tasksDone?: number | null;
   prUrl?: string | null;
@@ -220,7 +221,9 @@ export function KanbanCard({ run, selected, onClick, lifecycle }: KanbanCardProp
 
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: '2px 10px', fontSize: 'var(--text-2xs)', color: 'var(--text-dim)' }}>
         {run.elapsed && <span>{run.elapsed}</span>}
-        {run.tokens != null && <span>{formatTokens(run.tokens)} tok</span>}
+        {run.wasteTokens != null && run.wasteTokens > 0
+          ? <span style={{ color: 'var(--accent-warn)' }}>{formatTokens(run.wasteTokens)} tok · WASTE</span>
+          : run.tokens != null && <span>{formatTokens(run.tokens)} tok</span>}
         {tasksLabel && <span>{tasksLabel}</span>}
       </div>
 
