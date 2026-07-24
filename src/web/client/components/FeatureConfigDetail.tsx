@@ -4,6 +4,7 @@ import { EditableSelectField } from './core/EditableSelectField.js';
 import { EditableTextField } from './core/EditableTextField.js';
 import { EditableToggleField } from './core/EditableToggleField.js';
 import { Tag } from './core/Tag.js';
+import { useIsMobile } from '../Responsive.js';
 import type { FeatureCatalogEntry, BacklogSettings } from '../../../ui/catalog.js';
 import type { FeatureConfigPatch, FeatureConfigSaveResult, TaskConfigPatch } from '../../types.js';
 
@@ -124,6 +125,7 @@ export interface FeatureConfigDetailProps {
 }
 
 export function FeatureConfigDetail({ feature, backlogSettings, approvalChannels = ['telegram'], onSaveConfig, workflowSaveResult, toolIds = ['claude', 'codex', 'opencode'] }: FeatureConfigDetailProps): React.JSX.Element {
+  const isMobile = useIsMobile();
   const stages = feature.workflow.stages;
   const [selectedStage, setSelectedStage] = useState(stages[0] ?? 'specify');
   const [draftPrompt, setDraftPrompt] = useState('');
@@ -398,8 +400,8 @@ export function FeatureConfigDetail({ feature, backlogSettings, approvalChannels
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-      <ConfigCard title="Execution">
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 12, marginBottom: 12 }}>
+      <ConfigCard title="Tool / Adapter">
+        <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : 'repeat(2, 1fr)', gap: 12, marginBottom: 12 }}>
           <EditableSelectField
             id="execution-tool"
             label="tool"
@@ -442,6 +444,8 @@ export function FeatureConfigDetail({ feature, backlogSettings, approvalChannels
             placeholder="uses perFeatureMaxTokens when unset"
             onChange={(maxTokens) => { setDraftExecution((draft) => ({ ...draft, maxTokens })); }}
           />
+        </div>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 12, marginBottom: 12 }}>
           <EditableToggleField
             id="execution-auto-start"
             label="autoStart"
