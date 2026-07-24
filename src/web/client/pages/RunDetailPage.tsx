@@ -34,9 +34,8 @@ export interface RunDetailPageProps {
 }
 
 const TABS = [
-  { id: 'summary', label: 'Run Summary' },
   { id: 'spec', label: 'Feature Spec' },
-  { id: 'workflow', label: 'Workflow' },
+  { id: 'summary', label: 'Run Summary' },
   { id: 'config', label: 'Feature Config' },
   { id: 'output', label: 'Live Output' },
 ];
@@ -132,7 +131,7 @@ export function RunDetailPage({
   onBack,
   send,
 }: RunDetailPageProps): React.JSX.Element {
-  const [activeTab, setActiveTab] = useState('summary');
+  const [activeTab, setActiveTab] = useState('spec');
   const isMobile = useIsMobile();
   const [overrideTool, setOverrideTool] = useState('');
   const [overrideModel, setOverrideModel] = useState('');
@@ -323,19 +322,6 @@ export function RunDetailPage({
           source={feature?.description ?? ''}
           emptyFallback={`No spec declared for ${featureId}.`}
         />
-      </div>
-    ),
-    workflow: (
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-        {(feature?.tasks ?? []).length ? (
-          feature?.tasks?.map((t) => (
-            <div key={t.id} style={{ fontSize: 'var(--text-sm)', color: 'var(--text-dim)' }}>
-              {t.id} — {t.title} <span style={{ color: 'var(--text-faint)' }}>({t.status})</span>
-            </div>
-          ))
-        ) : (
-          <div style={{ color: 'var(--text-faint)', fontSize: 'var(--text-sm)' }}>No task breakdown declared.</div>
-        )}
       </div>
     ),
     config: feature ? (

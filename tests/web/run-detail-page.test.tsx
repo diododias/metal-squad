@@ -137,6 +137,9 @@ describe('RunDetailPage resume with override', () => {
     const note = 'note: post-run could not verify whether HEAD descends from the declared base develop. A verified GitHub PR already confirms this publication; treat this only as informational.';
     const container = renderPage(makeRun({ publishVerified: true, publishError: note, prNumber: 230, prUrl: 'https://example.test/pr/230' }), vi.fn());
 
+    const summaryTab = Array.from(container.querySelectorAll('button')).find((el) => el.textContent?.includes('Run Summary'));
+    act(() => { (summaryTab as HTMLElement)?.click(); });
+
     expect(container.textContent).toContain('Publish warning');
     expect(container.textContent).not.toContain('Publish check');
     expect(container.textContent).toContain(note);
@@ -145,6 +148,9 @@ describe('RunDetailPage resume with override', () => {
   it('labels an unverified publish error as a check failure', () => {
     const error = 'publish: no pull request is open for the current branch against develop.';
     const container = renderPage(makeRun({ publishVerified: false, publishError: error }), vi.fn());
+
+    const summaryTab = Array.from(container.querySelectorAll('button')).find((el) => el.textContent?.includes('Run Summary'));
+    act(() => { (summaryTab as HTMLElement)?.click(); });
 
     expect(container.textContent).toContain('Publish check');
     expect(container.textContent).not.toContain('Publish warning');
@@ -747,6 +753,32 @@ describe('RunDetailPage heartbeat display', () => {
       roots.length = 0;
       document.body.replaceChildren();
     }
+  });
+});
+
+describe('RunDetailPage tab order', () => {
+  it('opens on Feature Spec by default (SC-001)', () => {
+    const container = renderPage(makeRun(), vi.fn());
+
+    const spec = container.querySelector('[data-testid="run-spec-readonly"]');
+    expect(spec).not.toBeNull();
+  });
+
+  it('has no Workflow tab (SC-002)', () => {
+    const container = renderPage(makeRun(), vi.fn());
+
+    const tabs = Array.from(container.querySelectorAll('button, [role="tab"]'));
+    expect(tabs.some((el) => el.textContent === 'Workflow')).toBe(false);
+  });
+
+  it('shows Feature Spec before Run Summary in tab order', () => {
+    const container = renderPage(makeRun(), vi.fn());
+
+    const tabs = Array.from(container.querySelectorAll('button, [role="tab"]'));
+    const specIdx = tabs.findIndex((el) => el.textContent?.includes('Feature Spec'));
+    const summaryIdx = tabs.findIndex((el) => el.textContent?.includes('Run Summary'));
+    expect(specIdx).toBeGreaterThanOrEqual(0);
+    expect(summaryIdx).toBeGreaterThan(specIdx);
   });
 });
 
