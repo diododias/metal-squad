@@ -62,7 +62,13 @@ ponta a ponta (nesse caso, use `/msq-develop`, que dispara `msq run`).
    - nao informe `id`: o `msq backlog load` sempre gera o ID canonico da plataforma
    - `title`: `FXX — Titulo`
    - `spec`: resumo inline do problema/objetivo/escopo/validacao (formato do
-     `spec: >` ja usado no arquivo), ou `specFile` apontando pro doc criado
+     `spec: >` ja usado no arquivo), **ou** `specFile` apontando pro doc criado.
+     **IMPORTANTE**: o board (`catalog.ts`) exibe `data_json.spec`, nao o
+     conteudo do arquivo referenciado por `specFile`. O `backlog load` ja lê o
+     arquivo e popula `spec` em `data_json` automaticamente (fix aplicado em
+     `applyBacklogSeed`). Se usar so `specFile` sem `spec` inline em repos
+     sem esse fix, a descricao aparecera vazia no board — prefira sempre
+     incluir `spec` inline ou garantir que o fix esta presente.
    - `tool`/`model`/`effort`: conforme pedido pelo usuario nesta conversa; se
      nao especificado, mantenha o default do repo (`tool: claude`,
      `effort: medium` já corresponde ao tier `sonnet` no adapter Claude — ver
@@ -134,3 +140,10 @@ ponta a ponta (nesse caso, use `/msq-develop`, que dispara `msq run`).
   a feature (ex.: "configure sonnet com effort medium"), aplique isso
   diretamente nos campos `tool`/`effort` (e `model` apenas se um modelo
   especifico, fora do mapeamento padrao de effort, for pedido).
+- **spec vs specFile no board**: `catalog.ts:154` usa `feature.spec ?? null`
+  para preencher `description` no board. Quando so `specFile` e fornecido,
+  o board mostra vazio. O `applyBacklogSeed` (desde fix em
+  `src/db/backlogCatalog.ts`) le o arquivo e mergeia o conteudo em
+  `data_json.spec` na hora do seed. Recursos ja catalogados sem `spec`
+  precisam do script `scripts/backfill-spec-from-specfile.mjs` para
+  retroativamente preencher o campo.
