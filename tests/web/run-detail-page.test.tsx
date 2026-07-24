@@ -94,6 +94,30 @@ afterEach(() => {
 });
 
 describe('RunDetailPage resume with override', () => {
+  it('renders the Work Item type badge in the run header', () => {
+    const run = makeRun();
+    const state = makeState(run);
+    state.backlogSettings = { stageSkills: {} } as MsqWebState['backlogSettings'];
+    state.runtimeConfig = { ...state.runtimeConfig, notifications: { channels: [] } } as MsqWebState['runtimeConfig'];
+    state.featureCatalog = {
+      'feat-1': {
+        id: 'feat-1', title: 'Feature One', workItemType: 'bug', workflow: { stages: ['implement'] },
+      },
+    } as MsqWebState['featureCatalog'];
+    const container = document.createElement('div');
+    document.body.append(container);
+    const root = createRoot(container);
+    roots.push(root);
+
+    act(() => {
+      root.render(<RunDetailPage state={state} featureId="feat-1" runDetails={{}} linesByRun={{}} onSubscribeRun={() => () => undefined} onBack={() => undefined} send={vi.fn()} />);
+    });
+
+    const badge = container.querySelector('[data-testid="work-item-type-badge"]');
+    expect(badge?.textContent).toBe('bug');
+    expect(badge?.getAttribute('title')).toBe('type: bug');
+  });
+
   it('displays accumulated tokens across resumed sessions', () => {
     const container = renderPage(makeRun({ totalTokens: 125, pipelineTotalTokens: 900 }), vi.fn());
 

@@ -8,6 +8,7 @@ import { AgentTranscript, type TranscriptEntry } from '../components/transcript/
 import { RunStatusStrip } from '../components/status/RunStatusStrip.js';
 import { FeatureConfigDetail } from '../components/FeatureConfigDetail.js';
 import { MarkdownView } from '../components/MarkdownView.js';
+import { WorkItemTypeBadge } from '../components/data/WorkItemTypeBadge.js';
 import { PageHeader } from '../PageHeader.js';
 import { useActiveProject } from '../hooks/useActiveProject.js';
 import { useIsMobile } from '../Responsive.js';
@@ -364,6 +365,7 @@ export function RunDetailPage({
         }
         actions={
           <>
+            {feature?.workItemType && <WorkItemTypeBadge workItemType={feature.workItemType} />}
             {canPause && (
               <Button
                 variant="pause"

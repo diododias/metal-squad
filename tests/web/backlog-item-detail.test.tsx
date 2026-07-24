@@ -6,9 +6,7 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { BacklogItemDetail } from '../../src/web/client/pages/BacklogItemDetail.js';
 import { ActiveProjectContext } from '../../src/web/client/hooks/useActiveProject.js';
-import type { MsqWebState, WebSocketClientMessage, WebSocketServerMessage } from '../../src/web/types.js';
-
-type ActionResult = Extract<WebSocketServerMessage, { type: 'action:result' }>;
+import type { MsqWebState } from '../../src/web/types.js';
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -302,10 +300,9 @@ describe('BacklogItemDetail Project/repo context', () => {
   });
 });
 
-describe('BacklogItemDetail Work Item type change', () => {
-  function stateWithType(overrides: { workItemType?: string; templateId?: string; templateVersion?: number; runs?: unknown[] } = {}): MsqWebState {
+describe('BacklogItemDetail Work Item type badge', () => {
+  function stateWithType(overrides: { workItemType?: string; templateId?: string; templateVersion?: number } = {}): MsqWebState {
     return baseState({
-      runs: overrides.runs ?? [],
       featureCatalog: {
         'feat-1': {
           id: 'feat-1',
@@ -336,44 +333,6 @@ describe('BacklogItemDetail Work Item type change', () => {
     } as unknown as Partial<MsqWebState>);
   }
 
-  function renderInteractive(
-    state: MsqWebState,
-    send: (message: WebSocketClientMessage) => void,
-    actionResults: Record<string, ActionResult>,
-  ): { container: HTMLDivElement; rerender: (nextActionResults: Record<string, ActionResult>) => void } {
-    const container = document.createElement('div');
-    document.body.append(container);
-    const root = createRoot(container);
-    roots.push(root);
-    const doRender = (nextActionResults: Record<string, ActionResult>): void => {
-      act(() => {
-        root.render(
-          <BacklogItemDetail
-            state={state}
-            featureId="feat-1"
-            runHistories={{}}
-            onSubscribeHistory={() => () => undefined}
-            onBack={() => undefined}
-            onStart={() => undefined}
-            onSaveConfig={() => undefined}
-            onSaveTaskConfig={() => undefined}
-            onOpenRun={() => undefined}
-            send={send}
-            actionResults={nextActionResults}
-          />,
-        );
-      });
-    };
-    doRender(actionResults);
-    return { container, rerender: doRender };
-  }
-
-  function findButton(container: HTMLDivElement, text: string): HTMLButtonElement {
-    const button = Array.from(container.querySelectorAll('button')).find((candidate) => candidate.textContent === text);
-    if (!button) throw new Error(`Could not find button with text "${text}"`);
-    return button;
-  }
-
   it('shows the type and template/version badges', () => {
     const html = renderToStaticMarkup(
       <BacklogItemDetail
@@ -390,73 +349,15 @@ describe('BacklogItemDetail Work Item type change', () => {
         actionResults={{}}
       />,
     );
+    expect(html).toContain('data-testid="work-item-type-badge"');
     expect(html).toContain('title="type: bug"');
     expect(html).toContain('title="workflow template: tmpl-bug v2"');
   });
 
-  it('requests a preview and shows the current/new workflow diff when a type change is requested', () => {
-    const send = vi.fn();
-    const { container } = renderInteractive(stateWithType(), send, {});
-
-    act(() => { findButton(container, 'change to bug').click(); });
-
-    expect(send).toHaveBeenCalledTimes(1);
-    const message = send.mock.calls[0]?.[0] as Extract<WebSocketClientMessage, { type: 'action:changeWorkItemType' }>;
-    expect(message.type).toBe('action:changeWorkItemType');
-    expect(message.workItemId).toBe('feat-1');
-    expect(message.workItemType).toBe('bug');
-    expect(message.expectedRevision).toBe(4);
-    expect(message.preview).toBe(true);
-
-    expect(container.textContent).toContain('Change type: feature → bug');
-    expect(findButton(container, 'applying…').disabled).toBe(true);
-  });
-
-  it('confirms the type change after a valid preview resolves', () => {
-    const send = vi.fn();
-    const { container, rerender } = renderInteractive(stateWithType(), send, {});
-
-    act(() => { findButton(container, 'change to bug').click(); });
-    const previewMessage = send.mock.calls[0]?.[0] as Extract<WebSocketClientMessage, { type: 'action:changeWorkItemType' }>;
-
-    rerender({
-      [previewMessage.requestId]: {
-        type: 'action:result',
-        payload: { requestId: previewMessage.requestId, ok: true, preview: { templateId: 'tmpl-bug', templateVersion: 1, origin: 'builtin', stages: ['triage', 'fix'] } },
-      } as unknown as ActionResult,
-    });
-
-    expect(container.textContent).toContain('New template: tmpl-bug v1');
-    expect(findButton(container, 'confirm change').disabled).toBe(false);
-
-    act(() => { findButton(container, 'confirm change').click(); });
-    const confirmMessage = send.mock.calls[send.mock.calls.length - 1]?.[0] as Extract<WebSocketClientMessage, { type: 'action:changeWorkItemType' }>;
-    expect(confirmMessage.preview).toBeUndefined();
-    expect(confirmMessage.workItemType).toBe('bug');
-  });
-
-  it('shows the server error and keeps the diff open when the type change is rejected', () => {
-    const send = vi.fn();
-    const { container, rerender } = renderInteractive(stateWithType(), send, {});
-    act(() => { findButton(container, 'change to bug').click(); });
-    const previewMessage = send.mock.calls[0]?.[0] as Extract<WebSocketClientMessage, { type: 'action:changeWorkItemType' }>;
-
-    rerender({
-      [previewMessage.requestId]: {
-        type: 'action:result',
-        payload: { requestId: previewMessage.requestId, ok: false, error: { code: 'SKILL_MISSING', message: 'Target repository is missing a required skill.' } },
-      } as unknown as ActionResult,
-    });
-
-    const alert = container.querySelector('[role="alert"]');
-    expect(alert?.textContent).toBe('Target repository is missing a required skill.');
-    expect(container.textContent).toContain('Change type: feature → bug');
-  });
-
-  it('disables the type change controls and explains why when the Work Item has run history', () => {
+  it('does not render a post-creation type change flow', () => {
     const html = renderToStaticMarkup(
       <BacklogItemDetail
-        state={stateWithType({ runs: [{ featureId: 'feat-1', status: 'done' }] })}
+        state={stateWithType()}
         featureId="feat-1"
         runHistories={{}}
         onSubscribeHistory={() => () => undefined}
@@ -469,9 +370,10 @@ describe('BacklogItemDetail Work Item type change', () => {
         actionResults={{}}
       />,
     );
-    expect(html).toContain('type locked (has run history)');
-    expect(html).toContain('title="This Work Item has run history — its type is locked."');
     expect(html).not.toContain('change to bug');
+    expect(html).not.toContain('Change type:');
+    expect(html).not.toContain('confirm change');
+    expect(html).not.toContain('type locked');
   });
 });
 
