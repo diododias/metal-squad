@@ -145,7 +145,7 @@ describe('Settings client surfaces', () => {
       'Skills',
       'Notifications',
       'Budget',
-      'save runtime',
+      'Save changes',
     ]);
     expect(container.textContent).toContain('secrets');
     expect(container.textContent).toContain('empty');
@@ -203,7 +203,7 @@ describe('Settings client surfaces', () => {
       effort.dispatchEvent(new Event('change', { bubbles: true }));
     });
     act(() => {
-      Array.from(container.querySelectorAll('button')).find((button) => button.textContent === 'save defaults')?.click();
+      Array.from(container.querySelectorAll('button')).find((button) => button.textContent === 'Save changes')?.click();
     });
 
     expect(messages).toEqual([{ type: 'action:updateProjectDefaults', patch: { effort: 'high' } }]);
@@ -228,7 +228,7 @@ describe('Settings client surfaces', () => {
       dispatchInputChange(alertAtPercent, '0');
     });
     act(() => {
-      Array.from(container.querySelectorAll('button')).find((button) => button.textContent === 'save budget')?.click();
+      Array.from(container.querySelectorAll('button')).find((button) => button.textContent === 'Save changes')?.click();
     });
 
     expect(messages).toEqual([{ type: 'action:updateBudgetConfig', patch: { alertAtPercent: 0 } }]);
@@ -251,7 +251,7 @@ describe('Settings client surfaces', () => {
     });
 
     expect(container.textContent).toContain('Enter a whole number from 0 to 100.');
-    expect((Array.from(container.querySelectorAll('button')).find((button) => button.textContent === 'save budget') as HTMLButtonElement).disabled).toBe(true);
+    expect((Array.from(container.querySelectorAll('button')).find((button) => button.textContent === 'Save changes') as HTMLButtonElement).disabled).toBe(true);
     expect(messages).toEqual([]);
   });
 
@@ -284,7 +284,9 @@ describe('Settings client surfaces', () => {
     const done = container.querySelector('[id="notification-event-run:done"]') as HTMLInputElement;
     act(() => {
       done.click();
-      Array.from(container.querySelectorAll('button')).find((button) => button.textContent === 'save notifications')?.click();
+    });
+    act(() => {
+      Array.from(container.querySelectorAll('button')).find((button) => button.textContent === 'Save changes')?.click();
     });
 
     expect(messages).toEqual([{
@@ -315,13 +317,14 @@ describe('Settings client surfaces', () => {
       port.dispatchEvent(new Event('change', { bubbles: true }));
     });
     act(() => {
-      Array.from(container.querySelectorAll('button')).find((button) => button.textContent === 'save runtime')?.click();
+      Array.from(container.querySelectorAll('button')).find((button) => button.textContent === 'Save changes')?.click();
     });
 
     expect(messages).toEqual([{
       type: 'action:updateAppConfig',
       patch: { concurrency: 5, web: { port: 8080 } },
     }]);
+    expect((Array.from(container.querySelectorAll('button')).find((button) => button.textContent === 'Save changes') as HTMLButtonElement).disabled).toBe(true);
   });
 
   it('disables runtime controls when config.json is not writable', () => {
@@ -337,7 +340,7 @@ describe('Settings client surfaces', () => {
 
     expect((container.querySelector('#runtime-concurrency') as HTMLInputElement).disabled).toBe(true);
     expect((container.querySelector('#runtime-web-auth') as HTMLSelectElement).disabled).toBe(true);
-    expect(Array.from(container.querySelectorAll('button')).find((button) => button.textContent === 'save runtime')?.disabled).toBe(true);
+    expect(Array.from(container.querySelectorAll('button')).find((button) => button.textContent === 'Save changes')?.disabled).toBe(true);
     expect(container.textContent).toContain('config.json is read-only');
   });
 

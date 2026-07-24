@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Button } from '../components/core/Button.js';
 import { EditableSelectField } from '../components/core/EditableSelectField.js';
 import { EditableTextField } from '../components/core/EditableTextField.js';
@@ -6,6 +6,7 @@ import { EditableToggleField } from '../components/core/EditableToggleField.js';
 import { Tabs } from '../components/navigation/Tabs.js';
 import { Tag } from '../components/core/Tag.js';
 import { PageHeader } from '../PageHeader.js';
+import { usePageDirtyState, type PageDirtyRegistration } from '../hooks/usePageDirtyState.js';
 import type { AppConfigPatch, MsqWebState, ProjectDefaultsPatch, WebSocketClientMessage } from '../../types.js';
 import type { NotificationsPatch, ToolRegistryEntry } from '../../../config/index.js';
 
@@ -85,7 +86,19 @@ function positiveWholeNumber(value: string, max?: number): number | undefined {
   return Number.isInteger(number) && number > 0 && (max === undefined || number <= max) ? number : undefined;
 }
 
-function RuntimeTab({ state, send }: { state: MsqWebState; send: ConfigPageProps['send'] }): React.JSX.Element {
+type RegisterPageSave = (registration: PageDirtyRegistration) => void;
+
+function useRegisterPageSave(register: RegisterPageSave, isDirty: boolean, isValid: boolean, saveDraft: () => void): void {
+  const saveRef = useRef(saveDraft);
+  saveRef.current = saveDraft;
+  const save = useCallback(() => { saveRef.current(); }, []);
+
+  useEffect(() => {
+    register({ isDirty, isValid, save });
+  }, [isDirty, isValid, register, save]);
+}
+
+function RuntimeTab({ state, send, registerPageSave }: { state: MsqWebState; send: ConfigPageProps['send']; registerPageSave: RegisterPageSave }): React.JSX.Element {
   const c = state.runtimeConfig;
   const sources = state.backlogSettings.configSources;
   const environment = state.environment;
@@ -127,8 +140,13 @@ function RuntimeTab({ state, send }: { state: MsqWebState; send: ConfigPageProps
   }
 
   function save(): void {
-    if (canSave) send({ type: 'action:updateAppConfig', patch });
+    if (canSave) {
+      send({ type: 'action:updateAppConfig', patch });
+      setDraft(baseline);
+    }
   }
+
+  useRegisterPageSave(registerPageSave, Object.keys(patch).length > 0, writable && isValid, save);
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
@@ -144,7 +162,6 @@ function RuntimeTab({ state, send }: { state: MsqWebState; send: ConfigPageProps
           <EditableSelectField id="runtime-web-auth" label="web.auth" value={draft.webAuth} initialValue={baseline.webAuth} disabled={!writable} options={[{ value: 'token', label: 'token' }, { value: 'none', label: 'none' }]} onChange={(value) => { updateField('webAuth', value === 'none' ? 'none' : 'token'); }} />
           {!writable && <span style={{ color: 'var(--accent-warn)', fontSize: 'var(--text-xs)', lineHeight: 1.4 }}>config.json is read-only; runtime settings cannot be changed.</span>}
           {!isValid && <span style={{ color: 'var(--accent-warn)', fontSize: 'var(--text-xs)', lineHeight: 1.4 }}>Enter positive whole numbers; web.port must be between 1 and 65535.</span>}
-          <div><Button variant="primary" size="sm" onClick={save} disabled={!canSave}>save runtime</Button></div>
         </div>
       </Card>
       <Card title="Environment / Sources">
@@ -214,7 +231,7 @@ function sameJson(left: unknown, right: unknown): boolean {
   return JSON.stringify(left) === JSON.stringify(right);
 }
 
-function DefaultsTab({ state, send }: { state: MsqWebState; send: ConfigPageProps['send'] }): React.JSX.Element {
+function DefaultsTab({ state, send, registerPageSave }: { state: MsqWebState; send: ConfigPageProps['send']; registerPageSave: RegisterPageSave }): React.JSX.Element {
   const defaults = state.backlogSettings.projectDefaults;
   const baseline = useMemo(() => defaultsDraftFrom(defaults), [defaults]);
   const [draft, setDraft] = useState<DefaultsDraft>(baseline);
@@ -262,8 +279,13 @@ function DefaultsTab({ state, send }: { state: MsqWebState; send: ConfigPageProp
 
   const canSave = Object.keys(patch).length > 0 && guidance === undefined;
   function save(): void {
-    if (canSave) send({ type: 'action:updateProjectDefaults', patch });
+    if (canSave) {
+      send({ type: 'action:updateProjectDefaults', patch });
+      setDraft(baseline);
+    }
   }
+
+  useRegisterPageSave(registerPageSave, Object.keys(patch).length > 0, guidance === undefined, save);
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
@@ -372,7 +394,6 @@ function DefaultsTab({ state, send }: { state: MsqWebState; send: ConfigPageProp
             onChange={(autoAdvance) => { setDraft((current) => ({ ...current, autoAdvance })); }}
           />
           {guidance && <span style={{ color: 'var(--accent-warn)', fontSize: 'var(--text-xs)', lineHeight: 1.4 }}>{guidance}</span>}
-          <div><Button variant="primary" size="sm" onClick={save} disabled={!canSave}>save defaults</Button></div>
         </div>
       </Card>
     </div>
@@ -511,7 +532,7 @@ function credentialLabel(type: ChannelType): string | undefined {
   }
 }
 
-function NotificationsTab({ state, send }: { state: MsqWebState; send: ConfigPageProps['send'] }): React.JSX.Element {
+function NotificationsTab({ state, send, registerPageSave }: { state: MsqWebState; send: ConfigPageProps['send']; registerPageSave: RegisterPageSave }): React.JSX.Element {
   const baseline = useMemo(() => notificationsDraftFrom(state.runtimeConfig.notifications), [state.runtimeConfig.notifications]);
   const [channels, setChannels] = useState<NotificationChannelDraft[]>(baseline);
   const [events, setEvents] = useState<string[]>(state.runtimeConfig.notifications.events);
@@ -548,6 +569,16 @@ function NotificationsTab({ state, send }: { state: MsqWebState; send: ConfigPag
     setEvents((current) => enabled ? [...current, event] : current.filter((value) => value !== event));
   }
 
+  function save(): void {
+    if (canSave) {
+      send({ type: 'action:updateNotifications', patch });
+      setChannels(baseline);
+      setEvents(state.runtimeConfig.notifications.events);
+    }
+  }
+
+  useRegisterPageSave(registerPageSave, changed, channelsValid, save);
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
       <Card title="Channels">
@@ -569,13 +600,12 @@ function NotificationsTab({ state, send }: { state: MsqWebState; send: ConfigPag
           {NOTIFICATION_EVENTS.map((event) => <EditableToggleField key={event} id={`notification-event-${event}`} label={event} value={events.includes(event)} initialValue={state.runtimeConfig.notifications.events.includes(event)} onChange={(enabled) => { toggleEvent(event, enabled); }} />)}
         </div>
         {!channelsValid && <div style={{ color: 'var(--accent-warn)', fontSize: 'var(--text-xs)', marginTop: 10 }}>Enter a credential for every new channel.</div>}
-        <div style={{ marginTop: 12 }}><Button variant="primary" size="sm" onClick={() => { if (canSave) send({ type: 'action:updateNotifications', patch }); }} disabled={!canSave}>save notifications</Button></div>
       </Card>
     </div>
   );
 }
 
-function BudgetTab({ state, send }: { state: MsqWebState; send: ConfigPageProps['send'] }): React.JSX.Element {
+function BudgetTab({ state, send, registerPageSave }: { state: MsqWebState; send: ConfigPageProps['send']; registerPageSave: RegisterPageSave }): React.JSX.Element {
   const baseline = String(state.runtimeConfig.budget.alertAtPercent);
   const [draft, setDraft] = useState(baseline);
 
@@ -586,6 +616,15 @@ function BudgetTab({ state, send }: { state: MsqWebState; send: ConfigPageProps[
   const alertAtPercent = Number(draft);
   const isValid = Number.isInteger(alertAtPercent) && alertAtPercent >= 0 && alertAtPercent <= 100;
   const canSave = draft !== baseline && isValid;
+
+  function save(): void {
+    if (canSave) {
+      send({ type: 'action:updateBudgetConfig', patch: { alertAtPercent } });
+      setDraft(baseline);
+    }
+  }
+
+  useRegisterPageSave(registerPageSave, draft !== baseline, isValid, save);
 
   return (
     <Card title="Budget">
@@ -599,7 +638,6 @@ function BudgetTab({ state, send }: { state: MsqWebState; send: ConfigPageProps[
           onChange={setDraft}
         />
         {!isValid && <span style={{ color: 'var(--accent-warn)', fontSize: 'var(--text-xs)', lineHeight: 1.4 }}>Enter a whole number from 0 to 100.</span>}
-        <div><Button variant="primary" size="sm" onClick={() => { if (canSave) send({ type: 'action:updateBudgetConfig', patch: { alertAtPercent } }); }} disabled={!canSave}>save budget</Button></div>
       </div>
     </Card>
   );
@@ -607,31 +645,40 @@ function BudgetTab({ state, send }: { state: MsqWebState; send: ConfigPageProps[
 
 export function ConfigPage({ state, send }: ConfigPageProps): React.JSX.Element {
   const [tab, setTab] = useState('runtime');
+  const pageSave = usePageDirtyState();
+
+  const selectTab = useCallback((nextTab: string): void => {
+    pageSave.clear();
+    setTab(nextTab);
+  }, [pageSave]);
 
   const content = useMemo(() => {
     switch (tab) {
       case 'runtime':
-        return <RuntimeTab state={state} send={send} />;
+        return <RuntimeTab state={state} send={send} registerPageSave={pageSave.register} />;
       case 'defaults':
-        return <DefaultsTab state={state} send={send} />;
+        return <DefaultsTab state={state} send={send} registerPageSave={pageSave.register} />;
       case 'tools':
         return <ToolsTab state={state} send={send} />;
       case 'skills':
         return <SkillsTab state={state} />;
       case 'notifications':
-        return <NotificationsTab state={state} send={send} />;
+        return <NotificationsTab state={state} send={send} registerPageSave={pageSave.register} />;
       case 'budget':
-        return <BudgetTab state={state} send={send} />;
+        return <BudgetTab state={state} send={send} registerPageSave={pageSave.register} />;
       default:
         return null;
     }
-  }, [tab, state, send]);
+  }, [tab, state, send, pageSave.register]);
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
       <PageHeader title="Settings" breadcrumb="Runtime, defaults, skills, notifications and budget" />
       <div style={{ padding: '0 20px' }}>
-        <Tabs tabs={SUB_TABS} activeId={tab} onSelect={setTab} />
+        <Tabs tabs={SUB_TABS} activeId={tab} onSelect={selectTab} />
+      </div>
+      <div style={{ display: 'flex', justifyContent: 'flex-end', padding: '12px 20px 0' }}>
+        <Button variant="primary" size="sm" onClick={pageSave.save} disabled={!pageSave.isDirty || !pageSave.isValid}>Save changes</Button>
       </div>
       <div style={{ flex: 1, overflow: 'auto', padding: 20 }}>{content}</div>
     </div>
