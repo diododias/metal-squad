@@ -27,7 +27,7 @@ export interface LifecycleActionsProps {
   actionResults: ActionResults;
   /** Running entities offer "Cancel" first: the host surface owns the abort
    * plumbing (pipelineId/featureId) and wires it here. Absent means the surface
-   * cannot cancel from here — only the blocked reason is shown. */
+   * cannot cancel from here — Cancel remains visibly disabled with its reason. */
   onRequestCancel?: () => void;
   size?: 'sm' | 'md';
   /** Confirmation toast on successful archive/restore/delete (PF-07). */
@@ -56,9 +56,9 @@ function idField(kind: LifecycleEntityKind): 'projectId' | 'epicId' | 'workItemI
  * Renders the lifecycle actions the server policy permits for a single entity
  * (PRJ-18). The client never recomputes the rules: it enables/disables buttons
  * from `allowed`. Delete requires confirmation — typed (name) for Project/Epic,
- * explicit for Work Item. A running entity offers Cancel first and explains why
- * lifecycle is blocked. Archive (reversible) and Delete (tombstone) are visually
- * distinguished via a Tag.
+ * explicit for Work Item. A running entity offers Cancel first; unavailable
+ * actions remain visibly disabled with their policy reason as a tooltip. Archive
+ * (reversible) and Delete (tombstone) are visually distinguished via a Tag.
  */
 export function LifecycleActions({
   kind, id, name, revision, allowed, send, actionResults, onRequestCancel, size = 'sm', onToast,
@@ -117,14 +117,11 @@ export function LifecycleActions({
   return (
     <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
       {allowed.cancel ? (
-        <>
-          {onRequestCancel ? (
-            <Button variant="pause" size={size} onClick={onRequestCancel}>Cancel</Button>
-          ) : null}
-          <span style={{ color: 'var(--text-muted)', fontSize: 'var(--text-2xs)' }}>
-            {allowed.blockedReason ?? 'Running.'}
-          </span>
-        </>
+        onRequestCancel ? (
+          <Button variant="pause" size={size} onClick={onRequestCancel}>Cancel</Button>
+        ) : (
+          <Button variant="pause" size={size} disabled title={allowed.blockedReason ?? 'Running.'}>Cancel</Button>
+        )
       ) : null}
 
       {allowed.archive ? (
@@ -145,11 +142,11 @@ export function LifecycleActions({
         </Button>
       ) : null}
 
-      {/* Whenever delete is refused and the entity is not running (running is
-          already explained next to Cancel), say why — including the common
-          "has history → archive only" case, where Archive is still offered. */}
+      {/* Whenever delete is refused and the entity is not running, keep the
+          policy reason on a muted Archive action rather than rendering loose text.
+          The enabled Archive above remains available for the reversible action. */}
       {!allowed.cancel && !allowed.delete && allowed.blockedReason ? (
-        <span style={{ color: 'var(--text-muted)', fontSize: 'var(--text-2xs)' }}>{allowed.blockedReason}</span>
+        <Button variant="neutral" size={size} disabled title={allowed.blockedReason}>Archive</Button>
       ) : null}
 
       {error ? (

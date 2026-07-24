@@ -59,33 +59,41 @@ describe('LifecycleActions — policy drives the buttons', () => {
     expect(html).toContain('Delete');
   });
 
-  it('hides Delete when the policy refuses it and explains why', () => {
+  it('keeps the history reason on a muted Archive button instead of loose text', () => {
     const html = render({
       ...pristine, state: 'historical', delete: false,
       blockedReason: 'It has run history and can be archived but not deleted.',
     });
     expect(html).toContain('Archive');
     expect(html).not.toContain('>Delete<');
-    expect(html).toContain('run history');
+    expect(html).toContain('disabled=""');
+    expect(html).toContain('aria-disabled="true"');
+    expect(html).toContain('title="It has run history and can be archived but not deleted."');
+    expect(html).not.toContain('>It has run history and can be archived but not deleted.<');
   });
 
-  it('shows no destructive action while running and surfaces the reason', () => {
+  it('shows a muted Cancel with its reason while running without cancellation wiring', () => {
     const html = render({
       ...pristine, state: 'running', archive: false, delete: false, cancel: true,
       blockedReason: 'It is running; cancel it first.',
     });
     expect(html).not.toContain('Archive');
     expect(html).not.toContain('>Delete<');
-    expect(html).toContain('running');
+    expect(html).toContain('>Cancel<');
+    expect(html).toContain('disabled=""');
+    expect(html).toContain('aria-disabled="true"');
+    expect(html).toContain('title="It is running; cancel it first."');
+    expect(html).not.toContain('>It is running; cancel it first.<');
   });
 
-  it('offers Cancel only when the host surface wired the abort', () => {
+  it('enables Cancel only when the host surface wired the abort', () => {
     const running: AllowedLifecycle = {
       ...pristine, state: 'running', archive: false, delete: false, cancel: true,
       blockedReason: 'It is running; cancel it first.',
     };
-    expect(render(running, { onRequestCancel: vi.fn() })).toContain('Cancel');
-    expect(render(running)).not.toContain('>Cancel<');
+    const wired = render(running, { onRequestCancel: vi.fn() });
+    expect(wired).toContain('>Cancel<');
+    expect(wired).not.toContain('disabled=""');
   });
 
   it('offers Restore for an archived entity and nothing for a tombstone', () => {
