@@ -279,7 +279,7 @@ export function App(): React.JSX.Element {
   let page: React.ReactNode = null;
   if (route.page === 'board') {
     page = state && (
-      <BoardPage state={state} isMobile={isMobile} onOpenRun={openRun} onOpenBacklogItem={openBacklogItem} />
+      <BoardPage state={state} isMobile={isMobile} onOpenRun={openRun} onOpenBacklogItem={openBacklogItem} send={send} actionResults={projectActionResults} />
     );
   } else if (route.page === 'runs') {
     page = state && <RunsPage state={state} onOpenRun={openRun} />;

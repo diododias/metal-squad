@@ -4,7 +4,8 @@ import { StatusPill } from '../core/StatusPill.js';
 import { WorkflowStepper } from '../navigation/WorkflowStepper.js';
 import { formatTokens } from '../../lib/format.js';
 import { pillStatus, type PillStatusInput } from '../../lib/pillStatus.js';
-import { LifecycleActions } from '../LifecycleActions.js';
+import { WorkItemActions } from '../WorkItemActions.js';
+import type { StartEligibility } from '../../lib/startEligibility.js';
 import type { AllowedLifecycle, WebSocketClientMessage, WebSocketServerMessage } from '../../../types.js';
 import type { PipelineStatus } from '../../../../db/repo.js';
 
@@ -45,6 +46,7 @@ export interface KanbanCardRun {
   tasksDone?: number | null;
   prUrl?: string | null;
   prNumber?: number | null;
+  pipelineId?: number | null;
   repoLabel?: string | null;
   workItemType?: string | null;
   templateId?: string | null;
@@ -64,6 +66,8 @@ export interface KanbanCardProps {
     send: (message: WebSocketClientMessage) => void;
     actionResults: Record<string, Extract<WebSocketServerMessage, { type: 'action:result' }>>;
     onRequestCancel?: () => void;
+    eligibility: StartEligibility;
+    onStart: () => void;
   };
 }
 
@@ -223,15 +227,18 @@ export function KanbanCard({ run, selected, onClick, lifecycle }: KanbanCardProp
       {lifecycle && (
         // The card itself is clickable; lifecycle controls must not navigate.
         <div onClick={(event) => { event.stopPropagation(); }}>
-          <LifecycleActions
-            kind="work_item"
+          <WorkItemActions
             id={run.persistedId ?? run.featureId}
             name={run.title?.trim() ?? run.featureId}
             revision={lifecycle.revision}
             allowed={lifecycle.allowed}
+            eligibility={lifecycle.eligibility}
+            pill={status}
+            pipelineId={run.pipelineId ?? null}
             send={lifecycle.send}
             actionResults={lifecycle.actionResults}
             onRequestCancel={lifecycle.onRequestCancel}
+            onStart={lifecycle.onStart}
           />
         </div>
       )}
