@@ -154,6 +154,7 @@ export function EpicDetailPage({ state, projectId, epicId, send, actionResults, 
   return <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
     <PageHeader
       title={`${epic.title} · ${shortId('epic', epic.epicId)}`}
+      description={epic.description ?? undefined}
       breadcrumb={[
         { label: 'Projects', href: '/projects' },
         { label: `${project.name} · ${shortId('project', project.projectId)}`, href: hashWithRestoredQuery(`/projects/${projectId}`) },
@@ -219,7 +220,6 @@ export function EpicDetailPage({ state, projectId, epicId, send, actionResults, 
     />
     <main style={{ overflow: 'auto', padding: 20, display: 'grid', gap: 16 }}>
       <Card>
-        {epic.description && <p style={muted}>{epic.description}</p>}
         <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
           <div style={{ flex: '1 1 220px', minWidth: 180 }}>
             <ProgressBar

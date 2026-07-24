@@ -61,4 +61,15 @@ describe('PageHeader breadcrumb', () => {
     const container = render(<PageHeader title="Plain" />);
     expect(container.querySelector('h1')?.textContent).toBe('Plain');
   });
+
+  it('places filters before the description', () => {
+    const container = render(<PageHeader title="Detail" filters={<input aria-label="Search details" />} description="Detail description" />);
+    const header = container.querySelector('.msq-page-header');
+    const search = container.querySelector('input[aria-label="Search details"]');
+    const description = [...container.querySelectorAll('p')].find((element) => element.textContent === 'Detail description');
+
+    expect(header?.contains(search)).toBe(true);
+    expect(header?.contains(description)).toBe(true);
+    expect(search?.compareDocumentPosition(description ?? null) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
 });

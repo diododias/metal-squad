@@ -48,11 +48,11 @@ export function PageHeader({ title, description, breadcrumb, actions, filters }:
           >
             {title}
           </h1>
-          {description && <p style={{ margin: '6px 0 0', color: 'var(--text-dim)', fontSize: 'var(--text-sm)' }}>{description}</p>}
         </div>
         {actions && <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>{actions}</div>}
       </div>
       {filters && <div style={{ marginTop: 14 }}>{filters}</div>}
+      {description && <p style={{ margin: '14px 0 0', color: 'var(--text-dim)', fontSize: 'var(--text-sm)' }}>{description}</p>}
     </div>
   );
 }
