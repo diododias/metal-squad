@@ -7,6 +7,7 @@ import { pillStatus, type PillStatusInput } from '../../lib/pillStatus.js';
 import { WorkItemActions } from '../WorkItemActions.js';
 import { shortId } from '../../lib/entityId.js';
 import { WorkItemTypeBadge } from './WorkItemTypeBadge.js';
+import { useLiveElapsed } from '../../hooks/useLiveElapsed.js';
 import type { StartEligibility } from '../../lib/startEligibility.js';
 import type { AllowedLifecycle, WebSocketClientMessage, WebSocketServerMessage } from '../../../types.js';
 import type { PipelineStatus } from '../../../../db/repo.js';
@@ -36,6 +37,7 @@ export interface KanbanCardRun {
   effort?: string | null;
   autoAdvance?: boolean;
   elapsed?: string | null;
+  startedAt?: string | null;
   tokens?: number | null;
   wasteTokens?: number | null;
   tasksTotal?: number | null;
@@ -96,6 +98,9 @@ function buildToolRailCells(run: KanbanCardRun): ToolRailCell[] {
 
 export function KanbanCard({ run, selected, onClick, lifecycle }: KanbanCardProps): React.JSX.Element {
   const status = pillStatus(run);
+  const isRunning = run.status === 'running';
+  const liveElapsed = useLiveElapsed(run.startedAt ?? null, isRunning);
+  const elapsedDisplay = isRunning && liveElapsed != null ? liveElapsed : (run.elapsed ?? null);
   const tasksLabel = run.tasksTotal != null ? `${String(run.tasksDone ?? 0)}/${String(run.tasksTotal)} tasks` : null;
   const isDone = status === 'done';
   const displayId = shortId('work_item', run.featureId, run.workItemType);
@@ -217,7 +222,7 @@ export function KanbanCard({ run, selected, onClick, lifecycle }: KanbanCardProp
       )}
 
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: '2px 10px', fontSize: 'var(--text-2xs)', color: 'var(--text-dim)' }}>
-        {run.elapsed && <span>{run.elapsed}</span>}
+        {elapsedDisplay && <span>{elapsedDisplay}</span>}
         {run.wasteTokens != null && run.wasteTokens > 0
           ? <span style={{ color: 'var(--accent-warn)' }}>{formatTokens(run.wasteTokens)} tok · WASTE</span>
           : run.tokens != null && <span>{formatTokens(run.tokens)} tok</span>}
