@@ -8,6 +8,7 @@ import { LifecycleActions } from '../components/LifecycleActions.js';
 import { CreateWorkItemModal } from '../components/project/CreateWorkItemModal.js';
 import { Modal } from '../components/feedback/Modal.js';
 import { EpicEditor } from './EpicEditor.js';
+import { usePageDirtyState } from '../hooks/usePageDirtyState.js';
 import { WorkflowStepper } from '../components/navigation/WorkflowStepper.js';
 import { ProgressBar } from '../components/data/ProgressBar.js';
 import { startEligibility } from '../lib/startEligibility.js';
@@ -37,6 +38,22 @@ export function EpicDetailPage({ state, projectId, epicId, send, actionResults, 
   const [page, setPage] = useState(0);
   const [showCreateWorkItem, setShowCreateWorkItem] = useState(false);
   const [showEditEpic, setShowEditEpic] = useState(false);
+  const [showDiscardEpicChanges, setShowDiscardEpicChanges] = useState(false);
+  const epicPageSave = usePageDirtyState();
+
+  const closeEpicEditor = (): void => {
+    epicPageSave.clear();
+    setShowDiscardEpicChanges(false);
+    setShowEditEpic(false);
+  };
+
+  const requestCloseEpicEditor = (): void => {
+    if (epicPageSave.isDirty) {
+      setShowDiscardEpicChanges(true);
+      return;
+    }
+    closeEpicEditor();
+  };
 
   const items = useMemo(
     () => Object.values(state.featureCatalog).filter((item) => item.epicId === epicId),
@@ -191,7 +208,7 @@ export function EpicDetailPage({ state, projectId, epicId, send, actionResults, 
       </div>}
       actions={<div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
         <Button variant="primary" size="sm" onClick={() => { setShowCreateWorkItem(true); }}>+ New Feature</Button>
-        <Button size="sm" onClick={() => { setShowEditEpic(true); }}>Edit Epic</Button>
+        <Button size="sm" onClick={() => { epicPageSave.clear(); setShowEditEpic(true); }}>Edit Epic</Button>
         <LifecycleActions
           kind="epic"
           id={epic.epicId}
@@ -318,7 +335,7 @@ export function EpicDetailPage({ state, projectId, epicId, send, actionResults, 
       }}
       connected={connected}
     />
-    <Modal open={showEditEpic} onClose={() => { setShowEditEpic(false); }} width={640}>
+    <Modal open={showEditEpic} onClose={requestCloseEpicEditor} width={640}>
       <div role="dialog" aria-label="Edit Epic" style={{ padding: 20, display: 'grid', gap: 12 }}>
         <EpicEditor
           epic={epic}
@@ -327,10 +344,22 @@ export function EpicDetailPage({ state, projectId, epicId, send, actionResults, 
           send={send}
           actionResults={actionResults}
           requestId={nextRequestId}
+          registerPageSave={epicPageSave.register}
           onSaved={() => { onToast?.({ id: `${String(Date.now())}-epic-updated`, tone: 'ok', message: `Epic "${epic.title}" updated.`, source: 'Epics' }); }}
         />
-        <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
-          <Button size="sm" onClick={() => { setShowEditEpic(false); }}>fechar</Button>
+        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
+          <Button size="sm" onClick={requestCloseEpicEditor}>cancelar</Button>
+          <Button variant="primary" size="sm" disabled={!epicPageSave.isDirty || !epicPageSave.isValid} onClick={epicPageSave.save}>Save Epic</Button>
+        </div>
+      </div>
+    </Modal>
+    <Modal open={showDiscardEpicChanges} onClose={() => { setShowDiscardEpicChanges(false); }} width={460}>
+      <div role="dialog" aria-label="Discard Epic changes" style={{ padding: 20, display: 'grid', gap: 12 }}>
+        <strong style={{ fontSize: 'var(--text-sm)' }}>Discard changes?</strong>
+        <p style={{ margin: 0, color: 'var(--text-muted)', fontSize: 'var(--text-xs)', lineHeight: 1.5 }}>Your unsaved Epic changes will be lost.</p>
+        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
+          <Button size="sm" onClick={() => { setShowDiscardEpicChanges(false); }}>Cancel</Button>
+          <Button size="sm" variant="destructive" onClick={closeEpicEditor}>Discard</Button>
         </div>
       </div>
     </Modal>
