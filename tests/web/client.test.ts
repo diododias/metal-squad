@@ -209,6 +209,43 @@ describe('Settings client surfaces', () => {
     expect(messages).toEqual([{ type: 'action:updateProjectDefaults', patch: { effort: 'high' } }]);
   });
 
+  it('keeps defaults skills drafts after blur until the global save commits them', () => {
+    const messages: WebSocketClientMessage[] = [];
+    const container = render(React.createElement(ConfigPage, {
+      state: settingsState,
+      isMobile: false,
+      send: (message: WebSocketClientMessage) => { messages.push(message); },
+    }));
+
+    act(() => {
+      Array.from(container.querySelectorAll('button')).find((button) => button.textContent === 'Defaults')?.click();
+    });
+    const skills = container.querySelector('#defaults-skills') as HTMLInputElement;
+    const stageSkills = container.querySelector('#defaults-stage-skills-specify') as HTMLInputElement;
+    const save = Array.from(container.querySelectorAll('button')).find((button) => button.textContent === 'Save changes') as HTMLButtonElement;
+
+    act(() => {
+      dispatchInputChange(skills, 'speckit-specify, dev-flow');
+      dispatchInputChange(stageSkills, 'speckit-specify, speckit-implement');
+      skills.dispatchEvent(new Event('blur', { bubbles: true }));
+      stageSkills.dispatchEvent(new Event('blur', { bubbles: true }));
+    });
+
+    expect(skills.value).toBe('speckit-specify, dev-flow');
+    expect(stageSkills.value).toBe('speckit-specify, speckit-implement');
+    expect(save.disabled).toBe(false);
+
+    act(() => { save.click(); });
+
+    expect(messages).toEqual([{
+      type: 'action:updateProjectDefaults',
+      patch: {
+        skills: ['speckit-specify', 'dev-flow'],
+        stageSkills: { specify: ['speckit-specify', 'speckit-implement'] },
+      },
+    }]);
+  });
+
   it('saves a valid App budget alert without rendering project token limits', () => {
     const messages: WebSocketClientMessage[] = [];
     const container = render(React.createElement(ConfigPage, {
