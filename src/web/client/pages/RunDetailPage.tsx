@@ -345,7 +345,6 @@ export function RunDetailPage({
         approvalChannels={state.runtimeConfig.notifications.channels.map((channel) => channel.type)}
         toolIds={toolIds}
         onSaveConfig={saveConfig}
-        doneFeatureIds={new Set(state.doneFeatureIds)}
       />
     ) : (
       <div style={{ color: 'var(--text-faint)', fontSize: 'var(--text-sm)' }}>Feature config not found in catalog.</div>
