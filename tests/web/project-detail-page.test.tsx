@@ -89,7 +89,7 @@ describe('ProjectDetailPage as epic list', () => {
   it('places the search before the project description in the header', () => {
     const container = render(baseState({ projects: [{ ...baseState().projects[0]!, description: 'Project description' }] }));
     const search = container.querySelector('input[aria-label="Search Epics"]');
-    const description = [...container.querySelectorAll('.msq-page-header p')].find((element) => element.textContent === 'Project description');
+    const description = container.querySelector('.msq-page-header-description');
 
     expect(search?.compareDocumentPosition(description ?? null) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });

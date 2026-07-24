@@ -139,9 +139,18 @@ describe('EpicDetailPage', () => {
   it('places the search before the epic description in the header', () => {
     const container = render(baseState());
     const search = container.querySelector('input[aria-label="Search Work Items"]');
-    const description = [...container.querySelectorAll('.msq-page-header p')].find((element) => element.textContent === 'The first epic.');
+    const description = container.querySelector('.msq-page-header-description');
 
     expect(search?.compareDocumentPosition(description ?? null) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
+  it('renders the epic description as markdown in the header', () => {
+    const state = baseState({ epics: [{ ...baseState().epics[0]!, description: 'Read the **release notes** at [Docs](https://example.com/docs).' }] });
+    const container = render(state);
+    const description = container.querySelector('.msq-page-header-description');
+
+    expect(description?.querySelector('strong')?.textContent).toBe('release notes');
+    expect(description?.querySelector('a')?.getAttribute('href')).toBe('https://example.com/docs');
   });
 
   it('renders a two-level breadcrumb that navigates to the project detail and projects list', () => {

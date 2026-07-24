@@ -17,6 +17,7 @@ import { hashWithRestoredQuery, readHashParams, updateHashParams } from '../lib/
 import { pillStatus } from '../lib/pillStatus.js';
 import { shortId } from '../lib/entityId.js';
 import { PageHeader } from '../PageHeader.js';
+import { MarkdownView } from '../components/MarkdownView.js';
 import type { ToastStackItem } from '../components/feedback/ToastStack.js';
 import type { MsqWebState, WebSocketClientMessage, WebSocketServerMessage } from '../../types.js';
 
@@ -154,7 +155,7 @@ export function EpicDetailPage({ state, projectId, epicId, send, actionResults, 
   return <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
     <PageHeader
       title={`${epic.title} · ${shortId('epic', epic.epicId)}`}
-      description={epic.description ?? undefined}
+      description={epic.description ? <MarkdownView source={epic.description} /> : undefined}
       breadcrumb={[
         { label: 'Projects', href: '/projects' },
         { label: `${project.name} · ${shortId('project', project.projectId)}`, href: hashWithRestoredQuery(`/projects/${projectId}`) },
