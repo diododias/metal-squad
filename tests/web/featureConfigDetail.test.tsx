@@ -83,6 +83,10 @@ function saveButton(container: HTMLElement): HTMLButtonElement | undefined {
   return Array.from(container.querySelectorAll('button')).find((button) => button.textContent === 'save execution');
 }
 
+function behaviourSaveButton(container: HTMLElement): HTMLButtonElement | undefined {
+  return Array.from(container.querySelectorAll('button')).find((button) => button.textContent === 'save behaviour');
+}
+
 function workflowControl(container: HTMLElement, id: string): HTMLInputElement | HTMLSelectElement {
   return executionControl(container, id);
 }
@@ -168,8 +172,8 @@ describe('FeatureConfigDetail execution card', () => {
     const onSaveConfig = vi.fn();
     const view = mount();
     view.rerender(makeFeature(), onSaveConfig);
-    act(() => { (executionControl(view.container, 'execution-auto-start') as HTMLInputElement).click(); });
-    act(() => { saveButton(view.container)?.click(); });
+    act(() => { (executionControl(view.container, 'behaviour-auto-start') as HTMLInputElement).click(); });
+    act(() => { behaviourSaveButton(view.container)?.click(); });
     expect(onSaveConfig).toHaveBeenCalledWith({ autoStart: true });
   });
 
@@ -253,19 +257,12 @@ describe('FeatureConfigDetail execution card', () => {
 
 describe('FeatureConfigDetail workflow card', () => {
   it('builds sparse patches for every editable workflow value', () => {
-    const scenarios: Array<{ feature?: FeatureCatalogEntry; id: string; value?: string; expected: object }> = [
+    const workflowScenarios: Array<{ feature?: FeatureCatalogEntry; id: string; value?: string; expected: object }> = [
       { id: 'workflow-mode', value: 'single', expected: { workflow: { mode: 'single' } } },
       { id: 'workflow-sync-tasks', expected: { workflow: { syncTasksToBacklog: false } } },
-      { id: 'workflow-auto-advance', expected: { workflow: { autoAdvance: true } } },
-      {
-        feature: makeFeature({ workflow: { ...makeFeature().workflow, approvals: { channel: 'legacy-channel' as 'telegram' }, autoAdvance: false } }),
-        id: 'workflow-approval-channel',
-        value: 'telegram',
-        expected: { workflow: { approvals: { channel: 'telegram' } } },
-      },
     ];
 
-    for (const scenario of scenarios) {
+    for (const scenario of workflowScenarios) {
       const onSaveConfig = vi.fn();
       const view = mount();
       view.rerender(scenario.feature ?? makeFeature(), onSaveConfig);
@@ -277,24 +274,30 @@ describe('FeatureConfigDetail workflow card', () => {
       act(() => { workflowSaveButton(view.container)?.click(); });
       expect(onSaveConfig).toHaveBeenCalledWith(scenario.expected);
     }
+
+    // auto-advance is in the Behaviour card and only visible when mode === staged
+    const onSaveConfig = vi.fn();
+    const view = mount();
+    view.rerender(makeFeature(), onSaveConfig); // mode defaults to staged
+    act(() => { (workflowControl(view.container, 'behaviour-auto-advance') as HTMLInputElement).click(); });
+    act(() => { behaviourSaveButton(view.container)?.click(); });
+    expect(onSaveConfig).toHaveBeenCalledWith({ workflow: { autoAdvance: true } });
   });
 
-  it('keeps an unavailable approval destination and rejected draft visible for correction', () => {
+  it('displays the inherited approvals channel as read-only and does not send it in workflow patches', () => {
     const onSaveConfig = vi.fn();
     const feature = makeFeature({ workflow: { ...makeFeature().workflow, approvals: { channel: 'legacy-channel' as 'telegram' }, autoAdvance: false } });
     const view = mount();
     view.rerender(feature, onSaveConfig);
 
-    expect(view.container.textContent).toContain('legacy-channel (unavailable)');
-    act(() => { dispatchChange(workflowControl(view.container, 'workflow-mode'), 'single'); });
-    expect(view.container.textContent).toContain('Choose an available approval destination before saving.');
-    expect(workflowSaveButton(view.container)).toBeUndefined();
+    // approvals.channel is shown read-only — no editable control with that id
+    expect(view.container.textContent).toContain('legacy-channel');
+    expect(view.container.querySelector('#workflow-approval-channel')).toBeNull();
 
-    act(() => { dispatchChange(workflowControl(view.container, 'workflow-approval-channel'), 'telegram'); });
+    // a workflow change does not include approvals in the patch
+    act(() => { dispatchChange(workflowControl(view.container, 'workflow-mode'), 'single'); });
     act(() => { workflowSaveButton(view.container)?.click(); });
-    expect(onSaveConfig).toHaveBeenCalledWith({
-      workflow: { mode: 'single', approvals: { channel: 'telegram' } },
-    });
+    expect(onSaveConfig).toHaveBeenCalledWith({ workflow: { mode: 'single' } });
 
     view.rerender(feature, onSaveConfig, {
       type: 'featureConfig:saveResult',
