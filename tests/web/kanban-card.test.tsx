@@ -2,6 +2,7 @@ import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
 import { KanbanCard, toShortFeatureId, toShortModelLabel } from '../../src/web/client/components/data/KanbanCard.js';
+import { shortId } from '../../src/web/client/lib/entityId.js';
 
 const run = {
   featureId: 'feat-52',
@@ -9,11 +10,11 @@ const run = {
   status: 'done' as const,
 };
 
-describe('KanbanCard persisted identity', () => {
-  it('renders the persisted catalog ID when available', () => {
+describe('KanbanCard entity identity', () => {
+  it('renders the canonical feature ID instead of a legacy persisted format', () => {
     const html = renderToStaticMarkup(<KanbanCard run={{ ...run, persistedId: 'F-23456789' }} />);
-    expect(html).toContain('F-23456789');
-    expect(html).not.toContain(toShortFeatureId(run.featureId));
+    expect(html).toContain(shortId('work_item', run.featureId));
+    expect(html).not.toContain('F-23456789');
   });
 
   it('uses the short hash only as a display fallback', () => {
@@ -26,16 +27,21 @@ describe('KanbanCard persisted identity', () => {
       <KanbanCard run={{ ...run, persistedId: 'F-23456789', epicTitle: 'Web Dashboard' }} />,
     );
     expect(html).toContain('Web Dashboard');
-    expect(html).toContain('F-23456789');
+    expect(html).toContain(shortId('work_item', run.featureId));
     expect(html.indexOf('Legacy feature')).toBeLessThan(html.indexOf('Web Dashboard'));
-    expect(html.indexOf('Web Dashboard')).toBeLessThan(html.indexOf('F-23456789'));
+    expect(html.indexOf('Web Dashboard')).toBeLessThan(html.indexOf(shortId('work_item', run.featureId)));
   });
 
   it('keeps the feature id in the markup even when the epic title is long', () => {
     const html = renderToStaticMarkup(
       <KanbanCard run={{ ...run, persistedId: 'SET-44', epicTitle: 'Settings — M9 (Consolidacao, limpeza e docs finais do modulo)' }} />,
     );
-    expect(html).toContain('SET-44');
+    expect(html).toContain(shortId('work_item', run.featureId));
+  });
+
+  it('uses a B prefix for bugs without changing persisted data', () => {
+    const html = renderToStaticMarkup(<KanbanCard run={{ ...run, persistedId: 'F-23456789', workItemType: 'bug' }} />);
+    expect(html).toContain(shortId('work_item', run.featureId, 'bug'));
   });
 });
 

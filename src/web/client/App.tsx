@@ -11,6 +11,7 @@ import { useUnsavedGuard } from './hooks/useUnsavedGuard.js';
 import { ActiveProjectProvider, useActiveProject } from './hooks/useActiveProject.js';
 import { parseHash, type Route } from './lib/routes.js';
 import { hashWithRestoredQuery } from './lib/hashState.js';
+import { shortId } from './lib/entityId.js';
 import { BoardPage } from './pages/BoardPage.js';
 import { RunDetailPage } from './pages/RunDetailPage.js';
 import { BacklogItemDetail } from './pages/BacklogItemDetail.js';
@@ -388,8 +389,8 @@ export function App(): React.JSX.Element {
           actionResults={projectActionResults}
           breadcrumb={[
             { label: 'Projects', href: '/projects' },
-            { label: project.name, href: hashWithRestoredQuery(`/projects/${route.projectId}`) },
-            { label: epic.title, href: epicPath },
+            { label: `${project.name} · ${shortId('project', project.projectId)}`, href: hashWithRestoredQuery(`/projects/${route.projectId}`) },
+            { label: `${epic.title} · ${shortId('epic', epic.epicId)}`, href: epicPath },
           ]}
         />
       );

@@ -12,6 +12,7 @@ import { WorkflowTemplatesSection } from '../components/WorkflowTemplatesSection
 import { Tabs } from '../components/navigation/Tabs.js';
 import { readHashParams, updateHashParams } from '../lib/hashState.js';
 import { pillStatus } from '../lib/pillStatus.js';
+import { shortId } from '../lib/entityId.js';
 import { PageHeader } from '../PageHeader.js';
 import type { EpicRow as EpicRowData } from '../../../db/repo.js';
 import type { ToastStackItem } from '../components/feedback/ToastStack.js';
@@ -105,7 +106,7 @@ export function ProjectDetailPage({ state, projectId, send, actionResults, archi
 
   return <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
     <PageHeader
-      title={project.name}
+      title={`${project.name} · ${shortId('project', project.projectId)}`}
       description={project.description ?? undefined}
       breadcrumb={[{ label: 'Projects', href: '/projects' }]}
       filters={activeTab === 'epics' && <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center' }}>
@@ -253,6 +254,7 @@ function EpicRow({ epic, state, projectId, send, actionResults, onToast }: {
     <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, alignItems: 'center' }}>
       <div style={{ flex: '1 1 260px', minWidth: 200 }}>
         <h3 style={{ margin: 0 }}>{epic.title}</h3>
+        <p style={{ ...muted, marginTop: 4, fontFamily: 'var(--font-mono)', fontSize: 'var(--text-xs)' }}>{shortId('epic', epic.epicId)}</p>
         <p style={{ ...muted, marginTop: 4, fontSize: 'var(--text-xs)' }}>
           created {new Date(epic.createdAt).toLocaleDateString()} · updated {new Date(epic.updatedAt).toLocaleDateString()}
         </p>
