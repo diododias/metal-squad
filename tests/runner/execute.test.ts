@@ -682,6 +682,7 @@ describe('executeBacklog failure persistence', () => {
   });
 
   it('blocks MSQ_DONE without required publication fields as validation_failed', async () => {
+    mockCreateGate.mockReturnValue(44);
     mockRunFeature.mockImplementation(async () => ({
       ok: true,
       summary: 'declared done without publication',
@@ -693,13 +694,17 @@ describe('executeBacklog failure persistence', () => {
     await expect(executeBacklog(createPublishStageBacklog(), { cwd: '/repo', concurrency: 1 }))
       .rejects.toThrow('MSQ_DONE is missing required pr_url, pr_number, base, and head publication fields.');
 
+    expect(mockFinishRun).toHaveBeenCalledWith(7, 'blocked', expect.stringContaining('MSQ_DONE is missing required pr_url'));
+    expect(mockCreateGate).toHaveBeenCalledWith(7, 'feat-implement', 'repo-1');
     expect(mockEventEmit).toHaveBeenCalledWith('run:blocked', expect.objectContaining({
       code: 'validation_failed',
       reason: 'gate',
+      gateId: 44,
     }));
   });
 
   it('keeps declared PR fields and blocks a divergent verification as validation_failed', async () => {
+    mockCreateGate.mockReturnValue(45);
     mockRunFeature.mockImplementation(async () => ({
       ok: true,
       summary: 'declared publication',
@@ -733,7 +738,9 @@ describe('executeBacklog failure persistence', () => {
         branch: 'feat/declared', prNumber: 77, prUrl: 'https://example/pr/77', baseBranch: 'develop',
       }),
     }));
-    expect(mockEventEmit).toHaveBeenCalledWith('run:blocked', expect.objectContaining({ code: 'validation_failed' }));
+    expect(mockFinishRun).toHaveBeenCalledWith(7, 'blocked', expect.stringContaining('declared publication does not match verified publication'));
+    expect(mockCreateGate).toHaveBeenCalledWith(7, 'feat-implement', 'repo-1');
+    expect(mockEventEmit).toHaveBeenCalledWith('run:blocked', expect.objectContaining({ code: 'validation_failed', gateId: 45 }));
   });
 
   it('persists an explicit MSQ_BLOCKED control with its reason code', async () => {

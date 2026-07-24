@@ -487,7 +487,7 @@ function SkillsTab({ state }: { state: MsqWebState }): React.JSX.Element {
   );
 }
 
-const NOTIFICATION_EVENTS = ['run:start', 'gate:created', 'run:failed', 'budget:alert', 'run:done', 'stage:approval', 'stage:input', 'timeout:approval-created'] as const;
+const NOTIFICATION_EVENTS = ['run:start', 'gate:created', 'run:failed', 'run:blocked', 'budget:alert', 'run:done', 'stage:approval', 'stage:input', 'timeout:approval-created'] as const;
 const CHANNEL_TYPES = ['telegram', 'slack', 'discord', 'webhook', 'desktop'] as const;
 type ChannelType = (typeof CHANNEL_TYPES)[number];
 

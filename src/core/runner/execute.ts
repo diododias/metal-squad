@@ -569,6 +569,14 @@ export async function executeBacklog(
       const failurePolicy = getOnFailPolicy(feature);
       const failureStatus = res.publishVerificationStatus ?? (failurePolicy === 'gate' ? 'blocked' : 'failed');
       const status = res.ok && declaredDone ? 'done' : failureStatus;
+      // Publication validation failures are recoverable only after a human
+      // decision. Persist a gate before publishing the blocked state so the
+      // Web projection and the actionable gate:created notification agree.
+      // This path cannot overlap runWithRetry's on-fail gate: validation
+      // failures arrive as an otherwise successful adapter result.
+      const gateId = status === 'blocked' && res.publishValidationFailed
+        ? createGate(runId, feature.id, repoId)
+        : undefined;
       finishRun(runId, status, res.summary);
       if (stage) {
         msqEventBus.emit('task:updated', {
@@ -594,6 +602,7 @@ export async function executeBacklog(
           tool: feature.tool,
           reason: 'gate',
           ...(res.publishValidationFailed ? { code: 'validation_failed' as const } : {}),
+          ...(gateId !== undefined ? { gateId } : {}),
           summary: res.summary,
         });
       } else {

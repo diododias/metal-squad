@@ -248,6 +248,26 @@ describe('attachEventNotifications', () => {
     detach();
   });
 
+  it('keeps run:blocked informational when gate:created already owns recovery', async () => {
+    const { attachEventNotifications } = await import('../../src/core/events/notifications.js');
+    const eventBus = createMsqEventBus();
+    const detach = attachEventNotifications(eventBus);
+
+    eventBus.emit('run:blocked', {
+      runId: 34,
+      featureId: 'feat-validation',
+      tool: 'codex',
+      reason: 'gate',
+      code: 'validation_failed',
+      gateId: 8,
+      summary: 'Publication validation failed.',
+    });
+
+    expect(mockDispatch).not.toHaveBeenCalled();
+
+    detach();
+  });
+
   it('does not dispatch protective run:blocked outcomes', async () => {
     const { attachEventNotifications } = await import('../../src/core/events/notifications.js');
     const eventBus = createMsqEventBus();

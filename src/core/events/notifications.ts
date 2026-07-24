@@ -193,7 +193,11 @@ export function attachEventNotifications(
         },
       }).catch((error: unknown) => { console.error('[notify] timeout:approval-created dispatch failed:', error); });
     }),
-    eventBus.subscribe('run:blocked', ({ runId, featureId, reason, code, summary }) => {
+    eventBus.subscribe('run:blocked', ({ runId, featureId, reason, code, gateId, summary }) => {
+      // A persisted gate already emits the actionable approve/skip/retry
+      // message. Keep run:blocked for logs and telemetry without duplicating
+      // a second Telegram prompt for the same decision.
+      if (gateId !== undefined) return;
       if (classifyBlockedOutcome(reason) !== 'blocked-human') return;
 
       const blockingCause = code ?? reason;
