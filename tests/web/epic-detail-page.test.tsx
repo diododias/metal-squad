@@ -136,6 +136,14 @@ describe('Epic approval action', () => {
 });
 
 describe('EpicDetailPage', () => {
+  it('places the search before the epic description in the header', () => {
+    const container = render(baseState());
+    const search = container.querySelector('input[aria-label="Search Work Items"]');
+    const description = [...container.querySelectorAll('.msq-page-header p')].find((element) => element.textContent === 'The first epic.');
+
+    expect(search?.compareDocumentPosition(description ?? null) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
   it('renders a two-level breadcrumb that navigates to the project detail and projects list', () => {
     window.location.hash = '';
     const container = render(baseState());

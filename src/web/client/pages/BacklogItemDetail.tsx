@@ -97,6 +97,7 @@ export function BacklogItemDetail({
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
       <PageHeader
         title={feature.title}
+        description={feature.description ?? undefined}
         breadcrumb={breadcrumb ?? (
           <span>
             <a href="#/board" onClick={returnToItemContext} style={{ color: 'var(--text-dim)' }}>

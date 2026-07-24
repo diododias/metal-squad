@@ -81,6 +81,18 @@ afterEach(() => {
 });
 
 describe('BacklogItemDetail contextual breadcrumb (PF-14)', () => {
+  it('renders the Work Item description through the header slot', () => {
+    const html = render(baseState({ featureCatalog: {
+      'feat-1': { ...baseState().featureCatalog['feat-1']!, description: 'Work Item description' },
+    } }));
+    const headerStart = html.indexOf('class="msq-page-header"');
+    const bodyStart = html.indexOf('style="flex:1;overflow:auto;padding:20px"');
+    const descriptionPosition = html.indexOf('Work Item description');
+
+    expect(descriptionPosition).toBeGreaterThan(headerStart);
+    expect(descriptionPosition).toBeLessThan(bodyStart);
+  });
+
   it('keeps the default Board breadcrumb when no override is given', () => {
     const html = render(baseState());
     expect(html).toContain('Board');
