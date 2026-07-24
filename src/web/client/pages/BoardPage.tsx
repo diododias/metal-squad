@@ -153,12 +153,12 @@ export function BoardPage({ state, isMobile, onOpenRun, onOpenBacklogItem, send,
           </div>
         }
       />
-      <div style={{ flex: 1, overflow: 'auto', padding: isMobile ? 12 : 20 }}>
+      <div style={{ flex: 1, overflow: 'auto', padding: isMobile ? 12 : 20, minWidth: 0 }}>
         <div
           style={
             isMobile
               ? { display: 'flex', gap: 12, minHeight: '100%', overflowX: 'auto', scrollSnapType: 'x mandatory', paddingBottom: 4, WebkitOverflowScrolling: 'touch' }
-              : { display: 'grid', gridTemplateColumns: `repeat(${String(columns.length + 1)}, minmax(220px, 1fr))`, gap: 12, minHeight: '100%' }
+              : { display: 'grid', gridTemplateColumns: `repeat(${String(columns.length + 1)}, minmax(260px, 1fr))`, gap: 12, minHeight: '100%', minWidth: `${String((columns.length + 1) * 272)}px` }
           }
         >
           <div
