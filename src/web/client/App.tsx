@@ -233,12 +233,12 @@ export function App(): React.JSX.Element {
     route.page === 'run-detail' ? '/runs' : route.page === 'backlog-detail' ? '/board' : `/${route.page}`;
 
   const navItems: SidebarNavItem[] = [
-    { path: '/board', label: 'Board' },
     { path: '/projects', label: 'Projects', count: state?.projects.filter((project) => project.archivedAt === null).length },
+    { path: '/board', label: 'Board' },
     { path: '/runs', label: 'Runs' },
     { path: '/gates', label: 'Gates', count: state?.gates.length },
-    { path: '/analytics', label: 'Analytics' },
     { path: '/archived', label: 'Archived' },
+    { path: '/analytics', label: 'Analytics' },
     { path: '/config', label: 'Settings' },
   ];
 
