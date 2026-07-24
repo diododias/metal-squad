@@ -123,7 +123,7 @@ describe('backlog load command', () => {
     expect(mockAssertWritableDbPath).toHaveBeenCalled();
     expect(mockRegisterRepo).toHaveBeenCalledWith('repo-1', '/repo');
     expect(mockPlanBacklogSeed).toHaveBeenCalledWith(backlog, 'repo-1');
-    expect(mockApplyBacklogSeed).toHaveBeenCalledWith(backlog, plan);
+    expect(mockApplyBacklogSeed).toHaveBeenCalledWith(backlog, plan, '/repo');
     expect(log).toHaveBeenCalledWith(expect.stringContaining('Seed created'));
   });
 

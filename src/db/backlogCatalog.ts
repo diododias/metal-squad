@@ -1,4 +1,5 @@
-import { existsSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import type Database from 'better-sqlite3';
 import { getDb } from './index.js';
 import { resolveDbPath, resolveRuntimeConfig } from '../config/index.js';
@@ -481,10 +482,21 @@ export function planBacklogSeed(backlog: BacklogV2, repoId: string): BacklogSeed
   return { mode: 'seed', repoId, items };
 }
 
-/** Applies only the `created` entries of a seed plan in one SQLite transaction. */
-export function applyBacklogSeed(backlog: BacklogV2, plan: BacklogSeedPlan): void {
+/** Applies only the `created` entries of a seed plan in one SQLite transaction.
+ * When `repoPath` is provided, specFile content is read and stored as `spec`
+ * in `data_json` so the board catalog can display it without filesystem access. */
+export function applyBacklogSeed(backlog: BacklogV2, plan: BacklogSeedPlan, repoPath?: string): void {
   const db = getDb('readwrite');
   const created = new Set(plan.items.filter((item) => item.status === 'created').map((item) => `${item.kind}:${item.id}`));
+
+  function resolveSpecContent(feature: { spec?: string; specFile?: string }): string | undefined {
+    if (feature.spec) return feature.spec;
+    if (repoPath && feature.specFile) {
+      try { return readFileSync(resolve(repoPath, feature.specFile), 'utf8'); } catch { /* specFile unreadable — skip */ }
+    }
+    return undefined;
+  }
+
   db.transaction(() => {
     if (created.has(`catalog:${plan.repoId}`)) {
       db.prepare(
@@ -511,7 +523,9 @@ export function applyBacklogSeed(backlog: BacklogV2, plan: BacklogSeedPlan): voi
       epic.features.forEach((feature, featureIndex) => {
         if (!created.has(`feature:${feature.id}`)) return;
         const normalized = FeatureSchema.parse(feature);
-        insertFeature.run(normalized.id, epic.id, plan.repoId, normalized.title, JSON.stringify(normalized.dependsOn), normalized.specFile ?? null, featureIndex, JSON.stringify(normalized));
+        const spec = resolveSpecContent(normalized);
+        const data = spec !== undefined ? { ...normalized, spec } : normalized;
+        insertFeature.run(normalized.id, epic.id, plan.repoId, normalized.title, JSON.stringify(normalized.dependsOn), normalized.specFile ?? null, featureIndex, JSON.stringify(data));
         normalized.tasks.forEach((task, taskIndex) => {
           insertTask.run(task.id, normalized.id, task.title, task.status, taskIndex, JSON.stringify(task));
         });

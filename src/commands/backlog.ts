@@ -100,7 +100,7 @@ export function registerBacklog(program: Command): void {
         registerRepo(repoId, path);
         const staged = stageBacklogFile(opts.file, cwd, parsed);
         try {
-          applyBacklogSeed(parsed, plan);
+          applyBacklogSeed(parsed, plan, path);
           staged.commit();
           if (opts.format === 'json') console.log(JSON.stringify(plan, null, 2));
           else printSeedSummary(plan);

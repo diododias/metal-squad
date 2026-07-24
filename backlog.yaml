@@ -1,371 +1,935 @@
 version: 2
 repo: metal-squad
 epics:
-  - id: analytics-v2
-    title: Analytics v2 — Token consumption, efficiency and waste
+  - id: visual-refactoring
+    title: Visual Refactoring — msq web
+    description: >
+      Transformar o brain-dump visual em unidades de implementação com aceite
+      validável. A tela é uma função do estado — botões, badges e cores derivam
+      do status da entidade. 8 marcos, 32 features VR-01–VR-32. Caminho crítico:
+      M1 → M3 → M4 → M5 → M6 → M7 → M8. M2 paralelo e independente.
     features:
-      - title: ANA-00 — ADR de métricas, escopo e semântica de tokens
+      - id: F-BF86TKSE
+        title: VR-01 — Modelo de estado do Work Item e derivação da pill (BLOCKED)
         tool: codex
         model: gpt-5.6-terra
         effort: medium
         autoStart: true
-        specFile: docs/epics/epico -
-          analytics/features/ANA-00-adr-metricas-escopo-analytics.md
+        specFile: docs/epics/epico - visual
+          refactoring/features/VR-01-modelo-estado-work-item-blocked.md
         context:
-          - docs/epics/epico -
-            analytics/features/ANA-00-adr-metricas-escopo-analytics.md
-          - docs/adr/ADR-001-governanca-fonte-de-verdade-terminologia.md
-          - src/db/repo.ts
-        dependsOn: []
-        skills:
-          - dev-flow
-          - msq-communication-protocol
-        workflow:
-          autoAdvance: true
-          stepGuidance:
-            implement:
-              skills:
-                - dev-flow
-        id: F-DZR7DZ69
-      - title: ANA-01 — Saneamento de telemetria de tokens
-        tool: codex
-        model: gpt-5.6-terra
-        effort: medium
-        autoStart: true
-        specFile: docs/epics/epico -
-          analytics/features/ANA-01-saneamento-telemetria-tokens.md
-        context:
-          - docs/epics/epico -
-            analytics/features/ANA-01-saneamento-telemetria-tokens.md
-          - docs/epics/epico -
-            analytics/features/ANA-00-adr-metricas-escopo-analytics.md
-          - src/db/repo.ts
-          - src/core/runner/execute.ts
-          - src/core/adapters/claude.ts
-          - src/core/adapters/codex.ts
-          - src/core/stats.ts
-        dependsOn: []
-        skills:
-          - dev-flow
-          - msq-communication-protocol
-        workflow:
-          autoAdvance: true
-          stepGuidance:
-            implement:
-              skills:
-                - dev-flow
-        id: F-Q7MWV94E
-      - title: ANA-02 — Snapshots de modelo, effort e perfil de custo na run
-        tool: codex
-        model: gpt-5.6-terra
-        effort: medium
-        autoStart: true
-        specFile: docs/epics/epico -
-          analytics/features/ANA-02-snapshots-modelo-custo-run.md
-        context:
-          - docs/epics/epico -
-            analytics/features/ANA-02-snapshots-modelo-custo-run.md
-          - docs/epics/epico -
-            analytics/features/ANA-00-adr-metricas-escopo-analytics.md
-          - docs/epics/epico -
-            analytics/features/ANA-01-saneamento-telemetria-tokens.md
-          - src/db/index.ts
-          - src/db/repo.ts
-          - src/core/runner/execute.ts
-          - src/core/notify/resume-override.ts
-          - src/commands/resume.ts
-          - src/db/backfill.ts
-        dependsOn: []
-        skills:
-          - dev-flow
-          - msq-communication-protocol
-        workflow:
-          autoAdvance: true
-          stepGuidance:
-            implement:
-              skills:
-                - dev-flow
-        id: F-7VE9DR9Z
-      - title: ANA-03 — Queries agregadas de Analytics
-        tool: codex
-        model: gpt-5.6-terra
-        effort: medium
-        autoStart: true
-        specFile: docs/epics/epico -
-          analytics/features/ANA-03-queries-agregadas-analytics.md
-        context:
-          - docs/epics/epico -
-            analytics/features/ANA-03-queries-agregadas-analytics.md
-          - docs/epics/epico -
-            analytics/features/ANA-01-saneamento-telemetria-tokens.md
-          - docs/epics/epico -
-            analytics/features/ANA-02-snapshots-modelo-custo-run.md
-          - src/db/repo.ts
-          - src/db/index.ts
-          - src/core/stats.ts
-        dependsOn: []
-        skills:
-          - dev-flow
-          - msq-communication-protocol
-        workflow:
-          autoAdvance: true
-          stepGuidance:
-            implement:
-              skills:
-                - dev-flow
-        id: F-5ZDMJBY8
-      - title: ANA-04 — Contrato de state/WS para Analytics
-        tool: codex
-        model: gpt-5.6-terra
-        effort: medium
-        autoStart: true
-        specFile: docs/epics/epico -
-          analytics/features/ANA-04-contrato-state-ws-analytics.md
-        context:
-          - docs/epics/epico -
-            analytics/features/ANA-04-contrato-state-ws-analytics.md
-          - docs/epics/epico -
-            analytics/features/ANA-03-queries-agregadas-analytics.md
-          - src/web/state.ts
-          - src/web/types.ts
-          - src/web/server.ts
-          - src/web/client/hooks/useWebSocket.ts
-        dependsOn: []
-        skills:
-          - dev-flow
-          - msq-communication-protocol
-        workflow:
-          autoAdvance: true
-          stepGuidance:
-            implement:
-              skills:
-                - dev-flow
-        id: F-9PTSYRTM
-      - title: ANA-12 — UX e telas da página Analytics
-        tool: codex
-        model: gpt-5.6-terra
-        effort: medium
-        autoStart: true
-        specFile: docs/epics/epico - analytics/features/ANA-12-ux-telas-analytics.md
-        context:
-          - docs/epics/epico - analytics/features/ANA-12-ux-telas-analytics.md
-          - docs/epics/epico -
-            analytics/features/ANA-00-adr-metricas-escopo-analytics.md
-          - docs/epics/epico -
-            analytics/features/ANA-04-contrato-state-ws-analytics.md
-          - src/web/client/pages/AnalyticsPage.tsx
-          - src/web/client/components/data/MetricCard.tsx
-          - src/web/client/components/data/BarList.tsx
-          - src/web/client/components/data/TrendBars.tsx
-          - src/web/client/components/data/Table.tsx
+          - docs/epics/epico - visual
+            refactoring/features/VR-01-modelo-estado-work-item-blocked.md
+          - src/web/client/components/core/StatusPill.tsx
+          - src/web/client/pages/BoardPage.tsx
+          - src/web/client/components/data/KanbanCard.tsx
           - src/web/types.ts
         dependsOn: []
         skills:
           - dev-flow
           - msq-communication-protocol
         workflow:
+          mode: single
+          stages:
+            - implement
           autoAdvance: true
           stepGuidance:
             implement:
               skills:
                 - dev-flow
-        id: F-KN4F5FW6
-      - title: ANA-05 — Listagem completa de Work Items por consumo total
+                - msq-communication-protocol
+      - id: F-JQ94Z3DM
+        title: VR-02 — Ações contextuais do Work Item (Start/Resume/Delete/Abort/Cancel)
         tool: codex
         model: gpt-5.6-terra
         effort: medium
         autoStart: true
-        specFile: docs/epics/epico -
-          analytics/features/ANA-05-listagem-features-consumo-total.md
+        specFile: docs/epics/epico - visual
+          refactoring/features/VR-02-acoes-contextuais-work-item.md
         context:
-          - docs/epics/epico -
-            analytics/features/ANA-05-listagem-features-consumo-total.md
-          - docs/epics/epico -
-            analytics/features/ANA-04-contrato-state-ws-analytics.md
-          - docs/epics/epico - analytics/features/ANA-12-ux-telas-analytics.md
-          - src/web/client/pages/AnalyticsPage.tsx
-          - src/web/client/components/data/Table.tsx
-          - src/web/client/lib/format.ts
+          - docs/epics/epico - visual
+            refactoring/features/VR-02-acoes-contextuais-work-item.md
+          - src/web/client/components/LifecycleActions.tsx
+          - src/web/client/lib/startEligibility.ts
+          - src/web/client/pages/BacklogItemDetail.tsx
           - src/web/types.ts
-        dependsOn: []
+        dependsOn:
+          - vr01
         skills:
           - dev-flow
           - msq-communication-protocol
         workflow:
+          mode: single
+          stages:
+            - implement
           autoAdvance: true
           stepGuidance:
             implement:
               skills:
                 - dev-flow
-        id: F-9SR8JYSY
-      - title: ANA-08 — Drilldown por run, stage e task
+                - msq-communication-protocol
+      - id: F-24DXBEPV
+        title: VR-03 — Abort contabiliza WASTE TOKENS
         tool: codex
         model: gpt-5.6-terra
         effort: medium
         autoStart: true
-        specFile: docs/epics/epico -
-          analytics/features/ANA-08-drilldown-run-stage-task.md
+        specFile: docs/epics/epico - visual
+          refactoring/features/VR-03-abort-waste-tokens.md
         context:
-          - docs/epics/epico -
-            analytics/features/ANA-08-drilldown-run-stage-task.md
-          - docs/epics/epico -
-            analytics/features/ANA-04-contrato-state-ws-analytics.md
-          - docs/epics/epico -
-            analytics/features/ANA-05-listagem-features-consumo-total.md
-          - src/web/server.ts
-          - src/web/client/pages/AnalyticsPage.tsx
+          - docs/epics/epico - visual
+            refactoring/features/VR-03-abort-waste-tokens.md
+          - src/db/repo.ts
+          - src/web/types.ts
+          - src/web/schemas.ts
+          - src/web/client/components/data/KanbanCard.tsx
           - src/web/client/pages/RunDetailPage.tsx
-        dependsOn: []
+        dependsOn:
+          - vr02
         skills:
           - dev-flow
           - msq-communication-protocol
         workflow:
+          mode: single
+          stages:
+            - implement
           autoAdvance: true
           stepGuidance:
             implement:
               skills:
                 - dev-flow
-        id: F-5J5NM4FJ
-      - title: ANA-06 — Gráficos por Project, Epic e Work Item
+                - msq-communication-protocol
+      - id: F-Z3H5R4QK
+        title: VR-04 — Placeholders de texto → botão mutado com motivo
         tool: codex
         model: gpt-5.6-terra
         effort: medium
         autoStart: true
-        specFile: docs/epics/epico -
-          analytics/features/ANA-06-graficos-projeto-epico-feature.md
+        specFile: docs/epics/epico - visual
+          refactoring/features/VR-04-placeholders-botao-mutado.md
         context:
-          - docs/epics/epico -
-            analytics/features/ANA-06-graficos-projeto-epico-feature.md
-          - docs/epics/epico -
-            analytics/features/ANA-03-queries-agregadas-analytics.md
-          - docs/epics/epico -
-            analytics/features/ANA-04-contrato-state-ws-analytics.md
-          - src/web/client/pages/AnalyticsPage.tsx
-          - src/web/client/components/data/BarList.tsx
-          - src/web/client/components/data/TrendBars.tsx
-          - src/web/client/components/data/MetricCard.tsx
-        dependsOn: []
+          - docs/epics/epico - visual
+            refactoring/features/VR-04-placeholders-botao-mutado.md
+          - src/web/client/components/LifecycleActions.tsx
+          - src/web/client/pages/BacklogItemDetail.tsx
+          - src/web/client/components/data/KanbanCard.tsx
+        dependsOn:
+          - vr03
         skills:
           - dev-flow
           - msq-communication-protocol
         workflow:
+          mode: single
+          stages:
+            - implement
           autoAdvance: true
           stepGuidance:
             implement:
               skills:
                 - dev-flow
-        id: F-XFNDF8J4
-      - title: ANA-07 — Gráficos por tool, modelo e stage
+                - msq-communication-protocol
+      - id: F-GKPCYVSY
+        title: "VR-05 — Ciclo de vida do Epic: schema, in_review e transições
+          automáticas"
         tool: codex
         model: gpt-5.6-terra
         effort: medium
         autoStart: true
-        specFile: docs/epics/epico -
-          analytics/features/ANA-07-graficos-tool-model-stage.md
+        specFile: docs/epics/epico - visual
+          refactoring/features/VR-05-ciclo-vida-epic-schema-transicoes.md
         context:
-          - docs/epics/epico -
-            analytics/features/ANA-07-graficos-tool-model-stage.md
-          - docs/epics/epico -
-            analytics/features/ANA-02-snapshots-modelo-custo-run.md
-          - docs/epics/epico -
-            analytics/features/ANA-03-queries-agregadas-analytics.md
-          - docs/epics/epico -
-            analytics/features/ANA-04-contrato-state-ws-analytics.md
-          - src/web/client/pages/AnalyticsPage.tsx
+          - docs/epics/epico - visual
+            refactoring/features/VR-05-ciclo-vida-epic-schema-transicoes.md
+          - src/core/backlog/schema.ts
           - src/web/types.ts
-          - src/db/analytics.ts
-        dependsOn: []
+          - src/web/schemas.ts
+          - src/db/repo.ts
+          - src/web/client/pages/EpicDetailPage.tsx
+        dependsOn:
+          - vr04
         skills:
           - dev-flow
           - msq-communication-protocol
         workflow:
+          mode: single
+          stages:
+            - implement
           autoAdvance: true
           stepGuidance:
             implement:
               skills:
                 - dev-flow
-        id: F-M9RV2KEQ
-      - title: ANA-09 — Waste, anomalias e alertas de consumo
+                - msq-communication-protocol
+      - id: F-ZSNHVNY6
+        title: VR-06 — Ação "Aprovar" do Epic e Archive só após done
         tool: codex
         model: gpt-5.6-terra
         effort: medium
         autoStart: true
-        specFile: docs/epics/epico -
-          analytics/features/ANA-09-anomalias-waste-e-alertas.md
+        specFile: docs/epics/epico - visual
+          refactoring/features/VR-06-aprovar-epic-archive-apos-done.md
         context:
-          - docs/epics/epico -
-            analytics/features/ANA-09-anomalias-waste-e-alertas.md
-          - docs/epics/epico -
-            analytics/features/ANA-03-queries-agregadas-analytics.md
-          - docs/epics/epico -
-            analytics/features/ANA-00-adr-metricas-escopo-analytics.md
-          - src/db/analytics.ts
-          - src/core/stats.ts
+          - docs/epics/epico - visual
+            refactoring/features/VR-06-aprovar-epic-archive-apos-done.md
+          - src/web/client/components/LifecycleActions.tsx
+          - src/web/client/pages/EpicDetailPage.tsx
           - src/web/types.ts
-          - src/web/client/pages/AnalyticsPage.tsx
-        dependsOn: []
+        dependsOn:
+          - vr05
         skills:
           - dev-flow
           - msq-communication-protocol
         workflow:
+          mode: single
+          stages:
+            - implement
           autoAdvance: true
           stepGuidance:
             implement:
               skills:
                 - dev-flow
-        id: F-FEYGVC4Q
-      - title: ANA-10 — Forecast de budget e export analítico
+                - msq-communication-protocol
+      - id: F-G9TK5RK9
+        title: "VR-07 — Work Item: Failed → TODO/Done e Done → Clonar"
         tool: codex
         model: gpt-5.6-terra
         effort: medium
         autoStart: true
-        specFile: docs/epics/epico - analytics/features/ANA-10-previsao-budget-export.md
+        specFile: docs/epics/epico - visual
+          refactoring/features/VR-07-failed-todo-done-clonar.md
         context:
-          - docs/epics/epico -
-            analytics/features/ANA-10-previsao-budget-export.md
-          - docs/epics/epico -
-            analytics/features/ANA-03-queries-agregadas-analytics.md
-          - docs/epics/epico -
-            analytics/features/ANA-09-anomalias-waste-e-alertas.md
-          - src/db/analytics.ts
-          - src/web/server.ts
+          - docs/epics/epico - visual
+            refactoring/features/VR-07-failed-todo-done-clonar.md
+          - src/web/client/components/data/KanbanCard.tsx
+          - src/web/client/components/project/CreateWorkItemModal.tsx
           - src/web/types.ts
-          - src/web/client/pages/AnalyticsPage.tsx
-          - src/core/budget/tracker.ts
-        dependsOn: []
+        dependsOn:
+          - vr06
         skills:
           - dev-flow
           - msq-communication-protocol
         workflow:
+          mode: single
+          stages:
+            - implement
           autoAdvance: true
           stepGuidance:
             implement:
               skills:
                 - dev-flow
-        id: F-Y8ZSFAC3
-      - title: ANA-11 — Performance, testes e regressão E2E
+                - msq-communication-protocol
+      - id: F-GV8755JN
+        title: VR-08 — Padrão de save global por página (dirty state + botão único)
         tool: codex
         model: gpt-5.6-terra
         effort: medium
         autoStart: true
-        specFile: docs/epics/epico -
-          analytics/features/ANA-11-performance-e-regressao-e2e.md
+        specFile: docs/epics/epico - visual
+          refactoring/features/VR-08-save-global-dirty-state.md
         context:
-          - docs/epics/epico -
-            analytics/features/ANA-11-performance-e-regressao-e2e.md
-          - src/db/fixtures.ts
-          - tests/db/analytics.test.ts
-          - tests/web/server.test.ts
-          - tests/web/analytics-page.test.tsx
-          - tests/fixtures/scenarios/settings.backlog.yaml
+          - docs/epics/epico - visual
+            refactoring/features/VR-08-save-global-dirty-state.md
+          - src/web/client/pages/ConfigPage.tsx
+          - src/web/client/pages/BacklogItemDetail.tsx
+          - src/web/client/PageHeader.tsx
         dependsOn: []
         skills:
           - dev-flow
           - msq-communication-protocol
         workflow:
+          mode: single
+          stages:
+            - implement
           autoAdvance: true
           stepGuidance:
             implement:
               skills:
                 - dev-flow
-        id: F-4C8P47JK
+                - msq-communication-protocol
+      - id: F-FYH4RAY3
+        title: VR-09 — Guarda de saída com modal "Descartar alterações?"
+        tool: codex
+        model: gpt-5.6-terra
+        effort: medium
+        autoStart: true
+        specFile: docs/epics/epico - visual
+          refactoring/features/VR-09-guarda-saida-descartar-alteracoes.md
+        context:
+          - docs/epics/epico - visual
+            refactoring/features/VR-09-guarda-saida-descartar-alteracoes.md
+          - src/web/client/App.tsx
+          - src/web/client/pages/ConfigPage.tsx
+        dependsOn:
+          - vr08
+        skills:
+          - dev-flow
+          - msq-communication-protocol
+        workflow:
+          mode: single
+          stages:
+            - implement
+          autoAdvance: true
+          stepGuidance:
+            implement:
+              skills:
+                - dev-flow
+                - msq-communication-protocol
+      - id: F-PXSZVVRR
+        title: "VR-10 — Settings › Defaults › Skills: fim da perda silenciosa"
+        tool: codex
+        model: gpt-5.6-terra
+        effort: medium
+        autoStart: true
+        specFile: docs/epics/epico - visual
+          refactoring/features/VR-10-settings-skills-salvar.md
+        context:
+          - docs/epics/epico - visual
+            refactoring/features/VR-10-settings-skills-salvar.md
+          - src/web/client/pages/ConfigPage.tsx
+          - src/web/types.ts
+        dependsOn:
+          - vr09
+        skills:
+          - dev-flow
+          - msq-communication-protocol
+        workflow:
+          mode: single
+          stages:
+            - implement
+          autoAdvance: true
+          stepGuidance:
+            implement:
+              skills:
+                - dev-flow
+                - msq-communication-protocol
+      - title: VR-11 — Edição de Epic passa a salvar sob o padrão global
+        tool: codex
+        model: gpt-5.6-terra
+        effort: medium
+        autoStart: true
+        specFile: docs/epics/epico - visual
+          refactoring/features/VR-11-editar-epic-salvar.md
+        context:
+          - docs/epics/epico - visual
+            refactoring/features/VR-11-editar-epic-salvar.md
+          - src/web/client/pages/EpicEditor.tsx
+          - src/web/client/pages/EpicDetailPage.tsx
+        dependsOn:
+          - vr10
+        skills:
+          - dev-flow
+          - msq-communication-protocol
+        workflow:
+          mode: single
+          stages:
+            - implement
+          autoAdvance: true
+          stepGuidance:
+            implement:
+              skills:
+                - dev-flow
+                - msq-communication-protocol
+        id: F-YEXQENXH
+      - id: F-FFDMTKZN
+        title: VR-12 — Prefixos de ID P/E/B/R (+ F atual) consistentes
+        tool: codex
+        model: gpt-5.6-terra
+        effort: medium
+        autoStart: true
+        specFile: docs/epics/epico - visual
+          refactoring/features/VR-12-prefixos-id-p-e-b-r.md
+        context:
+          - docs/epics/epico - visual
+            refactoring/features/VR-12-prefixos-id-p-e-b-r.md
+          - src/web/client/components/data/KanbanCard.tsx
+          - src/web/client/pages/BoardPage.tsx
+          - src/web/types.ts
+        dependsOn:
+          - vr07
+        skills:
+          - dev-flow
+          - msq-communication-protocol
+        workflow:
+          mode: single
+          stages:
+            - implement
+          autoAdvance: true
+          stepGuidance:
+            implement:
+              skills:
+                - dev-flow
+                - msq-communication-protocol
+      - id: F-KQW56J7N
+        title: "VR-13 — Resíduos PT→EN: Board FALHA / CANCELED → FAILED"
+        tool: codex
+        model: gpt-5.6-terra
+        effort: medium
+        autoStart: true
+        specFile: docs/epics/epico - visual
+          refactoring/features/VR-13-residuos-pt-en-board-failed.md
+        context:
+          - docs/epics/epico - visual
+            refactoring/features/VR-13-residuos-pt-en-board-failed.md
+          - src/web/client/pages/BoardPage.tsx
+        dependsOn:
+          - vr12
+        skills:
+          - dev-flow
+          - msq-communication-protocol
+        workflow:
+          mode: single
+          stages:
+            - implement
+          autoAdvance: true
+          stepGuidance:
+            implement:
+              skills:
+                - dev-flow
+                - msq-communication-protocol
+      - id: F-5C694H92
+        title: VR-14 — Badge feature/bug em todas as superfícies; remover "Change to
+          XXX"
+        tool: codex
+        model: gpt-5.6-terra
+        effort: medium
+        autoStart: true
+        specFile: docs/epics/epico - visual
+          refactoring/features/VR-14-badge-feature-bug-remover-change-to.md
+        context:
+          - docs/epics/epico - visual
+            refactoring/features/VR-14-badge-feature-bug-remover-change-to.md
+          - src/web/client/pages/RunDetailPage.tsx
+          - src/web/client/components/data/KanbanCard.tsx
+          - src/web/types.ts
+        dependsOn:
+          - vr13
+        skills:
+          - dev-flow
+          - msq-communication-protocol
+        workflow:
+          mode: single
+          stages:
+            - implement
+          autoAdvance: true
+          stepGuidance:
+            implement:
+              skills:
+                - dev-flow
+                - msq-communication-protocol
+      - id: F-YPZ37RSK
+        title: VR-15 — Molde único de página de detalhe (título+ações / search /
+          descrição)
+        tool: codex
+        model: gpt-5.6-terra
+        effort: medium
+        autoStart: true
+        specFile: docs/epics/epico - visual
+          refactoring/features/VR-15-molde-unico-pagina-detalhe.md
+        context:
+          - docs/epics/epico - visual
+            refactoring/features/VR-15-molde-unico-pagina-detalhe.md
+          - src/web/client/PageHeader.tsx
+          - src/web/client/pages/ProjectDetailPage.tsx
+          - src/web/client/pages/EpicDetailPage.tsx
+          - src/web/client/pages/BacklogItemDetail.tsx
+        dependsOn:
+          - vr07
+          - vr14
+        skills:
+          - dev-flow
+          - msq-communication-protocol
+        workflow:
+          mode: single
+          stages:
+            - implement
+          autoAdvance: true
+          stepGuidance:
+            implement:
+              skills:
+                - dev-flow
+                - msq-communication-protocol
+      - id: F-GYWVAS82
+        title: VR-16 — Epic exibe descrição (markdown) e some o botão "novo" redundante
+        tool: codex
+        model: gpt-5.6-terra
+        effort: medium
+        autoStart: true
+        specFile: docs/epics/epico - visual
+          refactoring/features/VR-16-epic-descricao-remover-botao-redundante.md
+        context:
+          - docs/epics/epico - visual
+            refactoring/features/VR-16-epic-descricao-remover-botao-redundante.md
+          - src/web/client/pages/EpicDetailPage.tsx
+          - src/web/client/components/MarkdownView.tsx
+        dependsOn:
+          - vr15
+        skills:
+          - dev-flow
+          - msq-communication-protocol
+        workflow:
+          mode: single
+          stages:
+            - implement
+          autoAdvance: true
+          stepGuidance:
+            implement:
+              skills:
+                - dev-flow
+                - msq-communication-protocol
+      - id: F-4Y543CV7
+        title: VR-17 — Breadcrumbs completos Projeto › Epic › Work Item na Run Detail
+        tool: codex
+        model: gpt-5.6-terra
+        effort: medium
+        autoStart: true
+        specFile: docs/epics/epico - visual
+          refactoring/features/VR-17-breadcrumbs-completos-run-detail.md
+        context:
+          - docs/epics/epico - visual
+            refactoring/features/VR-17-breadcrumbs-completos-run-detail.md
+          - src/web/client/pages/RunDetailPage.tsx
+          - src/web/client/PageHeader.tsx
+          - src/web/client/lib/routes.ts
+        dependsOn:
+          - vr16
+        skills:
+          - dev-flow
+          - msq-communication-protocol
+        workflow:
+          mode: single
+          stages:
+            - implement
+          autoAdvance: true
+          stepGuidance:
+            implement:
+              skills:
+                - dev-flow
+                - msq-communication-protocol
+      - id: F-3EP9TK9Y
+        title: VR-18 — Bloco Requirements (Spec + Context + Dependências editáveis)
+        tool: codex
+        model: gpt-5.6-terra
+        effort: medium
+        autoStart: true
+        specFile: docs/epics/epico - visual
+          refactoring/features/VR-18-bloco-requirements.md
+        context:
+          - docs/epics/epico - visual
+            refactoring/features/VR-18-bloco-requirements.md
+          - src/web/client/pages/BacklogItemDetail.tsx
+          - src/web/client/components/FeatureConfigDetail.tsx
+          - src/web/types.ts
+        dependsOn:
+          - vr17
+        skills:
+          - dev-flow
+          - msq-communication-protocol
+        workflow:
+          mode: single
+          stages:
+            - implement
+          autoAdvance: true
+          stepGuidance:
+            implement:
+              skills:
+                - dev-flow
+                - msq-communication-protocol
+      - id: F-S4KKCJY3
+        title: VR-19 — Bloco Tool/Adapter (desktop lado-a-lado, mobile empilhado)
+        tool: codex
+        model: gpt-5.6-terra
+        effort: medium
+        autoStart: true
+        specFile: docs/epics/epico - visual
+          refactoring/features/VR-19-bloco-tool-adapter.md
+        context:
+          - docs/epics/epico - visual
+            refactoring/features/VR-19-bloco-tool-adapter.md
+          - src/web/client/components/FeatureConfigDetail.tsx
+          - src/web/client/pages/BacklogItemDetail.tsx
+        dependsOn:
+          - vr18
+        skills:
+          - dev-flow
+          - msq-communication-protocol
+        workflow:
+          mode: single
+          stages:
+            - implement
+          autoAdvance: true
+          stepGuidance:
+            implement:
+              skills:
+                - dev-flow
+                - msq-communication-protocol
+      - id: F-7HZS84VF
+        title: VR-20 — Bloco Behaviour + Approvals Channel migra para o Projeto
+        tool: codex
+        model: gpt-5.6-terra
+        effort: medium
+        autoStart: true
+        specFile: docs/epics/epico - visual
+          refactoring/features/VR-20-bloco-behaviour-approvals-projeto.md
+        context:
+          - docs/epics/epico - visual
+            refactoring/features/VR-20-bloco-behaviour-approvals-projeto.md
+          - src/web/client/components/FeatureConfigDetail.tsx
+          - src/web/client/pages/ProjectDetailPage.tsx
+          - src/web/client/pages/BacklogItemDetail.tsx
+          - src/web/types.ts
+        dependsOn:
+          - vr19
+        skills:
+          - dev-flow
+          - msq-communication-protocol
+        workflow:
+          mode: single
+          stages:
+            - implement
+          autoAdvance: true
+          stepGuidance:
+            implement:
+              skills:
+                - dev-flow
+                - msq-communication-protocol
+      - id: F-3YEYA4MX
+        title: "VR-21 — KanbanCard: timelapse ao vivo (segundo a segundo)"
+        tool: codex
+        model: gpt-5.6-terra
+        effort: medium
+        autoStart: true
+        specFile: docs/epics/epico - visual
+          refactoring/features/VR-21-kanbancard-timelapse-ao-vivo.md
+        context:
+          - docs/epics/epico - visual
+            refactoring/features/VR-21-kanbancard-timelapse-ao-vivo.md
+          - src/web/client/components/data/KanbanCard.tsx
+          - src/web/client/pages/BoardPage.tsx
+        dependsOn:
+          - vr20
+        skills:
+          - dev-flow
+          - msq-communication-protocol
+        workflow:
+          mode: single
+          stages:
+            - implement
+          autoAdvance: true
+          stepGuidance:
+            implement:
+              skills:
+                - dev-flow
+                - msq-communication-protocol
+      - id: F-2EST43WX
+        title: "VR-22 — KanbanCard: largura mínima, rolagem lateral e spinner real"
+        tool: codex
+        model: gpt-5.6-terra
+        effort: medium
+        autoStart: true
+        specFile: docs/epics/epico - visual
+          refactoring/features/VR-22-kanbancard-min-width-spinner.md
+        context:
+          - docs/epics/epico - visual
+            refactoring/features/VR-22-kanbancard-min-width-spinner.md
+          - src/web/client/components/data/KanbanCard.tsx
+          - src/web/client/pages/BoardPage.tsx
+          - src/web/client/components/core/StatusPill.tsx
+        dependsOn:
+          - vr21
+        skills:
+          - dev-flow
+          - msq-communication-protocol
+        workflow:
+          mode: single
+          stages:
+            - implement
+          autoAdvance: true
+          stepGuidance:
+            implement:
+              skills:
+                - dev-flow
+                - msq-communication-protocol
+      - id: F-TWBH2A2D
+        title: "VR-23 — KanbanCard: Start/Resume no card, dep-ok e auto adv/start
+          visíveis"
+        tool: codex
+        model: gpt-5.6-terra
+        effort: medium
+        autoStart: true
+        specFile: docs/epics/epico - visual
+          refactoring/features/VR-23-kanbancard-start-resume-dep-ok.md
+        context:
+          - docs/epics/epico - visual
+            refactoring/features/VR-23-kanbancard-start-resume-dep-ok.md
+          - src/web/client/components/data/KanbanCard.tsx
+          - src/web/client/lib/startEligibility.ts
+          - src/web/types.ts
+        dependsOn:
+          - vr22
+        skills:
+          - dev-flow
+          - msq-communication-protocol
+        workflow:
+          mode: single
+          stages:
+            - implement
+          autoAdvance: true
+          stepGuidance:
+            implement:
+              skills:
+                - dev-flow
+                - msq-communication-protocol
+      - id: F-45Q7MRBC
+        title: "VR-24 — Run Detail: 1ª aba Feature Spec e consolidação da aba Workflow"
+        tool: codex
+        model: gpt-5.6-terra
+        effort: medium
+        autoStart: true
+        specFile: docs/epics/epico - visual
+          refactoring/features/VR-24-run-detail-abas-consolidar-workflow.md
+        context:
+          - docs/epics/epico - visual
+            refactoring/features/VR-24-run-detail-abas-consolidar-workflow.md
+          - src/web/client/pages/RunDetailPage.tsx
+          - src/web/client/components/navigation/Tabs.tsx
+        dependsOn:
+          - vr23
+        skills:
+          - dev-flow
+          - msq-communication-protocol
+        workflow:
+          mode: single
+          stages:
+            - implement
+          autoAdvance: true
+          stepGuidance:
+            implement:
+              skills:
+                - dev-flow
+                - msq-communication-protocol
+      - id: F-58XF3BTV
+        title: "VR-25 — Run Detail: janela de contexto sem % (corrige os 700%)"
+        tool: codex
+        model: gpt-5.6-terra
+        effort: medium
+        autoStart: true
+        specFile: docs/epics/epico - visual
+          refactoring/features/VR-25-run-detail-contexto-sem-percent.md
+        context:
+          - docs/epics/epico - visual
+            refactoring/features/VR-25-run-detail-contexto-sem-percent.md
+          - src/web/client/pages/RunDetailPage.tsx
+          - src/web/client/components/status/RunStatusStrip.tsx
+          - src/web/client/lib/format.ts
+        dependsOn:
+          - vr24
+        skills:
+          - dev-flow
+          - msq-communication-protocol
+        workflow:
+          mode: single
+          stages:
+            - implement
+          autoAdvance: true
+          stepGuidance:
+            implement:
+              skills:
+                - dev-flow
+                - msq-communication-protocol
+      - id: F-XPEM9EHN
+        title: "VR-26 — Run Detail: hover no Live Output e badge feature/bug"
+        tool: codex
+        model: gpt-5.6-terra
+        effort: medium
+        autoStart: true
+        specFile: docs/epics/epico - visual
+          refactoring/features/VR-26-run-detail-hover-live-output-badge.md
+        context:
+          - docs/epics/epico - visual
+            refactoring/features/VR-26-run-detail-hover-live-output-badge.md
+          - src/web/client/components/transcript/AgentTranscript.tsx
+          - src/web/client/pages/RunDetailPage.tsx
+        dependsOn:
+          - vr25
+        skills:
+          - dev-flow
+          - msq-communication-protocol
+        workflow:
+          mode: single
+          stages:
+            - implement
+          autoAdvance: true
+          stepGuidance:
+            implement:
+              skills:
+                - dev-flow
+                - msq-communication-protocol
+      - id: F-3Z66K4Z2
+        title: "VR-27 — Spec Preview: fundo menos agressivo"
+        tool: codex
+        model: gpt-5.6-terra
+        effort: medium
+        autoStart: true
+        specFile: docs/epics/epico - visual
+          refactoring/features/VR-27-spec-preview-fundo.md
+        context:
+          - docs/epics/epico - visual
+            refactoring/features/VR-27-spec-preview-fundo.md
+          - src/web/client/pages/BacklogItemDetail.tsx
+          - src/web/client/pages/RunDetailPage.tsx
+        dependsOn:
+          - vr26
+        skills:
+          - dev-flow
+          - msq-communication-protocol
+        workflow:
+          mode: single
+          stages:
+            - implement
+          autoAdvance: true
+          stepGuidance:
+            implement:
+              skills:
+                - dev-flow
+                - msq-communication-protocol
+      - id: F-T7AMC47F
+        title: VR-28 — Ordem definida da sidebar
+        tool: codex
+        model: gpt-5.6-terra
+        effort: medium
+        autoStart: true
+        specFile: docs/epics/epico - visual refactoring/features/VR-28-sidebar-ordem.md
+        context:
+          - docs/epics/epico - visual refactoring/features/VR-28-sidebar-ordem.md
+          - src/web/client/App.tsx
+          - src/web/client/components/navigation/Sidebar.tsx
+        dependsOn:
+          - vr27
+        skills:
+          - dev-flow
+          - msq-communication-protocol
+        workflow:
+          mode: single
+          stages:
+            - implement
+          autoAdvance: true
+          stepGuidance:
+            implement:
+              skills:
+                - dev-flow
+                - msq-communication-protocol
+      - id: F-YJV3PCWN
+        title: VR-29 — Minimização com ícones (fallback 1ª letra já existe)
+        tool: codex
+        model: gpt-5.6-terra
+        effort: medium
+        autoStart: true
+        specFile: docs/epics/epico - visual
+          refactoring/features/VR-29-sidebar-minimizacao-icones.md
+        context:
+          - docs/epics/epico - visual
+            refactoring/features/VR-29-sidebar-minimizacao-icones.md
+          - src/web/client/components/navigation/Sidebar.tsx
+          - src/web/client/App.tsx
+        dependsOn:
+          - vr28
+        skills:
+          - dev-flow
+          - msq-communication-protocol
+        workflow:
+          mode: single
+          stages:
+            - implement
+          autoAdvance: true
+          stepGuidance:
+            implement:
+              skills:
+                - dev-flow
+                - msq-communication-protocol
+      - id: F-KYMSZB8W
+        title: VR-30 — Markdown em descrições de Project/Epic e clareza Auto
+          Advance/Start
+        tool: codex
+        model: gpt-5.6-terra
+        effort: medium
+        autoStart: true
+        specFile: docs/epics/epico - visual
+          refactoring/features/VR-30-markdown-descricoes-clareza-auto.md
+        context:
+          - docs/epics/epico - visual
+            refactoring/features/VR-30-markdown-descricoes-clareza-auto.md
+          - src/web/client/pages/ProjectDetailPage.tsx
+          - src/web/client/pages/EpicDetailPage.tsx
+          - src/web/client/components/MarkdownView.tsx
+        dependsOn:
+          - vr29
+        skills:
+          - dev-flow
+          - msq-communication-protocol
+        workflow:
+          mode: single
+          stages:
+            - implement
+          autoAdvance: true
+          stepGuidance:
+            implement:
+              skills:
+                - dev-flow
+                - msq-communication-protocol
+      - id: F-WKCVMFFR
+        title: VR-31 — Grafo de dependências do Epic (ordem de implementação/revisão)
+        tool: codex
+        model: gpt-5.6-terra
+        effort: medium
+        autoStart: true
+        specFile: docs/epics/epico - visual
+          refactoring/features/VR-31-grafo-dependencias-epic.md
+        context:
+          - docs/epics/epico - visual
+            refactoring/features/VR-31-grafo-dependencias-epic.md
+          - src/web/client/pages/EpicDetailPage.tsx
+          - src/web/types.ts
+        dependsOn:
+          - vr30
+        skills:
+          - dev-flow
+          - msq-communication-protocol
+        workflow:
+          mode: single
+          stages:
+            - implement
+          autoAdvance: true
+          stepGuidance:
+            implement:
+              skills:
+                - dev-flow
+                - msq-communication-protocol
+      - title: VR-32 — Ordenação do backlog por drag-and-drop
+        tool: codex
+        model: gpt-5.6-terra
+        effort: medium
+        autoStart: true
+        specFile: docs/epics/epico - visual
+          refactoring/features/VR-32-drag-and-drop-ordem-execucao.md
+        context:
+          - docs/epics/epico - visual
+            refactoring/features/VR-32-drag-and-drop-ordem-execucao.md
+          - src/web/client/pages/EpicDetailPage.tsx
+          - src/web/client/pages/ProjectDetailPage.tsx
+          - src/web/types.ts
+        dependsOn:
+          - vr31
+        skills:
+          - dev-flow
+          - msq-communication-protocol
+        workflow:
+          mode: single
+          stages:
+            - implement
+          autoAdvance: true
+          stepGuidance:
+            implement:
+              skills:
+                - dev-flow
+                - msq-communication-protocol
+        id: F-CAASK659
