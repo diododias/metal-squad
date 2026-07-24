@@ -93,8 +93,8 @@ function buildToolRailCells(run: KanbanCardRun): ToolRailCell[] {
   if (run.model) cells.push({ key: 'model', icon: '⚙', label: toShortModelLabel(run.model), title: `model: ${run.model}` });
   if (run.effort) cells.push({ key: 'effort', icon: '▁▃▅', label: run.effort, title: `effort: ${run.effort}` });
   if (run.repoLabel) cells.push({ key: 'repo', icon: '⌂', label: run.repoLabel, title: `repository: ${run.repoLabel}` });
-  if (run.autoAdvance) cells.push({ key: 'auto', icon: '≫', label: 'auto adv', title: 'auto-advance', color: 'var(--accent-ok)' });
-  if (run.autoStart) cells.push({ key: 'autostart', icon: '▶', label: 'auto start', title: 'auto-start', color: 'var(--accent-ok)' });
+  if (run.autoAdvance) cells.push({ key: 'auto', icon: '≫', label: 'auto adv', title: 'Auto Advance: advances to the next stage automatically after each stage completes (staged mode only)', color: 'var(--accent-ok)' });
+  if (run.autoStart) cells.push({ key: 'autostart', icon: '▶', label: 'auto start', title: 'Auto Start: starts automatically when dependencies are met, without manual approval', color: 'var(--accent-ok)' });
   return cells;
 }
 

@@ -107,14 +107,14 @@ describe('KanbanCard status and indicators', () => {
     const html = renderToStaticMarkup(
       <KanbanCard run={{ ...run, status: 'running', tool: 'claude', autoAdvance: true }} />,
     );
-    expect(html).toContain('title="auto-advance"');
+    expect(html).toContain('Auto Advance:');
     expect(html).toContain('≫');
     expect(html).toContain('auto');
   });
 
   it('hides the auto-advance cell by default', () => {
     const html = renderToStaticMarkup(<KanbanCard run={{ ...run, status: 'running', tool: 'claude' }} />);
-    expect(html).not.toContain('title="auto-advance"');
+    expect(html).not.toContain('Auto Advance:');
   });
 
   it('shows the elapsed time lapse in the footer', () => {
@@ -334,7 +334,7 @@ describe('KanbanCard auto-start cell (SC-003)', () => {
     const html = renderToStaticMarkup(
       <KanbanCard run={{ ...run, status: 'todo', tool: 'claude', autoStart: true }} />,
     );
-    expect(html).toContain('title="auto-start"');
+    expect(html).toContain('Auto Start:');
     expect(html).toContain('auto start');
   });
 
@@ -342,12 +342,12 @@ describe('KanbanCard auto-start cell (SC-003)', () => {
     const html = renderToStaticMarkup(
       <KanbanCard run={{ ...run, status: 'running', tool: 'claude', autoAdvance: true, autoStart: true }} />,
     );
-    expect(html).toContain('title="auto-advance"');
-    expect(html).toContain('title="auto-start"');
+    expect(html).toContain('Auto Advance:');
+    expect(html).toContain('Auto Start:');
   });
 
   it('hides auto-start cell by default', () => {
     const html = renderToStaticMarkup(<KanbanCard run={{ ...run, status: 'todo', tool: 'claude' }} />);
-    expect(html).not.toContain('title="auto-start"');
+    expect(html).not.toContain('Auto Start:');
   });
 });

@@ -14,6 +14,7 @@ import { readHashParams, updateHashParams } from '../lib/hashState.js';
 import { pillStatus } from '../lib/pillStatus.js';
 import { shortId } from '../lib/entityId.js';
 import { PageHeader } from '../PageHeader.js';
+import { MarkdownView } from '../components/MarkdownView.js';
 import type { EpicRow as EpicRowData } from '../../../db/repo.js';
 import type { ToastStackItem } from '../components/feedback/ToastStack.js';
 import type { MsqWebState, WebSocketClientMessage, WebSocketServerMessage } from '../../types.js';
@@ -107,7 +108,7 @@ export function ProjectDetailPage({ state, projectId, send, actionResults, archi
   return <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
     <PageHeader
       title={`${project.name} · ${shortId('project', project.projectId)}`}
-      description={project.description ?? undefined}
+      description={project.description ? <MarkdownView source={project.description} /> : undefined}
       breadcrumb={[{ label: 'Projects', href: '/projects' }]}
       filters={activeTab === 'epics' && <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center' }}>
         <input
