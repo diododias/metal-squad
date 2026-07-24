@@ -26,8 +26,9 @@ const DOT_COLOR: Record<ToolCallStatus, string> = {
 export function AgentTranscript({ entries }: AgentTranscriptProps): React.JSX.Element {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+      <style>{`.transcript-row:hover { background: var(--accent-info-10); border-radius: 4px; }`}</style>
       {entries.map((e, i) => (
-        <div key={e.id ?? i} style={{ display: 'flex', gap: 10 }}>
+        <div key={e.id ?? i} className="transcript-row" style={{ display: 'flex', gap: 10 }}>
           <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', flexShrink: 0, width: 8 }}>
             <span
               style={{
