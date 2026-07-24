@@ -1,6 +1,41 @@
 import { z } from 'zod';
 
 const RequestIdSchema = z.string().min(1);
+const AnalyticsStringFilter = z.string().min(1).max(200);
+const AnalyticsFiltersSchema = z.object({
+  sinceDays: z.number().int().positive().max(3650).optional(),
+  from: z.string().datetime().optional(),
+  to: z.string().datetime().optional(),
+  projectId: AnalyticsStringFilter.optional(), epicId: AnalyticsStringFilter.optional(), repoId: AnalyticsStringFilter.optional(),
+  workItemId: AnalyticsStringFilter.optional(), tool: AnalyticsStringFilter.optional(), model: AnalyticsStringFilter.optional(),
+  status: AnalyticsStringFilter.optional(), stage: AnalyticsStringFilter.optional(),
+  dataQuality: z.enum(['exact', 'derived', 'unknown', 'missing-snapshot', 'missing-tokens']).optional(),
+}).strict().refine((filters) => !(filters.sinceDays !== undefined && (filters.from !== undefined || filters.to !== undefined)), {
+  message: 'Use sinceDays or a date range, not both.',
+});
+const AnalyticsPaginationSchema = z.object({ limit: z.number().int().positive().max(200).optional(), offset: z.number().int().nonnegative().optional() }).strict();
+
+export const AnalyticsWorkItemsMessageSchema = z.object({
+  type: z.literal('action:getAnalyticsWorkItems'), requestId: RequestIdSchema, filters: AnalyticsFiltersSchema,
+  pagination: AnalyticsPaginationSchema.optional(),
+  sort: z.object({ by: z.enum(['workItemId', 'totalTokens', 'inputTokens', 'cachedInputTokens', 'outputTokens', 'runs', 'wasteTokens', 'successRatePercent', 'lastRunAt', 'contextMaxPercent']).optional(), direction: z.enum(['asc', 'desc']).optional() }).strict().optional(),
+}).strict();
+export const AnalyticsBreakdownMessageSchema = z.object({
+  type: z.literal('action:getAnalyticsBreakdown'), requestId: RequestIdSchema, filters: AnalyticsFiltersSchema,
+  bucket: z.enum(['hour', 'day', 'week', 'month']).optional(), rankingLimit: z.number().int().positive().max(100).optional(),
+}).strict();
+export const AnalyticsRunDrilldownMessageSchema = z.object({
+  type: z.literal('action:getAnalyticsRunDrilldown'), requestId: RequestIdSchema, filters: AnalyticsFiltersSchema,
+  pagination: AnalyticsPaginationSchema.optional(),
+}).strict();
+export const AnalyticsExportMessageSchema = z.object({
+  type: z.literal('action:exportAnalytics'), requestId: RequestIdSchema, filters: AnalyticsFiltersSchema,
+  format: z.enum(['csv', 'json']),
+}).strict();
+export type AnalyticsWorkItemsMessage = z.infer<typeof AnalyticsWorkItemsMessageSchema>;
+export type AnalyticsBreakdownMessage = z.infer<typeof AnalyticsBreakdownMessageSchema>;
+export type AnalyticsRunDrilldownMessage = z.infer<typeof AnalyticsRunDrilldownMessageSchema>;
+export type AnalyticsExportMessage = z.infer<typeof AnalyticsExportMessageSchema>;
 
 const ProjectPatchSchema = z.object({
   name: z.string().optional(),

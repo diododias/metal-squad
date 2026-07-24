@@ -11,6 +11,7 @@ const mockCreateStageTransitionDecision = vi.fn();
 const mockCreateGate = vi.fn();
 const mockCreateRetryRecord = vi.fn();
 const mockUpdateRunTool = vi.fn();
+const mockUpdateRunExecutionSnapshot = vi.fn();
 const mockUpdateRunPublishState = vi.fn();
 const mockUpdateStageTransitionDecisionNextSessionId = vi.fn();
 const mockFinishRun = vi.fn();
@@ -85,6 +86,7 @@ vi.mock('../../src/db/repo.js', () => ({
   createGate: mockCreateGate,
   createRetryRecord: mockCreateRetryRecord,
   updateRunTool: mockUpdateRunTool,
+  updateRunExecutionSnapshot: mockUpdateRunExecutionSnapshot,
   updateRunPublishState: mockUpdateRunPublishState,
   updateStageTransitionDecisionNextSessionId: mockUpdateStageTransitionDecisionNextSessionId,
   finishRun: mockFinishRun,
@@ -162,6 +164,7 @@ beforeEach(() => {
   mockCreateGate.mockReset();
   mockCreateRetryRecord.mockReset();
   mockUpdateRunTool.mockReset();
+  mockUpdateRunExecutionSnapshot.mockReset();
   mockUpdateRunPublishState.mockReset();
   mockUpdateStageTransitionDecisionNextSessionId.mockReset();
   mockFinishRun.mockReset();
@@ -197,6 +200,11 @@ beforeEach(() => {
     workflow: { autoAdvanceStages: false, pollIntervalMs: 1 },
     budget: {},
     integration: { baseBranch: 'develop' },
+    tools: [
+      { id: 'claude', command: 'claude' },
+      { id: 'codex', command: 'codex' },
+      { id: 'opencode', command: 'opencode' },
+    ],
   });
   mockEventEmit.mockReset();
   mockAttachDefaultEventLogger.mockReset();
@@ -674,6 +682,7 @@ describe('executeBacklog failure persistence', () => {
   });
 
   it('blocks MSQ_DONE without required publication fields as validation_failed', async () => {
+    mockCreateGate.mockReturnValue(44);
     mockRunFeature.mockImplementation(async () => ({
       ok: true,
       summary: 'declared done without publication',
@@ -685,13 +694,17 @@ describe('executeBacklog failure persistence', () => {
     await expect(executeBacklog(createPublishStageBacklog(), { cwd: '/repo', concurrency: 1 }))
       .rejects.toThrow('MSQ_DONE is missing required pr_url, pr_number, base, and head publication fields.');
 
+    expect(mockFinishRun).toHaveBeenCalledWith(7, 'blocked', expect.stringContaining('MSQ_DONE is missing required pr_url'));
+    expect(mockCreateGate).toHaveBeenCalledWith(7, 'feat-implement', 'repo-1');
     expect(mockEventEmit).toHaveBeenCalledWith('run:blocked', expect.objectContaining({
       code: 'validation_failed',
       reason: 'gate',
+      gateId: 44,
     }));
   });
 
   it('keeps declared PR fields and blocks a divergent verification as validation_failed', async () => {
+    mockCreateGate.mockReturnValue(45);
     mockRunFeature.mockImplementation(async () => ({
       ok: true,
       summary: 'declared publication',
@@ -725,7 +738,9 @@ describe('executeBacklog failure persistence', () => {
         branch: 'feat/declared', prNumber: 77, prUrl: 'https://example/pr/77', baseBranch: 'develop',
       }),
     }));
-    expect(mockEventEmit).toHaveBeenCalledWith('run:blocked', expect.objectContaining({ code: 'validation_failed' }));
+    expect(mockFinishRun).toHaveBeenCalledWith(7, 'blocked', expect.stringContaining('declared publication does not match verified publication'));
+    expect(mockCreateGate).toHaveBeenCalledWith(7, 'feat-implement', 'repo-1');
+    expect(mockEventEmit).toHaveBeenCalledWith('run:blocked', expect.objectContaining({ code: 'validation_failed', gateId: 45 }));
   });
 
   it('persists an explicit MSQ_BLOCKED control with its reason code', async () => {
@@ -1032,6 +1047,9 @@ describe('executeBacklog failure persistence', () => {
     expect(mockCreateRetryRecord).toHaveBeenNthCalledWith(3, 7, 3, 'codex falha', expect.any(Number), 'codex', undefined);
 
     expect(mockUpdateRunTool).toHaveBeenCalledWith(7, 'opencode');
+    expect(mockUpdateRunExecutionSnapshot).toHaveBeenCalledWith(7, expect.objectContaining({
+      model: 'gpt-4o', effort: 'medium', toolName: 'opencode', metricsConfidence: 'exact',
+    }));
     expect(mockFinishRun).toHaveBeenCalledWith(7, 'done', 'opencode ok');
   });
 
@@ -1304,18 +1322,9 @@ describe('executeBacklog failure persistence', () => {
         }),
       }),
     );
-    expect(mockCreateRun).toHaveBeenNthCalledWith(1, 'repo-1', 'feat-27', 'codex', {
-      pipelineId: 9,
-      stage: 'specify',
-    });
-    expect(mockCreateRun).toHaveBeenNthCalledWith(2, 'repo-1', 'feat-27', 'codex', {
-      pipelineId: 9,
-      stage: 'plan',
-    });
-    expect(mockCreateRun).toHaveBeenNthCalledWith(3, 'repo-1', 'feat-27', 'codex', {
-      pipelineId: 9,
-      stage: 'dev-flow',
-    });
+    expect(mockCreateRun).toHaveBeenNthCalledWith(1, 'repo-1', 'feat-27', 'codex', expect.objectContaining({ pipelineId: 9, stage: 'specify' }));
+    expect(mockCreateRun).toHaveBeenNthCalledWith(2, 'repo-1', 'feat-27', 'codex', expect.objectContaining({ pipelineId: 9, stage: 'plan' }));
+    expect(mockCreateRun).toHaveBeenNthCalledWith(3, 'repo-1', 'feat-27', 'codex', expect.objectContaining({ pipelineId: 9, stage: 'dev-flow' }));
     expect(mockCreateStageRequest).toHaveBeenCalledWith(
       9,
       'feat-27',
@@ -1873,14 +1882,8 @@ describe('executeBacklog failure persistence', () => {
     ).resolves.toBeUndefined();
 
     expect(mockResumePipeline).toHaveBeenCalledWith(9);
-    expect(mockCreateRun).toHaveBeenNthCalledWith(1, 'repo-1', 'feat-27', 'codex', {
-      pipelineId: 9,
-      stage: 'plan',
-    });
-    expect(mockCreateRun).toHaveBeenNthCalledWith(2, 'repo-1', 'feat-27', 'codex', {
-      pipelineId: 9,
-      stage: 'implement',
-    });
+    expect(mockCreateRun).toHaveBeenNthCalledWith(1, 'repo-1', 'feat-27', 'codex', expect.objectContaining({ pipelineId: 9, stage: 'plan' }));
+    expect(mockCreateRun).toHaveBeenNthCalledWith(2, 'repo-1', 'feat-27', 'codex', expect.objectContaining({ pipelineId: 9, stage: 'implement' }));
   });
 
   it('resumes a staged workflow with the adapter session persisted for the stage it was blocked on', async () => {
@@ -2552,15 +2555,19 @@ describe('executeBacklog failure persistence', () => {
         cwd: '/repo',
         concurrency: 1,
         resumePipelineId: 9,
-        resumeOverride: { featureId: 'feat-a', tool: 'opencode' },
+        resumeOverride: { featureId: 'feat-a', tool: 'opencode', model: 'provider/model', effort: 'high' },
       }),
     ).resolves.toBeUndefined();
 
     expect(mockRunFeature).toHaveBeenCalledTimes(2);
     expect(mockRunFeature.mock.calls[0]![0].id).toBe('feat-a');
     expect(mockRunFeature.mock.calls[0]![0].tool).toBe('opencode');
+    expect(mockRunFeature.mock.calls[0]![0]).toMatchObject({ model: 'provider/model', effort: 'high' });
     expect(mockRunFeature.mock.calls[1]![0].id).toBe('feat-b');
     expect(mockRunFeature.mock.calls[1]![0].tool).toBe('codex');
+    expect(mockCreateRun).toHaveBeenNthCalledWith(1, 'repo-1', 'feat-a', 'opencode', expect.objectContaining({
+      snapshot: expect.objectContaining({ model: 'provider/model', effort: 'high', metricsConfidence: 'exact' }),
+    }));
   });
 
   it('returns jitter within the expected exponential interval', async () => {

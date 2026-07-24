@@ -9,6 +9,9 @@ import type { AppConfigPatch as ConfigAppConfigPatch, Config, NotificationChanne
 import type { Skill } from '../core/skills/types.js';
 import type { WorkItemType as MsqWorkItemType } from '../db/workflowTemplates.js';
 import type { AllowedLifecycle } from '../core/lifecyclePolicy.js';
+import type { AnalyticsDataQuality, AnalyticsExportDataset, AnalyticsFilters, AnalyticsForecast, AnalyticsInsight, AnalyticsPeriodComparison, AnalyticsRunDrilldownRow, AnalyticsSort, AnalyticsSummary, AnalyticsTokenGroup, AnalyticsWorkItemRow, TokenTimeBucket } from '../db/analytics.js';
+
+export type { AnalyticsInsight } from '../db/analytics.js';
 
 export type { AllowedLifecycle } from '../core/lifecyclePolicy.js';
 
@@ -39,6 +42,23 @@ export interface TokenStats {
   totalTokens: number | null;
   error: string | null;
 }
+
+export interface AnalyticsSnapshot {
+  period: { sinceDays: number };
+  summary: AnalyticsSummary;
+  topGroups: { byProject: AnalyticsTokenGroup[]; byEpic: AnalyticsTokenGroup[]; byRepository: AnalyticsTokenGroup[]; byWorkItem: AnalyticsTokenGroup[]; byTool: AnalyticsTokenGroup[]; byModel: AnalyticsTokenGroup[]; byStage: AnalyticsTokenGroup[]; byEffort?: AnalyticsTokenGroup[]; byThinking?: AnalyticsTokenGroup[]; byStatus: AnalyticsTokenGroup[] };
+  dataQuality: AnalyticsDataQuality;
+  generatedAt: string;
+  revision: number;
+}
+
+export interface AnalyticsActionError { code: 'INVALID_FILTERS' | 'QUERY_FAILED'; message: string; }
+export interface AnalyticsWorkItemsResult { type: 'analytics:workItems'; payload: { requestId: string; ok: true; rows: AnalyticsWorkItemRow[]; total: number } | { requestId: string; ok: false; error: AnalyticsActionError }; }
+export interface AnalyticsBreakdownResult { type: 'analytics:breakdown'; payload: { requestId: string; ok: true; summary: AnalyticsSummary; timeSeries: TokenTimeBucket[]; groups: AnalyticsSnapshot['topGroups']; dataQuality: AnalyticsDataQuality; insights: AnalyticsInsight[]; forecast: AnalyticsForecast; comparison: AnalyticsPeriodComparison; generatedAt: string; revision: number } | { requestId: string; ok: false; error: AnalyticsActionError }; }
+export interface AnalyticsRunDrilldownResult { type: 'analytics:runDrilldown'; payload: { requestId: string; ok: true; rows: AnalyticsRunDrilldownRow[] } | { requestId: string; ok: false; error: AnalyticsActionError }; }
+export interface AnalyticsExportResult { type: 'analytics:export'; payload: { requestId: string; ok: true; format: 'csv' | 'json'; filename: string; content: string; dataset: AnalyticsExportDataset } | { requestId: string; ok: false; error: AnalyticsActionError }; }
+export type AnalyticsQueryFilters = AnalyticsFilters;
+export type AnalyticsQuerySort = AnalyticsSort;
 
 export interface TimeoutApprovalState {
   requestId: number;
@@ -165,6 +185,9 @@ export interface MsqWebState {
     periods: { label: string; days: number | null }[];
     rows: StatsRunRow[];
   };
+  /** Aggregate analytics contract. `dashboard.rows` remains legacy compatibility
+      only and must not be used by new Analytics UI work. */
+  analytics: AnalyticsSnapshot;
   notifications: UiNotification[];
   theme: ThemeSnapshot;
   /** Config page (Runtime/Notifications/Budget sub-tabs) — read-only
@@ -568,6 +591,10 @@ export type WebSocketClientMessage =
   | { type: 'action:setSecret'; patch: SecretPatch }
   | { type: 'action:clearSecret'; account: string }
   | { type: 'action:updateToolsRegistry'; tools: ToolRegistryEntry[] }
+  | { type: 'action:getAnalyticsWorkItems'; requestId: string; filters: AnalyticsFilters; pagination?: { limit?: number; offset?: number }; sort?: AnalyticsSort }
+  | { type: 'action:getAnalyticsBreakdown'; requestId: string; filters: AnalyticsFilters; bucket?: 'hour' | 'day' | 'week' | 'month'; rankingLimit?: number }
+  | { type: 'action:getAnalyticsRunDrilldown'; requestId: string; filters: AnalyticsFilters; pagination?: { limit?: number; offset?: number } }
+  | { type: 'action:exportAnalytics'; requestId: string; filters: AnalyticsFilters; format: 'csv' | 'json' }
   | { type: 'action:pausePipeline'; pipelineId: number }
   | { type: 'action:resumePipeline'; pipelineId: number }
   | { type: 'action:abortPipeline'; pipelineId: number }
@@ -606,6 +633,10 @@ export type WebSocketServerMessage =
   | ValidateWorkflowTemplateResult
   | ArchivedQueryResult
   | AuditTrailQueryResult
+  | AnalyticsWorkItemsResult
+  | AnalyticsBreakdownResult
+  | AnalyticsRunDrilldownResult
+  | AnalyticsExportResult
   | { type: 'run:detail'; payload: { runId: number; taskRuns: TaskRun[]; breakdown: RunBreakdown | null; sessionStatus: SessionStatusSnapshot | null; statusHistory: SessionStatusSnapshot[]; toolCalls: ToolCallRecord[] } }
   | { type: 'run:history'; payload: { featureId: string; runs: RunHistoryEntry[] } }
   | { type: 'run:changes'; payload: RunChangesPayload }

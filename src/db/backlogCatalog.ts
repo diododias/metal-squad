@@ -510,9 +510,10 @@ export function applyBacklogSeed(backlog: BacklogV2, plan: BacklogSeedPlan): voi
       }
       epic.features.forEach((feature, featureIndex) => {
         if (!created.has(`feature:${feature.id}`)) return;
-        insertFeature.run(feature.id, epic.id, plan.repoId, feature.title, JSON.stringify(feature.dependsOn), feature.specFile ?? null, featureIndex, JSON.stringify(feature));
-        feature.tasks.forEach((task, taskIndex) => {
-          insertTask.run(task.id, feature.id, task.title, task.status, taskIndex, JSON.stringify(task));
+        const normalized = FeatureSchema.parse(feature);
+        insertFeature.run(normalized.id, epic.id, plan.repoId, normalized.title, JSON.stringify(normalized.dependsOn), normalized.specFile ?? null, featureIndex, JSON.stringify(normalized));
+        normalized.tasks.forEach((task, taskIndex) => {
+          insertTask.run(task.id, normalized.id, task.title, task.status, taskIndex, JSON.stringify(task));
         });
       });
     });

@@ -263,7 +263,7 @@ describe('Settings client surfaces', () => {
         ...settingsState.runtimeConfig,
         notifications: {
           channels: [{ type: 'webhook', configured: true }],
-          events: ['run:start'],
+          events: ['run:blocked'],
         },
       },
     } as MsqWebState;
@@ -279,6 +279,8 @@ describe('Settings client surfaces', () => {
     expect(container.textContent).toContain('configured');
     expect((container.querySelector('#notification-channel-0-credential') as HTMLInputElement).value).toBe('');
 
+    const blocked = container.querySelector('[id="notification-event-run:blocked"]') as HTMLInputElement;
+    expect(blocked.checked).toBe(true);
     const done = container.querySelector('[id="notification-event-run:done"]') as HTMLInputElement;
     act(() => {
       done.click();
@@ -287,7 +289,7 @@ describe('Settings client surfaces', () => {
 
     expect(messages).toEqual([{
       type: 'action:updateNotifications',
-      patch: { channels: [{ type: 'webhook' }], events: ['run:start', 'run:done'] },
+      patch: { channels: [{ type: 'webhook' }], events: ['run:blocked', 'run:done'] },
     }]);
   });
 

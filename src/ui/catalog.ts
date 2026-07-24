@@ -3,7 +3,7 @@ import type { ToolCapabilities } from '../core/adapters/types.js';
 import { loadBacklogFromCatalog } from '../core/backlog/load.js';
 import { resolveRepo } from '../core/repo.js';
 import { getCatalogMeta, listWorkItemsByScope, type WorkItemScope } from '../db/backlogCatalog.js';
-import { DefaultsSchema, type Budget, type Defaults, type Retry, type Task, type WorkItemType, type Workflow } from '../core/backlog/schema.js';
+import { DefaultsSchema, WorkflowSchema, type Budget, type Defaults, type Retry, type Task, type WorkItemType, type Workflow } from '../core/backlog/schema.js';
 import { logCaughtError } from '../core/events/index.js';
 
 export interface WorkItemCatalogEntry {
@@ -128,7 +128,7 @@ export function getFeatureCatalog(scope: WorkItemScope = {}): Record<string, Wor
     return Object.fromEntries(listWorkItemsByScope(scope).map((row) => {
       const feature = JSON.parse(row.dataJson) as {
         id: string; title: string; skills?: string[]; tool: string; model?: string; effort: string;
-        thinking?: string; spec?: string; tasks?: Task[]; dependsOn: string[]; workflow: Workflow;
+        thinking?: string; spec?: string; tasks?: Task[]; dependsOn: string[]; workflow?: Partial<Workflow>;
         retry?: Retry; specFile?: string; context?: string[]; maxTokens?: number; autoStart?: boolean;
         templateId?: string; templateVersion?: number;
       };
@@ -154,7 +154,7 @@ export function getFeatureCatalog(scope: WorkItemScope = {}): Record<string, Wor
         description: feature.spec ?? null,
         tasks: feature.tasks,
         dependsOn: feature.dependsOn,
-        workflow: feature.workflow,
+        workflow: WorkflowSchema.parse(feature.workflow),
         retry: feature.retry,
         specFile: feature.specFile,
         context: feature.context,

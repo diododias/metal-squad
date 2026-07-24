@@ -63,6 +63,8 @@ export interface RunBlockedEvent {
   /** `reason` routes recovery; `code` explains the specific blocking cause. */
   reason: RunBlockedReason;
   code?: RunBlockedCode;
+  /** When present, `gate:created` is the actionable notification for this block. */
+  gateId?: number;
   summary: string;
 }
 

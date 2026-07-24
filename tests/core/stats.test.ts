@@ -3,10 +3,12 @@ import {
   aggregateTokens,
   computeRunBreakdown,
   computeStats,
+  computeTokenBaseline,
   formatBreakdown,
   formatDurationMs,
   formatTokensCompact,
   renderUsageBar,
+  isTokenOutlier,
 } from '../../src/core/stats.js';
 import { parsePeriodDays } from '../../src/commands/stats.js';
 import type { RunEventRow, StatsRunRow } from '../../src/db/repo.js';
@@ -62,6 +64,23 @@ describe('computeStats', () => {
     expect(stats.avgDurationMs).toBeNull();
     expect(stats.successRatePercent).toBeNull();
     expect(stats.topFeaturesByTokens).toEqual([]);
+  });
+
+  it('does not aggregate invalid or unknown telemetry', () => {
+    const stats = computeStats([
+      run({ dataQuality: 'valid', totalTokens: 100, inputTokens: 80, outputTokens: 20 }),
+      run({ id: 2, featureId: 'bad', dataQuality: 'invalid', totalTokens: -1, inputTokens: -2, outputTokens: 1 }),
+      run({ id: 3, featureId: 'unknown', dataQuality: 'unknown', totalTokens: null, inputTokens: null, outputTokens: null }),
+    ]);
+    expect(stats.tokens).toEqual({ total: 100, input: 80, cachedInput: 0, output: 20 });
+  });
+});
+
+describe('token baselines', () => {
+  it('excludes invalid values while retaining a stable nearest-rank percentile', () => {
+    const baseline = computeTokenBaseline([10, 20, Number.NaN, -1, 100]);
+    expect(baseline).toEqual({ count: 3, average: 130 / 3, p95: 100, p99: 100 });
+    expect(isTokenOutlier(100, baseline)).toBe(true);
   });
 });
 

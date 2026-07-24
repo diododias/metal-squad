@@ -3,6 +3,7 @@ import { dirname } from 'node:path';
 import Database from 'better-sqlite3';
 import { DB_PATH_ENV, resolveDbPath, ensureDataDir } from '../config/index.js';
 import { BUILTIN_WORKFLOW_TEMPLATES } from '../core/workflow/stageSkills.js';
+import { backfillRunExecutionSnapshots } from './backfill.js';
 
 let db: Database.Database | null = null;
 let dbMode: 'readonly' | 'readwrite' | null = null;
@@ -190,6 +191,7 @@ function migrate(d: Database.Database): void {
       id         INTEGER PRIMARY KEY AUTOINCREMENT,
       repo_id    TEXT NOT NULL REFERENCES repos(repo_id),
       feature_id TEXT NOT NULL,
+      epic_id    TEXT REFERENCES backlog_epics(epic_id),
       tool       TEXT NOT NULL,
       pipeline_id INTEGER REFERENCES pipelines(id),
       stage      TEXT,
@@ -200,6 +202,7 @@ function migrate(d: Database.Database): void {
       cached_input_tokens INTEGER,
       output_tokens INTEGER,
       total_tokens INTEGER,
+      token_data_quality TEXT,
       context_window_tokens INTEGER,
       context_window_percent REAL,
       publish_verified INTEGER,
@@ -219,7 +222,14 @@ function migrate(d: Database.Database): void {
       session_reason TEXT,
       session_terminal INTEGER NOT NULL DEFAULT 0,
       adapter_session_tool TEXT,
-      adapter_session_id TEXT
+      adapter_session_id TEXT,
+      model TEXT,
+      effort TEXT,
+      thinking TEXT,
+      tool_name TEXT,
+      tool_version TEXT,
+      pricing_profile_id TEXT,
+      metrics_confidence TEXT DEFAULT 'unknown'
     );
 
     CREATE TABLE IF NOT EXISTS token_usage (
@@ -228,7 +238,9 @@ function migrate(d: Database.Database): void {
       input     INTEGER NOT NULL DEFAULT 0,
       cached_input INTEGER NOT NULL DEFAULT 0,
       output    INTEGER NOT NULL DEFAULT 0,
-      total     INTEGER NOT NULL DEFAULT 0
+      total     INTEGER NOT NULL DEFAULT 0,
+      data_quality TEXT,
+      raw_usage_json TEXT
     );
 
     CREATE TABLE IF NOT EXISTS gates (
@@ -306,6 +318,7 @@ function migrate(d: Database.Database): void {
       cached_input_tokens INTEGER NOT NULL DEFAULT 0,
       output_tokens INTEGER NOT NULL DEFAULT 0,
       total_tokens INTEGER NOT NULL DEFAULT 0,
+      token_data_quality TEXT,
       context_window_tokens INTEGER,
       context_window_percent REAL
     );
@@ -567,6 +580,14 @@ function migrate(d: Database.Database): void {
   ensureRunColumn('remote_branch', `ALTER TABLE runs ADD COLUMN remote_branch TEXT`);
   ensureRunColumn('pr_number', `ALTER TABLE runs ADD COLUMN pr_number INTEGER`);
   ensureRunColumn('pr_url', `ALTER TABLE runs ADD COLUMN pr_url TEXT`);
+  ensureRunColumn('model', `ALTER TABLE runs ADD COLUMN model TEXT`);
+  ensureRunColumn('effort', `ALTER TABLE runs ADD COLUMN effort TEXT`);
+  ensureRunColumn('thinking', `ALTER TABLE runs ADD COLUMN thinking TEXT`);
+  ensureRunColumn('tool_name', `ALTER TABLE runs ADD COLUMN tool_name TEXT`);
+  ensureRunColumn('tool_version', `ALTER TABLE runs ADD COLUMN tool_version TEXT`);
+  ensureRunColumn('pricing_profile_id', `ALTER TABLE runs ADD COLUMN pricing_profile_id TEXT`);
+  ensureRunColumn('metrics_confidence', `ALTER TABLE runs ADD COLUMN metrics_confidence TEXT`);
+  ensureRunColumn('token_data_quality', `ALTER TABLE runs ADD COLUMN token_data_quality TEXT`);
 
   const usageColumns = d
     .prepare(`PRAGMA table_info(token_usage)`)
@@ -574,6 +595,12 @@ function migrate(d: Database.Database): void {
   const hasCachedInputUsage = usageColumns.some((column) => column.name === 'cached_input');
   if (!hasCachedInputUsage) {
     d.exec(`ALTER TABLE token_usage ADD COLUMN cached_input INTEGER NOT NULL DEFAULT 0`);
+  }
+  if (!usageColumns.some((column) => column.name === 'data_quality')) {
+    d.exec(`ALTER TABLE token_usage ADD COLUMN data_quality TEXT`);
+  }
+  if (!usageColumns.some((column) => column.name === 'raw_usage_json')) {
+    d.exec(`ALTER TABLE token_usage ADD COLUMN raw_usage_json TEXT`);
   }
 
   const taskRunColumns = d
@@ -588,6 +615,7 @@ function migrate(d: Database.Database): void {
   ensureTaskRunColumn('cached_input_tokens', `ALTER TABLE task_runs ADD COLUMN cached_input_tokens INTEGER NOT NULL DEFAULT 0`);
   ensureTaskRunColumn('output_tokens', `ALTER TABLE task_runs ADD COLUMN output_tokens INTEGER NOT NULL DEFAULT 0`);
   ensureTaskRunColumn('total_tokens', `ALTER TABLE task_runs ADD COLUMN total_tokens INTEGER NOT NULL DEFAULT 0`);
+  ensureTaskRunColumn('token_data_quality', `ALTER TABLE task_runs ADD COLUMN token_data_quality TEXT`);
   ensureTaskRunColumn('context_window_tokens', `ALTER TABLE task_runs ADD COLUMN context_window_tokens INTEGER`);
   ensureTaskRunColumn('context_window_percent', `ALTER TABLE task_runs ADD COLUMN context_window_percent REAL`);
 
@@ -651,6 +679,7 @@ function migrate(d: Database.Database): void {
   };
   ensureRetryHistoryColumn('tool', `ALTER TABLE retry_history ADD COLUMN tool TEXT`);
   ensureRetryHistoryColumn('model', `ALTER TABLE retry_history ADD COLUMN model TEXT`);
+  backfillRunExecutionSnapshots(d);
 
   const stageRequestColumns = d
     .prepare(`PRAGMA table_info(stage_requests)`)
@@ -726,8 +755,19 @@ function migrate(d: Database.Database): void {
   d.exec(`CREATE INDEX IF NOT EXISTS idx_backlog_features_repo_epic_lifecycle ON backlog_features(repo_id, epic_id, archived_at, deleted_at, position)`);
 
   ensureRunColumn('project_id', `ALTER TABLE runs ADD COLUMN project_id TEXT REFERENCES projects(project_id)`);
+  ensureRunColumn('epic_id', `ALTER TABLE runs ADD COLUMN epic_id TEXT REFERENCES backlog_epics(epic_id)`);
   d.exec(`CREATE INDEX IF NOT EXISTS idx_runs_project ON runs(project_id)`);
   d.exec(`CREATE INDEX IF NOT EXISTS idx_runs_project_status ON runs(project_id, status, id DESC)`);
+  d.exec(`CREATE INDEX IF NOT EXISTS idx_runs_model_confidence ON runs(model, metrics_confidence, started_at DESC)`);
+  d.exec(`CREATE INDEX IF NOT EXISTS idx_runs_started_at ON runs(started_at DESC)`);
+  d.exec(`CREATE INDEX IF NOT EXISTS idx_runs_repo_started_at ON runs(repo_id, started_at DESC)`);
+  d.exec(`CREATE INDEX IF NOT EXISTS idx_runs_project_started_at ON runs(project_id, started_at DESC)`);
+  d.exec(`CREATE INDEX IF NOT EXISTS idx_runs_epic_started_at ON runs(epic_id, started_at DESC)`);
+  d.exec(`CREATE INDEX IF NOT EXISTS idx_runs_feature_started_at ON runs(feature_id, started_at DESC)`);
+  d.exec(`CREATE INDEX IF NOT EXISTS idx_runs_tool_started_at ON runs(tool, started_at DESC)`);
+  d.exec(`CREATE INDEX IF NOT EXISTS idx_runs_model_started_at ON runs(model, started_at DESC)`);
+  d.exec(`CREATE INDEX IF NOT EXISTS idx_runs_status_started_at ON runs(status, started_at DESC)`);
+  d.exec(`CREATE INDEX IF NOT EXISTS idx_runs_stage_started_at ON runs(stage, started_at DESC)`);
 
   ensurePipelineColumn('project_id', `ALTER TABLE pipelines ADD COLUMN project_id TEXT REFERENCES projects(project_id)`);
   d.exec(`CREATE INDEX IF NOT EXISTS idx_pipelines_project ON pipelines(project_id)`);

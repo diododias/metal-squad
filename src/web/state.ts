@@ -32,6 +32,7 @@ import { createSkillRegistry } from '../core/skills/registry.js';
 import type { Skill } from '../core/skills/types.js';
 import { collectEnvironmentInfo } from './environment.js';
 import { logCaughtError } from '../core/events/index.js';
+import { getAnalyticsDataQuality, getAnalyticsSummary, getTokenBreakdowns } from '../db/analytics.js';
 import type { MsqWebState, ProjectSummary, RepositorySummary, ThemeSnapshot, TimeoutApprovalState, TokenStats, UiNotification, WebRuntimeConfig, ErrorEntry, WorkflowTemplateMappings, WorkflowTemplateSummary } from './types.js';
 
 const DASHBOARD_PERIODS: { label: string; days: number | null }[] = [
@@ -152,6 +153,32 @@ function computeTokenStats(sinceDays = 7): TokenStats {
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Failed to load token stats.';
     return { status: 'error', totalTokens: null, error: message };
+  }
+}
+
+const ANALYTICS_SNAPSHOT_DAYS = 7;
+const ANALYTICS_TOP_GROUP_LIMIT = 5;
+
+function collectAnalyticsSnapshot(revision: number): MsqWebState['analytics'] {
+  const filters = { sinceDays: ANALYTICS_SNAPSHOT_DAYS };
+  try {
+    return {
+      period: filters,
+      summary: getAnalyticsSummary(filters),
+      topGroups: getTokenBreakdowns(filters, ANALYTICS_TOP_GROUP_LIMIT),
+      dataQuality: getAnalyticsDataQuality(filters),
+      generatedAt: new Date().toISOString(),
+      revision,
+    };
+  } catch (error) {
+    pushError('web/state.collectAnalyticsSnapshot', error);
+    return {
+      period: filters,
+      summary: { totalTokens: 0, inputTokens: 0, cachedInputTokens: 0, outputTokens: 0, runs: 0, successRatePercent: null, wasteTokens: 0, contextAvgPercent: null, contextMaxPercent: null, contextP95Percent: null, confidence: 'unknown' },
+      topGroups: { byProject: [], byEpic: [], byRepository: [], byWorkItem: [], byTool: [], byModel: [], byStage: [], byEffort: [], byThinking: [], byStatus: [] },
+      dataQuality: { totalRuns: 0, exactRuns: 0, derivedRuns: 0, unknownRuns: 0, missingTokenRuns: 0, missingProjectSnapshotRuns: 0, missingEpicSnapshotRuns: 0 },
+      generatedAt: new Date().toISOString(), revision,
+    };
   }
 }
 
@@ -456,8 +483,9 @@ export function buildMsqWebState(): MsqWebState {
   const errors = snapshotErrors;
   snapshotErrors = [];
 
+  const revision = collectProjectStateRevision();
   return {
-    revision: collectProjectStateRevision(),
+    revision,
     repoLabel,
     projects,
     repositories,
@@ -482,6 +510,7 @@ export function buildMsqWebState(): MsqWebState {
       periods: DASHBOARD_PERIODS,
       rows: collectDashboardRows(),
     },
+    analytics: collectAnalyticsSnapshot(revision),
     notifications: [],
     theme: buildThemeSnapshot(),
     runtimeConfig: collectRuntimeConfig({

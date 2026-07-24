@@ -64,6 +64,7 @@ export function App(): React.JSX.Element {
   const [projectActionResults, setProjectActionResults] = useState<Record<string, Extract<WebSocketServerMessage, { type: 'action:result' }>>>({});
   const [archivedResults, setArchivedResults] = useState<Record<string, Extract<WebSocketServerMessage, { type: 'action:archivedResult' }>>>({});
   const [auditTrailResults, setAuditTrailResults] = useState<Record<string, Extract<WebSocketServerMessage, { type: 'action:auditTrailResult' }>>>({});
+  const [analyticsMessage, setAnalyticsMessage] = useState<WebSocketServerMessage | null>(null);
   const { linesByRun, append, clear } = useLocalOutput();
   const hasReceivedStateRef = useRef(false);
 
@@ -133,7 +134,9 @@ export function App(): React.JSX.Element {
 
   const onMessage = useCallback(
     (message: WebSocketServerMessage) => {
-      if (message.type === 'state:full') {
+      if (message.type === 'analytics:workItems' || message.type === 'analytics:breakdown' || message.type === 'analytics:runDrilldown' || message.type === 'analytics:export') {
+        setAnalyticsMessage(message);
+      } else if (message.type === 'state:full') {
         const arrivedNotifications = message.payload.notifications;
         if (!hasReceivedStateRef.current) {
           hasReceivedStateRef.current = true;
@@ -320,7 +323,7 @@ export function App(): React.JSX.Element {
   } else if (route.page === 'gates') {
     page = state && <GatesPage state={state} send={send} />;
   } else if (route.page === 'analytics') {
-    page = state && <AnalyticsPage state={state} />;
+    page = state && <AnalyticsPage state={state} send={send} analyticsMessage={analyticsMessage} />;
   } else if (route.page === 'projects') {
     page = state && <ProjectsPage state={state} send={send} actionResults={projectActionResults} />;
   } else if (route.page === 'project-detail') {

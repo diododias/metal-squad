@@ -38,7 +38,7 @@ import { allocateFeatureId } from '../core/backlog/featureId.js';
 import { DefaultsSchema, FeatureSchema, type Defaults, type Feature, type WorkItem, type WorkflowTemplateDefinition } from '../core/backlog/schema.js';
 import type { TemplateOrigin, WorkItemType } from './workflowTemplates.js';
 import { topoOrder } from '../core/orchestrator/graph.js';
-import { sanitizeToolCallRecord, type PublishEvidence, type SessionHandle, type SessionStatusSnapshot, type TokenUsage, type ToolCallRecord } from '../core/adapters/types.js';
+import { normalizeTokenUsage, sanitizeToolCallRecord, type PublishEvidence, type SessionHandle, type SessionStatusSnapshot, type TokenDataQuality, type TokenUsage, type ToolCallRecord } from '../core/adapters/types.js';
 import { resolveDbPath } from '../config/index.js';
 import { msqEventBus, logCaughtError } from '../core/events/index.js';
 import type {
@@ -1442,6 +1442,17 @@ export function recordFeatureTopicAssociationError(
 export interface CreateRunOptions {
   pipelineId?: number;
   stage?: string;
+  snapshot?: RunExecutionSnapshot;
+}
+
+export interface RunExecutionSnapshot {
+  model?: string;
+  effort?: string;
+  thinking?: string;
+  toolName?: string;
+  toolVersion?: string;
+  pricingProfileId?: string;
+  metricsConfidence: 'exact' | 'derived' | 'unknown';
 }
 
 export type RunStatus = 'running' | 'done' | 'failed' | 'blocked' | 'aborted';
@@ -1473,10 +1484,18 @@ export function createRun(
 ): number {
   const info = getDb('readwrite')
     .prepare(
-      `INSERT INTO runs (repo_id, project_id, feature_id, tool, pipeline_id, stage)
-       VALUES (?, (SELECT project_id FROM project_repos WHERE repo_id = ?), ?, ?, ?, ?)`,
+      `INSERT INTO runs (
+         repo_id, project_id, feature_id, epic_id, tool, pipeline_id, stage,
+         model, effort, thinking, tool_name, tool_version, pricing_profile_id, metrics_confidence
+       ) VALUES (?, (SELECT project_id FROM project_repos WHERE repo_id = ?), ?,
+                 (SELECT epic_id FROM backlog_features WHERE feature_id = ?), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     )
-    .run(repoId, repoId, featureId, tool, opts.pipelineId ?? null, opts.stage ?? null);
+    .run(
+      repoId, repoId, featureId, featureId, tool, opts.pipelineId ?? null, opts.stage ?? null,
+      opts.snapshot?.model ?? null, opts.snapshot?.effort ?? null, opts.snapshot?.thinking ?? null,
+      opts.snapshot?.toolName ?? null, opts.snapshot?.toolVersion ?? null,
+      opts.snapshot?.pricingProfileId ?? null, opts.snapshot?.metricsConfidence ?? 'unknown',
+    );
   const runId = Number(info.lastInsertRowid);
   recordRunEvent(runId, 'started', opts.stage ? { stage: opts.stage } : undefined);
   return runId;
@@ -1745,6 +1764,8 @@ export function recordUsage(runId: number, usage: TokenUsage): void {
 }
 
 export function updateRunUsage(runId: number, usage: TokenUsage | TokensUpdateEvent): void {
+  const normalized = normalizeTokenUsage(usage);
+  const normalizedUsage = normalized.usage;
   const db = getDb('readwrite');
   const previous = db
     .prepare(
@@ -1770,12 +1791,14 @@ export function updateRunUsage(runId: number, usage: TokenUsage | TokensUpdateEv
        SET input_tokens = ?, cached_input_tokens = ?, output_tokens = ?, total_tokens = ?
        WHERE id = ?`,
     )
-    .run(usage.input, usage.cachedInput ?? null, usage.output, usage.total, runId);
+    .run(normalizedUsage.input, normalizedUsage.cachedInput ?? null, normalizedUsage.output, normalizedUsage.total, runId);
+  db.prepare(`UPDATE runs SET token_data_quality = ? WHERE id = ?`)
+    .run(normalized.dataQuality, runId);
 
   const tool = (('tool' in usage ? usage.tool : undefined) ?? previous?.tool);
   if (tool) {
     const contextWindowTokens = resolveContextWindow({ tool });
-    const contextWindowPercent = computeContextWindowPercent(usage.total, contextWindowTokens);
+    const contextWindowPercent = computeContextWindowPercent(normalizedUsage.total, contextWindowTokens);
     db.prepare(
       `UPDATE runs
        SET context_window_tokens = ?, context_window_percent = ?
@@ -1784,10 +1807,10 @@ export function updateRunUsage(runId: number, usage: TokenUsage | TokensUpdateEv
   }
 
   db
-    .prepare(`INSERT INTO token_usage (run_id, input, cached_input, output, total) VALUES (?, ?, ?, ?, ?)`)
-    .run(runId, usage.input, usage.cachedInput ?? 0, usage.output, usage.total);
+    .prepare(`INSERT INTO token_usage (run_id, input, cached_input, output, total, data_quality, raw_usage_json) VALUES (?, ?, ?, ?, ?, ?, ?)`)
+    .run(runId, normalizedUsage.input, normalizedUsage.cachedInput ?? 0, normalizedUsage.output, normalizedUsage.total, normalized.dataQuality, normalized.rawUsageJson);
 
-  applyTaskUsageDelta(db, runId, previous, usage, tool);
+  applyTaskUsageDelta(db, runId, previous, normalizedUsage, tool, normalized.dataQuality);
 }
 
 export interface RunOutputRow {
@@ -2552,6 +2575,22 @@ export function updateRunTool(runId: number, tool: Tool): void {
     .run(tool, runId);
 }
 
+/** Replaces the run-local profile when retry/fallback selects the real winner. */
+export function updateRunExecutionSnapshot(runId: number, snapshot: RunExecutionSnapshot): void {
+  getDb('readwrite')
+    .prepare(
+      `UPDATE runs
+          SET model = ?, effort = ?, thinking = ?, tool_name = ?, tool_version = ?,
+              pricing_profile_id = ?, metrics_confidence = ?
+        WHERE id = ?`,
+    )
+    .run(
+      snapshot.model ?? null, snapshot.effort ?? null, snapshot.thinking ?? null,
+      snapshot.toolName ?? null, snapshot.toolVersion ?? null,
+      snapshot.pricingProfileId ?? null, snapshot.metricsConfidence, runId,
+    );
+}
+
 export interface RetryHistoryRow {
   attempt: number;
   error: string | null;
@@ -2656,6 +2695,13 @@ export interface StatsRunRow {
   integrityIssue?: string;
   featureId: string;
   tool: string;
+  model: string | null;
+  effort: string | null;
+  thinking: string | null;
+  toolName: string | null;
+  toolVersion: string | null;
+  pricingProfileId: string | null;
+  metricsConfidence: 'exact' | 'derived' | 'unknown';
   status: string;
   startedAt: string;
   endedAt: string | null;
@@ -2663,6 +2709,7 @@ export interface StatsRunRow {
   cachedInputTokens: number | null;
   outputTokens: number | null;
   totalTokens: number | null;
+  dataQuality?: TokenDataQuality;
   contextWindowTokens?: number | null;
   contextWindowPercent?: number | null;
 }
@@ -2697,12 +2744,14 @@ export function listRunsForStats(filters: StatsFilters = {}): StatsRunRow[] {
   const where = clauses.length > 0 ? `WHERE ${clauses.join(' AND ')}` : '';
   const rows = getDb('readonly')
     .prepare(
-      `WITH latest_usage AS (
-         SELECT u.run_id AS runId, u.input, u.cached_input AS cachedInput, u.output, u.total
+      `WITH latest_valid_usage AS (
+         SELECT u.run_id AS runId, u.input, u.cached_input AS cachedInput, u.output, u.total, u.data_quality AS dataQuality
          FROM token_usage u
          JOIN (
            SELECT run_id, MAX(id) AS id
            FROM token_usage
+           WHERE input >= 0 AND cached_input >= 0 AND output >= 0
+             AND total >= input + cached_input + output
            GROUP BY run_id
          ) latest_token_usage ON latest_token_usage.id = u.id
        )
@@ -2712,23 +2761,57 @@ export function listRunsForStats(filters: StatsFilters = {}): StatsRunRow[] {
          r.project_id AS projectId,
          r.feature_id AS featureId,
          r.tool,
+         r.model,
+         r.effort,
+         r.thinking,
+         r.tool_name AS toolName,
+         r.tool_version AS toolVersion,
+         r.pricing_profile_id AS pricingProfileId,
+         r.metrics_confidence AS metricsConfidence,
          r.status,
          r.started_at AS startedAt,
          r.ended_at AS endedAt,
-         COALESCE(r.input_tokens, lu.input) AS inputTokens,
-         COALESCE(r.cached_input_tokens, lu.cachedInput) AS cachedInputTokens,
-         COALESCE(r.output_tokens, lu.output) AS outputTokens,
-         COALESCE(r.total_tokens, lu.total) AS totalTokens,
+         CASE WHEN r.input_tokens >= 0 AND r.output_tokens >= 0 AND r.total_tokens >= r.input_tokens + COALESCE(r.cached_input_tokens, 0) + r.output_tokens THEN r.input_tokens ELSE lu.input END AS inputTokens,
+         CASE WHEN r.input_tokens >= 0 AND r.output_tokens >= 0 AND r.total_tokens >= r.input_tokens + COALESCE(r.cached_input_tokens, 0) + r.output_tokens THEN r.cached_input_tokens ELSE lu.cachedInput END AS cachedInputTokens,
+         CASE WHEN r.input_tokens >= 0 AND r.output_tokens >= 0 AND r.total_tokens >= r.input_tokens + COALESCE(r.cached_input_tokens, 0) + r.output_tokens THEN r.output_tokens ELSE lu.output END AS outputTokens,
+         CASE WHEN r.input_tokens >= 0 AND r.output_tokens >= 0 AND r.total_tokens >= r.input_tokens + COALESCE(r.cached_input_tokens, 0) + r.output_tokens THEN r.total_tokens ELSE lu.total END AS totalTokens,
+         CASE
+           WHEN r.input_tokens >= 0 AND r.output_tokens >= 0 AND r.total_tokens >= r.input_tokens + COALESCE(r.cached_input_tokens, 0) + r.output_tokens THEN COALESCE(r.token_data_quality, 'valid')
+           WHEN lu.runId IS NOT NULL THEN COALESCE(lu.dataQuality, 'valid')
+           WHEN r.input_tokens IS NULL AND r.cached_input_tokens IS NULL AND r.output_tokens IS NULL AND r.total_tokens IS NULL THEN 'unknown'
+           ELSE 'invalid'
+         END AS dataQuality,
          r.context_window_tokens AS contextWindowTokens,
          r.context_window_percent AS contextWindowPercent
        FROM runs r
-       LEFT JOIN latest_usage lu ON lu.runId = r.id
+       LEFT JOIN latest_valid_usage lu ON lu.runId = r.id
        ${where}
        ORDER BY r.id DESC`,
     )
     .all(...params) as StatsRunRow[];
   for (const row of rows) if (!row.projectId) row.integrityIssue = 'Run has no Project snapshot.';
   return rows;
+}
+
+export interface TokenDataQualityReport {
+  negativeRows: number;
+  nullComponentRows: number;
+  totalLessThanBreakdownRows: number;
+  runsWithoutUsage: number;
+}
+
+/** Non-destructive historical quality scan; it never rewrites telemetry. */
+export function getTokenDataQualityReport(): TokenDataQualityReport {
+  if (!hasDbFile()) return { negativeRows: 0, nullComponentRows: 0, totalLessThanBreakdownRows: 0, runsWithoutUsage: 0 };
+  return getDb('readonly').prepare(
+    `SELECT
+       SUM(CASE WHEN input_tokens < 0 OR cached_input_tokens < 0 OR output_tokens < 0 OR total_tokens < 0 THEN 1 ELSE 0 END) AS negativeRows,
+       SUM(CASE WHEN input_tokens IS NULL OR output_tokens IS NULL OR total_tokens IS NULL THEN 1 ELSE 0 END) AS nullComponentRows,
+       SUM(CASE WHEN total_tokens IS NOT NULL AND total_tokens < COALESCE(input_tokens, 0) + COALESCE(cached_input_tokens, 0) + COALESCE(output_tokens, 0) THEN 1 ELSE 0 END) AS totalLessThanBreakdownRows,
+       SUM(CASE WHEN input_tokens IS NULL AND cached_input_tokens IS NULL AND output_tokens IS NULL AND total_tokens IS NULL
+                     AND NOT EXISTS (SELECT 1 FROM token_usage u WHERE u.run_id = runs.id) THEN 1 ELSE 0 END) AS runsWithoutUsage
+     FROM runs`,
+  ).get() as TokenDataQualityReport;
 }
 
 // F34 item 5c: historical average/median total_tokens among completed runs
@@ -2846,11 +2929,15 @@ function applyTaskUsageDelta(
   previous: PreviousUsageSnapshot | undefined,
   usage: TokenUsage | TokensUpdateEvent,
   tool?: Tool,
+  dataQuality: Extract<TokenDataQuality, 'valid' | 'corrected'> = 'valid',
 ): void {
   const deltaInput = clampUsageDelta(usage.input, previous?.inputTokens);
   const deltaCachedInput = clampUsageDelta(usage.cachedInput ?? 0, previous?.cachedInputTokens);
   const deltaOutput = clampUsageDelta(usage.output, previous?.outputTokens);
-  const deltaTotal = clampUsageDelta(usage.total, previous?.totalTokens);
+  const deltaTotal = Math.max(
+    clampUsageDelta(usage.total, previous?.totalTokens),
+    deltaInput + deltaCachedInput + deltaOutput,
+  );
 
   if (deltaInput === 0 && deltaCachedInput === 0 && deltaOutput === 0 && deltaTotal === 0) {
     return;
@@ -2890,6 +2977,7 @@ function applyTaskUsageDelta(
          cached_input_tokens = COALESCE(cached_input_tokens, 0) + ?,
          output_tokens = COALESCE(output_tokens, 0) + ?,
          total_tokens = COALESCE(total_tokens, 0) + ?,
+         token_data_quality = ?,
          context_window_tokens = COALESCE(?, context_window_tokens),
          context_window_percent = COALESCE(?, context_window_percent)
      WHERE id = ?`,
@@ -2898,6 +2986,7 @@ function applyTaskUsageDelta(
     deltaCachedInput,
     deltaOutput,
     deltaTotal,
+    dataQuality,
     contextWindowTokens,
     contextWindowPercent,
     activeTask.id,

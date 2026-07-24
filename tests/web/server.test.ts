@@ -27,7 +27,7 @@ const mocks = vi.hoisted(() => ({
   listTaskRunsForRun: vi.fn(),
   listRunEvents: vi.fn(),
   getFeatureCatalog: vi.fn(),
-  getBacklogSettings: vi.fn(),
+  getBacklogSettings: vi.fn(() => ({ budget: undefined })),
   pausePipeline: vi.fn(),
   resumePipeline: vi.fn(),
   abortPipeline: vi.fn(),
@@ -45,7 +45,7 @@ const mocks = vi.hoisted(() => ({
   getFeatureIdOwner: vi.fn(),
   loadBacklogFromCatalog: vi.fn(),
   validateBacklogSkills: vi.fn(),
-  loadConfig: vi.fn(),
+  loadConfig: vi.fn(() => ({ budget: {} })),
   resolveRuntimeConfig: vi.fn(),
   saveConfig: vi.fn(),
   saveNotificationsPatch: vi.fn(),
@@ -108,6 +108,34 @@ const mocks = vi.hoisted(() => ({
   duplicateWorkflowTemplate: vi.fn(),
   archiveWorkflowTemplate: vi.fn(),
   mapProjectWorkItemTemplate: vi.fn(),
+  getAnalyticsSummary: vi.fn(),
+  getTokenBreakdowns: vi.fn(),
+  getAnalyticsDataQuality: vi.fn(),
+  getAnalyticsInsights: vi.fn(() => []),
+  getAnalyticsForecast: vi.fn(),
+  getAnalyticsPeriodComparison: vi.fn(),
+  getAnalyticsExportDataset: vi.fn(() => ({
+    schemaVersion: 1, generatedAt: '2026-07-23T12:00:00.000Z', filters: { sinceDays: 7 },
+    summary: { totalTokens: 700 }, dataQuality: {}, forecast: {}, comparison: {}, workItems: [{ workItemId: 'w1', totalTokens: 700 }],
+  })),
+  getTokenTimeSeries: vi.fn(),
+  listAnalyticsWorkItems: vi.fn(),
+  countAnalyticsWorkItems: vi.fn(() => 1),
+  listAnalyticsRunDrilldown: vi.fn(),
+}));
+
+vi.mock('../../src/db/analytics.js', () => ({
+  getAnalyticsSummary: mocks.getAnalyticsSummary,
+  getTokenBreakdowns: mocks.getTokenBreakdowns,
+  getAnalyticsDataQuality: mocks.getAnalyticsDataQuality,
+  getAnalyticsInsights: mocks.getAnalyticsInsights,
+  getAnalyticsForecast: mocks.getAnalyticsForecast,
+  getAnalyticsPeriodComparison: mocks.getAnalyticsPeriodComparison,
+  getAnalyticsExportDataset: mocks.getAnalyticsExportDataset,
+  getTokenTimeSeries: mocks.getTokenTimeSeries,
+  listAnalyticsWorkItems: mocks.listAnalyticsWorkItems,
+  countAnalyticsWorkItems: mocks.countAnalyticsWorkItems,
+  listAnalyticsRunDrilldown: mocks.listAnalyticsRunDrilldown,
 }));
 
 vi.mock('../../src/core/repo.js', () => ({
@@ -416,6 +444,12 @@ describe('web server', () => {
       once: vi.fn(),
       unref: vi.fn(),
     });
+    mocks.getAnalyticsSummary.mockReturnValue({ totalTokens: 120, inputTokens: 50, cachedInputTokens: 10, outputTokens: 60, runs: 2, successRatePercent: 100, wasteTokens: 0, contextAvgPercent: null, contextMaxPercent: null, contextP95Percent: null, confidence: 'exact' });
+    mocks.getTokenBreakdowns.mockReturnValue({ byProject: [], byEpic: [], byRepository: [], byWorkItem: [], byTool: [], byModel: [], byStage: [], byStatus: [] });
+    mocks.getAnalyticsDataQuality.mockReturnValue({ totalRuns: 2, exactRuns: 2, derivedRuns: 0, unknownRuns: 0, missingTokenRuns: 0, missingProjectSnapshotRuns: 0, missingEpicSnapshotRuns: 0 });
+    mocks.getTokenTimeSeries.mockReturnValue([]);
+    mocks.listAnalyticsWorkItems.mockReturnValue([{ workItemId: 'feat-1', projectId: 'project-1', epicId: 'epic-1', repoId: 'repo-1', totalTokens: 120, inputTokens: 50, cachedInputTokens: 10, outputTokens: 60, runs: 2, successRatePercent: 100, wasteTokens: 0, contextAvgPercent: null, contextMaxPercent: null, contextP95Percent: null, confidence: 'exact', doneRuns: 2, failedRuns: 0, blockedRuns: 0, abortedRuns: 0, lastRunAt: '2026-07-23T12:00:00.000Z', derivedStatus: 'done', dominantTool: 'codex', dominantModel: 'gpt-5' }]);
+    mocks.listAnalyticsRunDrilldown.mockReturnValue([]);
   });
 
   afterEach(async () => {
@@ -483,6 +517,103 @@ describe('web server', () => {
     socket.send(JSON.stringify({ type: 'auth', token: 'secret' }));
     const message = await waitForSocketMessage(socket);
     expect((message as { type: string }).type).toBe('state:full');
+    socket.close();
+  });
+
+  it('serves bounded Analytics queries with their requestId', async () => {
+    const { createWebServer } = await import('../../src/web/server.js');
+    server = createWebServer({ host: '127.0.0.1', port: 0, auth: 'token', token: 'secret' });
+    await new Promise<void>((resolve) => server!.server.listen(0, '127.0.0.1', resolve));
+    const port = (server!.server.address() as { port: number }).port;
+    const socket = new WebSocket(`ws://127.0.0.1:${port}/ws`);
+    await waitForOpen(socket);
+    socket.send(JSON.stringify({ type: 'auth', token: 'secret' }));
+    await waitForSocketMessage(socket);
+    socket.send(JSON.stringify({ type: 'action:getAnalyticsWorkItems', requestId: 'analytics-2', filters: { sinceDays: 7 }, pagination: { limit: 10, offset: 0 } }));
+    const result = await waitForMatchingMessage(socket, (message) => message.type === 'analytics:workItems');
+    expect(result).toMatchObject({ type: 'analytics:workItems', payload: { requestId: 'analytics-2', ok: true } });
+    expect(mocks.listAnalyticsWorkItems).toHaveBeenCalledWith({ sinceDays: 7 }, { limit: 10, offset: 0 }, undefined);
+    expect(mocks.countAnalyticsWorkItems).toHaveBeenCalledWith({ sinceDays: 7 });
+    socket.close();
+  });
+
+  it('serves the Work Item run drilldown only when the drawer requests it', async () => {
+    mocks.listAnalyticsRunDrilldown.mockReturnValue([{ runId: 4, pipelineId: 2, workItemId: 'feat-1', tasks: [], retries: [], events: [] }]);
+    const { createWebServer } = await import('../../src/web/server.js');
+    server = createWebServer({ host: '127.0.0.1', port: 0, auth: 'token', token: 'secret' });
+    await new Promise<void>((resolve) => server!.server.listen(0, '127.0.0.1', resolve));
+    const port = (server!.server.address() as { port: number }).port;
+    const socket = new WebSocket(`ws://127.0.0.1:${port}/ws`);
+    await waitForOpen(socket);
+    socket.send(JSON.stringify({ type: 'auth', token: 'secret' }));
+    await waitForSocketMessage(socket);
+    socket.send(JSON.stringify({ type: 'action:getAnalyticsRunDrilldown', requestId: 'drilldown-1', filters: { workItemId: 'feat-1' }, pagination: { limit: 50 } }));
+    const result = await waitForMatchingMessage(socket, (message) => message.type === 'analytics:runDrilldown');
+    expect(result).toMatchObject({ type: 'analytics:runDrilldown', payload: { requestId: 'drilldown-1', ok: true, rows: [{ runId: 4, pipelineId: 2 }] } });
+    expect(mocks.listAnalyticsRunDrilldown).toHaveBeenCalledWith({ workItemId: 'feat-1' }, { limit: 50 });
+    socket.close();
+  });
+
+  it('rejects invalid Analytics filters with an actionable typed error', async () => {
+    const { createWebServer } = await import('../../src/web/server.js');
+    server = createWebServer({ host: '127.0.0.1', port: 0, auth: 'token', token: 'secret' });
+    await new Promise<void>((resolve) => server!.server.listen(0, '127.0.0.1', resolve));
+    const port = (server!.server.address() as { port: number }).port;
+    const socket = new WebSocket(`ws://127.0.0.1:${port}/ws`);
+    await waitForOpen(socket);
+    socket.send(JSON.stringify({ type: 'auth', token: 'secret' }));
+    await waitForSocketMessage(socket);
+    socket.send(JSON.stringify({ type: 'action:getAnalyticsBreakdown', requestId: 'analytics-invalid', filters: { sinceDays: 7, from: '2026-01-01T00:00:00.000Z' } }));
+    const result = await waitForMatchingMessage(socket, (message) => message.type === 'analytics:breakdown');
+    expect(result).toMatchObject({ type: 'analytics:breakdown', payload: { requestId: 'analytics-invalid', ok: false, error: { code: 'INVALID_FILTERS' } } });
+    socket.close();
+  });
+
+  it('exports sanitized server-side analytics aggregates in the requested format', async () => {
+    const { createWebServer } = await import('../../src/web/server.js');
+    server = createWebServer({ host: '127.0.0.1', port: 0, auth: 'token', token: 'secret' });
+    await new Promise<void>((resolve) => server!.server.listen(0, '127.0.0.1', resolve));
+    const port = (server!.server.address() as { port: number }).port;
+    const socket = new WebSocket(`ws://127.0.0.1:${port}/ws`);
+    await waitForOpen(socket);
+    socket.send(JSON.stringify({ type: 'auth', token: 'secret' }));
+    await waitForSocketMessage(socket);
+    socket.send(JSON.stringify({ type: 'action:exportAnalytics', requestId: 'analytics-export', filters: { sinceDays: 7 }, format: 'json' }));
+    const result = await waitForMatchingMessage(socket, (message) => message.type === 'analytics:export');
+    expect(result).toMatchObject({ type: 'analytics:export', payload: { requestId: 'analytics-export', ok: true, format: 'json', filename: 'analytics-export-2026-07-23.json' } });
+    expect((result.payload as { content: string }).content).not.toMatch(/branch_name|commit_sha|pr_url|\/safe\/repo/);
+    expect(mocks.getAnalyticsExportDataset).toHaveBeenCalledWith({ sinceDays: 7 }, undefined);
+    socket.close();
+  });
+
+  it('serves filtered breakdowns, unknown drilldowns, and exports as bounded on-demand messages', async () => {
+    const { createWebServer } = await import('../../src/web/server.js');
+    mocks.getAnalyticsSummary.mockReturnValue({ totalTokens: 160, runs: 1 });
+    mocks.getTokenBreakdowns.mockReturnValue({ byProject: [], byEpic: [], byRepository: [], byWorkItem: [], byTool: [], byModel: [], byStage: [], byEffort: [], byThinking: [], byStatus: [] });
+    mocks.getAnalyticsDataQuality.mockReturnValue({ totalRuns: 1, exactRuns: 0, derivedRuns: 0, unknownRuns: 1, missingTokenRuns: 1, missingProjectSnapshotRuns: 1, missingEpicSnapshotRuns: 1 });
+    mocks.getTokenTimeSeries.mockReturnValue([]);
+    mocks.listAnalyticsRunDrilldown.mockReturnValue([{ runId: 9, workItemId: 'unknown-run', totalTokens: 0, confidence: 'unknown' }]);
+    server = createWebServer({ host: '127.0.0.1', port: 0, auth: 'token', token: 'secret' });
+    await new Promise<void>((resolve) => server!.server.listen(0, '127.0.0.1', resolve));
+    const port = (server!.server.address() as { port: number }).port;
+    const socket = new WebSocket(`ws://127.0.0.1:${port}/ws`);
+    await waitForOpen(socket);
+    socket.send(JSON.stringify({ type: 'auth', token: 'secret' }));
+    await waitForSocketMessage(socket);
+    const filters = { projectId: 'p1', epicId: 'e1', repoId: 'r1', tool: 'codex', model: 'unknown model', sinceDays: 30 };
+
+    socket.send(JSON.stringify({ type: 'action:getAnalyticsBreakdown', requestId: 'filtered-breakdown', filters }));
+    expect(await waitForMatchingMessage(socket, (message) => message.type === 'analytics:breakdown')).toMatchObject({ payload: { requestId: 'filtered-breakdown', ok: true } });
+    expect(mocks.getAnalyticsSummary).toHaveBeenCalledWith(filters);
+    expect(mocks.getTokenBreakdowns).toHaveBeenCalledWith(filters, 20);
+
+    socket.send(JSON.stringify({ type: 'action:getAnalyticsRunDrilldown', requestId: 'unknown-drilldown', filters: { ...filters, dataQuality: 'missing-snapshot' }, pagination: { limit: 25 } }));
+    expect(await waitForMatchingMessage(socket, (message) => message.type === 'analytics:runDrilldown')).toMatchObject({ payload: { requestId: 'unknown-drilldown', ok: true, rows: [expect.objectContaining({ confidence: 'unknown' })] } });
+    expect(mocks.listAnalyticsRunDrilldown).toHaveBeenCalledWith({ ...filters, dataQuality: 'missing-snapshot' }, { limit: 25 });
+
+    socket.send(JSON.stringify({ type: 'action:exportAnalytics', requestId: 'filtered-export', filters, format: 'csv' }));
+    expect(await waitForMatchingMessage(socket, (message) => message.type === 'analytics:export')).toMatchObject({ payload: { requestId: 'filtered-export', ok: true, format: 'csv' } });
+    expect(mocks.getAnalyticsExportDataset).toHaveBeenCalledWith(filters, undefined);
     socket.close();
   });
 

@@ -36,10 +36,11 @@ export function computeStats(rows: StatsRunRow[], topN = 5): RunStats {
 
   for (const row of rows) {
     if (row.status in runs) runs[row.status as keyof typeof runs] += 1;
-    tokens.total += row.totalTokens ?? 0;
-    tokens.input += row.inputTokens ?? 0;
-    tokens.cachedInput += row.cachedInputTokens ?? 0;
-    tokens.output += row.outputTokens ?? 0;
+    const usableTokens = row.dataQuality === undefined || row.dataQuality === 'valid' || row.dataQuality === 'corrected';
+    tokens.total += usableTokens ? row.totalTokens ?? 0 : 0;
+    tokens.input += usableTokens ? row.inputTokens ?? 0 : 0;
+    tokens.cachedInput += usableTokens ? row.cachedInputTokens ?? 0 : 0;
+    tokens.output += usableTokens ? row.outputTokens ?? 0 : 0;
     if (row.contextWindowPercent !== null && row.contextWindowPercent !== undefined) {
       contextPercentTotal += row.contextWindowPercent;
       contextPercentCount += 1;
@@ -49,7 +50,7 @@ export function computeStats(rows: StatsRunRow[], topN = 5): RunStats {
     }
 
     const feature = byFeature.get(row.featureId) ?? { tokens: 0, runs: 0 };
-    feature.tokens += row.totalTokens ?? 0;
+    feature.tokens += usableTokens ? row.totalTokens ?? 0 : 0;
     feature.runs += 1;
     byFeature.set(row.featureId, feature);
 
@@ -166,6 +167,37 @@ export function formatTokensCompact(total: number): string {
   return String(total);
 }
 
+/** Returns the nearest-rank percentile. Invalid values are deliberately
+ * ignored: callers can retain their count as a data-quality signal without
+ * allowing unknown telemetry to distort a comparison baseline. */
+export function percentile(values: readonly number[], percent: number): number | null {
+  const valid = values.filter((value) => Number.isFinite(value)).sort((a, b) => a - b);
+  if (!valid.length) return null;
+  const rank = Math.max(1, Math.min(valid.length, Math.ceil((percent / 100) * valid.length)));
+  return valid[rank - 1] ?? null;
+}
+
+export interface TokenBaseline {
+  count: number;
+  average: number | null;
+  p95: number | null;
+  p99: number | null;
+}
+
+export function computeTokenBaseline(values: readonly number[]): TokenBaseline {
+  const valid = values.filter((value) => Number.isFinite(value) && value >= 0);
+  return {
+    count: valid.length,
+    average: valid.length ? valid.reduce((sum, value) => sum + value, 0) / valid.length : null,
+    p95: percentile(valid, 95),
+    p99: percentile(valid, 99),
+  };
+}
+
+export function isTokenOutlier(value: number, baseline: TokenBaseline): boolean {
+  return Number.isFinite(value) && baseline.p95 !== null && value >= baseline.p95 && value > (baseline.average ?? 0);
+}
+
 function gateKey(event: RunEventRow): number | string {
   const gateId = event.metadata?.gateId;
   return typeof gateId === 'number' ? gateId : 'gate';
@@ -199,7 +231,9 @@ export function aggregateTokens(rows: StatsRunRow[]): TokenAggregates {
   let totalTokens = 0;
 
   for (const row of rows) {
-    const tokens = row.totalTokens ?? 0;
+    const tokens = row.dataQuality === undefined || row.dataQuality === 'valid' || row.dataQuality === 'corrected'
+      ? row.totalTokens ?? 0
+      : 0;
     totalTokens += tokens;
 
     const repoToolKey = `${row.repoId} ${row.tool}`;

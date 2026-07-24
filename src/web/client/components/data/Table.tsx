@@ -5,12 +5,15 @@ export interface TableColumn<T> {
   label: string;
   align?: 'left' | 'right' | 'center';
   render?: (row: T) => React.ReactNode;
+  sortable?: boolean;
 }
 
 export interface TableProps<T extends { id?: string | number }> {
   columns: TableColumn<T>[];
   rows: T[];
   onRowClick?: (row: T) => void;
+  sort?: { key: string; direction: 'asc' | 'desc' };
+  onSort?: (key: string) => void;
 }
 
 function cellText(value: unknown): string {
@@ -19,7 +22,7 @@ function cellText(value: unknown): string {
   return JSON.stringify(value);
 }
 
-export function Table<T extends { id?: string | number }>({ columns, rows, onRowClick }: TableProps<T>): React.JSX.Element {
+export function Table<T extends { id?: string | number }>({ columns, rows, onRowClick, sort, onSort }: TableProps<T>): React.JSX.Element {
   return (
     <table style={{ width: '100%', borderCollapse: 'collapse', fontFamily: 'var(--font-mono)', fontSize: 'var(--text-sm)' }}>
       <thead>
@@ -27,6 +30,7 @@ export function Table<T extends { id?: string | number }>({ columns, rows, onRow
           {columns.map((col) => (
             <th
               key={col.key}
+              aria-sort={col.sortable && sort?.key === col.key ? (sort.direction === 'asc' ? 'ascending' : 'descending') : undefined}
               style={{
                 textAlign: col.align ?? 'left',
                 padding: '8px 10px',
@@ -38,7 +42,7 @@ export function Table<T extends { id?: string | number }>({ columns, rows, onRow
                 fontWeight: 500,
               }}
             >
-              {col.label}
+              {col.sortable && onSort ? <button type="button" onClick={() => { onSort(col.key); }} aria-label={`Sort by ${col.label}`} style={{ border: 0, padding: 0, background: 'none', color: 'inherit', cursor: 'pointer', font: 'inherit', textTransform: 'inherit', letterSpacing: 'inherit' }}>{col.label}{sort?.key === col.key ? ` ${sort.direction === 'asc' ? '↑' : '↓'}` : ''}</button> : col.label}
             </th>
           ))}
         </tr>
@@ -48,6 +52,9 @@ export function Table<T extends { id?: string | number }>({ columns, rows, onRow
           <tr
             key={row.id ?? i}
             onClick={onRowClick ? (): void => { onRowClick(row); } : undefined}
+            onKeyDown={onRowClick ? (event): void => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); onRowClick(row); } } : undefined}
+            tabIndex={onRowClick ? 0 : undefined}
+            aria-label={onRowClick ? `Open ${String(row.id ?? i)}` : undefined}
             style={{
               cursor: onRowClick ? 'pointer' : 'default',
               background: i % 2 === 1 ? 'var(--bg-panel-alt)' : 'transparent',

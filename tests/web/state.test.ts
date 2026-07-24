@@ -19,6 +19,15 @@ const mocks = vi.hoisted(() => ({
   collectEnvironmentInfo: vi.fn(),
   listWorkflowTemplates: vi.fn((): Record<string, unknown>[] => []),
   listProjectTemplateMappings: vi.fn((): Record<string, unknown>[] => []),
+  getAnalyticsSummary: vi.fn(),
+  getTokenBreakdowns: vi.fn(),
+  getAnalyticsDataQuality: vi.fn(),
+}));
+
+vi.mock('../../src/db/analytics.js', () => ({
+  getAnalyticsSummary: mocks.getAnalyticsSummary,
+  getTokenBreakdowns: mocks.getTokenBreakdowns,
+  getAnalyticsDataQuality: mocks.getAnalyticsDataQuality,
 }));
 
 vi.mock('../../src/db/workflowTemplates.js', () => ({
@@ -80,6 +89,9 @@ describe('buildMsqWebState pendingFeatures projection', () => {
     mocks.listProjectStateSummaries.mockReturnValue([]);
     mocks.listRepositoryStateSummaries.mockReturnValue([]);
     mocks.listEpics.mockReturnValue([]);
+    mocks.getAnalyticsSummary.mockReturnValue({ totalTokens: 120, inputTokens: 50, cachedInputTokens: 10, outputTokens: 60, runs: 2, successRatePercent: 100, wasteTokens: 0, contextAvgPercent: null, contextMaxPercent: null, contextP95Percent: null, confidence: 'exact' });
+    mocks.getTokenBreakdowns.mockReturnValue({ byProject: [], byEpic: [], byRepository: [], byWorkItem: [], byTool: [], byModel: [], byStage: [], byStatus: [] });
+    mocks.getAnalyticsDataQuality.mockReturnValue({ totalRuns: 2, exactRuns: 2, derivedRuns: 0, unknownRuns: 0, missingTokenRuns: 0, missingProjectSnapshotRuns: 0, missingEpicSnapshotRuns: 0 });
     mocks.getFeatureCatalog.mockReturnValue({
       'feat-1': {
         id: 'feat-1',
@@ -114,6 +126,21 @@ describe('buildMsqWebState pendingFeatures projection', () => {
       budget: { alertAtPercent: 80 },
       web: { host: '127.0.0.1', port: 8743, auth: 'token' },
     });
+  });
+
+  it('adds a lightweight aggregate Analytics snapshot without using dashboard rows as its source', async () => {
+    const { buildMsqWebState } = await import('../../src/web/state.js');
+    const state = buildMsqWebState();
+    expect(state.analytics).toMatchObject({ period: { sinceDays: 7 }, summary: { totalTokens: 120, runs: 2 }, dataQuality: { exactRuns: 2 }, revision: 7 });
+    expect(state.analytics.topGroups.byWorkItem).toEqual([]);
+    expect(mocks.getAnalyticsSummary).toHaveBeenCalledWith({ sinceDays: 7 });
+    expect(mocks.getTokenBreakdowns).toHaveBeenCalledWith({ sinceDays: 7 }, 5);
+  });
+
+  it('keeps the standard Analytics state push bounded to top-five groups', async () => {
+    const { buildMsqWebState } = await import('../../src/web/state.js');
+    buildMsqWebState();
+    expect(mocks.getTokenBreakdowns).toHaveBeenCalledWith({ sinceDays: 7 }, 5);
   });
 
   it('removes newly started running features from pendingFeatures', async () => {
@@ -274,6 +301,49 @@ describe('buildMsqWebState pendingFeatures projection', () => {
         options: ['Cache em memoria', 'Cache em SQLite'],
       },
     ]);
+  });
+
+  it('projects a validation-blocked run and its open gate for Web recovery', async () => {
+    const { buildMsqWebState } = await import('../../src/web/state.js');
+    mocks.openGates.mockReturnValue([{
+      id: 7,
+      runId: 42,
+      featureId: 'feat-1',
+      repoId: 'repo-1',
+      createdAt: '2026-07-14T12:00:00.000Z',
+      resolvedAt: null,
+      decision: null,
+    }]);
+    mocks.listRunsForTui.mockReturnValue([{
+      runId: 42,
+      repoId: 'repo-1',
+      featureId: 'feat-1',
+      tool: 'codex',
+      pipelineId: 99,
+      stage: 'implement',
+      rawStatus: 'blocked',
+      status: 'blocked',
+      startedAt: '2026-07-14T11:00:00.000Z',
+      endedAt: '2026-07-14T12:00:00.000Z',
+      totalTokens: 100,
+      inputTokens: 50,
+      outputTokens: 50,
+      gateId: 7,
+      gateDecision: null,
+      pipelineStatus: 'blocked',
+      pipelineCurrentStage: 'implement',
+      pipelineResumeSummary: null,
+      pendingStageRequestId: null,
+      pendingStageRequestKind: null,
+      pendingStageRequestPrompt: null,
+      pendingStageRequestCreatedAt: null,
+    }]);
+
+    const state = buildMsqWebState();
+    expect(state.gates).toEqual(expect.arrayContaining([
+      expect.objectContaining({ kind: 'gate', id: 7, featureId: 'feat-1' }),
+    ]));
+    expect(state.runs[0]).toEqual(expect.objectContaining({ runId: 42, gateId: 7, status: 'blocked' }));
   });
 
   it('removes blocked execution-owned features from pendingFeatures', async () => {
