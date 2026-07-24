@@ -74,18 +74,18 @@ afterEach(() => {
 });
 
 describe('EditProjectModal (PF-16)', () => {
-  it('opens with the current values and salvar disabled until dirty', () => {
+  it('opens with the current values and save disabled until dirty', () => {
     const view = render({});
     expect(input(view.container, 'edit-project-name').value).toBe('Project One');
     expect(input(view.container, 'edit-project-description').value).toBe('The original description.');
-    expect(buttonByText(view.container, 'salvar')?.disabled).toBe(true);
+    expect(buttonByText(view.container, 'save')?.disabled).toBe(true);
   });
 
-  it('cancelar closes without emitting action:updateProject', () => {
+  it('cancel closes without emitting action:updateProject', () => {
     const onClose = vi.fn();
     const view = render({ onClose });
     act(() => { setValue(input(view.container, 'edit-project-name'), 'Renamed'); });
-    act(() => { buttonByText(view.container, 'cancelar')?.click(); });
+    act(() => { buttonByText(view.container, 'cancel')?.click(); });
     expect(onClose).toHaveBeenCalledTimes(1);
     expect(view.send).not.toHaveBeenCalled();
   });
@@ -93,7 +93,7 @@ describe('EditProjectModal (PF-16)', () => {
   it('saves only the changed fields with expectedRevision', () => {
     const view = render({});
     act(() => { setValue(input(view.container, 'edit-project-name'), 'Renamed project'); });
-    act(() => { buttonByText(view.container, 'salvar')?.click(); });
+    act(() => { buttonByText(view.container, 'save')?.click(); });
     const message = view.send.mock.calls[0]?.[0] as { type: string; projectId: string; expectedRevision: number; patch: Record<string, unknown> };
     expect(message).toMatchObject({ type: 'action:updateProject', projectId: 'proj-1', expectedRevision: 3, patch: { name: 'Renamed project' } });
     expect(message.patch.description).toBeUndefined();
@@ -105,7 +105,7 @@ describe('EditProjectModal (PF-16)', () => {
     const onSaved = vi.fn();
     const view = render({ onClose, onSaved });
     act(() => { setValue(input(view.container, 'edit-project-name'), 'Renamed'); });
-    act(() => { buttonByText(view.container, 'salvar')?.click(); });
+    act(() => { buttonByText(view.container, 'save')?.click(); });
     const { requestId } = view.send.mock.calls[0]?.[0] as { requestId: string };
     view.rerender({ [requestId]: { type: 'action:result', payload: { requestId, ok: true, entity: { projectId: 'proj-1', revision: 4 } } } as unknown as ActionResult });
     expect(onSaved).toHaveBeenCalledWith('Renamed');
@@ -115,7 +115,7 @@ describe('EditProjectModal (PF-16)', () => {
   it('offers revision-conflict recovery and reapplies against the pushed revision', () => {
     const view = render({});
     act(() => { setValue(input(view.container, 'edit-project-name'), 'Renamed'); });
-    act(() => { buttonByText(view.container, 'salvar')?.click(); });
+    act(() => { buttonByText(view.container, 'save')?.click(); });
     const first = view.send.mock.calls[0]?.[0] as { requestId: string };
     const conflicted = projectSummary({ revision: 5 });
     view.rerender({

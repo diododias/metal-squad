@@ -22,7 +22,7 @@ export interface CreateEpicModalProps {
 }
 
 /**
- * Modal form behind the `+ Novo Épico` action on the project detail page.
+ * Modal form behind the `+ New Epic` action on the project detail page.
  * Sends the existing `action:createEpic` and tracks its `action:result` by
  * requestId: success closes the modal, an error keeps it open showing the
  * server message. Opening always starts from a blank draft.
@@ -99,8 +99,8 @@ export function CreateEpicModal({ open, projectId, send, actionResults, onClose,
       <EditableTextField id="create-epic-description" label="Description" value={description} initialValue="" onChange={setDescription} disabled={pending} placeholder="Optional description" />
       {error && <p role="alert" style={{ margin: 0, color: 'var(--accent-danger)', fontSize: 'var(--text-xs)' }}>{error}</p>}
       <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
-        <Button size="sm" disabled={pending} onClick={onClose}>cancelar</Button>
-        <Button variant="primary" size="sm" disabled={pending || !title.trim()} onClick={createEpic}>{pending ? 'creating…' : 'criar'}</Button>
+        <Button size="sm" disabled={pending} onClick={onClose}>cancel</Button>
+        <Button variant="primary" size="sm" disabled={pending || !title.trim()} onClick={createEpic}>{pending ? 'creating…' : 'create'}</Button>
       </div>
     </div>
   </Modal>;

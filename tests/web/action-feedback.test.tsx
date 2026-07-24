@@ -68,8 +68,8 @@ describe('CreateEpicModal on WS disconnect (PF-07)', () => {
     const input = container.querySelector('#create-epic-title') as HTMLInputElement;
     Object.getOwnPropertyDescriptor(Object.getPrototypeOf(input), 'value')?.set?.call(input, 'Epic');
     act(() => { input.dispatchEvent(new Event('input', { bubbles: true })); });
-    const criar = [...container.querySelectorAll('button')].find((item) => item.textContent === 'criar');
-    act(() => { criar?.click(); });
+    const create = [...container.querySelectorAll('button')].find((item) => item.textContent === 'create');
+    act(() => { create?.click(); });
     expect(send).toHaveBeenCalledTimes(1);
     const firstRequestId = (send.mock.calls[0]?.[0] as { requestId: string }).requestId;
     expect(container.textContent).toContain('creating…');
@@ -79,7 +79,7 @@ describe('CreateEpicModal on WS disconnect (PF-07)', () => {
     expect(container.querySelector('[role="alert"]')?.textContent).toBe(CONNECTION_LOST_MESSAGE);
 
     act(() => { root.render(element(true)); });
-    const retry = [...container.querySelectorAll('button')].find((item) => item.textContent === 'criar');
+    const retry = [...container.querySelectorAll('button')].find((item) => item.textContent === 'create');
     expect(retry?.disabled).toBe(false);
     act(() => { retry?.click(); });
     expect(send).toHaveBeenCalledTimes(2);
@@ -123,11 +123,11 @@ describe('ToastStack action button (PF-07)', () => {
     const onDismiss = vi.fn();
     const { container } = mount(
       <ToastStack
-        items={[{ id: `${String(Date.now())}-t1`, tone: 'ok', message: 'Work Item created.', action: { label: 'abrir detalhe', onSelect } }]}
+        items={[{ id: `${String(Date.now())}-t1`, tone: 'ok', message: 'Work Item created.', action: { label: 'open details', onSelect } }]}
         onDismiss={onDismiss}
       />,
     );
-    const action = [...container.querySelectorAll('button')].find((item) => item.textContent === 'abrir detalhe');
+    const action = [...container.querySelectorAll('button')].find((item) => item.textContent === 'open details');
     expect(action).toBeDefined();
     act(() => { action?.click(); });
     expect(onSelect).toHaveBeenCalledTimes(1);

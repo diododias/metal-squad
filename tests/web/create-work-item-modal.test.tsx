@@ -129,17 +129,17 @@ describe('CreateWorkItemModal', () => {
     expect(after[1]?.workItemType).toBe('bug');
   });
 
-  it('keeps criar disabled until title + valid preview, then sends action:createWorkItem', () => {
+  it('keeps create disabled until title + valid preview, then sends action:createWorkItem', () => {
     const send = vi.fn();
     const view = render({ send, defaultEpicId: 'epic-1' });
     act(() => { setValue(view.container.querySelector('#create-work-item-title') as HTMLInputElement, 'My feature'); });
-    expect(buttonByText(view.container, 'criar').disabled).toBe(true);
+    expect(buttonByText(view.container, 'create').disabled).toBe(true);
     const previewRequest = send.mock.calls.map((call) => call[0] as { type: string; requestId: string }).find((message) => message.type === 'action:resolveWorkflowTemplate');
     view.rerender({ [previewRequest!.requestId]: previewOk(previewRequest!.requestId) });
     expect(view.container.textContent).toContain('template: tpl-1 v2 (project)');
-    const criar = buttonByText(view.container, 'criar');
-    expect(criar.disabled).toBe(false);
-    act(() => { criar.click(); });
+    const createButton = buttonByText(view.container, 'create');
+    expect(createButton.disabled).toBe(false);
+    act(() => { createButton.click(); });
     const create = send.mock.calls.map((call) => call[0] as { type: string; title?: string; epicId?: string; repoId?: string }).find((message) => message.type === 'action:createWorkItem');
     expect(create).toMatchObject({ epicId: 'epic-1', repoId: 'repo-1', title: 'My feature' });
   });
@@ -150,7 +150,7 @@ describe('CreateWorkItemModal', () => {
     const previewRequest = send.mock.calls.map((call) => call[0] as { type: string; requestId: string }).find((message) => message.type === 'action:resolveWorkflowTemplate');
     view.rerender({ [previewRequest!.requestId]: previewOk(previewRequest!.requestId) });
     expect((view.container.querySelector('#create-work-item-title') as HTMLInputElement).value).toBe('Original (copy)');
-    act(() => { buttonByText(view.container, 'criar').click(); });
+    act(() => { buttonByText(view.container, 'create').click(); });
     const create = send.mock.calls.map((call) => call[0] as Record<string, unknown>).find((message) => message.type === 'action:createWorkItem');
     expect(create).toMatchObject({ title: 'Original (copy)', workItemType: 'bug', description: 'Copied spec', dependsOn: ['feat-0'] });
   });
@@ -161,7 +161,7 @@ describe('CreateWorkItemModal', () => {
     const previewRequest = send.mock.calls.map((call) => call[0] as { type: string; requestId: string }).find((message) => message.type === 'action:resolveWorkflowTemplate');
     view.rerender({ [previewRequest!.requestId]: { type: 'action:result', payload: { requestId: previewRequest!.requestId, ok: false, error: { code: 'not_found', message: 'no template mapped for bug' } } } as unknown as ActionResult });
     expect(view.container.querySelector('[role="alert"]')?.textContent).toBe('no template mapped for bug');
-    expect(buttonByText(view.container, 'criar').disabled).toBe(true);
+    expect(buttonByText(view.container, 'create').disabled).toBe(true);
   });
 
   it('closes and reports the created Work Item id on success; error keeps it open', () => {
@@ -172,7 +172,7 @@ describe('CreateWorkItemModal', () => {
     act(() => { setValue(view.container.querySelector('#create-work-item-title') as HTMLInputElement, 'My feature'); });
     const previewRequest = send.mock.calls.map((call) => call[0] as { type: string; requestId: string }).find((message) => message.type === 'action:resolveWorkflowTemplate');
     view.rerender({ [previewRequest!.requestId]: previewOk(previewRequest!.requestId) });
-    act(() => { buttonByText(view.container, 'criar').click(); });
+    act(() => { buttonByText(view.container, 'create').click(); });
     const create = send.mock.calls.map((call) => call[0] as { type: string; requestId: string }).find((message) => message.type === 'action:createWorkItem');
     view.rerender({
       [previewRequest!.requestId]: previewOk(previewRequest!.requestId),

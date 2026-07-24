@@ -56,7 +56,7 @@ describe('ProjectsPage', () => {
   it('sends create and update actions with a request id and expected revision', () => {
     const send = vi.fn<(message: WebSocketClientMessage) => void>();
     const container = render({ send });
-    act(() => { Array.from(container.querySelectorAll('button')).find((button) => button.textContent === '+ Novo Projeto')?.click(); });
+    act(() => { Array.from(container.querySelectorAll('button')).find((button) => button.textContent === '+ New Project')?.click(); });
     act(() => { setValue(container.querySelector('#new-project-name') as HTMLInputElement, 'New Project'); });
     act(() => { Array.from(container.querySelectorAll('button')).find((button) => button.textContent === 'create project')?.click(); });
     expect(send.mock.calls[0]?.[0]).toMatchObject({ type: 'action:createProject', name: 'New Project' });

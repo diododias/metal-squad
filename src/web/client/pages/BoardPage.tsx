@@ -96,7 +96,7 @@ export function BoardPage({ state, isMobile, onOpenRun, onOpenBacklogItem, send,
   const columns: Column[] = [
     { key: 'progress', label: 'IN PROGRESS / BLOCKED', items: projectRuns.filter((r) => (r.status === 'running' || r.status === 'blocked') && matchesRun(r)), empty: 'No active runs' },
     { key: 'done', label: 'DONE', items: projectRuns.filter((r) => r.status === 'done' && matchesRun(r)), empty: 'No completed runs' },
-    { key: 'failed', label: 'FALHA / CANCELED', items: projectRuns.filter((r) => (r.status === 'failed' || r.status === 'aborted') && matchesRun(r)), empty: 'No failed runs' },
+    { key: 'failed', label: 'FAILED / ABORTED', items: projectRuns.filter((r) => (r.status === 'failed' || r.status === 'aborted') && matchesRun(r)), empty: 'No failed runs' },
   ];
 
   return (

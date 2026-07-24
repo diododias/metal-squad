@@ -32,7 +32,7 @@ describe('BoardPage view', () => {
     const html = renderBoard();
     expect(html).toContain('IN PROGRESS / BLOCKED');
     expect(html).toContain('DONE');
-    expect(html).toContain('FALHA / CANCELED');
+    expect(html).toContain('FAILED / ABORTED');
   });
 
   it('does not render any workflow stage columns', () => {
