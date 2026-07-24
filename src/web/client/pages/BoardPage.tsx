@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { KanbanCard, type KanbanCardProps } from '../components/data/KanbanCard.js';
+import { CreateWorkItemModal } from '../components/project/CreateWorkItemModal.js';
 import { formatElapsed } from '../lib/format.js';
 import { PageHeader } from '../PageHeader.js';
 import type { MsqWebState } from '../../types.js';
@@ -46,6 +47,8 @@ export function BoardPage({ state, isMobile, onOpenRun, onOpenBacklogItem, send,
   const [toolFilter, setToolFilter] = useState('all');
   const [epicFilter, setEpicFilter] = useState('all');
   const [typeFilter, setTypeFilter] = useState('all');
+  const [cloneDraft, setCloneDraft] = useState<React.ComponentProps<typeof CreateWorkItemModal>['initialDraft']>();
+  const [cloneProjectId, setCloneProjectId] = useState<string>();
   const { activeProjectId } = useActiveProject();
   const projectFeatures = scopedFeatures(state, activeProjectId, Object.values(state.featureCatalog));
   const projectRuns = scopedRuns(state, activeProjectId);
@@ -69,6 +72,15 @@ export function BoardPage({ state, isMobile, onOpenRun, onOpenBacklogItem, send,
       }),
       onStart: (): void => { send({ type: 'action:startFeature', featureId }); },
       onRequestCancel: pipelineId == null ? undefined : (): void => { send({ type: 'action:requestFeatureAbort', pipelineId, featureId }); },
+      onClone: (): void => {
+        if (!feature.projectId || !feature.epicId || !feature.repoId) return;
+        setCloneProjectId(feature.projectId);
+        setCloneDraft({
+          title: `${feature.title} (copy)`, epicId: feature.epicId, repoId: feature.repoId,
+          workItemType: feature.workItemType === 'bug' ? 'bug' : 'feature',
+          description: feature.description, dependsOn: feature.dependsOn,
+        });
+      },
     };
   };
 
@@ -267,6 +279,15 @@ export function BoardPage({ state, isMobile, onOpenRun, onOpenBacklogItem, send,
           ))}
         </div>
       </div>
+      {cloneProjectId && <CreateWorkItemModal
+        open={cloneDraft !== undefined}
+        projectId={cloneProjectId}
+        initialDraft={cloneDraft}
+        state={state}
+        send={send ?? ((): void => undefined)}
+        actionResults={actionResults}
+        onClose={() => { setCloneDraft(undefined); setCloneProjectId(undefined); }}
+      />}
     </div>
   );
 }

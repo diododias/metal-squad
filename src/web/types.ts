@@ -572,6 +572,8 @@ export type WebSocketClientMessage =
   | { type: 'action:createEpic'; requestId: string; projectId: string; title: string; description?: string | null }
   | { type: 'action:approveEpic'; requestId: string; epicId: string; expectedRevision: number }
   | { type: 'action:createWorkItem'; requestId: string; epicId: string; repoId: string; workItemType?: MsqWorkItemType; title: string; description?: string | null; dependsOn?: string[] }
+  | { type: 'action:reopenFailedWorkItem'; requestId: string; workItemId: string; expectedRevision: number }
+  | { type: 'action:markFailedWorkItemDone'; requestId: string; workItemId: string; expectedRevision: number }
   | { type: 'action:resolveWorkflowTemplate'; requestId: string; epicId: string; repoId: string; workItemType: MsqWorkItemType }
   | { type: 'action:createWorkflowTemplate'; requestId: string; projectId: string; name: string; definition: unknown }
   | { type: 'action:updateWorkflowTemplate'; requestId: string; templateId: string; expectedRevision: number; patch: { name?: string; definition?: unknown } }

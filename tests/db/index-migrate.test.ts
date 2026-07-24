@@ -125,6 +125,7 @@ describe('getDb migration — column checks', () => {
       { name: 'adapter_session_tool' }, { name: 'adapter_session_id' },
       { name: 'model' }, { name: 'effort' }, { name: 'thinking' }, { name: 'tool_name' },
       { name: 'tool_version' }, { name: 'pricing_profile_id' }, { name: 'metrics_confidence' },
+      { name: 'dismissed_at' },
     ];
     pragmaRunsColumns = ALL_RUN_COLS;
     pragmaTokenUsageColumns = [{ name: 'cached_input' }, { name: 'data_quality' }, { name: 'raw_usage_json' }];

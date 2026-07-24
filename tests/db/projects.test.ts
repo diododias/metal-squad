@@ -340,6 +340,32 @@ describe('Project and repository domain queries', () => {
     })).toThrowError(CrossRepositoryDependencyError);
   });
 
+  it('reopens only a failed Work Item into TODO and can mark that failure done manually', async () => {
+    const { db, createEpic, createProject, createRun, createWorkItem, finishRun, linkRepo, listCompletedFeatureIds, listRunHistoryForFeature, listRunsForTui, markFailedWorkItemDone, registerRepo, reopenFailedWorkItem } = await setup();
+    const { backfillProjects } = await import('../../src/db/backfill.js');
+    backfillProjects(db);
+    const repoPath = join(directory, 'repo-transitions');
+    mkdirSync(repoPath);
+    const project = createProject({ name: 'Transitions' });
+    registerRepo('repo-transitions', repoPath);
+    linkRepo(project.projectId, 'repo-transitions');
+    const epic = createEpic({ projectId: project.projectId, title: 'Epic' });
+
+    const reopened = createWorkItem({ epicId: epic.epicId, repoId: 'repo-transitions', title: 'Reopen me' });
+    finishRun(createRun('repo-transitions', reopened.workItemId, 'codex'), 'failed');
+    const reopenedAfter = reopenFailedWorkItem(reopened.workItemId, reopened.revision, { audit: { actor: 'web', requestId: 'reopen-1' } });
+    expect(reopenedAfter.revision).toBe(2);
+    expect(listRunsForTui(20, 'repo-transitions').find((run) => run.featureId === reopened.workItemId)).toBeUndefined();
+    expect(listRunHistoryForFeature('repo-transitions', reopened.workItemId)).toHaveLength(1);
+
+    const manual = createWorkItem({ epicId: epic.epicId, repoId: 'repo-transitions', title: 'Mark me done' });
+    finishRun(createRun('repo-transitions', manual.workItemId, 'codex'), 'failed');
+    const doneAfter = markFailedWorkItemDone(manual.workItemId, manual.revision, { audit: { actor: 'web', requestId: 'done-1' } });
+    expect(doneAfter.revision).toBe(2);
+    expect(listRunsForTui(20, 'repo-transitions').find((run) => run.featureId === manual.workItemId)?.status).toBe('done');
+    expect(listCompletedFeatureIds('repo-transitions')).toContain(manual.workItemId);
+  });
+
   it('rolls back Work Item insertion when its audit event fails', async () => {
     const { db, createEpic, createProject, createWorkItem, linkRepo, registerRepo } = await setup();
     const { backfillProjects } = await import('../../src/db/backfill.js');

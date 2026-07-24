@@ -39,6 +39,7 @@ interface View {
 function render(props: {
   state?: MsqWebState;
   defaultEpicId?: string;
+  initialDraft?: React.ComponentProps<typeof CreateWorkItemModal>['initialDraft'];
   send?: (message: WebSocketClientMessage) => void;
   onClose?: () => void;
   onCreated?: (workItemId: string, title: string) => void;
@@ -52,6 +53,7 @@ function render(props: {
       open
       projectId="proj-1"
       defaultEpicId={props.defaultEpicId}
+      initialDraft={props.initialDraft}
       state={props.state ?? baseState()}
       send={props.send ?? (() => undefined)}
       actionResults={actionResults}
@@ -140,6 +142,17 @@ describe('CreateWorkItemModal', () => {
     act(() => { criar.click(); });
     const create = send.mock.calls.map((call) => call[0] as { type: string; title?: string; epicId?: string; repoId?: string }).find((message) => message.type === 'action:createWorkItem');
     expect(create).toMatchObject({ epicId: 'epic-1', repoId: 'repo-1', title: 'My feature' });
+  });
+
+  it('pre-fills a clone draft and preserves its description and dependencies on create', () => {
+    const send = vi.fn();
+    const view = render({ send, initialDraft: { title: 'Original (copy)', epicId: 'epic-1', repoId: 'repo-1', workItemType: 'bug', description: 'Copied spec', dependsOn: ['feat-0'] } });
+    const previewRequest = send.mock.calls.map((call) => call[0] as { type: string; requestId: string }).find((message) => message.type === 'action:resolveWorkflowTemplate');
+    view.rerender({ [previewRequest!.requestId]: previewOk(previewRequest!.requestId) });
+    expect((view.container.querySelector('#create-work-item-title') as HTMLInputElement).value).toBe('Original (copy)');
+    act(() => { buttonByText(view.container, 'criar').click(); });
+    const create = send.mock.calls.map((call) => call[0] as Record<string, unknown>).find((message) => message.type === 'action:createWorkItem');
+    expect(create).toMatchObject({ title: 'Original (copy)', workItemType: 'bug', description: 'Copied spec', dependsOn: ['feat-0'] });
   });
 
   it('shows the preview error from the server in the modal', () => {

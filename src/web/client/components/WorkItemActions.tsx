@@ -22,6 +22,8 @@ export interface WorkItemActionsProps {
   startLabel?: string;
   startTitle?: string;
   onRequestCancel?: () => void;
+  /** Opens the prefilled creation flow for a completed Work Item. */
+  onClone?: () => void;
   size?: 'sm' | 'md';
   onToast?: (item: ToastStackItem) => void;
 }
@@ -33,13 +35,16 @@ export interface WorkItemActionsProps {
  */
 export function WorkItemActions({
   id, name, revision, allowed, eligibility, pill, pipelineId, send, actionResults,
-  onStart, startLabel = 'Start', startTitle, onRequestCancel, size = 'sm', onToast,
+  onStart, startLabel = 'Start', startTitle, onRequestCancel, onClone, size = 'sm', onToast,
 }: WorkItemActionsProps): React.JSX.Element | null {
   const canResume = pill === 'blocked' && pipelineId != null;
   const canAbort = (pill === 'running' || pill === 'blocked') && pipelineId != null;
   const canStart = pill === 'not_started';
+  const canReopenFailed = pill === 'failed';
+  const canMarkFailedDone = pill === 'failed';
+  const canClone = pill === 'done' && onClone !== undefined;
 
-  if (!canStart && !canResume && !canAbort && !allowed) return null;
+  if (!canStart && !canResume && !canAbort && !canReopenFailed && !canMarkFailedDone && !canClone && !allowed) return null;
 
   return (
     <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
@@ -64,6 +69,17 @@ export function WorkItemActions({
           Abort
         </Button>
       )}
+      {canReopenFailed && (
+        <Button size={size} onClick={() => { send({ type: 'action:reopenFailedWorkItem', requestId: `reopen-${id}-${String(Date.now())}`, workItemId: id, expectedRevision: revision }); }}>
+          Back to TODO
+        </Button>
+      )}
+      {canMarkFailedDone && (
+        <Button variant="ok" size={size} onClick={() => { send({ type: 'action:markFailedWorkItemDone', requestId: `mark-done-${id}-${String(Date.now())}`, workItemId: id, expectedRevision: revision }); }}>
+          Mark as Done
+        </Button>
+      )}
+      {canClone && <Button size={size} onClick={onClone}>Clone</Button>}
       <LifecycleActions
         kind="work_item"
         id={id}
