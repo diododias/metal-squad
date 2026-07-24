@@ -140,7 +140,7 @@ describe('EpicDetailPage', () => {
     window.location.hash = '';
     const container = render(baseState());
     const buttons = [...container.querySelectorAll('button')];
-    const projectCrumb = buttons.find((button) => button.textContent === 'Project One');
+    const projectCrumb = buttons.find((button) => button.textContent?.startsWith('Project One · P-'));
     const projectsCrumb = buttons.find((button) => button.textContent === 'Projects');
     expect(projectCrumb).toBeDefined();
     expect(projectsCrumb).toBeDefined();
@@ -598,7 +598,7 @@ describe('EpicDetailPage filter persistence (PF-18)', () => {
       statusSelect.dispatchEvent(new Event('change', { bubbles: true }));
     });
     expect(window.location.hash).toContain('status=failed');
-    const projectCrumb = [...container.querySelectorAll('button')].find((button) => button.textContent === 'Project One');
+    const projectCrumb = [...container.querySelectorAll('button')].find((button) => button.textContent?.startsWith('Project One · P-'));
     act(() => { projectCrumb?.click(); });
     expect(window.location.hash).toBe('#/projects/proj-1?status=done');
   });

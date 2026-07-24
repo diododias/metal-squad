@@ -72,6 +72,11 @@ afterEach(() => {
 });
 
 describe('RepositoriesSection add-by-path (PF-13)', () => {
+  it('renders a repository short ID with the R prefix', () => {
+    const view = render([{ repoId: 'repo-1', projectId: 'proj-1', label: 'repo-one', health: 'ok', lastCheckedAt: null }]);
+    expect(view.container.textContent).toMatch(/R-[0-9A-F]{8}/);
+  });
+
   it('shows the add CTA when the project has no repository', () => {
     const view = render([]);
     expect(view.container.textContent).toContain('Add one by path below');

@@ -15,6 +15,7 @@ import { ProgressBar } from '../components/data/ProgressBar.js';
 import { startEligibility } from '../lib/startEligibility.js';
 import { hashWithRestoredQuery, readHashParams, updateHashParams } from '../lib/hashState.js';
 import { pillStatus } from '../lib/pillStatus.js';
+import { shortId } from '../lib/entityId.js';
 import { PageHeader } from '../PageHeader.js';
 import type { ToastStackItem } from '../components/feedback/ToastStack.js';
 import type { MsqWebState, WebSocketClientMessage, WebSocketServerMessage } from '../../types.js';
@@ -152,10 +153,10 @@ export function EpicDetailPage({ state, projectId, epicId, send, actionResults, 
 
   return <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
     <PageHeader
-      title={epic.title}
+      title={`${epic.title} · ${shortId('epic', epic.epicId)}`}
       breadcrumb={[
         { label: 'Projects', href: '/projects' },
-        { label: project.name, href: hashWithRestoredQuery(`/projects/${projectId}`) },
+        { label: `${project.name} · ${shortId('project', project.projectId)}`, href: hashWithRestoredQuery(`/projects/${projectId}`) },
       ]}
       filters={<div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center' }}>
         <input
@@ -289,6 +290,7 @@ export function EpicDetailPage({ state, projectId, epicId, send, actionResults, 
               </div>
             </div>
             <div style={tags}>
+              <Tag>{shortId('work_item', item.id, item.workItemType)}</Tag>
               <Tag>{item.workItemType}</Tag>
               <Tag>{item.repoLabel ?? 'unresolved repo'}</Tag>
               <StatusPill status={pillStatus(run ?? {})} label={pillStatus(run ?? {})} />

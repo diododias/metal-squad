@@ -173,7 +173,7 @@ describe('navigation chain — Projects → Epic → Work Item (PF-01, PF-02, PF
         />,
       );
     });
-    const projectCrumb = [...el.querySelectorAll('button')].find((b) => b.textContent === 'Project One');
+    const projectCrumb = [...el.querySelectorAll('button')].find((b) => b.textContent?.startsWith('Project One · P-'));
     act(() => { projectCrumb?.click(); });
     expect(window.location.hash).toBe('#/projects/proj-1?status=in_progress');
   });

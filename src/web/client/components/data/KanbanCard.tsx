@@ -5,20 +5,14 @@ import { WorkflowStepper } from '../navigation/WorkflowStepper.js';
 import { formatTokens } from '../../lib/format.js';
 import { pillStatus, type PillStatusInput } from '../../lib/pillStatus.js';
 import { WorkItemActions } from '../WorkItemActions.js';
+import { shortId } from '../../lib/entityId.js';
 import type { StartEligibility } from '../../lib/startEligibility.js';
 import type { AllowedLifecycle, WebSocketClientMessage, WebSocketServerMessage } from '../../../types.js';
 import type { PipelineStatus } from '../../../../db/repo.js';
 
-/** Deterministic 8-hex-digit short id from a feature id string, so the same
- * feature always renders the same F-XXXXXXXX badge without a backend. */
+/** @deprecated Use shortId('work_item', id, type) for new entity displays. */
 export function toShortFeatureId(featureId: string): string {
-  let hash = 2166136261;
-  for (let i = 0; i < featureId.length; i += 1) {
-    hash ^= featureId.charCodeAt(i);
-    hash = Math.imul(hash, 16777619);
-  }
-  const hex = (hash >>> 0).toString(16).toUpperCase().padStart(8, '0').slice(0, 8);
-  return `F-${hex}`;
+  return shortId('work_item', featureId);
 }
 
 /** Short display label for a model id (`claude-sonnet-4-5` → `sonnet-4-5`);
@@ -49,7 +43,7 @@ export interface KanbanCardRun {
   prNumber?: number | null;
   pipelineId?: number | null;
   repoLabel?: string | null;
-  workItemType?: string | null;
+  workItemType?: 'feature' | 'bug' | null;
   templateId?: string | null;
   templateVersion?: number | null;
   repoUnhealthy?: boolean;
@@ -103,7 +97,7 @@ export function KanbanCard({ run, selected, onClick, lifecycle }: KanbanCardProp
   const status = pillStatus(run);
   const tasksLabel = run.tasksTotal != null ? `${String(run.tasksDone ?? 0)}/${String(run.tasksTotal)} tasks` : null;
   const isDone = status === 'done';
-  const displayId = run.persistedId ?? toShortFeatureId(run.featureId);
+  const displayId = shortId('work_item', run.featureId, run.workItemType);
   const displayTitle = run.title?.trim();
   const railCells = buildToolRailCells(run);
 

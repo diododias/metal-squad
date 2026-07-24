@@ -94,6 +94,8 @@ describe('ProjectDetailPage as epic list', () => {
     expect(container.textContent).toContain('2 work items');
     expect(container.textContent).toContain('created');
     expect(container.textContent).toContain('updated');
+    expect(container.textContent).toMatch(/P-[0-9A-F]{8}/);
+    expect(container.textContent).toMatch(/E-[0-9A-F]{8}/);
   });
 
   it('navigates to the epic detail hash on row click', () => {

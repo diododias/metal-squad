@@ -37,7 +37,7 @@ export function RunsPage({ state, onOpenRun }: RunsPageProps): React.JSX.Element
   }
 
   const columns: TableColumn<RunSummary>[] = [
-    { key: 'featureId', label: 'Feature', render: (r) => <FeatureIdentity title={state.featureCatalog[r.featureId]?.title} id={r.featureId} /> },
+    { key: 'featureId', label: 'Feature', render: (r) => <FeatureIdentity title={state.featureCatalog[r.featureId]?.title} id={r.featureId} workItemType={state.featureCatalog[r.featureId]?.workItemType} /> },
     { key: 'status', label: 'Status', render: (r) => <StatusPill status={r.status} /> },
     { key: 'tool', label: 'Tool', render: (r) => <Tag>{r.tool}</Tag> },
     { key: 'model', label: 'Model', render: (r) => state.featureCatalog[r.featureId]?.model ?? '—' },
