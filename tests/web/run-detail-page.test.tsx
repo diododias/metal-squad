@@ -547,16 +547,19 @@ describe('RunDetailPage Project/repo context', () => {
           id: 'feat-1',
           title: 'Feature One',
           projectId: 'project-a',
+          epicId: 'epic-a',
+          epicTitle: 'Epic A',
           repoLabel: 'repo-one',
           workflow: { stages: ['implement'], stepGuidance: {} },
         },
       },
+      epics: [{ epicId: 'epic-a', projectId: 'project-a', title: 'Epic A', description: null, status: 'todo', position: 0, revision: 1, archivedAt: null }],
       backlogSettings: { stageSkills: {} },
       runtimeConfig: { web: { statusSpinner: false }, tools: [{ id: 'claude' }, { id: 'codex' }, { id: 'opencode' }], notifications: { channels: [] } },
     } as unknown as MsqWebState;
   }
 
-  it('shows the item Project name and repo label in the breadcrumb', () => {
+  it('shows the complete Project, Epic, and Work Item breadcrumb', () => {
     const container = document.createElement('div');
     document.body.append(container);
     const root = createRoot(container);
@@ -575,7 +578,58 @@ describe('RunDetailPage Project/repo context', () => {
       );
     });
 
-    expect(container.textContent).toContain('Project A · repo-one · feat-1');
+    expect(container.textContent).toContain('Projects › Project A › Epic A › Feature One');
+  });
+
+  it('degrades to the available breadcrumb levels when hierarchy entries cannot resolve', () => {
+    const state = stateWithItemContext(makeRun());
+    state.projects = [];
+    state.epics = [];
+    const container = document.createElement('div');
+    document.body.append(container);
+    const root = createRoot(container);
+    roots.push(root);
+    act(() => {
+      root.render(<RunDetailPage state={state} featureId="feat-1" runDetails={{}} linesByRun={{}} onSubscribeRun={() => () => undefined} onBack={() => undefined} send={vi.fn()} />);
+    });
+
+    expect(container.textContent).toContain('Projects › Feature One');
+    expect(container.textContent).not.toContain('Epic A');
+  });
+
+  it('navigates hierarchy breadcrumbs while restoring the item Project context', () => {
+    const setActiveProject = vi.fn();
+    const container = document.createElement('div');
+    document.body.append(container);
+    const root = createRoot(container);
+    roots.push(root);
+
+    act(() => {
+      root.render(
+        <ActiveProjectContext.Provider value={{ activeProjectId: 'project-other', activeProject: null, setActiveProject, selectionInvalidated: false }}>
+          <RunDetailPage
+            state={stateWithItemContext(makeRun())}
+            featureId="feat-1"
+            runDetails={{}}
+            linesByRun={{}}
+            onSubscribeRun={() => () => undefined}
+            onBack={() => undefined}
+            send={vi.fn()}
+          />
+        </ActiveProjectContext.Provider>,
+      );
+    });
+
+    const breadcrumbs = Array.from(container.querySelectorAll('button')).filter((button) => ['Projects', 'Project A', 'Epic A'].includes(button.textContent ?? ''));
+    expect(breadcrumbs).toHaveLength(3);
+
+    act(() => { breadcrumbs[0]?.click(); });
+    expect(window.location.hash).toBe('#/projects');
+    act(() => { breadcrumbs[1]?.click(); });
+    expect(window.location.hash).toBe('#/projects/project-a');
+    act(() => { breadcrumbs[2]?.click(); });
+    expect(window.location.hash).toBe('#/projects/project-a/epics/epic-a');
+    expect(setActiveProject).toHaveBeenCalledWith('project-a');
   });
 
   it('switches the active project context to the item Project before returning from a mismatched selection', () => {

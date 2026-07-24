@@ -13,6 +13,7 @@ import { PageHeader } from '../PageHeader.js';
 import { useActiveProject } from '../hooks/useActiveProject.js';
 import { useIsMobile } from '../Responsive.js';
 import { formatClockTime, formatElapsed, formatPercent, formatPublishTarget, formatTokens, getPublishStatusLabel, getRunStatusLabel, parseTimestampMs } from '../lib/format.js';
+import { hashWithRestoredQuery } from '../lib/hashState.js';
 import { summarizeTaskRuns } from '../lib/workflow.js';
 import { STAGE_ORDER } from '../../../core/workflow/stageOrder.js';
 import type { MsqWebState, FeatureConfigPatch, WebSocketClientMessage } from '../../types.js';
@@ -142,10 +143,24 @@ export function RunDetailPage({
   const { activeProjectId, setActiveProject } = useActiveProject();
   const itemProjectId = feature?.projectId ?? null;
   const projects = 'projects' in state ? state.projects : [];
-  const projectName = projects.find((project) => project.projectId === itemProjectId)?.name;
+  const project = projects.find((candidate) => candidate.projectId === itemProjectId);
+  const epic = feature?.epicId
+    ? state.epics.find((candidate) => candidate.epicId === feature.epicId && candidate.projectId === itemProjectId && candidate.archivedAt === null)
+    : undefined;
+  const epicTitle = epic?.title ?? feature?.epicTitle;
   function returnToItemContext(): void {
     if (itemProjectId && itemProjectId !== activeProjectId) setActiveProject(itemProjectId);
   }
+  const itemBreadcrumb = [
+    { label: 'Projects', href: hashWithRestoredQuery('/projects'), onClick: returnToItemContext },
+    ...(project && itemProjectId
+      ? [{ label: project.name, href: hashWithRestoredQuery(`/projects/${itemProjectId}`), onClick: returnToItemContext }]
+      : []),
+    ...(project && feature?.epicId && epicTitle && itemProjectId
+      ? [{ label: epicTitle, href: hashWithRestoredQuery(`/projects/${itemProjectId}/epics/${feature.epicId}`), onClick: returnToItemContext }]
+      : []),
+    { label: feature?.title ?? featureId },
+  ];
   const scrollRef = useRef<HTMLDivElement>(null);
   const stickToBottomRef = useRef(true);
 
@@ -179,13 +194,9 @@ export function RunDetailPage({
   if (!run) {
     return (
       <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
-        <PageHeader
-          title={featureId}
-          breadcrumb={
-            <a href="#/runs" onClick={returnToItemContext} style={{ color: 'var(--text-dim)' }}>
-              Runs
-            </a>
-          }
+          <PageHeader
+            title={featureId}
+            breadcrumb={itemBreadcrumb}
         />
         <div style={{ padding: 28, color: 'var(--text-dim)' }}>
           No run found for {featureId}. It may still be in Todo — start it from the Board.
@@ -355,14 +366,7 @@ export function RunDetailPage({
       <div style={{ position: 'relative', flexShrink: 0 }}>
       <PageHeader
         title={feature?.title ?? featureId}
-        breadcrumb={
-          <span>
-            <a href="#/runs" onClick={returnToItemContext} style={{ color: 'var(--text-dim)' }}>
-              Runs
-            </a>{' '}
-            / {projectName ? `${projectName} · ` : ''}{feature?.repoLabel ? `${feature.repoLabel} · ` : ''}{featureId}
-          </span>
-        }
+        breadcrumb={itemBreadcrumb}
         actions={
           <>
             {feature?.workItemType && <WorkItemTypeBadge workItemType={feature.workItemType} />}

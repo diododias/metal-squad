@@ -2,7 +2,8 @@ import React from 'react';
 
 export interface BreadcrumbItem {
   label: string;
-  href: string;
+  href?: string;
+  onClick?: () => void;
 }
 
 export interface PageHeaderProps {
@@ -14,16 +15,18 @@ export interface PageHeaderProps {
 }
 
 function isBreadcrumbTrail(breadcrumb: React.ReactNode | BreadcrumbItem[]): breadcrumb is BreadcrumbItem[] {
-  return Array.isArray(breadcrumb) && breadcrumb.every((item: unknown) => typeof item === 'object' && item !== null && 'label' in item && 'href' in item);
+  return Array.isArray(breadcrumb) && breadcrumb.every((item: unknown) => typeof item === 'object' && item !== null && 'label' in item);
 }
 
 const crumbLinkStyle: React.CSSProperties = { background: 'none', border: 0, color: 'var(--accent-info)', padding: 0, cursor: 'pointer', font: 'inherit' };
 
 function BreadcrumbTrail({ items }: { items: BreadcrumbItem[] }): React.JSX.Element {
   return <span>
-    {items.map((item, index) => <span key={item.href}>
+    {items.map((item, index) => <span key={item.href ?? item.label}>
       {index > 0 && <span style={{ color: 'var(--text-faint)' }}> › </span>}
-      <button onClick={() => { window.location.hash = item.href; }} style={crumbLinkStyle}>{item.label}</button>
+      {item.href
+        ? <button onClick={() => { item.onClick?.(); window.location.hash = item.href ?? ''; }} style={crumbLinkStyle}>{item.label}</button>
+        : <span>{item.label}</span>}
     </span>)}
   </span>;
 }
