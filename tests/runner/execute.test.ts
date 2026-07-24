@@ -895,6 +895,9 @@ describe('executeBacklog failure persistence', () => {
           tasks: ['speckit-tasks'],
           implement: ['implement'],
           validate: ['review'],
+          reproduce: ['bug-reproduce'],
+          fix: ['dev-flow'],
+          verify: ['review'],
         },
       },
     );
@@ -1347,6 +1350,9 @@ describe('executeBacklog failure persistence', () => {
           tasks: ['speckit-tasks'],
           implement: ['implement'],
           validate: ['review'],
+          reproduce: ['bug-reproduce'],
+          fix: ['dev-flow'],
+          verify: ['review'],
         },
       },
     );
@@ -1664,6 +1670,9 @@ describe('executeBacklog failure persistence', () => {
         tasks: ['speckit-tasks'],
         implement: ['implement'],
         validate: ['review'],
+        reproduce: ['bug-reproduce'],
+        fix: ['dev-flow'],
+        verify: ['review'],
       },
     });
   });
@@ -2193,6 +2202,9 @@ describe('executeBacklog failure persistence', () => {
         tasks: ['speckit-tasks'],
         implement: ['implement'],
         validate: ['review'],
+        reproduce: ['bug-reproduce'],
+        fix: ['dev-flow'],
+        verify: ['review'],
       },
     });
     expect(mockUpdateStageTransitionDecisionNextSessionId).toHaveBeenCalledWith(101, 'thread_1');
@@ -2260,6 +2272,9 @@ describe('executeBacklog failure persistence', () => {
         tasks: ['speckit-tasks'],
         implement: ['implement'],
         validate: ['review'],
+        reproduce: ['bug-reproduce'],
+        fix: ['dev-flow'],
+        verify: ['review'],
       },
     });
   });
@@ -2303,6 +2318,9 @@ describe('executeBacklog failure persistence', () => {
         tasks: ['speckit-tasks'],
         implement: ['implement'],
         validate: ['review'],
+        reproduce: ['bug-reproduce'],
+        fix: ['dev-flow'],
+        verify: ['review'],
       },
     });
   });
@@ -2350,6 +2368,9 @@ describe('executeBacklog failure persistence', () => {
         tasks: ['speckit-tasks'],
         implement: ['implement'],
         validate: ['review'],
+        reproduce: ['bug-reproduce'],
+        fix: ['dev-flow'],
+        verify: ['review'],
       },
     });
   });
@@ -2397,6 +2418,9 @@ describe('executeBacklog failure persistence', () => {
         tasks: ['speckit-tasks'],
         implement: ['implement'],
         validate: ['review'],
+        reproduce: ['bug-reproduce'],
+        fix: ['dev-flow'],
+        verify: ['review'],
       },
     });
   });
@@ -2445,6 +2469,9 @@ describe('executeBacklog failure persistence', () => {
         tasks: ['speckit-tasks'],
         implement: ['implement'],
         validate: ['review'],
+        reproduce: ['bug-reproduce'],
+        fix: ['dev-flow'],
+        verify: ['review'],
       },
     });
   });
@@ -2493,6 +2520,9 @@ describe('executeBacklog failure persistence', () => {
         tasks: ['speckit-tasks'],
         implement: ['implement'],
         validate: ['review'],
+        reproduce: ['bug-reproduce'],
+        fix: ['dev-flow'],
+        verify: ['review'],
       },
     });
   });
