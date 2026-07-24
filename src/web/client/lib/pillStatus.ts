@@ -17,6 +17,9 @@ export interface PillStatusInput {
  */
 export function pillStatus({ status, pipelineStatus }: PillStatusInput): PillStatus {
   switch (pipelineStatus) {
+    case null:
+    case undefined:
+      break;
     case 'paused':
     case 'blocked':
       return 'blocked';

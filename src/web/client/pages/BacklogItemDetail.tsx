@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { Button } from '../components/core/Button.js';
-import { LifecycleActions } from '../components/LifecycleActions.js';
+import { WorkItemActions } from '../components/WorkItemActions.js';
 import { FeatureConfigDetail } from '../components/FeatureConfigDetail.js';
 import { WorkflowStepper } from '../components/navigation/WorkflowStepper.js';
 import { Tabs } from '../components/navigation/Tabs.js';
@@ -8,6 +8,7 @@ import { MarkdownView } from '../components/MarkdownView.js';
 import { PageHeader, type PageHeaderProps } from '../PageHeader.js';
 import { useActiveProject } from '../hooks/useActiveProject.js';
 import { startEligibility } from '../lib/startEligibility.js';
+import { pillStatus } from '../lib/pillStatus.js';
 import type { MsqWebState, FeatureConfigPatch, FeatureConfigSaveResult, TaskConfigPatch, WebSocketClientMessage, WebSocketServerMessage, MsqWorkItemType } from '../../types.js';
 import type { RunHistoryEntry } from '../../../db/repo.js';
 
@@ -70,6 +71,7 @@ export function BacklogItemDetail({
     doneFeatureIds,
     repositories,
   });
+  const activeRun = state.runs.find((run) => run.featureId === featureId);
   const { activeProjectId, setActiveProject } = useActiveProject();
   const itemProjectId = feature?.projectId ?? null;
   const projects = 'projects' in state ? state.projects : [];
@@ -156,23 +158,19 @@ export function BacklogItemDetail({
         )}
         actions={
           <>
-            <Button
-              variant="primary"
-              size="sm"
-              disabled={!eligibility.canStart}
-              title={eligibility.reason ?? 'Start feature'}
-              onClick={() => { onStart(featureId); }}
-            >
-              start feature
-            </Button>
-            <LifecycleActions
-              kind="work_item"
+            <WorkItemActions
               id={feature.persistedId ?? featureId}
               name={feature.title}
               revision={feature.revision}
               allowed={state.lifecycle?.[`work_item:${feature.persistedId ?? featureId}`]}
+              eligibility={eligibility}
+              pill={pillStatus(activeRun ?? {})}
+              pipelineId={activeRun?.pipelineId}
               send={send}
               actionResults={actionResults}
+              onStart={() => { onStart(featureId); }}
+              startLabel="start feature"
+              startTitle="Start feature"
             />
             <Button variant="neutral" size="sm" onClick={() => { returnToItemContext(); onBack(); }}>
               close

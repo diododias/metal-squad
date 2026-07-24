@@ -436,18 +436,18 @@ describe('EpicDetailPage row execution actions (PF-15)', () => {
     expect(startButtonIn(integrityRow)?.title).toContain('Integrity issue');
   });
 
-  it('shows view run instead of start while a run is active, navigating to the run detail', () => {
+  it('shows Abort instead of Start while a run is active', () => {
     window.location.hash = '#/projects/proj-1/epics/epic-1';
     const state = baseState({
-      runs: [{ featureId: 'feat-1', status: 'running', runId: 7 }],
+      runs: [{ featureId: 'feat-1', status: 'running', runId: 7, pipelineId: 1 }],
     } as unknown as Partial<MsqWebState>);
     const view = renderRow(state);
     const row = rows(view.container).find((candidate) => candidate.textContent?.includes('Item feat-1'));
     expect(startButtonIn(row)).toBeUndefined();
-    const viewRun = [...(row?.querySelectorAll('button') ?? [])].find((button) => button.textContent === 'view run');
-    expect(viewRun).toBeDefined();
-    act(() => { viewRun?.click(); });
-    expect(window.location.hash).toBe('#/runs/feat-1');
+    const abort = [...(row?.querySelectorAll('button') ?? [])].find((button) => button.textContent === 'Abort');
+    expect(abort).toBeDefined();
+    act(() => { abort?.click(); });
+    expect(view.send).toHaveBeenCalledWith({ type: 'action:abortPipeline', pipelineId: 1 });
   });
 });
 

@@ -1,17 +1,21 @@
 import React, { useState } from 'react';
-import { KanbanCard } from '../components/data/KanbanCard.js';
+import { KanbanCard, type KanbanCardProps } from '../components/data/KanbanCard.js';
 import { formatElapsed } from '../lib/format.js';
 import { PageHeader } from '../PageHeader.js';
 import type { MsqWebState } from '../../types.js';
 import type { RunSummary } from '../../../db/repo.js';
 import { useActiveProject } from '../hooks/useActiveProject.js';
 import { scopedFeatures, scopedRuns } from '../lib/scope.js';
+import { startEligibility } from '../lib/startEligibility.js';
+import type { WebSocketClientMessage, WebSocketServerMessage } from '../../types.js';
 
 export interface BoardPageProps {
   state: MsqWebState;
   isMobile: boolean;
   onOpenRun: (featureId: string) => void;
   onOpenBacklogItem: (featureId: string) => void;
+  send?: (message: WebSocketClientMessage) => void;
+  actionResults?: Record<string, Extract<WebSocketServerMessage, { type: 'action:result' }>>;
 }
 
 function cardInteraction(
@@ -37,7 +41,7 @@ interface Column {
   empty: string;
 }
 
-export function BoardPage({ state, isMobile, onOpenRun, onOpenBacklogItem }: BoardPageProps): React.JSX.Element {
+export function BoardPage({ state, isMobile, onOpenRun, onOpenBacklogItem, send, actionResults = {} }: BoardPageProps): React.JSX.Element {
   const [query, setQuery] = useState('');
   const [toolFilter, setToolFilter] = useState('all');
   const [epicFilter, setEpicFilter] = useState('all');
@@ -47,6 +51,26 @@ export function BoardPage({ state, isMobile, onOpenRun, onOpenBacklogItem }: Boa
   const projectRuns = scopedRuns(state, activeProjectId);
   const projectRepoCount = new Set(projectFeatures.map((feature) => feature.repoId).filter(Boolean)).size;
   const repositories = 'repositories' in state ? state.repositories : [];
+  const doneFeatureIds = new Set(state.doneFeatureIds);
+  const lifecycleFor = (featureId: string, pipelineId: number | null | undefined): KanbanCardProps['lifecycle'] => {
+    const feature = state.featureCatalog[featureId];
+    if (!feature || !send) return undefined;
+    return {
+      allowed: state.lifecycle?.[`work_item:${feature.persistedId ?? featureId}`],
+      revision: feature.revision,
+      send,
+      actionResults,
+      eligibility: startEligibility({
+        dependsOn: feature.dependsOn,
+        repoId: feature.repoId,
+        integrityIssue: feature.integrityIssue,
+        doneFeatureIds,
+        repositories,
+      }),
+      onStart: (): void => { send({ type: 'action:startFeature', featureId }); },
+      onRequestCancel: pipelineId == null ? undefined : (): void => { send({ type: 'action:requestFeatureAbort', pipelineId, featureId }); },
+    };
+  };
 
   const q = query.trim().toLowerCase();
   const matches = (title: string | null | undefined, id: string): boolean =>
@@ -169,6 +193,7 @@ export function BoardPage({ state, isMobile, onOpenRun, onOpenBacklogItem }: Boa
                       templateId: f.templateId, templateVersion: f.templateVersion,
                       repoUnhealthy: repositories.find((repo) => repo.repoId === f.repoId)?.health === 'unavailable',
                     }}
+                    lifecycle={lifecycleFor(f.id, null)}
                   />
                 </div>
               ))}
@@ -226,11 +251,13 @@ export function BoardPage({ state, isMobile, onOpenRun, onOpenBacklogItem }: Boa
                         tokens: r.totalTokens,
                         prUrl: r.prUrl,
                         prNumber: r.prNumber,
+                        pipelineId: r.pipelineId,
                         repoLabel: projectRepoCount > 1 ? state.featureCatalog[r.featureId]?.repoLabel : null,
                         workItemType: state.featureCatalog[r.featureId]?.workItemType,
                         templateId: state.featureCatalog[r.featureId]?.templateId,
                         templateVersion: state.featureCatalog[r.featureId]?.templateVersion,
                       }}
+                      lifecycle={lifecycleFor(r.featureId, r.pipelineId)}
                     />
                   </div>
                 ))}

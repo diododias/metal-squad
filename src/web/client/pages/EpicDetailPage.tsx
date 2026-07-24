@@ -5,6 +5,7 @@ import { StatusPill } from '../components/core/StatusPill.js';
 import { Tag } from '../components/core/Tag.js';
 import { DependencyTag } from '../components/FeatureConfigDetail.js';
 import { LifecycleActions } from '../components/LifecycleActions.js';
+import { WorkItemActions } from '../components/WorkItemActions.js';
 import { CreateWorkItemModal } from '../components/project/CreateWorkItemModal.js';
 import { Modal } from '../components/feedback/Modal.js';
 import { EpicEditor } from './EpicEditor.js';
@@ -226,7 +227,6 @@ export function EpicDetailPage({ state, projectId, epicId, send, actionResults, 
         {items.length > 0 && filteredItems.length === 0 && <Card><p style={muted}>No matching Work Items.</p></Card>}
         {visible.map((item) => {
           const run = state.runs.find((candidate) => candidate.featureId === item.id);
-          const runActive = run?.status === 'running' || run?.status === 'blocked';
           const eligibility = startEligibility({
             dependsOn: item.dependsOn,
             repoId: item.repoId,
@@ -257,14 +257,21 @@ export function EpicDetailPage({ state, projectId, epicId, send, actionResults, 
           >
             <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, alignItems: 'flex-start', flexWrap: 'wrap' }}>
               <strong>{item.title}</strong>
-              <div
-                style={{ display: 'flex', alignItems: 'center', gap: 8 }}
-                onClick={(event) => { event.stopPropagation(); }}
-                onKeyDown={(event) => { event.stopPropagation(); }}
-              >
-                {runActive
-                  ? <Button size="sm" onClick={() => { window.location.hash = `/runs/${item.id}`; }}>view run</Button>
-                  : <Button size="sm" disabled={!eligibility.canStart} title={eligibility.reason ?? `Start "${item.title}"`} onClick={startItem}>start</Button>}
+              <div onClick={(event) => { event.stopPropagation(); }} onKeyDown={(event) => { event.stopPropagation(); }}>
+                <WorkItemActions
+                  id={item.persistedId ?? item.id}
+                  name={item.title}
+                  revision={item.revision}
+                  allowed={state.lifecycle?.[`work_item:${item.persistedId ?? item.id}`]}
+                  eligibility={eligibility}
+                  pill={pillStatus(run ?? {})}
+                  pipelineId={run?.pipelineId}
+                  send={send}
+                  actionResults={actionResults}
+                  onStart={startItem}
+                  startLabel="start"
+                  onToast={onToast}
+                />
               </div>
             </div>
             <div style={tags}>
