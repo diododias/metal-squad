@@ -272,11 +272,31 @@ describe('EpicDetailPage edit modal (PF-06)', () => {
     expect((dialog?.querySelector('#epic-epic-1-title') as HTMLInputElement).value).toBe('Epic One');
   });
 
-  it('does not expose manual status editing', () => {
+  it('saves title changes through the modal global save and keeps status read-only', () => {
     const view = renderWithSend(baseState());
     openEditor(view.container);
     expect(view.container.querySelector('#epic-epic-1-status')).toBeNull();
     expect(view.container.textContent).toContain('status follows Work Item execution');
+    const title = view.container.querySelector('#epic-epic-1-title') as HTMLInputElement;
+    Object.getOwnPropertyDescriptor(Object.getPrototypeOf(title), 'value')?.set?.call(title, 'Renamed Epic');
+    act(() => { title.dispatchEvent(new Event('input', { bubbles: true })); });
+    const save = [...view.container.querySelectorAll('button')].find((item) => item.textContent === 'Save Epic');
+    act(() => { save?.click(); });
+    const message = view.send.mock.calls.map((call) => call[0] as { type: string; patch?: { title?: string }; expectedRevision?: number }).find((item) => item.type === 'action:updateEpic');
+    expect(message?.patch?.title).toBe('Renamed Epic');
+    expect(message?.expectedRevision).toBe(1);
+  });
+
+  it('asks before discarding a dirty Epic draft', () => {
+    const view = renderWithSend(baseState());
+    openEditor(view.container);
+    const title = view.container.querySelector('#epic-epic-1-title') as HTMLInputElement;
+    Object.getOwnPropertyDescriptor(Object.getPrototypeOf(title), 'value')?.set?.call(title, 'Unsaved Epic');
+    act(() => { title.dispatchEvent(new Event('input', { bubbles: true })); });
+    act(() => { [...view.container.querySelectorAll('button')].find((item) => item.textContent === 'cancelar')?.click(); });
+    expect(view.container.querySelector('[aria-label="Discard Epic changes"]')).not.toBeNull();
+    act(() => { [...view.container.querySelectorAll('button')].find((item) => item.textContent === 'Discard')?.click(); });
+    expect(view.container.querySelector('[aria-label="Edit Epic"]')).toBeNull();
   });
 
   it('surfaces the revision-conflict recovery actions inside the modal', () => {
@@ -285,7 +305,7 @@ describe('EpicDetailPage edit modal (PF-06)', () => {
     const titleInput = view.container.querySelector('#epic-epic-1-title') as HTMLInputElement;
     Object.getOwnPropertyDescriptor(Object.getPrototypeOf(titleInput), 'value')?.set?.call(titleInput, 'Renamed');
     act(() => { titleInput.dispatchEvent(new Event('input', { bubbles: true })); });
-    const save = [...view.container.querySelectorAll('button')].find((item) => item.textContent?.startsWith('save'));
+    const save = [...view.container.querySelectorAll('button')].find((item) => item.textContent === 'Save Epic');
     act(() => { save?.click(); });
     const message = view.send.mock.calls.map((call) => call[0] as { type: string; requestId: string }).find((item) => item.type === 'action:updateEpic');
     view.rerender({ [message!.requestId]: { type: 'action:result', payload: { requestId: message!.requestId, ok: false, error: { code: 'REVISION_CONFLICT', message: 'Epic was modified by someone else.' } } } as unknown as ActionResult });
