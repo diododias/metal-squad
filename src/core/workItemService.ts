@@ -3,6 +3,8 @@ import {
   createWorkItem,
   deleteWorkItem,
   restoreArchivedWorkItem,
+  reopenFailedWorkItem,
+  markFailedWorkItemDone,
   type AuditContext,
   type CreateWorkItemInput,
   type WorkItemRow,
@@ -41,6 +43,16 @@ export const workItemService = {
 
   restoreArchive(workItemId: string, expectedRevision: number, options: { audit?: AuditContext } = {}): ServiceMutationResult<WorkItemRow> {
     const entity = restoreArchivedWorkItem(workItemId, expectedRevision, options);
+    return { entity, revision: entity.revision };
+  },
+
+  reopenFailed(workItemId: string, expectedRevision: number, options: { audit?: AuditContext } = {}): ServiceMutationResult<WorkItemRow> {
+    const entity = reopenFailedWorkItem(workItemId, expectedRevision, options);
+    return { entity, revision: entity.revision };
+  },
+
+  markFailedDone(workItemId: string, expectedRevision: number, options: { audit?: AuditContext } = {}): ServiceMutationResult<WorkItemRow> {
+    const entity = markFailedWorkItemDone(workItemId, expectedRevision, options);
     return { entity, revision: entity.revision };
   },
 };

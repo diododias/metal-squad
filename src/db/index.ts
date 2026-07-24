@@ -588,6 +588,9 @@ function migrate(d: Database.Database): void {
   ensureRunColumn('pricing_profile_id', `ALTER TABLE runs ADD COLUMN pricing_profile_id TEXT`);
   ensureRunColumn('metrics_confidence', `ALTER TABLE runs ADD COLUMN metrics_confidence TEXT`);
   ensureRunColumn('token_data_quality', `ALTER TABLE runs ADD COLUMN token_data_quality TEXT`);
+  // A reopened failed Work Item retains its attempt for audit/analytics, but
+  // must no longer be the active run projected into the board.
+  ensureRunColumn('dismissed_at', `ALTER TABLE runs ADD COLUMN dismissed_at TEXT`);
 
   const usageColumns = d
     .prepare(`PRAGMA table_info(token_usage)`)
@@ -768,6 +771,7 @@ function migrate(d: Database.Database): void {
   d.exec(`CREATE INDEX IF NOT EXISTS idx_runs_model_started_at ON runs(model, started_at DESC)`);
   d.exec(`CREATE INDEX IF NOT EXISTS idx_runs_status_started_at ON runs(status, started_at DESC)`);
   d.exec(`CREATE INDEX IF NOT EXISTS idx_runs_stage_started_at ON runs(stage, started_at DESC)`);
+  d.exec(`CREATE INDEX IF NOT EXISTS idx_runs_feature_dismissed ON runs(feature_id, dismissed_at, id DESC)`);
 
   ensurePipelineColumn('project_id', `ALTER TABLE pipelines ADD COLUMN project_id TEXT REFERENCES projects(project_id)`);
   d.exec(`CREATE INDEX IF NOT EXISTS idx_pipelines_project ON pipelines(project_id)`);

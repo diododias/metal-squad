@@ -63,7 +63,7 @@ import { workItemService } from '../core/workItemService.js';
 import { projectService, repoLinkService } from '../core/projectService.js';
 import { buildMsqWebState, appendNotification, resetWebStateCaches, invalidateWorkflowTemplatesCache } from './state.js';
 import { createWebAuth, isAllowedHostHeader, isAllowedOrigin, timingSafeEqualStrings } from './auth.js';
-import { EpicActionMessageSchema, LifecycleActionMessageSchema, ProjectActionMessageSchema, RepositoryActionMessageSchema, WorkItemActionMessageSchema, WorkflowTemplateActionMessageSchema, WorkItemTypeChangeMessageSchema, ResolveWorkflowTemplateMessageSchema, WorkflowTemplateDefinitionMessageSchema, ValidateWorkflowTemplateMessageSchema, ArchivedQueryMessageSchema, AuditTrailQueryMessageSchema, AnalyticsWorkItemsMessageSchema, AnalyticsBreakdownMessageSchema, AnalyticsRunDrilldownMessageSchema, AnalyticsExportMessageSchema } from './schemas.js';
+import { EpicActionMessageSchema, LifecycleActionMessageSchema, ProjectActionMessageSchema, RepositoryActionMessageSchema, WorkItemActionMessageSchema, FailedWorkItemTransitionMessageSchema, WorkflowTemplateActionMessageSchema, WorkItemTypeChangeMessageSchema, ResolveWorkflowTemplateMessageSchema, WorkflowTemplateDefinitionMessageSchema, ValidateWorkflowTemplateMessageSchema, ArchivedQueryMessageSchema, AuditTrailQueryMessageSchema, AnalyticsWorkItemsMessageSchema, AnalyticsBreakdownMessageSchema, AnalyticsRunDrilldownMessageSchema, AnalyticsExportMessageSchema } from './schemas.js';
 import {
   archiveWorkflowTemplate,
   createWorkflowTemplate,
@@ -906,6 +906,13 @@ export function createWebServer(options: {
         if (result.payload.ok) reconcileWebState(featureCwd, { forceBroadcast: true });
         break;
       }
+      case 'action:reopenFailedWorkItem':
+      case 'action:markFailedWorkItemDone': {
+        const result = handleFailedWorkItemTransition(message);
+        sendTo(client, result);
+        if (result.payload.ok) reconcileWebState(featureCwd, { forceBroadcast: true });
+        break;
+      }
       case 'action:archiveProject':
       case 'action:deleteProject':
       case 'action:restoreArchivedProject':
@@ -1616,6 +1623,20 @@ export function createWebServer(options: {
         dependsOn: parsed.data.dependsOn,
         audit: { actor: 'web', requestId: parsed.data.requestId },
       }, snapshot);
+      return { type: 'action:result', payload: { requestId: parsed.data.requestId, ok: true, workItem: result.entity, revision: result.revision ?? result.entity.revision } };
+    } catch (error) {
+      return { type: 'action:result', payload: { requestId: parsed.data.requestId, ok: false, error: workItemActionError(error) } };
+    }
+  }
+
+  function handleFailedWorkItemTransition(message: unknown): WorkItemActionResult {
+    const parsed = FailedWorkItemTransitionMessageSchema.safeParse(message);
+    if (!parsed.success) return { type: 'action:result', payload: { requestId: actionResultRequestId(message), ok: false, error: { code: 'INVALID_PAYLOAD', message: 'Invalid failed Work Item transition payload.' } } };
+    try {
+      const audit = { actor: 'web', requestId: parsed.data.requestId };
+      const result = parsed.data.type === 'action:reopenFailedWorkItem'
+        ? workItemService.reopenFailed(parsed.data.workItemId, parsed.data.expectedRevision, { audit })
+        : workItemService.markFailedDone(parsed.data.workItemId, parsed.data.expectedRevision, { audit });
       return { type: 'action:result', payload: { requestId: parsed.data.requestId, ok: true, workItem: result.entity, revision: result.revision ?? result.entity.revision } };
     } catch (error) {
       return { type: 'action:result', payload: { requestId: parsed.data.requestId, ok: false, error: workItemActionError(error) } };

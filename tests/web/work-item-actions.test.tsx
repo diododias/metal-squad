@@ -63,4 +63,22 @@ describe('WorkItemActions', () => {
     expect(render('not_started')).toContain('>Delete<');
     expect(render('running', { allowed: { ...allowed, delete: false } })).toContain('>Abort<');
   });
+
+  it('offers failed-only transitions and a clone callback only for done items', () => {
+    const send = vi.fn();
+    const failed: React.ComponentProps<typeof WorkItemActions> = {
+      id: 'F-1', name: 'Item one', revision: 7, allowed, eligibility, pill: 'failed', pipelineId: null, send, actionResults: {}, onStart: vi.fn(),
+    };
+    const failedHtml = renderToStaticMarkup(<WorkItemActions {...failed} />);
+    expect(failedHtml).toContain('>Back to TODO<');
+    expect(failedHtml).toContain('>Mark as Done<');
+    expect(failedHtml).not.toContain('>Clone<');
+    clickHandler(failed, 'Back to TODO')();
+    expect(send).toHaveBeenCalledWith(expect.objectContaining({ type: 'action:reopenFailedWorkItem', workItemId: 'F-1', expectedRevision: 7 }));
+
+    const onClone = vi.fn();
+    expect(renderToStaticMarkup(<WorkItemActions {...failed} pill="done" onClone={onClone} />)).toContain('>Clone<');
+    clickHandler({ ...failed, pill: 'done', onClone }, 'Clone')();
+    expect(onClone).toHaveBeenCalledOnce();
+  });
 });

@@ -39,6 +39,7 @@ export function EpicDetailPage({ state, projectId, epicId, send, actionResults, 
   const epic = state.epics.find((item) => item.epicId === epicId && item.projectId === projectId && item.archivedAt === null);
   const [page, setPage] = useState(0);
   const [showCreateWorkItem, setShowCreateWorkItem] = useState(false);
+  const [cloneDraft, setCloneDraft] = useState<React.ComponentProps<typeof CreateWorkItemModal>['initialDraft']>();
   const [showEditEpic, setShowEditEpic] = useState(false);
 
   const items = useMemo(
@@ -280,6 +281,10 @@ export function EpicDetailPage({ state, projectId, epicId, send, actionResults, 
                   onStart={startItem}
                   startLabel="start"
                   onToast={onToast}
+                  onClone={() => {
+                    setCloneDraft({ title: `${item.title} (copy)`, epicId: item.epicId ?? epicId, repoId: item.repoId ?? '', workItemType: item.workItemType === 'bug' ? 'bug' : 'feature', description: item.description, dependsOn: item.dependsOn });
+                    setShowCreateWorkItem(true);
+                  }}
                 />
               </div>
             </div>
@@ -320,10 +325,11 @@ export function EpicDetailPage({ state, projectId, epicId, send, actionResults, 
       open={showCreateWorkItem}
       projectId={projectId}
       defaultEpicId={epicId}
+      initialDraft={cloneDraft}
       state={state}
       send={send}
       actionResults={actionResults}
-      onClose={() => { setShowCreateWorkItem(false); }}
+      onClose={() => { setShowCreateWorkItem(false); setCloneDraft(undefined); }}
       onCreated={(workItemId, title, createdEpicId) => {
         onToast?.({
           id: `${String(Date.now())}-work-item-created`,

@@ -84,6 +84,8 @@ const mocks = vi.hoisted(() => ({
     archive: vi.fn(),
     delete: vi.fn(),
     restoreArchive: vi.fn(),
+    reopenFailed: vi.fn(),
+    markFailedDone: vi.fn(),
   },
   getEpicTemplateTarget: vi.fn(() => ({ projectId: 'project-1', repoPath: '/safe/repo' })),
   getWorkItemTemplateTarget: vi.fn(() => ({
@@ -1067,6 +1069,19 @@ describe('web server', () => {
     await waitForSocketMessage(socket);
     return socket;
   }
+
+  it('routes failed Work Item transitions with revision-aware audit context', async () => {
+    const workItem = { workItemId: 'F-FAILED1', revision: 4 };
+    mocks.workItemService.reopenFailed.mockReturnValue({ entity: workItem, revision: 4 });
+    const socket = await connectAuthenticated();
+    const result = waitForMatchingMessage(socket, (message) => message.type === 'action:result' && (message.payload as { requestId?: string }).requestId === 'reopen-failed-1');
+
+    socket.send(JSON.stringify({ type: 'action:reopenFailedWorkItem', requestId: 'reopen-failed-1', workItemId: 'F-FAILED1', expectedRevision: 3 }));
+
+    expect(await result).toEqual({ type: 'action:result', payload: { requestId: 'reopen-failed-1', ok: true, workItem, revision: 4 } });
+    expect(mocks.workItemService.reopenFailed).toHaveBeenCalledWith('F-FAILED1', 3, { audit: { actor: 'web', requestId: 'reopen-failed-1' } });
+    socket.close();
+  });
 
   it('resolves the bug template for a bug Work Item and snapshots it at creation', async () => {
     mocks.resolveTemplate.mockReturnValue({

@@ -22,6 +22,9 @@ export interface CreateWorkItemModalProps {
   projectId: string;
   /** Pre-selects the Epic when opened from the Epic detail page (still editable). */
   defaultEpicId?: string;
+  /** Optional source values used by Done → Clone. They remain editable before
+   * creating the new Work Item. */
+  initialDraft?: { title: string; epicId: string; repoId: string; workItemType: MsqWorkItemType; description?: string | null; dependsOn?: string[] };
   state: MsqWebState;
   send: (message: WebSocketClientMessage) => void;
   actionResults: Record<string, Extract<WebSocketServerMessage, { type: 'action:result' }>>;
@@ -43,7 +46,7 @@ export interface CreateWorkItemModalProps {
  * Item → repo link is final at creation; type changes later live in the
  * backlog item detail (`action:changeWorkItemType`).
  */
-export function CreateWorkItemModal({ open, projectId, defaultEpicId, state, send, actionResults, onClose, onCreated, connected }: CreateWorkItemModalProps): React.JSX.Element | null {
+export function CreateWorkItemModal({ open, projectId, defaultEpicId, initialDraft, state, send, actionResults, onClose, onCreated, connected }: CreateWorkItemModalProps): React.JSX.Element | null {
   const epics = state.epics.filter((epic) => epic.projectId === projectId && epic.archivedAt === null);
   const repos = state.repositories.filter((repo) => repo.projectId === projectId);
   const selectableRepos = repos.filter((repo) => repo.health !== 'unavailable');
@@ -52,6 +55,8 @@ export function CreateWorkItemModal({ open, projectId, defaultEpicId, state, sen
   const [epicId, setEpicId] = useState('');
   const [repoId, setRepoId] = useState('');
   const [workItemType, setWorkItemType] = useState<MsqWorkItemType>('feature');
+  const [description, setDescription] = useState<string | null>(null);
+  const [dependsOn, setDependsOn] = useState<string[]>([]);
   const [preview, setPreview] = useState<PreviewState | null>(null);
   const [pendingRequestId, setPendingRequestId] = useState<string | null>(null);
   const [error, setError] = useState<string>();
@@ -60,16 +65,18 @@ export function CreateWorkItemModal({ open, projectId, defaultEpicId, state, sen
 
   useEffect(() => {
     if (!open) return;
-    setTitle('');
-    setEpicId(defaultEpicId ?? '');
-    setRepoId(selectableRepos.length === 1 ? selectableRepos[0]?.repoId ?? '' : '');
-    setWorkItemType('feature');
+    setTitle(initialDraft?.title ?? '');
+    setEpicId(initialDraft?.epicId ?? defaultEpicId ?? '');
+    setRepoId(initialDraft?.repoId ?? (selectableRepos.length === 1 ? selectableRepos[0]?.repoId ?? '' : ''));
+    setWorkItemType(initialDraft?.workItemType ?? 'feature');
+    setDescription(initialDraft?.description ?? null);
+    setDependsOn(initialDraft?.dependsOn ?? []);
     setPreview(null);
     setPendingRequestId(null);
     setError(undefined);
     document.getElementById('create-work-item-title')?.focus();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open, defaultEpicId]);
+  }, [open, defaultEpicId, initialDraft]);
 
   useEffect(() => {
     if (!open) return;
@@ -139,12 +146,12 @@ export function CreateWorkItemModal({ open, projectId, defaultEpicId, state, sen
     const requestId = nextRequestId('work-item');
     setError(undefined);
     setPendingRequestId(requestId);
-    send({ type: 'action:createWorkItem', requestId, epicId, repoId, workItemType, title: title.trim() });
+    send({ type: 'action:createWorkItem', requestId, epicId, repoId, workItemType, title: title.trim(), ...(description == null ? {} : { description }), ...(dependsOn.length === 0 ? {} : { dependsOn }) });
   };
 
   return <Modal open={open} onClose={pending ? (): void => undefined : onClose} width={560}>
     <div role="dialog" aria-label="Create Work Item" style={{ padding: 20, display: 'grid', gap: 12 }}>
-      <h2 style={{ margin: 0, fontFamily: 'var(--font-display)', fontWeight: 400 }}>+ New Feature</h2>
+      <h2 style={{ margin: 0, fontFamily: 'var(--font-display)', fontWeight: 400 }}>{initialDraft ? 'Clone Work Item' : '+ New Feature'}</h2>
       {repos.length === 0 ? <>
         <p style={{ margin: 0, color: 'var(--text-dim)' }}>Link a repository before creating a Work Item. The server rejects targets outside this Project.</p>
         <div style={{ display: 'flex', justifyContent: 'flex-end' }}><Button size="sm" onClick={onClose}>fechar</Button></div>

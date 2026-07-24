@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { Button } from '../components/core/Button.js';
 import { WorkItemActions } from '../components/WorkItemActions.js';
+import { CreateWorkItemModal } from '../components/project/CreateWorkItemModal.js';
 import { FeatureConfigDetail } from '../components/FeatureConfigDetail.js';
 import { WorkflowStepper } from '../components/navigation/WorkflowStepper.js';
 import { Tabs } from '../components/navigation/Tabs.js';
@@ -48,6 +49,7 @@ export function BacklogItemDetail({
   const feature = state.featureCatalog[featureId];
   const [specDraft, setSpecDraft] = useState('');
   const [specView, setSpecView] = useState<'edit' | 'preview'>('edit');
+  const [showClone, setShowClone] = useState(false);
   const [typeChange, setTypeChange] = useState<{
     pendingRequestId?: string;
     proposedType?: MsqWorkItemType;
@@ -171,6 +173,7 @@ export function BacklogItemDetail({
               onStart={() => { onStart(featureId); }}
               startLabel="start feature"
               startTitle="Start feature"
+              onClone={() => { setShowClone(true); }}
             />
             <Button variant="neutral" size="sm" onClick={() => { returnToItemContext(); onBack(); }}>
               close
@@ -289,6 +292,19 @@ export function BacklogItemDetail({
           failedFeatureIds={failedFeatureIds}
         />
       </div>
+      {feature.projectId && feature.epicId && feature.repoId && <CreateWorkItemModal
+        open={showClone}
+        projectId={feature.projectId}
+        initialDraft={{
+          title: `${feature.title} (copy)`, epicId: feature.epicId, repoId: feature.repoId,
+          workItemType: feature.workItemType === 'bug' ? 'bug' : 'feature',
+          description: feature.description, dependsOn: feature.dependsOn,
+        }}
+        state={state}
+        send={send}
+        actionResults={actionResults}
+        onClose={() => { setShowClone(false); }}
+      />}
     </div>
   );
 }

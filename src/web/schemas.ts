@@ -149,6 +149,13 @@ export const WorkItemActionMessageSchema = z.object({
 
 export type WorkItemActionMessage = z.infer<typeof WorkItemActionMessageSchema>;
 
+export const FailedWorkItemTransitionMessageSchema = z.object({
+  type: z.enum(['action:reopenFailedWorkItem', 'action:markFailedWorkItemDone']),
+  requestId: RequestIdSchema,
+  workItemId: z.string().min(1),
+  expectedRevision: z.number().int().positive(),
+}).strict();
+
 /** Read-only preview of the template a new Work Item would get, resolved from
  * the same inputs `action:createWorkItem` uses (epic + repo + type) — before
  * any Work Item row exists, so `action:changeWorkItemType`'s preview (which

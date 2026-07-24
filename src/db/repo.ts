@@ -778,6 +778,61 @@ export function restoreArchivedWorkItem(workItemId: string, expectedRevision: nu
   });
 }
 
+/** Hides the latest failed attempt from the active projection while retaining
+ * it in run history and analytics. The Work Item consequently re-enters TODO.
+ */
+export function reopenFailedWorkItem(workItemId: string, expectedRevision: number, options: { audit?: AuditContext } = {}): WorkItemRow {
+  return withTransaction((database) => {
+    const before = getWorkItemLifecycle(database, workItemId);
+    if (!before) throw new WorkItemNotFoundError(workItemId);
+    assertRevision(workItemId, expectedRevision, before.revision, 'Work Item');
+    const run = database.prepare(
+      `SELECT id, status FROM runs WHERE feature_id = ? AND dismissed_at IS NULL ORDER BY id DESC LIMIT 1`,
+    ).get(workItemId) as { id: number; status: RunStatus } | undefined;
+    if (run?.status !== 'failed') throw new Error(`Work Item ${workItemId} does not have an active failed run to reopen.`);
+    database.prepare(`UPDATE runs SET dismissed_at = datetime('now') WHERE id = ?`).run(run.id);
+    database.prepare(
+      `UPDATE backlog_features SET revision = revision + 1, updated_at = datetime('now') WHERE feature_id = ? AND revision = ?`,
+    ).run(workItemId, expectedRevision);
+    syncEpicStatusForWorkItem(database, workItemId);
+    const after = getWorkItemFromDatabase(database, workItemId);
+    if (!after) throw new WorkItemNotFoundError(workItemId);
+    recordAuditEvent(database, options.audit, 'work_item', workItemId, 'reopenFailed', before, after);
+    return after;
+  });
+}
+
+/** Records an explicit human completion without rewriting the failed attempt.
+ * The synthetic terminal run is intentionally auditable and participates in
+ * the same completion/dependency projections as an executor-completed run.
+ */
+export function markFailedWorkItemDone(workItemId: string, expectedRevision: number, options: { audit?: AuditContext } = {}): WorkItemRow {
+  return withTransaction((database) => {
+    const before = getWorkItemLifecycle(database, workItemId);
+    if (!before) throw new WorkItemNotFoundError(workItemId);
+    assertRevision(workItemId, expectedRevision, before.revision, 'Work Item');
+    const run = database.prepare(
+      `SELECT id, status FROM runs WHERE feature_id = ? AND dismissed_at IS NULL ORDER BY id DESC LIMIT 1`,
+    ).get(workItemId) as { id: number; status: RunStatus } | undefined;
+    if (run?.status !== 'failed') throw new Error(`Work Item ${workItemId} does not have an active failed run to mark done.`);
+    const item = getWorkItemFromDatabase(database, workItemId);
+    if (!item) throw new WorkItemNotFoundError(workItemId);
+    const info = database.prepare(
+      `INSERT INTO runs (repo_id, project_id, feature_id, epic_id, tool, status, summary, ended_at)
+       VALUES (?, (SELECT project_id FROM project_repos WHERE repo_id = ?), ?, ?, ?, 'done', ?, datetime('now'))`,
+    ).run(item.repoId, item.repoId, workItemId, item.epicId, item.tool, 'Marked done manually after a failed run.');
+    recordRunEvent(Number(info.lastInsertRowid), 'done', { manual: true, afterFailedRunId: run.id });
+    database.prepare(
+      `UPDATE backlog_features SET revision = revision + 1, updated_at = datetime('now') WHERE feature_id = ? AND revision = ?`,
+    ).run(workItemId, expectedRevision);
+    syncEpicStatusForWorkItem(database, workItemId);
+    const after = getWorkItemFromDatabase(database, workItemId);
+    if (!after) throw new WorkItemNotFoundError(workItemId);
+    recordAuditEvent(database, options.audit, 'work_item', workItemId, 'markDone', before, after);
+    return after;
+  });
+}
+
 /** Archives a completed Epic (reversible). Children are not touched; effective
  * listings hide descendants of an archived ancestor. */
 export function archiveEpic(epicId: string, expectedRevision: number, options: { audit?: AuditContext } = {}): EpicRow {
@@ -1592,8 +1647,8 @@ export function getLatestRunSessionHandle(
   const row = getDb('readonly')
     .prepare(
       `SELECT id, adapter_session_tool AS tool, adapter_session_id AS sessionId
-         FROM runs
-        WHERE pipeline_id = ? AND feature_id = ? AND stage = ? AND adapter_session_id IS NOT NULL
+       FROM runs
+       WHERE pipeline_id = ? AND feature_id = ? AND stage = ? AND adapter_session_id IS NOT NULL
         ORDER BY id DESC
         LIMIT 1`,
     )
@@ -2192,7 +2247,7 @@ export function listRunsForTui(limit = 50, repoId?: string, scope: ProjectScope 
       `WITH latest AS (
          SELECT MAX(id) AS id
          FROM runs
-         ${repoFilter}
+         ${repoFilter ? `${repoFilter} AND dismissed_at IS NULL` : 'WHERE dismissed_at IS NULL'}
          GROUP BY repo_id, feature_id
        ),
        latest_usage AS (
@@ -2451,6 +2506,13 @@ export function listCompletedFeatureIds(repoId?: string, scope: ProjectScope = {
   for (const row of rows) {
     for (const featureId of getPipelineSnapshot(row).done) done.add(featureId);
   }
+  const manuallyCompletedWhere = clauses.length > 0 ? ` AND ${clauses.join(' AND ')}` : '';
+  const manuallyCompleted = getDb('readonly').prepare(
+    `SELECT DISTINCT feature_id AS featureId
+       FROM runs
+      WHERE status = 'done' AND dismissed_at IS NULL${manuallyCompletedWhere}`,
+  ).all(...params) as { featureId: string }[];
+  for (const row of manuallyCompleted) done.add(row.featureId);
   return done;
 }
 

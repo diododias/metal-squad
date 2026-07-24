@@ -69,6 +69,8 @@ export interface KanbanCardProps {
     onRequestCancel?: () => void;
     eligibility: StartEligibility;
     onStart: () => void;
+    /** Opens the shared creation modal with this completed Work Item's draft. */
+    onClone?: () => void;
   };
 }
 
@@ -242,6 +244,7 @@ export function KanbanCard({ run, selected, onClick, lifecycle }: KanbanCardProp
             actionResults={lifecycle.actionResults}
             onRequestCancel={lifecycle.onRequestCancel}
             onStart={lifecycle.onStart}
+            onClone={lifecycle.onClone}
           />
         </div>
       )}
