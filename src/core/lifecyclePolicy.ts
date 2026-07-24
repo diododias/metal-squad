@@ -342,6 +342,21 @@ export function projectLifecycle(db: Database.Database, kind: LifecycleEntityKin
 
   const archive = canArchive(state);
   const decision = deleteDecision(db, kind, id, state);
+  if (kind === 'epic') {
+    const epic = db.prepare(`SELECT status FROM backlog_epics WHERE epic_id = ?`).get(id) as { status: EpicStatus } | undefined;
+    if (epic?.status !== 'done') {
+      return {
+        state,
+        archived: false,
+        deleted: false,
+        archive: false,
+        delete: decision.delete,
+        cancel: false,
+        restore: false,
+        blockedReason: decision.delete ? 'Approve this Epic before archiving.' : decision.reason,
+      };
+    }
+  }
   return {
     state,
     archived: false,

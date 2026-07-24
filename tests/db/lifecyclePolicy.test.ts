@@ -84,6 +84,10 @@ describe('Lifecycle policy engine (archive/delete/restore)', () => {
     return (db.prepare(`SELECT revision FROM ${table} WHERE ${idCol} = ?`).get(id) as { revision: number }).revision;
   }
 
+  function markEpicDone(db: Database.Database, epicId: string): void {
+    db.prepare(`UPDATE backlog_epics SET status = 'done' WHERE epic_id = ?`).run(epicId);
+  }
+
   it('derives Epic status atomically from Work Item run transitions', async () => {
     const env = await setup();
     const { db, createRun, createWorkItem, finishRun, getEpic } = env;
@@ -113,6 +117,16 @@ describe('Lifecycle policy engine (archive/delete/restore)', () => {
 
     createRun(fixture.repoId, fixture.workItemId, 'codex');
     expect(getEpic(fixture.epicId)?.status).toBe('done');
+  });
+
+  it('projects Epic archive only after the terminal done state', async () => {
+    const env = await setup();
+    const { db } = env;
+    const { projectLifecycle } = await import('../../src/core/lifecyclePolicy.js');
+    const { epicId } = await seed(env);
+    expect(projectLifecycle(db, 'epic', epicId)).toMatchObject({ archive: false });
+    markEpicDone(db, epicId);
+    expect(projectLifecycle(db, 'epic', epicId)).toMatchObject({ archive: true });
   });
 
   // --- Work Item matrix ---------------------------------------------------
@@ -224,8 +238,9 @@ describe('Lifecycle policy engine (archive/delete/restore)', () => {
   it('refuses to restore a Work Item whose Epic is archived', async () => {
     const env = await setup();
     const { archiveWorkItem, archiveEpic, restoreArchivedWorkItem, AncestorArchivedError } = env;
-    const { workItemId, epicId } = await seed(env);
+    const { db, workItemId, epicId } = await seed(env);
     archiveWorkItem(workItemId, 1);
+    markEpicDone(db, epicId);
     archiveEpic(epicId, 1);
     expect(() => restoreArchivedWorkItem(workItemId, 2)).toThrowError(AncestorArchivedError);
   });
@@ -276,13 +291,28 @@ describe('Lifecycle policy engine (archive/delete/restore)', () => {
     expect(() => deleteEpic(epicId, 1)).toThrowError(EntityRunningError);
   });
 
-  it('archives an Epic with historical Work Items but refuses to delete it', async () => {
+  it('requires approval before archiving an Epic, then preserves its history', async () => {
     const env = await setup();
-    const { db, archiveEpic, deleteEpic, EntityHasHistoryError } = env;
+    const { db, archiveEpic, approveEpic, deleteEpic, EntityHasHistoryError, EpicNotDoneError } = env;
     const { epicId, workItemId, repoId } = await seed(env);
     insertRun(db, repoId, workItemId, 'done');
-    expect(archiveEpic(epicId, 1).revision).toBe(2);
-    expect(() => deleteEpic(epicId, 2)).toThrowError(EntityHasHistoryError);
+    expect(() => archiveEpic(epicId, 1)).toThrowError(EpicNotDoneError);
+    db.prepare(`UPDATE backlog_epics SET status = 'in_review' WHERE epic_id = ?`).run(epicId);
+    expect(approveEpic(epicId, 1).revision).toBe(2);
+    expect(archiveEpic(epicId, 2).revision).toBe(3);
+    expect(() => deleteEpic(epicId, 3)).toThrowError(EntityHasHistoryError);
+  });
+
+  it('approves only an in_review Epic and records the explicit transition', async () => {
+    const env = await setup();
+    const { db, approveEpic, EpicNotInReviewError } = env;
+    const { epicId } = await seed(env);
+    expect(() => approveEpic(epicId, 1)).toThrowError(EpicNotInReviewError);
+    db.prepare(`UPDATE backlog_epics SET status = 'in_review' WHERE epic_id = ?`).run(epicId);
+    const approved = approveEpic(epicId, 1, { audit: { actor: 'test', requestId: 'approve-1' } });
+    expect(approved).toMatchObject({ status: 'done', revision: 2 });
+    expect(db.prepare(`SELECT action FROM audit_events WHERE entity_id = ? ORDER BY id DESC LIMIT 1`).get(epicId)).toEqual({ action: 'approve' });
+    expect(() => approveEpic(epicId, 2)).toThrowError(EpicNotInReviewError);
   });
 
   // --- Project matrix -----------------------------------------------------
@@ -320,7 +350,8 @@ describe('Lifecycle policy engine (archive/delete/restore)', () => {
   it('refuses to restore an Epic while its Project is archived', async () => {
     const env = await setup();
     const { archiveEpic, archiveProject, restoreArchivedEpic, AncestorArchivedError } = env;
-    const { projectId, epicId } = await seed(env);
+    const { db, projectId, epicId } = await seed(env);
+    markEpicDone(db, epicId);
     archiveEpic(epicId, 1);
     archiveProject(projectId, 1);
     expect(() => restoreArchivedEpic(epicId, 2)).toThrowError(AncestorArchivedError);
@@ -357,7 +388,7 @@ describe('Lifecycle policy engine (archive/delete/restore)', () => {
 
   it('lists archived Projects and Epics paginated, most recently archived first', async () => {
     const env = await setup();
-    const { archiveProject, listArchivedProjects, countArchivedProjects, archiveEpic, listArchivedEpics, countArchivedEpics } = env;
+    const { db, archiveProject, listArchivedProjects, countArchivedProjects, archiveEpic, listArchivedEpics, countArchivedEpics } = env;
     const first = await seed(env, 'repo-a');
     const second = await seed(env, 'repo-b');
 
@@ -369,6 +400,7 @@ describe('Lifecycle policy engine (archive/delete/restore)', () => {
     expect(listArchivedProjects({ limit: 1, offset: 1 })).toHaveLength(1);
 
     expect(listArchivedEpics()).toHaveLength(0);
+    markEpicDone(db, first.epicId);
     archiveEpic(first.epicId, 1);
     expect(countArchivedEpics()).toBe(1);
     expect(countArchivedEpics(second.projectId)).toBe(0);

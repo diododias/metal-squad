@@ -374,6 +374,8 @@ export type EpicActionErrorCode =
   | 'ENTITY_HAS_HISTORY'
   | 'ENTITY_IN_USE'
   | 'ANCESTOR_ARCHIVED'
+  | 'EPIC_NOT_IN_REVIEW'
+  | 'EPIC_NOT_DONE'
   | 'EPIC_ACTION_FAILED';
 
 export interface EpicActionError {
@@ -568,6 +570,7 @@ export type WebSocketClientMessage =
   | { type: 'action:queryArchived'; requestId: string; filters: ArchivedQueryFilters; limit: number; offset: number }
   | { type: 'action:queryAuditTrail'; requestId: string; entityKind: 'project' | 'epic' | 'work_item'; entityId: string }
   | { type: 'action:createEpic'; requestId: string; projectId: string; title: string; description?: string | null }
+  | { type: 'action:approveEpic'; requestId: string; epicId: string; expectedRevision: number }
   | { type: 'action:createWorkItem'; requestId: string; epicId: string; repoId: string; workItemType?: MsqWorkItemType; title: string; description?: string | null; dependsOn?: string[] }
   | { type: 'action:resolveWorkflowTemplate'; requestId: string; epicId: string; repoId: string; workItemType: MsqWorkItemType }
   | { type: 'action:createWorkflowTemplate'; requestId: string; projectId: string; name: string; definition: unknown }
@@ -583,7 +586,7 @@ export type WebSocketClientMessage =
       requestId: string;
       epicId: string;
       expectedRevision: number;
-      patch: { title?: string; description?: string | null; status?: 'todo' | 'in_progress' | 'in_review' | 'done' | 'archived'; position?: number };
+      patch: { title?: string; description?: string | null; position?: number };
     }
   | { type: 'action:updateBudgetConfig'; patch: BudgetConfigPatch }
   | { type: 'action:updateNotifications'; patch: NotificationsPatch }

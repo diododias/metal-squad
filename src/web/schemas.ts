@@ -116,12 +116,17 @@ export const EpicActionMessageSchema = z.discriminatedUnion('type', [
     patch: z.object({
       title: z.string().optional(),
       description: z.string().nullable().optional(),
-      status: z.enum(['todo', 'in_progress', 'in_review', 'done', 'archived']).optional(),
       position: z.number().int().nonnegative().optional(),
     }).strict().refine(
       (patch) => Object.keys(patch).length > 0,
       { message: 'Epic update requires at least one allowed patch field.' },
     ),
+  }).strict(),
+  z.object({
+    type: z.literal('action:approveEpic'),
+    requestId: RequestIdSchema,
+    epicId: z.string().min(1),
+    expectedRevision: z.number().int().positive(),
   }).strict(),
 ]);
 

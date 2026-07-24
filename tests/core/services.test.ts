@@ -67,17 +67,17 @@ describe('project and epic domain services', () => {
       expect(epicService.get(result.entity.epicId)).toEqual(result.entity);
     });
 
-    it('normalizes an update patch across every allowed field', () => {
+    it('normalizes an update patch across every editable field', () => {
       const project = projectService.create({ name: 'Parent' }).entity;
       const epic = epicService.create({ projectId: project.projectId, title: 'Before' }).entity;
       const updated = epicService.update(
         epic.epicId,
-        { title: '  After  ', description: 'desc', status: 'done', position: 3 },
+        { title: '  After  ', description: 'desc', position: 3 },
         1,
       );
       expect(updated.entity.title).toBe('After');
       expect(updated.entity.description).toBe('desc');
-      expect(updated.entity.status).toBe('done');
+      expect(updated.entity.status).toBe('todo');
       expect(updated.revision).toBe(updated.entity.revision);
     });
 

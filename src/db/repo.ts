@@ -7,6 +7,8 @@ import {
   EntityHasHistoryError,
   EntityInUseError,
   EntityRunningError,
+  EpicNotDoneError,
+  EpicNotInReviewError,
   EpicNotFoundError,
   CrossRepositoryDependencyError,
   DependencyCycleError,
@@ -181,7 +183,6 @@ export interface CreateEpicInput {
 export interface UpdateEpicPatch {
   title?: string;
   description?: string | null;
-  status?: EpicStatus;
   position?: number;
 }
 
@@ -396,7 +397,7 @@ export function updateEpic(epicId: string, patch: UpdateEpicPatch, expectedRevis
       epicId,
       title: patch.title ?? before.title,
       description: patch.description === undefined ? before.description : patch.description,
-      status: patch.status ?? before.status,
+      status: before.status,
     });
     const position = patch.position ?? before.position;
     const result = database.prepare(
@@ -412,6 +413,30 @@ export function updateEpic(epicId: string, patch: UpdateEpicPatch, expectedRevis
     const after = getEpicFromDatabase(database, epicId);
     if (!after) throw new EpicNotFoundError(epicId);
     recordAuditEvent(database, options.audit, 'epic', epicId, 'update', before, after);
+    return after;
+  });
+}
+
+/** Approves the derived review state into the terminal `done` state. */
+export function approveEpic(epicId: string, expectedRevision: number, options: { audit?: AuditContext } = {}): EpicRow {
+  return withTransaction((database) => {
+    const before = getEpicFromDatabase(database, epicId);
+    if (!before) throw new EpicNotFoundError(epicId);
+    if (before.revision !== expectedRevision) throw new RevisionConflictError(epicId, expectedRevision, before.revision, 'Epic');
+    if (before.status !== 'in_review') throw new EpicNotInReviewError(epicId, before.status);
+    const entity = epicEntity({ epicId, title: before.title, description: before.description, status: 'done' });
+    const result = database.prepare(
+      `UPDATE backlog_epics
+          SET status = ?, data_json = ?, revision = revision + 1, updated_at = datetime('now')
+        WHERE epic_id = ? AND revision = ?`,
+    ).run(entity.status, JSON.stringify(entity), epicId, expectedRevision);
+    if (result.changes !== 1) {
+      const current = getEpicFromDatabase(database, epicId);
+      throw new RevisionConflictError(epicId, expectedRevision, current?.revision ?? before.revision, 'Epic');
+    }
+    const after = getEpicFromDatabase(database, epicId);
+    if (!after) throw new EpicNotFoundError(epicId);
+    recordAuditEvent(database, options.audit, 'epic', epicId, 'approve', before, after);
     return after;
   });
 }
@@ -753,14 +778,17 @@ export function restoreArchivedWorkItem(workItemId: string, expectedRevision: nu
   });
 }
 
-/** Archives an Epic (reversible). Children are not touched; effective listings
- * hide descendants of an archived ancestor. Refused while running. */
+/** Archives a completed Epic (reversible). Children are not touched; effective
+ * listings hide descendants of an archived ancestor. */
 export function archiveEpic(epicId: string, expectedRevision: number, options: { audit?: AuditContext } = {}): EpicRow {
   return withTransaction((database) => {
     const before = getEpicLifecycle(database, epicId);
     if (!before) throw new EpicNotFoundError(epicId);
     assertRevision(epicId, expectedRevision, before.revision, 'Epic');
     if (!canArchive(classifyEpicState(database, epicId))) throw new EntityRunningError('epic', epicId);
+    const current = getEpicFromDatabase(database, epicId);
+    if (!current) throw new EpicNotFoundError(epicId);
+    if (current.status !== 'done') throw new EpicNotDoneError(epicId, current.status);
     database.prepare(
       `UPDATE backlog_epics
           SET archived_at = COALESCE(archived_at, datetime('now')),

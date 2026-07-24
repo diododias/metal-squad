@@ -70,17 +70,18 @@ type ActionResult = Extract<WebSocketServerMessage, { type: 'action:result' }>;
 
 function render(
   state: MsqWebState,
-  { epicId = 'epic-1', onBack = (): void => undefined, onOpenBacklogItem = (): void => undefined }: {
+  { epicId = 'epic-1', onBack = (): void => undefined, onOpenBacklogItem = (): void => undefined, send: providedSend }: {
     epicId?: string;
     onBack?: () => void;
     onOpenBacklogItem?: (featureId: string) => void;
+    send?: (message: WebSocketClientMessage) => void;
   } = {},
 ): HTMLDivElement {
   const container = document.createElement('div');
   document.body.appendChild(container);
   const root = createRoot(container);
   roots.push(root);
-  const send: (message: WebSocketClientMessage) => void = () => undefined;
+  const send: (message: WebSocketClientMessage) => void = providedSend ?? (() => undefined);
   const actionResults: Record<string, ActionResult> = {};
   act(() => {
     root.render(
@@ -115,6 +116,22 @@ describe('epic-detail route parsing', () => {
   it('parses the epic route before the generic project route', () => {
     expect(parseHash('#/projects/p1/epics/e1')).toEqual({ page: 'epic-detail', projectId: 'p1', epicId: 'e1' });
     expect(parseHash('#/projects/p1')).toEqual({ page: 'project-detail', projectId: 'p1' });
+  });
+});
+
+describe('Epic approval action', () => {
+  it('shows Approve only for an in_review Epic and sends optimistic revision', () => {
+    const send = vi.fn<(message: WebSocketClientMessage) => void>();
+    const container = render(baseState({ epics: [{ ...baseState().epics[0]!, status: 'in_review', revision: 7 }] }), { send });
+    const approve = [...container.querySelectorAll('button')].find((button) => button.textContent === 'Approve');
+    expect(approve).toBeDefined();
+    act(() => { approve?.click(); });
+    expect(send).toHaveBeenCalledWith(expect.objectContaining({ type: 'action:approveEpic', epicId: 'epic-1', expectedRevision: 7 }));
+  });
+
+  it('does not offer approval once the Epic is done', () => {
+    const container = render(baseState({ epics: [{ ...baseState().epics[0]!, status: 'done' }] }));
+    expect([...container.querySelectorAll('button')].some((button) => button.textContent === 'Approve')).toBe(false);
   });
 });
 

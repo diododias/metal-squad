@@ -5,6 +5,7 @@ import { StatusPill } from '../components/core/StatusPill.js';
 import { Tag } from '../components/core/Tag.js';
 import { DependencyTag } from '../components/FeatureConfigDetail.js';
 import { LifecycleActions } from '../components/LifecycleActions.js';
+import { EpicApprovalAction } from '../components/EpicApprovalAction.js';
 import { WorkItemActions } from '../components/WorkItemActions.js';
 import { CreateWorkItemModal } from '../components/project/CreateWorkItemModal.js';
 import { Modal } from '../components/feedback/Modal.js';
@@ -194,6 +195,14 @@ export function EpicDetailPage({ state, projectId, epicId, send, actionResults, 
       actions={<div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
         <Button variant="primary" size="sm" onClick={() => { setShowCreateWorkItem(true); }}>+ New Feature</Button>
         <Button size="sm" onClick={() => { setShowEditEpic(true); }}>Edit Epic</Button>
+        <EpicApprovalAction
+          epicId={epic.epicId}
+          revision={epic.revision}
+          status={epic.status}
+          send={send}
+          actionResults={actionResults}
+          onToast={onToast}
+        />
         <LifecycleActions
           kind="epic"
           id={epic.epicId}

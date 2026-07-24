@@ -328,7 +328,7 @@ describe('backlogCatalog upsert/diff/load', () => {
   // archived — descendants of an archived ancestor are consultable, just
   // hidden from the default (active) listing.
   it('scopes Work Items to the archived lifecycle, including descendants of an archived Epic', async () => {
-    const { upsertBacklogCatalog, listWorkItemsByScope, countWorkItemsByScope } = await setup({ migrated: true });
+    const { db, upsertBacklogCatalog, listWorkItemsByScope, countWorkItemsByScope } = await setup({ migrated: true });
     const { archiveWorkItem, archiveEpic } = await import('../../src/db/repo.js');
     upsertBacklogCatalog(makeBacklog({
       epics: [{
@@ -347,6 +347,7 @@ describe('backlogCatalog upsert/diff/load', () => {
     expect(listWorkItemsByScope({ lifecycle: 'archived' })).toMatchObject([{ featureId: 'feat-1', archivedAt: expect.any(String) }]);
     expect(countWorkItemsByScope({ lifecycle: 'archived' })).toBe(1);
 
+    db.prepare(`UPDATE backlog_epics SET status = 'done' WHERE epic_id = 'epic-1'`).run();
     archiveEpic('epic-1', 1);
     const archived = listWorkItemsByScope({ lifecycle: 'archived' });
     expect(archived.map((entry) => entry.featureId).sort()).toEqual(['feat-1', 'feat-2']);

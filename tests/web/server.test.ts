@@ -74,6 +74,7 @@ const mocks = vi.hoisted(() => ({
   epicService: {
     create: vi.fn(),
     update: vi.fn(),
+    approve: vi.fn(),
     archive: vi.fn(),
     delete: vi.fn(),
     restoreArchive: vi.fn(),
@@ -932,6 +933,49 @@ describe('web server', () => {
 
     expect(await result).toEqual({ type: 'action:result', payload: { requestId: 'rst-1', ok: true, entity: restored, revision: 3 } });
     expect(mocks.epicService.restoreArchive).toHaveBeenCalledWith('epic-1', 2, { audit: { actor: 'web', requestId: 'rst-1' } });
+    socket.close();
+  });
+
+  it('routes Epic approval with expectedRevision and returns the terminal Epic', async () => {
+    const { createWebServer } = await import('../../src/web/server.js');
+    const approved = epicEntity({ status: 'done', revision: 4 });
+    mocks.epicService.approve.mockReturnValue({ entity: approved, revision: 4 });
+
+    server = createWebServer({ host: '127.0.0.1', port: 0, auth: 'token', token: 'secret', cwd });
+    await new Promise<void>((resolve) => server!.server.listen(0, '127.0.0.1', resolve));
+    const address = server!.server.address() as { port: number };
+    const socket = new WebSocket(`ws://127.0.0.1:${address.port}/ws`);
+    await waitForOpen(socket);
+    socket.send(JSON.stringify({ type: 'auth', token: 'secret' }));
+    await waitForSocketMessage(socket);
+
+    const result = waitForMatchingMessage(socket, (message) => message.type === 'action:result' && (message.payload as { requestId?: string }).requestId === 'approve-1');
+    socket.send(JSON.stringify({ type: 'action:approveEpic', requestId: 'approve-1', epicId: 'epic-1', expectedRevision: 3 }));
+
+    expect(await result).toEqual({ type: 'action:result', payload: { requestId: 'approve-1', ok: true, entity: approved } });
+    expect(mocks.epicService.approve).toHaveBeenCalledWith('epic-1', 3, { audit: { actor: 'web', requestId: 'approve-1' } });
+    socket.close();
+  });
+
+  it('returns the actionable server error when an Epic outside review is approved', async () => {
+    const { createWebServer } = await import('../../src/web/server.js');
+    mocks.epicService.approve.mockImplementation(() => { throw Object.assign(new Error('Epic epic-1 is in_progress; only an in_review Epic can be approved'), { code: 'EPIC_NOT_IN_REVIEW' }); });
+
+    server = createWebServer({ host: '127.0.0.1', port: 0, auth: 'token', token: 'secret', cwd });
+    await new Promise<void>((resolve) => server!.server.listen(0, '127.0.0.1', resolve));
+    const address = server!.server.address() as { port: number };
+    const socket = new WebSocket(`ws://127.0.0.1:${address.port}/ws`);
+    await waitForOpen(socket);
+    socket.send(JSON.stringify({ type: 'auth', token: 'secret' }));
+    await waitForSocketMessage(socket);
+
+    const result = waitForMatchingMessage(socket, (message) => message.type === 'action:result' && (message.payload as { requestId?: string }).requestId === 'approve-bad-1');
+    socket.send(JSON.stringify({ type: 'action:approveEpic', requestId: 'approve-bad-1', epicId: 'epic-1', expectedRevision: 3 }));
+
+    expect(await result).toEqual({
+      type: 'action:result',
+      payload: { requestId: 'approve-bad-1', ok: false, error: { code: 'EPIC_NOT_IN_REVIEW', message: 'Epic epic-1 is in_progress; only an in_review Epic can be approved' } },
+    });
     socket.close();
   });
 
