@@ -260,13 +260,13 @@ describe('Project and repository domain queries', () => {
       id: epic.epicId, title: 'First Epic', description: 'Initial scope', status: 'todo', features: [],
     });
 
-    const updated = updateEpic(epic.epicId, { status: 'in_progress', description: null }, 1, {
+    const updated = updateEpic(epic.epicId, { description: null }, 1, {
       audit: { actor: 'web', requestId: 'epic-update-1' },
     });
-    expect(updated).toMatchObject({ status: 'in_progress', description: null, revision: 2 });
+    expect(updated).toMatchObject({ status: 'todo', description: null, revision: 2 });
     expect(db.prepare(`SELECT status FROM runs WHERE feature_id = 'run-feature'`).get()).toEqual({ status: 'running' });
     expect(JSON.parse((db.prepare(`SELECT data_json FROM backlog_epics WHERE epic_id = ?`).get(epic.epicId) as { data_json: string }).data_json)).toEqual({
-      id: epic.epicId, title: 'First Epic', status: 'in_progress', features: [],
+      id: epic.epicId, title: 'First Epic', status: 'todo', features: [],
     });
     expect(db.prepare(`SELECT request_id, actor, entity_kind, action FROM audit_events WHERE entity_id = ? ORDER BY id`).all(epic.epicId)).toEqual([
       { request_id: 'epic-create-1', actor: 'web', entity_kind: 'epic', action: 'create' },

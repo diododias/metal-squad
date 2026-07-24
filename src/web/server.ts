@@ -893,7 +893,8 @@ export function createWebServer(options: {
         break;
       }
       case 'action:createEpic':
-      case 'action:updateEpic': {
+      case 'action:updateEpic':
+      case 'action:approveEpic': {
         const result = handleEpicAction(message);
         sendTo(client, result);
         if (result.payload.ok) reconcileWebState(featureCwd, { forceBroadcast: true });
@@ -1311,7 +1312,7 @@ export function createWebServer(options: {
     const code = typeof error === 'object' && error !== null
       ? (error as { code?: unknown }).code
       : undefined;
-    if (code === 'PROJECT_NOT_FOUND' || code === 'REVISION_CONFLICT') {
+    if (code === 'PROJECT_NOT_FOUND' || code === 'EPIC_NOT_FOUND' || code === 'REVISION_CONFLICT' || code === 'EPIC_NOT_IN_REVIEW') {
       return { code, message: error instanceof Error ? error.message : 'Epic action failed.' };
     }
     return { code: 'EPIC_ACTION_FAILED', message: 'Could not save epic.' };
@@ -1326,9 +1327,11 @@ export function createWebServer(options: {
       };
     }
     try {
-      const serviceResult = parsed.data.type === 'action:createEpic'
+    const serviceResult = parsed.data.type === 'action:createEpic'
         ? epicService.create({ projectId: parsed.data.projectId, title: parsed.data.title, description: parsed.data.description, audit: { actor: 'web', requestId: parsed.data.requestId } })
-        : epicService.update(parsed.data.epicId, parsed.data.patch, parsed.data.expectedRevision, { audit: { actor: 'web', requestId: parsed.data.requestId } });
+        : parsed.data.type === 'action:approveEpic'
+          ? epicService.approve(parsed.data.epicId, parsed.data.expectedRevision, { audit: { actor: 'web', requestId: parsed.data.requestId } })
+          : epicService.update(parsed.data.epicId, parsed.data.patch, parsed.data.expectedRevision, { audit: { actor: 'web', requestId: parsed.data.requestId } });
       return {
         type: 'action:result',
         payload: { requestId: parsed.data.requestId, ok: true, entity: serviceResult.entity },
@@ -1627,6 +1630,7 @@ export function createWebServer(options: {
     const code = typeof error === 'object' && error !== null ? (error as { code?: unknown }).code : undefined;
     if (code === 'ENTITY_RUNNING' || code === 'ENTITY_HAS_HISTORY' || code === 'ENTITY_IN_USE' || code === 'ANCESTOR_ARCHIVED'
       || code === 'REPOSITORY_NOT_IN_PROJECT'
+      || code === 'EPIC_NOT_DONE'
       || code === 'REVISION_CONFLICT' || code === 'PROJECT_NOT_FOUND' || code === 'EPIC_NOT_FOUND' || code === 'WORK_ITEM_NOT_FOUND') {
       return { code, message: error instanceof Error ? error.message : 'Lifecycle action failed.' };
     }

@@ -1,5 +1,6 @@
 import {
   archiveEpic,
+  approveEpic,
   createEpic,
   deleteEpic,
   getEpic,
@@ -17,7 +18,6 @@ function normalizedEpicPatch(patch: UpdateEpicPatch): UpdateEpicPatch {
   const normalized: UpdateEpicPatch = {};
   if (patch.title !== undefined) normalized.title = patch.title.trim();
   if (patch.description !== undefined) normalized.description = patch.description;
-  if (patch.status !== undefined) normalized.status = patch.status;
   if (patch.position !== undefined) normalized.position = patch.position;
   if (Object.keys(normalized).length === 0) throw new Error('Epic update requires at least one allowed patch field.');
   return normalized;
@@ -26,6 +26,15 @@ function normalizedEpicPatch(patch: UpdateEpicPatch): UpdateEpicPatch {
 export const epicService = {
   create(input: CreateEpicInput): ServiceMutationResult<EpicRow> {
     const entity = createEpic({ ...input, title: input.title.trim() });
+    return { entity, revision: entity.revision };
+  },
+
+  approve(
+    epicId: string,
+    expectedRevision: number,
+    options: { audit?: AuditContext } = {},
+  ): ServiceMutationResult<EpicRow> {
+    const entity = approveEpic(epicId, expectedRevision, options);
     return { entity, revision: entity.revision };
   },
 

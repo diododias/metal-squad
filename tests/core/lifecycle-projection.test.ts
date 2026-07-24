@@ -22,6 +22,7 @@ function createSchema(database: Database.Database): void {
     CREATE TABLE backlog_epics (
       epic_id TEXT PRIMARY KEY,
       project_id TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'todo',
       archived_at TEXT,
       deleted_at TEXT
     );

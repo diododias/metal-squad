@@ -22,7 +22,9 @@ export type DomainErrorCode =
   | 'ENTITY_RUNNING'
   | 'ENTITY_HAS_HISTORY'
   | 'ENTITY_IN_USE'
-  | 'ANCESTOR_ARCHIVED';
+  | 'ANCESTOR_ARCHIVED'
+  | 'EPIC_NOT_IN_REVIEW'
+  | 'EPIC_NOT_DONE';
 
 export class DomainError extends Error {
   public constructor(
@@ -45,6 +47,23 @@ export class EpicNotFoundError extends DomainError {
   public constructor(epicId: string) {
     super('EPIC_NOT_FOUND', `Epic not found: ${epicId}`);
     this.name = 'EpicNotFoundError';
+  }
+}
+
+/** Raised when an Epic approval is attempted before its derived lifecycle has
+ * reached review. Approval is the only user-driven status transition. */
+export class EpicNotInReviewError extends DomainError {
+  public constructor(epicId: string, status: string) {
+    super('EPIC_NOT_IN_REVIEW', `Epic ${epicId} is ${status}; only an in_review Epic can be approved`);
+    this.name = 'EpicNotInReviewError';
+  }
+}
+
+/** Archive is deliberately the post-approval terminal action for Epics. */
+export class EpicNotDoneError extends DomainError {
+  public constructor(epicId: string, status: string) {
+    super('EPIC_NOT_DONE', `Epic ${epicId} is ${status}; approve it before archiving`);
+    this.name = 'EpicNotDoneError';
   }
 }
 

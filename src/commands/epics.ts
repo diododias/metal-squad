@@ -1,13 +1,11 @@
 import type { Command } from 'commander';
 import { epicService } from '../core/epicService.js';
-import type { EpicStatus } from '../core/backlog/schema.js';
 import { parseRevision, printDomainOutput, rethrowDomainError } from './domainOutput.js';
 
 interface EpicOptions {
   projectId?: string;
   description?: string;
   title?: string;
-  status?: EpicStatus;
   position?: string;
   expectedRevision?: string;
   format?: string;
@@ -30,11 +28,15 @@ export function registerEpics(program: Command): void {
     .action((projectId: string, title: string, opts: EpicOptions) => {
       try { printDomainOutput(epicService.create({ projectId, title, description: opts.description }), opts.format); } catch (error) { rethrowDomainError(error, opts.format); }
     });
-  epics.command('update <epicId>').option('--title <title>').option('--description <description>').option('--status <status>').option('--position <position>').option('--expected-revision <revision>').option('--format <format>', 'text | json', 'text')
+  epics.command('update <epicId>').option('--title <title>').option('--description <description>').option('--position <position>').option('--expected-revision <revision>').option('--format <format>', 'text | json', 'text')
     .action((epicId: string, opts: EpicOptions) => {
       try {
-        printDomainOutput(epicService.update(epicId, { title: opts.title, description: opts.description, status: opts.status, position: optionalPosition(opts.position) }, parseRevision(opts.expectedRevision)), opts.format);
+        printDomainOutput(epicService.update(epicId, { title: opts.title, description: opts.description, position: optionalPosition(opts.position) }, parseRevision(opts.expectedRevision)), opts.format);
       } catch (error) { rethrowDomainError(error, opts.format); }
+    });
+  epics.command('approve <epicId>').option('--expected-revision <revision>').option('--format <format>', 'text | json', 'text')
+    .action((epicId: string, opts: EpicOptions) => {
+      try { printDomainOutput(epicService.approve(epicId, parseRevision(opts.expectedRevision), { audit: { actor: 'cli' } }), opts.format); } catch (error) { rethrowDomainError(error, opts.format); }
     });
   epics.command('archive <epicId>').option('--expected-revision <revision>').option('--format <format>', 'text | json', 'text')
     .action((epicId: string, opts: EpicOptions) => {
