@@ -1,8 +1,9 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Button } from '../components/core/Button.js';
 import { EditableTextField } from '../components/core/EditableTextField.js';
 import { StatusPill } from '../components/core/StatusPill.js';
 import { Tag } from '../components/core/Tag.js';
+import type { PageDirtyRegistration } from '../hooks/usePageDirtyState.js';
 import { isRevisionConflictMessage, readActionOutcome } from '../lib/actionFeedback.js';
 import type { EpicRow } from '../../../db/repo.js';
 import type { WebSocketClientMessage, WebSocketServerMessage } from '../../types.js';
@@ -40,13 +41,15 @@ export interface EpicEditorProps {
   send: (message: WebSocketClientMessage) => void;
   actionResults: Record<string, EpicActionResult>;
   requestId: (prefix: string) => string;
+  /** Registers this form with the modal's single, shared save control. */
+  registerPageSave?: (registration: PageDirtyRegistration) => void;
   /** Fired after a successful save (PF-07 confirmation toast). */
   onSaved?: () => void;
 }
 
 /** Editable Epic metadata. Execution state belongs to Work Item runs, so it is
  * deliberately only displayed as derived progress and never written here. */
-export function EpicEditor({ epic, completedWorkItems, totalWorkItems, send, actionResults, requestId, onSaved }: EpicEditorProps): React.JSX.Element {
+export function EpicEditor({ epic, completedWorkItems, totalWorkItems, send, actionResults, requestId, registerPageSave, onSaved }: EpicEditorProps): React.JSX.Element {
   const [draft, setDraft] = useState<EpicDraft>(() => toDraft(epic));
   const handledResults = useRef(new Set<string>());
   const previousEpic = useRef(epic);
@@ -87,7 +90,8 @@ export function EpicEditor({ epic, completedWorkItems, totalWorkItems, send, act
   const dirty = isDirty(draft, epic);
   const conflict = isRevisionConflictMessage(draft.error);
 
-  const save = (): void => {
+  const save = useCallback((): void => {
+    if (draft.pendingRequestId) return;
     if (!title) {
       setDraft((current) => ({ ...current, error: 'Enter an Epic title.' }));
       return;
@@ -104,7 +108,12 @@ export function EpicEditor({ epic, completedWorkItems, totalWorkItems, send, act
     const id = requestId('epic-update');
     setDraft((current) => ({ ...current, pendingRequestId: id, error: undefined }));
     send({ type: 'action:updateEpic', requestId: id, epicId: epic.epicId, expectedRevision: draft.expectedRevision, patch });
-  };
+  }, [draft, epic, position, positionValid, requestId, send, title]);
+
+  const isValid = Boolean(title) && positionValid && !draft.pendingRequestId;
+  useEffect(() => {
+    registerPageSave?.({ isDirty: dirty, isValid, save });
+  }, [dirty, isValid, registerPageSave, save]);
 
   const update = (patch: Partial<EpicDraft>): void => { setDraft((current) => ({ ...current, ...patch, error: undefined })); };
 
@@ -125,7 +134,6 @@ export function EpicEditor({ epic, completedWorkItems, totalWorkItems, send, act
       <Button size="sm" onClick={() => { setDraft(toDraft(epic)); }}>reload current values</Button>
       <Button size="sm" variant="recovery" disabled={Boolean(draft.pendingRequestId)} onClick={save}>reapply draft</Button>
     </div>}
-    <div><Button variant="primary" size="sm" disabled={!dirty || Boolean(draft.pendingRequestId)} onClick={save}>{draft.pendingRequestId ? 'saving…' : 'save Epic'}</Button></div>
   </section>;
 }
 
