@@ -66,7 +66,7 @@ describe('PageHeader breadcrumb', () => {
     const container = render(<PageHeader title="Detail" filters={<input aria-label="Search details" />} description="Detail description" />);
     const header = container.querySelector('.msq-page-header');
     const search = container.querySelector('input[aria-label="Search details"]');
-    const description = [...container.querySelectorAll('p')].find((element) => element.textContent === 'Detail description');
+    const description = container.querySelector('.msq-page-header-description');
 
     expect(header?.contains(search)).toBe(true);
     expect(header?.contains(description)).toBe(true);

@@ -7,7 +7,7 @@ export interface BreadcrumbItem {
 
 export interface PageHeaderProps {
   title: string;
-  description?: string;
+  description?: React.ReactNode;
   breadcrumb?: React.ReactNode | BreadcrumbItem[];
   actions?: React.ReactNode;
   filters?: React.ReactNode;
@@ -52,7 +52,7 @@ export function PageHeader({ title, description, breadcrumb, actions, filters }:
         {actions && <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>{actions}</div>}
       </div>
       {filters && <div style={{ marginTop: 14 }}>{filters}</div>}
-      {description && <p style={{ margin: '14px 0 0', color: 'var(--text-dim)', fontSize: 'var(--text-sm)' }}>{description}</p>}
+      {description && <div className="msq-page-header-description" style={{ marginTop: 14, color: 'var(--text-dim)', fontSize: 'var(--text-sm)' }}>{description}</div>}
     </div>
   );
 }

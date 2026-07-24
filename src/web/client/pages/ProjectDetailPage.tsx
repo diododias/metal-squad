@@ -167,7 +167,6 @@ export function ProjectDetailPage({ state, projectId, send, actionResults, archi
       <section>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
           <h2 style={{ ...heading, marginBottom: 0 }}>Epics</h2>
-          <Button variant="primary" size="sm" onClick={() => { setShowCreateEpic(true); }}>+ New Epic</Button>
         </div>
         {epics.length === 0 && <Card>
           <p style={muted}>No Epics yet.</p>

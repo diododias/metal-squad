@@ -210,6 +210,11 @@ describe('Create Epic modal from ProjectDetailPage (PF-04, PF-07)', () => {
     act(() => { btn?.click(); });
   }
 
+  it('shows a single New Epic action in the header', () => {
+    const { el } = setupProject();
+    expect([...el.querySelectorAll('button')].filter((button) => button.textContent === '+ New Epic')).toHaveLength(1);
+  });
+
   function fillTitle(el: HTMLDivElement, value: string): void {
     const input = el.querySelector('#create-epic-title') as HTMLInputElement;
     Object.getOwnPropertyDescriptor(Object.getPrototypeOf(input), 'value')?.set?.call(input, value);
