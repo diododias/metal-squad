@@ -6,6 +6,7 @@ import { formatTokens } from '../../lib/format.js';
 import { pillStatus, type PillStatusInput } from '../../lib/pillStatus.js';
 import { WorkItemActions } from '../WorkItemActions.js';
 import { shortId } from '../../lib/entityId.js';
+import { WorkItemTypeBadge } from './WorkItemTypeBadge.js';
 import type { StartEligibility } from '../../lib/startEligibility.js';
 import type { AllowedLifecycle, WebSocketClientMessage, WebSocketServerMessage } from '../../../types.js';
 import type { PipelineStatus } from '../../../../db/repo.js';
@@ -131,7 +132,7 @@ export function KanbanCard({ run, selected, onClick, lifecycle }: KanbanCardProp
       </div>
       {(run.workItemType ?? run.templateId) && (
         <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', marginBottom: 6 }}>
-          {run.workItemType && <span title={`type: ${run.workItemType}`} style={{ display: 'inline-block', padding: '2px 6px', border: '1px solid var(--border-dim)', borderRadius: 'var(--radius-sm)', fontSize: 'var(--text-2xs)', color: 'var(--text-dim)', textTransform: 'uppercase' }}>{run.workItemType}</span>}
+          {run.workItemType && <WorkItemTypeBadge workItemType={run.workItemType} />}
           {run.templateId && <span title={`workflow template: ${run.templateId}${run.templateVersion != null ? ` v${String(run.templateVersion)}` : ''}`} style={{ display: 'inline-block', padding: '2px 6px', border: '1px solid var(--border-dim)', borderRadius: 'var(--radius-sm)', fontSize: 'var(--text-2xs)', color: 'var(--text-dim)' }}>{run.templateId}{run.templateVersion != null && ` v${String(run.templateVersion)}`}</span>}
         </div>
       )}
