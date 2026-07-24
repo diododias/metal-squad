@@ -1,8 +1,9 @@
 import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { KanbanCard, toShortFeatureId, toShortModelLabel } from '../../src/web/client/components/data/KanbanCard.js';
 import { shortId } from '../../src/web/client/lib/entityId.js';
+import type { KanbanCardProps } from '../../src/web/client/components/data/KanbanCard.js';
 
 const run = {
   featureId: 'feat-52',
@@ -243,5 +244,110 @@ describe('KanbanCard Project scope (repo, type, health)', () => {
   it('omits the health warning when the repository is healthy or unchecked', () => {
     const html = renderToStaticMarkup(<KanbanCard run={{ ...run, repoUnhealthy: false }} />);
     expect(html).not.toContain('repository unavailable');
+  });
+});
+
+function makeLifecycle(
+  overrides: Partial<KanbanCardProps['lifecycle']> = {},
+): NonNullable<KanbanCardProps['lifecycle']> {
+  return {
+    allowed: undefined,
+    revision: 1,
+    send: vi.fn(),
+    actionResults: {},
+    eligibility: { canStart: true, reason: null, blockedByDependencies: [], repoUnhealthy: false },
+    onStart: vi.fn(),
+    ...overrides,
+  };
+}
+
+describe('KanbanCard Start/Resume actions (SC-001, SC-002)', () => {
+  it('renders a Start button for a TODO card with lifecycle (SC-001)', () => {
+    const html = renderToStaticMarkup(
+      <KanbanCard run={{ ...run, status: 'todo' }} lifecycle={makeLifecycle()} />,
+    );
+    expect(html).toContain('Start');
+  });
+
+  it('disables Start when eligibility.canStart is false', () => {
+    const html = renderToStaticMarkup(
+      <KanbanCard
+        run={{ ...run, status: 'todo' }}
+        lifecycle={makeLifecycle({
+          eligibility: { canStart: false, reason: 'Pending dependencies: dep-1', blockedByDependencies: ['dep-1'], repoUnhealthy: false },
+        })}
+      />,
+    );
+    expect(html).toContain('Start');
+    expect(html).toContain('Pending dependencies');
+  });
+
+  it('renders a Resume button for a BLOCKED card with a live pipeline (SC-002)', () => {
+    const html = renderToStaticMarkup(
+      <KanbanCard
+        run={{ ...run, status: 'running', pipelineStatus: 'paused', pipelineId: 42 }}
+        lifecycle={makeLifecycle()}
+      />,
+    );
+    expect(html).toContain('Resume');
+  });
+
+  it('omits Start/Resume when no lifecycle prop is provided', () => {
+    const todoHtml = renderToStaticMarkup(<KanbanCard run={{ ...run, status: 'todo' }} />);
+    expect(todoHtml).not.toContain('>Start<');
+    const blockedHtml = renderToStaticMarkup(<KanbanCard run={{ ...run, status: 'running', pipelineStatus: 'paused', pipelineId: 99 }} />);
+    expect(blockedHtml).not.toContain('>Resume<');
+  });
+});
+
+describe('KanbanCard dependency indicator (SC-003)', () => {
+  it('shows deps-ok badge when all dependencies are completed', () => {
+    const html = renderToStaticMarkup(
+      <KanbanCard run={{ ...run, status: 'todo' }} lifecycle={makeLifecycle()} />,
+    );
+    expect(html).toContain('deps ok');
+    expect(html).toContain('All dependencies completed');
+  });
+
+  it('shows blocked-deps badge with count when dependencies are pending', () => {
+    const html = renderToStaticMarkup(
+      <KanbanCard
+        run={{ ...run, status: 'todo' }}
+        lifecycle={makeLifecycle({
+          eligibility: { canStart: false, reason: 'Pending dependencies: dep-a, dep-b', blockedByDependencies: ['dep-a', 'dep-b'], repoUnhealthy: false },
+        })}
+      />,
+    );
+    expect(html).toContain('deps 2');
+    expect(html).toContain('dep-a, dep-b');
+  });
+
+  it('omits the deps indicator when lifecycle is absent', () => {
+    const html = renderToStaticMarkup(<KanbanCard run={{ ...run, status: 'todo' }} />);
+    expect(html).not.toContain('deps ok');
+    expect(html).not.toContain('deps ');
+  });
+});
+
+describe('KanbanCard auto-start cell (SC-003)', () => {
+  it('renders auto-start cell in the tool rail when autoStart is true', () => {
+    const html = renderToStaticMarkup(
+      <KanbanCard run={{ ...run, status: 'todo', tool: 'claude', autoStart: true }} />,
+    );
+    expect(html).toContain('title="auto-start"');
+    expect(html).toContain('auto start');
+  });
+
+  it('renders both auto-advance and auto-start cells when both flags are set', () => {
+    const html = renderToStaticMarkup(
+      <KanbanCard run={{ ...run, status: 'running', tool: 'claude', autoAdvance: true, autoStart: true }} />,
+    );
+    expect(html).toContain('title="auto-advance"');
+    expect(html).toContain('title="auto-start"');
+  });
+
+  it('hides auto-start cell by default', () => {
+    const html = renderToStaticMarkup(<KanbanCard run={{ ...run, status: 'todo', tool: 'claude' }} />);
+    expect(html).not.toContain('title="auto-start"');
   });
 });

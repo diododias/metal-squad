@@ -36,6 +36,7 @@ export interface KanbanCardRun {
   model?: string | null;
   effort?: string | null;
   autoAdvance?: boolean;
+  autoStart?: boolean;
   elapsed?: string | null;
   startedAt?: string | null;
   tokens?: number | null;
@@ -92,7 +93,8 @@ function buildToolRailCells(run: KanbanCardRun): ToolRailCell[] {
   if (run.model) cells.push({ key: 'model', icon: '⚙', label: toShortModelLabel(run.model), title: `model: ${run.model}` });
   if (run.effort) cells.push({ key: 'effort', icon: '▁▃▅', label: run.effort, title: `effort: ${run.effort}` });
   if (run.repoLabel) cells.push({ key: 'repo', icon: '⌂', label: run.repoLabel, title: `repository: ${run.repoLabel}` });
-  if (run.autoAdvance) cells.push({ key: 'auto', icon: '≫', label: 'auto', title: 'auto-advance', color: 'var(--accent-ok)' });
+  if (run.autoAdvance) cells.push({ key: 'auto', icon: '≫', label: 'auto adv', title: 'auto-advance', color: 'var(--accent-ok)' });
+  if (run.autoStart) cells.push({ key: 'autostart', icon: '▶', label: 'auto start', title: 'auto-start', color: 'var(--accent-ok)' });
   return cells;
 }
 
@@ -227,6 +229,12 @@ export function KanbanCard({ run, selected, onClick, lifecycle }: KanbanCardProp
           ? <span style={{ color: 'var(--accent-warn)' }}>{formatTokens(run.wasteTokens)} tok · WASTE</span>
           : run.tokens != null && <span>{formatTokens(run.tokens)} tok</span>}
         {tasksLabel && <span>{tasksLabel}</span>}
+        {lifecycle && ((): React.JSX.Element => {
+          const blocked = lifecycle.eligibility.blockedByDependencies;
+          return blocked.length === 0
+            ? <span title="All dependencies completed" style={{ color: 'var(--accent-ok)' }}>✓ deps ok</span>
+            : <span title={`Pending dependencies: ${blocked.join(', ')}`} style={{ color: 'var(--accent-warn)' }}>⚑ deps {blocked.length}</span>;
+        })()}
       </div>
 
       {lifecycle && (
