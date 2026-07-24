@@ -342,7 +342,6 @@ export function RunDetailPage({
       <FeatureConfigDetail
         feature={feature}
         backlogSettings={state.backlogSettings}
-        approvalChannels={state.runtimeConfig.notifications.channels.map((channel) => channel.type)}
         toolIds={toolIds}
         onSaveConfig={saveConfig}
       />

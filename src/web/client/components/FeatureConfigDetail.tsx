@@ -22,7 +22,6 @@ interface ExecutionDraft {
 interface WorkflowDraft {
   mode: string;
   syncTasksToBacklog: boolean;
-  approvalChannel: string;
   autoAdvance: boolean;
 }
 
@@ -41,7 +40,6 @@ function workflowDraftFrom(feature: FeatureCatalogEntry): WorkflowDraft {
   return {
     mode: feature.workflow.mode,
     syncTasksToBacklog: feature.workflow.syncTasksToBacklog,
-    approvalChannel: feature.workflow.approvals.channel,
     autoAdvance: feature.workflow.autoAdvance,
   };
 }
@@ -49,7 +47,6 @@ function workflowDraftFrom(feature: FeatureCatalogEntry): WorkflowDraft {
 function sameWorkflowDraft(left: WorkflowDraft, right: WorkflowDraft): boolean {
   return left.mode === right.mode
     && left.syncTasksToBacklog === right.syncTasksToBacklog
-    && left.approvalChannel === right.approvalChannel
     && left.autoAdvance === right.autoAdvance;
 }
 
@@ -117,14 +114,13 @@ function SubHeading({ children }: { children: React.ReactNode }): React.JSX.Elem
 export interface FeatureConfigDetailProps {
   feature: FeatureCatalogEntry;
   backlogSettings: BacklogSettings;
-  approvalChannels?: string[];
   onSaveConfig: (patch: FeatureConfigPatch) => void;
   onSaveTaskConfig?: (taskId: string, patch: TaskConfigPatch) => void;
   workflowSaveResult?: FeatureConfigSaveResult;
   toolIds?: string[];
 }
 
-export function FeatureConfigDetail({ feature, backlogSettings, approvalChannels = ['telegram'], onSaveConfig, workflowSaveResult, toolIds = ['claude', 'codex', 'opencode'] }: FeatureConfigDetailProps): React.JSX.Element {
+export function FeatureConfigDetail({ feature, backlogSettings, onSaveConfig, workflowSaveResult, toolIds = ['claude', 'codex', 'opencode'] }: FeatureConfigDetailProps): React.JSX.Element {
   const isMobile = useIsMobile();
   const stages = feature.workflow.stages;
   const [selectedStage, setSelectedStage] = useState(stages[0] ?? 'specify');
@@ -346,7 +342,6 @@ export function FeatureConfigDetail({ feature, backlogSettings, approvalChannels
   if (executionCapabilities.model && draftExecution.model !== executionBaseline.model) executionPatch.model = draftExecution.model;
   if (executionCapabilities.effort && draftExecution.effort !== executionBaseline.effort) executionPatch.effort = draftExecution.effort;
   if (executionCapabilities.thinking && draftExecution.thinking !== executionBaseline.thinking) executionPatch.thinking = draftExecution.thinking;
-  if (draftExecution.autoStart !== executionBaseline.autoStart) executionPatch.autoStart = draftExecution.autoStart;
 
   if (hasChangedMaxTokens) {
     const parsed = Number(draftExecution.maxTokens);
@@ -357,8 +352,11 @@ export function FeatureConfigDetail({ feature, backlogSettings, approvalChannels
     }
   }
 
+  if (draftExecution.autoStart !== executionBaseline.autoStart) executionPatch.autoStart = draftExecution.autoStart;
+
   const hasUnavailableTool = !toolIds.includes(draftExecution.tool);
-  const hasExecutionChanges = Object.keys(executionPatch).length > 0 || hasChangedMaxTokens;
+  const adapterOnlyPatchKeys = Object.keys(executionPatch).filter((k) => k !== 'autoStart');
+  const hasExecutionChanges = adapterOnlyPatchKeys.length > 0 || hasChangedMaxTokens;
   const unsupportedExecutionWarnings = configuredCapabilities ? [
     !executionCapabilities.model ? `${draftExecution.tool} does not support model; it will be ignored.` : undefined,
     !executionCapabilities.effort ? `${draftExecution.tool} does not support effort; it will be ignored.` : undefined,
@@ -369,24 +367,21 @@ export function FeatureConfigDetail({ feature, backlogSettings, approvalChannels
   const canSaveExecution = hasExecutionChanges && !executionGuidance;
 
   function saveExecution(): void {
-    if (!canSaveExecution || Object.keys(executionPatch).length === 0) return;
-    onSaveConfig(executionPatch);
+    if (!canSaveExecution || adapterOnlyPatchKeys.length === 0) return;
+    const adapterPatch: FeatureConfigPatch = {};
+    for (const key of adapterOnlyPatchKeys) {
+      (adapterPatch as Record<string, unknown>)[key] = (executionPatch as Record<string, unknown>)[key];
+    }
+    onSaveConfig(adapterPatch);
   }
 
   const workflowBaseline = workflowDraftFrom(feature);
   const workflowPatch: NonNullable<FeatureConfigPatch['workflow']> = {};
   if (draftWorkflow.mode !== workflowBaseline.mode) workflowPatch.mode = draftWorkflow.mode;
   if (draftWorkflow.syncTasksToBacklog !== workflowBaseline.syncTasksToBacklog) workflowPatch.syncTasksToBacklog = draftWorkflow.syncTasksToBacklog;
-  const approvalPatch: { channel?: string } = {};
-  if (draftWorkflow.approvalChannel !== workflowBaseline.approvalChannel) approvalPatch.channel = draftWorkflow.approvalChannel;
-  if (Object.keys(approvalPatch).length > 0) workflowPatch.approvals = approvalPatch;
   if (draftWorkflow.autoAdvance !== workflowBaseline.autoAdvance) workflowPatch.autoAdvance = draftWorkflow.autoAdvance;
   const hasWorkflowChanges = Object.keys(workflowPatch).length > 0;
-  const hasUnavailableApprovalChannel = !approvalChannels.includes(draftWorkflow.approvalChannel);
-  const workflowGuidance = hasUnavailableApprovalChannel && hasWorkflowChanges
-    ? 'Choose an available approval destination before saving.'
-    : undefined;
-  const canSaveWorkflow = hasWorkflowChanges && !workflowGuidance && !workflowSavePending && !awaitingWorkflowRefresh;
+  const canSaveWorkflow = hasWorkflowChanges && !workflowSavePending && !awaitingWorkflowRefresh;
 
   function saveWorkflow(): void {
     if (!canSaveWorkflow) return;
@@ -394,6 +389,19 @@ export function FeatureConfigDetail({ feature, backlogSettings, approvalChannels
     workflowResultAtSaveStart.current = workflowSaveResult;
     setWorkflowSavePending(true);
     onSaveConfig({ workflow: workflowPatch });
+  }
+
+  const hasBehaviourExecutionChanges = draftExecution.autoStart !== executionBaseline.autoStart;
+  const hasBehaviourWorkflowChanges = draftWorkflow.mode === 'staged' && draftWorkflow.autoAdvance !== workflowBaseline.autoAdvance;
+
+  function saveBehaviour(): void {
+    if (hasBehaviourExecutionChanges) onSaveConfig({ autoStart: draftExecution.autoStart });
+    if (hasBehaviourWorkflowChanges) {
+      setWorkflowIssues([]);
+      workflowResultAtSaveStart.current = workflowSaveResult;
+      setWorkflowSavePending(true);
+      onSaveConfig({ workflow: { autoAdvance: draftWorkflow.autoAdvance } });
+    }
   }
 
   const resolvedStageSkills = backlogSettings.stageSkills[selectedStage] ?? [];
@@ -446,13 +454,6 @@ export function FeatureConfigDetail({ feature, backlogSettings, approvalChannels
           />
         </div>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 12, marginBottom: 12 }}>
-          <EditableToggleField
-            id="execution-auto-start"
-            label="autoStart"
-            value={draftExecution.autoStart}
-            initialValue={executionBaseline.autoStart}
-            onChange={(autoStart) => { setDraftExecution((draft) => ({ ...draft, autoStart })); }}
-          />
           {executionGuidance && <span style={{ color: 'var(--accent-warn)', fontSize: 'var(--text-xs)', lineHeight: 1.4 }}>{executionGuidance}</span>}
           {unsupportedExecutionWarnings.map((warning) => (
             <span key={warning} style={{ color: 'var(--accent-warn)', fontSize: 'var(--text-xs)', lineHeight: 1.4 }}>{warning}</span>
@@ -460,6 +461,42 @@ export function FeatureConfigDetail({ feature, backlogSettings, approvalChannels
           {canSaveExecution && (
             <div>
               <Button variant="primary" size="sm" onClick={saveExecution}>save execution</Button>
+            </div>
+          )}
+        </div>
+      </ConfigCard>
+
+      <ConfigCard title="Behaviour">
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 12, marginBottom: 12 }}>
+          <div>
+            <EditableToggleField
+              id="behaviour-auto-start"
+              label="Auto Start"
+              value={draftExecution.autoStart}
+              initialValue={executionBaseline.autoStart}
+              onChange={(autoStart) => { setDraftExecution((draft) => ({ ...draft, autoStart })); }}
+            />
+            <div style={{ fontSize: 'var(--text-2xs)', color: 'var(--text-faint)', marginTop: 3, lineHeight: 1.4 }}>
+              Start automatically when dependencies are met, without manual approval.
+            </div>
+          </div>
+          {draftWorkflow.mode === 'staged' && (
+            <div>
+              <EditableToggleField
+                id="behaviour-auto-advance"
+                label="Auto Advance"
+                value={draftWorkflow.autoAdvance}
+                initialValue={workflowBaseline.autoAdvance}
+                onChange={(autoAdvance) => { setDraftWorkflow((draft) => ({ ...draft, autoAdvance })); }}
+              />
+              <div style={{ fontSize: 'var(--text-2xs)', color: 'var(--text-faint)', marginTop: 3, lineHeight: 1.4 }}>
+                Advance to the next stage automatically after each stage completes (staged mode only).
+              </div>
+            </div>
+          )}
+          {(hasBehaviourExecutionChanges || hasBehaviourWorkflowChanges) && (
+            <div>
+              <Button variant="primary" size="sm" onClick={saveBehaviour} disabled={workflowSavePending || awaitingWorkflowRefresh !== null}>save behaviour</Button>
             </div>
           )}
         </div>
@@ -482,22 +519,6 @@ export function FeatureConfigDetail({ feature, backlogSettings, approvalChannels
             initialValue={workflowBaseline.syncTasksToBacklog}
             onChange={(syncTasksToBacklog) => { setDraftWorkflow((draft) => ({ ...draft, syncTasksToBacklog })); }}
           />
-          <EditableSelectField
-            id="workflow-approval-channel"
-            label="approvals.channel"
-            value={draftWorkflow.approvalChannel}
-            initialValue={workflowBaseline.approvalChannel}
-            options={Array.from(new Set(approvalChannels)).map((channel) => ({ value: channel, label: channel }))}
-            onChange={(approvalChannel) => { setDraftWorkflow((draft) => ({ ...draft, approvalChannel: approvalChannel ?? '' })); }}
-          />
-          <EditableToggleField
-            id="workflow-auto-advance"
-            label="workflow.autoAdvance"
-            value={draftWorkflow.autoAdvance}
-            initialValue={workflowBaseline.autoAdvance}
-            onChange={(autoAdvance) => { setDraftWorkflow((draft) => ({ ...draft, autoAdvance })); }}
-          />
-          {workflowGuidance && <span style={{ color: 'var(--accent-warn)', fontSize: 'var(--text-xs)', lineHeight: 1.4 }}>{workflowGuidance}</span>}
           {workflowIssues.map((issue, index) => (
             <span key={`${issue.path ?? 'workflow'}-${String(index)}`} style={{ color: 'var(--accent-warn)', fontSize: 'var(--text-xs)', lineHeight: 1.4 }}>
               {issue.path ? `${issue.path}: ${issue.message}` : issue.message}
@@ -506,6 +527,7 @@ export function FeatureConfigDetail({ feature, backlogSettings, approvalChannels
           {canSaveWorkflow && <div><Button variant="primary" size="sm" onClick={saveWorkflow}>save workflow</Button></div>}
         </div>
         <ConfigField label="sessionPolicy.mode" value={feature.workflow.sessionPolicy.mode} />
+        <ConfigField label="approvals.channel" value={feature.workflow.approvals.channel} />
       </ConfigCard>
 
       {feature.retry && (
