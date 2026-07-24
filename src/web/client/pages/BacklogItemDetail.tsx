@@ -2,9 +2,10 @@ import React, { useEffect, useState } from 'react';
 import { Button } from '../components/core/Button.js';
 import { WorkItemActions } from '../components/WorkItemActions.js';
 import { CreateWorkItemModal } from '../components/project/CreateWorkItemModal.js';
-import { FeatureConfigDetail } from '../components/FeatureConfigDetail.js';
+import { DependencyTag, FeatureConfigDetail } from '../components/FeatureConfigDetail.js';
 import { Tabs } from '../components/navigation/Tabs.js';
 import { MarkdownView } from '../components/MarkdownView.js';
+import { Tag } from '../components/core/Tag.js';
 import { WorkItemTypeBadge } from '../components/data/WorkItemTypeBadge.js';
 import { PageHeader, type PageHeaderProps } from '../PageHeader.js';
 import { useActiveProject } from '../hooks/useActiveProject.js';
@@ -46,6 +47,9 @@ export function BacklogItemDetail({
   const feature = state.featureCatalog[featureId];
   const [specDraft, setSpecDraft] = useState('');
   const [specView, setSpecView] = useState<'edit' | 'preview'>('edit');
+  const [depsDraft, setDepsDraft] = useState<string[]>([]);
+  const [newDep, setNewDep] = useState('');
+  const [depError, setDepError] = useState<string | null>(null);
   const [showClone, setShowClone] = useState(false);
   const doneFeatureIds = new Set(state.doneFeatureIds);
   const failedFeatureIds = new Set<string>();
@@ -73,6 +77,7 @@ export function BacklogItemDetail({
 
   useEffect(() => onSubscribeHistory(featureId), [featureId, onSubscribeHistory]);
   useEffect(() => { setSpecDraft(feature?.description ?? ''); }, [feature?.description]);
+  useEffect(() => { setDepsDraft(feature?.dependsOn ?? []); }, [feature?.dependsOn]);
 
   const specDirty = specDraft !== (feature?.description ?? '');
   const specPreviewSource = specDirty ? specDraft : (feature?.description ?? '');
@@ -139,9 +144,11 @@ export function BacklogItemDetail({
               </span>
             )}
           </div>
+
+          {/* Spec */}
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, marginBottom: 10 }}>
             <div>
-              <div style={{ color: 'var(--text-primary)', fontWeight: 600 }}>Specification</div>
+              <div style={{ color: 'var(--text-primary)', fontWeight: 600 }}>Requirements</div>
               <div style={{ color: 'var(--text-dim)', fontSize: 'var(--text-xs)' }}>{feature.specFile ?? 'Stored in the backlog catalog'}</div>
             </div>
             <Button variant="primary" size="sm" disabled={!specDirty} onClick={() => { onSaveConfig(featureId, { spec: specDraft }); }}>
@@ -182,6 +189,87 @@ export function BacklogItemDetail({
               )}
             </div>
           )}
+
+          {/* Context */}
+          {(feature.context ?? []).length > 0 && (
+            <div style={{ marginTop: 14, paddingTop: 14, borderTop: '1px solid var(--border-dim)' }}>
+              <div style={{ fontSize: 'var(--text-2xs)', textTransform: 'uppercase', letterSpacing: 'var(--tracking-wide)', color: 'var(--text-faint)', marginBottom: 6 }}>Context files</div>
+              <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
+                {(feature.context ?? []).map((c) => <Tag key={c}>{c}</Tag>)}
+              </div>
+            </div>
+          )}
+
+          {/* Dependencies */}
+          <div style={{ marginTop: 14, paddingTop: 14, borderTop: '1px solid var(--border-dim)' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, marginBottom: 8 }}>
+              <div style={{ fontSize: 'var(--text-2xs)', textTransform: 'uppercase', letterSpacing: 'var(--tracking-wide)', color: 'var(--text-faint)' }}>Dependencies</div>
+              {depsDraft.join(',') !== feature.dependsOn.join(',') && (
+                <Button
+                  variant="primary"
+                  size="sm"
+                  onClick={() => {
+                    onSaveConfig(featureId, { dependsOn: depsDraft });
+                  }}
+                >
+                  save deps
+                </Button>
+              )}
+            </div>
+            <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', marginBottom: 8 }}>
+              {depsDraft.length ? (
+                depsDraft.map((d) => (
+                  <span key={d} style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                    <DependencyTag depId={d} doneFeatureIds={doneFeatureIds} failedFeatureIds={failedFeatureIds} />
+                    <button
+                      type="button"
+                      aria-label={`Remove dependency ${d}`}
+                      onClick={() => { setDepsDraft((prev) => prev.filter((x) => x !== d)); setDepError(null); }}
+                      style={{ border: 0, background: 'transparent', color: 'var(--text-dim)', cursor: 'pointer', fontSize: 'var(--text-xs)', padding: '0 2px', lineHeight: 1 }}
+                    >
+                      ×
+                    </button>
+                  </span>
+                ))
+              ) : (
+                <span style={{ fontSize: 'var(--text-xs)', color: 'var(--text-faint)' }}>none</span>
+              )}
+            </div>
+            <div style={{ display: 'flex', gap: 6 }}>
+              <input
+                value={newDep}
+                onChange={(e) => { setNewDep(e.target.value); setDepError(null); }}
+                onKeyDown={(e) => {
+                  if (e.key !== 'Enter') return;
+                  const dep = newDep.trim();
+                  if (!dep) return;
+                  if (dep === featureId) { setDepError('A work item cannot depend on itself.'); return; }
+                  if (depsDraft.includes(dep)) { setDepError(`"${dep}" is already listed.`); return; }
+                  if (!(dep in state.featureCatalog)) { setDepError(`"${dep}" was not found in the catalog.`); return; }
+                  setDepsDraft((prev) => [...prev, dep]);
+                  setNewDep('');
+                }}
+                placeholder="add dependency ID… (Enter)"
+                style={{ flex: 1, background: 'var(--bg-sunken)', border: '1px solid var(--border-dim)', borderRadius: 'var(--radius-sm)', color: 'var(--text-primary)', fontFamily: 'var(--font-mono)', fontSize: 'var(--text-xs)', padding: '6px 9px' }}
+              />
+              <Button
+                variant="neutral"
+                size="sm"
+                onClick={() => {
+                  const dep = newDep.trim();
+                  if (!dep) return;
+                  if (dep === featureId) { setDepError('A work item cannot depend on itself.'); return; }
+                  if (depsDraft.includes(dep)) { setDepError(`"${dep}" is already listed.`); return; }
+                  if (!(dep in state.featureCatalog)) { setDepError(`"${dep}" was not found in the catalog.`); return; }
+                  setDepsDraft((prev) => [...prev, dep]);
+                  setNewDep('');
+                }}
+              >
+                add
+              </Button>
+            </div>
+            {depError && <div role="alert" style={{ color: 'var(--accent-warn)', fontSize: 'var(--text-xs)', marginTop: 4 }}>{depError}</div>}
+          </div>
         </section>
         <FeatureConfigDetail
           feature={feature}
@@ -190,8 +278,6 @@ export function BacklogItemDetail({
           toolIds={state.runtimeConfig.tools.map((tool) => tool.id)}
           onSaveConfig={(patch) => { onSaveConfig(featureId, patch); }}
           workflowSaveResult={workflowSaveResult}
-          doneFeatureIds={doneFeatureIds}
-          failedFeatureIds={failedFeatureIds}
         />
       </div>
       {feature.projectId && feature.epicId && feature.repoId && <CreateWorkItemModal

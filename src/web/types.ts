@@ -239,6 +239,7 @@ export interface RunChangesPayload {
  * reshaping from an untrusted client. */
 export interface FeatureConfigPatch {
   spec?: string;
+  dependsOn?: string[];
   tool?: string;
   model?: string;
   effort?: string;
