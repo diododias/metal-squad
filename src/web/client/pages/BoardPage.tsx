@@ -215,6 +215,7 @@ export function BoardPage({ state, isMobile, onOpenRun, onOpenBacklogItem }: Boa
                         title: state.featureCatalog[r.featureId]?.title,
                         epicTitle: state.featureCatalog[r.featureId]?.epicTitle,
                         status: r.status,
+                        pipelineStatus: r.pipelineStatus,
                         stages: state.featureCatalog[r.featureId]?.workflow.stages,
                         tool: r.tool,
                         model: state.featureCatalog[r.featureId]?.model,

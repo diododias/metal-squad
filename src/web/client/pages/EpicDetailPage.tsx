@@ -12,6 +12,7 @@ import { WorkflowStepper } from '../components/navigation/WorkflowStepper.js';
 import { ProgressBar } from '../components/data/ProgressBar.js';
 import { startEligibility } from '../lib/startEligibility.js';
 import { hashWithRestoredQuery, readHashParams, updateHashParams } from '../lib/hashState.js';
+import { pillStatus } from '../lib/pillStatus.js';
 import { PageHeader } from '../PageHeader.js';
 import type { ToastStackItem } from '../components/feedback/ToastStack.js';
 import type { MsqWebState, WebSocketClientMessage, WebSocketServerMessage } from '../../types.js';
@@ -215,7 +216,7 @@ export function EpicDetailPage({ state, projectId, epicId, send, actionResults, 
               label={`derived progress: ${String(completed)}/${String(items.length)}`}
             />
           </div>
-          <StatusPill status={epic.status === 'done' ? 'done' : epic.status === 'in_progress' ? 'running' : 'not_started'} label={`manual: ${epic.status}`} spinner={false} />
+          <StatusPill status={pillStatus({ status: epic.status })} label={`manual: ${epic.status}`} spinner={false} />
         </div>
         <div style={tags}>{[...repoCounts].map(([label, count]) => <Tag key={label}>{label}: {count}</Tag>)}</div>
       </Card>
@@ -269,7 +270,7 @@ export function EpicDetailPage({ state, projectId, epicId, send, actionResults, 
             <div style={tags}>
               <Tag>{item.workItemType}</Tag>
               <Tag>{item.repoLabel ?? 'unresolved repo'}</Tag>
-              <StatusPill status={run?.status ?? 'not_started'} label={run?.status ?? 'not started'} spinner={run?.status === 'running'} />
+              <StatusPill status={pillStatus(run ?? {})} label={pillStatus(run ?? {})} />
               {item.dependsOn.map((dependency) => <DependencyTag key={dependency} depId={dependency} doneFeatureIds={doneFeatureIds} failedFeatureIds={failedFeatureIds} />)}
               {item.updatedAt && <span style={{ color: 'var(--text-faint)', fontSize: 'var(--text-xs)' }}>updated {new Date(item.updatedAt).toLocaleDateString()}</span>}
             </div>

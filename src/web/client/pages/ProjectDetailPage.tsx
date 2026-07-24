@@ -11,6 +11,7 @@ import { RepositoriesSection } from '../components/project/RepositoriesSection.j
 import { WorkflowTemplatesSection } from '../components/WorkflowTemplatesSection.js';
 import { Tabs } from '../components/navigation/Tabs.js';
 import { readHashParams, updateHashParams } from '../lib/hashState.js';
+import { pillStatus } from '../lib/pillStatus.js';
 import { PageHeader } from '../PageHeader.js';
 import type { EpicRow as EpicRowData } from '../../../db/repo.js';
 import type { ToastStackItem } from '../components/feedback/ToastStack.js';
@@ -260,7 +261,7 @@ function EpicRow({ epic, state, projectId, send, actionResults, onToast }: {
         </p>
       </div>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
-        <StatusPill status={epic.status === 'done' ? 'done' : epic.status === 'in_progress' ? 'running' : 'not_started'} spinner={false} />
+        <StatusPill status={pillStatus({ status: epic.status })} spinner={false} />
         <div role="none" onClick={(e) => { e.stopPropagation(); }} onKeyDown={(e) => { e.stopPropagation(); }}>
           <LifecycleActions
             kind="epic"

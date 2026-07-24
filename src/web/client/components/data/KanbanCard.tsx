@@ -1,10 +1,12 @@
 import React from 'react';
 import { Card } from '../core/Card.js';
-import { StatusPill, type PillStatus } from '../core/StatusPill.js';
+import { StatusPill } from '../core/StatusPill.js';
 import { WorkflowStepper } from '../navigation/WorkflowStepper.js';
 import { formatTokens } from '../../lib/format.js';
+import { pillStatus, type PillStatusInput } from '../../lib/pillStatus.js';
 import { LifecycleActions } from '../LifecycleActions.js';
 import type { AllowedLifecycle, WebSocketClientMessage, WebSocketServerMessage } from '../../../types.js';
+import type { PipelineStatus } from '../../../../db/repo.js';
 
 /** Deterministic 8-hex-digit short id from a feature id string, so the same
  * feature always renders the same F-XXXXXXXX badge without a backend. */
@@ -29,7 +31,8 @@ export interface KanbanCardRun {
   persistedId?: string | null;
   title?: string | null;
   epicTitle?: string | null;
-  status: PillStatus | (string & {});
+  status: PillStatusInput['status'];
+  pipelineStatus?: PipelineStatus | null;
   stage?: string | null;
   stages?: string[];
   tool?: string | null;
@@ -90,8 +93,9 @@ function buildToolRailCells(run: KanbanCardRun): ToolRailCell[] {
 }
 
 export function KanbanCard({ run, selected, onClick, lifecycle }: KanbanCardProps): React.JSX.Element {
+  const status = pillStatus(run);
   const tasksLabel = run.tasksTotal != null ? `${String(run.tasksDone ?? 0)}/${String(run.tasksTotal)} tasks` : null;
-  const isDone = run.status === 'done';
+  const isDone = status === 'done';
   const displayId = run.persistedId ?? toShortFeatureId(run.featureId);
   const displayTitle = run.title?.trim();
   const railCells = buildToolRailCells(run);
@@ -121,7 +125,7 @@ export function KanbanCard({ run, selected, onClick, lifecycle }: KanbanCardProp
           )}
         </div>
         <div style={{ flexShrink: 0 }}>
-          <StatusPill status={run.status} />
+          <StatusPill status={status} />
         </div>
       </div>
       {(run.workItemType ?? run.templateId) && (
@@ -164,7 +168,7 @@ export function KanbanCard({ run, selected, onClick, lifecycle }: KanbanCardProp
               currentStage={isDone ? null : (run.stage ?? null)}
               completed={isDone}
               variant="bar"
-              allPending={run.status === 'todo'}
+              allPending={status === 'not_started'}
             />
           </div>
         )

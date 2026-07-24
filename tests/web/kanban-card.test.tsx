@@ -80,6 +80,14 @@ describe('KanbanCard status and indicators', () => {
     expect(html).toContain('1000k tok');
   });
 
+  it('renders a paused pipeline as blocked instead of running', () => {
+    const html = renderToStaticMarkup(
+      <KanbanCard run={{ ...run, status: 'running', pipelineStatus: 'paused' }} />,
+    );
+    expect(html).toContain('⊘ blocked');
+    expect(html).not.toContain('msq-status-spinner');
+  });
+
   it('shows the auto-advance cell in the tool rail when the workflow auto-advances', () => {
     const html = renderToStaticMarkup(
       <KanbanCard run={{ ...run, status: 'running', tool: 'claude', autoAdvance: true }} />,
