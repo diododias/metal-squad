@@ -46,6 +46,7 @@ export function Button({
   return (
     <button
       disabled={disabled}
+      aria-disabled={disabled || undefined}
       onClick={onClick}
       title={title}
       style={{ ...base, ...VARIANTS[variant], ...style }}
