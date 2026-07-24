@@ -12,7 +12,7 @@ import { WorkItemTypeBadge } from '../components/data/WorkItemTypeBadge.js';
 import { PageHeader } from '../PageHeader.js';
 import { useActiveProject } from '../hooks/useActiveProject.js';
 import { useIsMobile } from '../Responsive.js';
-import { formatClockTime, formatElapsed, formatPercent, formatPublishTarget, formatTokens, getPublishStatusLabel, getRunStatusLabel, parseTimestampMs } from '../lib/format.js';
+import { formatClockTime, formatElapsed, formatPublishTarget, formatTokens, getPublishStatusLabel, getRunStatusLabel, parseTimestampMs } from '../lib/format.js';
 import { hashWithRestoredQuery } from '../lib/hashState.js';
 import { summarizeTaskRuns } from '../lib/workflow.js';
 import { STAGE_ORDER } from '../../../core/workflow/stageOrder.js';
@@ -497,7 +497,7 @@ export function RunDetailPage({
             model={feature?.model}
             tokens={formatTokens(run.wasteTokens != null && run.wasteTokens > 0 ? run.wasteTokens : run.pipelineTotalTokens ?? run.totalTokens)}
             tokensAreWaste={run.wasteTokens != null && run.wasteTokens > 0}
-            contextPercent={formatPercent(run.contextWindowPercent)}
+            contextTokens={formatTokens(run.inputTokens)}
             elapsed={formatElapsed(run.startedAt, run.endedAt)}
           />
         </div>

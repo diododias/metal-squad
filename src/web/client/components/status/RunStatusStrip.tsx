@@ -11,12 +11,12 @@ export interface RunStatusStripProps {
   tokens?: string | null;
   /** Whether the displayed tokens were consumed by an aborted run. */
   tokensAreWaste?: boolean;
-  contextPercent?: string | null;
+  contextTokens?: string | null;
   elapsed?: string | null;
 }
 
 /** Unified single-row replacement for the run-detail metric card grid:
- * `[⟳ running] · claude · sonnet-4-5 · 41.9k tok · ctx 71% · 11m40s`.
+ * `[⟳ running] · claude · sonnet-4-5 · 41.9k tok · ctx 41.9k tok · 11m40s`.
  * Null/empty items are omitted; flex-wrap folds it into two lines on mobile. */
 export function RunStatusStrip({
   status,
@@ -26,14 +26,14 @@ export function RunStatusStrip({
   model,
   tokens,
   tokensAreWaste = false,
-  contextPercent,
+  contextTokens,
   elapsed,
 }: RunStatusStripProps): React.JSX.Element {
   const items: React.ReactNode[] = [];
   if (tool) items.push(<span key="tool">{tool}</span>);
   if (model) items.push(<span key="model">{model}</span>);
   if (tokens && tokens !== '—') items.push(<span key="tokens" style={{ color: tokensAreWaste ? 'var(--accent-warn)' : 'var(--text-primary)', fontWeight: 600 }}>{tokens} tok{tokensAreWaste ? ' · WASTE' : ''}</span>);
-  if (contextPercent && contextPercent !== '—') items.push(<span key="ctx">ctx {contextPercent}</span>);
+  if (contextTokens && contextTokens !== '—') items.push(<span key="ctx">ctx {contextTokens} tok</span>);
   if (elapsed && elapsed !== '—') items.push(<span key="elapsed" style={{ color: 'var(--text-primary)', fontWeight: 600 }}>{elapsed}</span>);
 
   return (

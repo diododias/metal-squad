@@ -11,7 +11,7 @@ describe('RunStatusStrip', () => {
         tool="claude"
         model="claude-sonnet-4-5"
         tokens="41.9k"
-        contextPercent="71%"
+        contextTokens="41.9k"
         elapsed="11m40s"
       />,
     );
@@ -19,13 +19,13 @@ describe('RunStatusStrip', () => {
     expect(html).toContain('claude');
     expect(html).toContain('claude-sonnet-4-5');
     expect(html).toContain('41.9k tok');
-    expect(html).toContain('ctx 71%');
+    expect(html).toContain('ctx 41.9k tok');
     expect(html).toContain('11m40s');
   });
 
   it('omits null and placeholder items instead of rendering dashes', () => {
     const html = renderToStaticMarkup(
-      <RunStatusStrip status="done" tool="codex" tokens="—" contextPercent="—" elapsed="—" />,
+      <RunStatusStrip status="done" tool="codex" tokens="—" contextTokens="—" elapsed="—" />,
     );
     expect(html).toContain('codex');
     expect(html).not.toContain('—');

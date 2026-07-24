@@ -88,11 +88,11 @@ export function WorkItemDrilldownDrawer({
       <h4 style={{ margin: '0 0 8px' }}>{pipelineRuns[0]?.pipelineId === null ? 'Standalone run' : `Pipeline #${String(pipelineRuns[0]?.pipelineId)}`}</h4>
       {pipelineRuns.map((run) => <article key={run.runId} style={{ padding: '8px 0', borderTop: '1px solid var(--border-dim)' }}>
         <div><StatusPill status={run.status} spinner={false} /> <strong>Run #{run.runId}</strong> · {run.stage ?? 'No stage'} · {run.tool}/{run.model ?? 'Unknown Model'}</div>
-        <div style={muted}>Started {new Date(run.startedAt).toLocaleString()} · {run.endedAt ? `duration ${formatDurationMs(run.durationMs)}` : 'Still running — completion time pending'} · context {formatPercent(run.contextWindowPercent)}</div>
+        <div style={muted}>Started {new Date(run.startedAt).toLocaleString()} · {run.endedAt ? `duration ${formatDurationMs(run.durationMs)}` : 'Still running — completion time pending'} · context {formatTokens(run.inputTokens)} tok</div>
         {!run.hasTokenTelemetry ? <p style={{ ...muted, margin: '5px 0' }}><em>No token telemetry captured</em></p> : <p style={{ ...muted, margin: '5px 0' }}>Total {formatTokens(run.totalTokens)} · Useful {formatTokens(run.usefulTokens)} · Waste {formatTokens(run.wasteTokens)}</p>}
         {run.summary && <p style={{ ...muted, margin: '5px 0' }}>Output summary: {run.summary}</p>}
         {run.retries.length > 0 && <div style={muted}>Attempts: {run.retries.map((retry) => `#${String(retry.attempt)} ${retry.tool ?? run.tool}/${retry.model ?? run.model ?? 'Unknown Model'}`).join(', ')}</div>}
-        {run.tasks.length > 0 && <details><summary>Task token breakdown ({String(run.tasks.length)})</summary><ul style={{ ...muted, paddingLeft: 18 }}>{run.tasks.map((task) => <li key={task.taskId}>{task.title} · {task.stage ?? '—'} · {task.status} · {formatTokens(task.totalTokens)} · context {formatPercent(task.contextWindowPercent)}</li>)}</ul></details>}
+        {run.tasks.length > 0 && <details><summary>Task token breakdown ({String(run.tasks.length)})</summary><ul style={{ ...muted, paddingLeft: 18 }}>{run.tasks.map((task) => <li key={task.taskId}>{task.title} · {task.stage ?? '—'} · {task.status} · {formatTokens(task.totalTokens)} · context {formatTokens(task.inputTokens)} tok</li>)}</ul></details>}
         {run.events.length > 0 && <div style={{ ...muted, marginTop: 5 }}>Events: {run.events.map((event) => eventLabel(event.event)).join(' · ')}</div>}
       </article>)}
     </section>)}
