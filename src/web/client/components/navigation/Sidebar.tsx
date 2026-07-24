@@ -5,6 +5,7 @@ export interface SidebarNavItem {
   path: string;
   label: string;
   count?: number;
+  icon?: string;
 }
 
 export interface SidebarProps {
@@ -128,7 +129,7 @@ export function Sidebar({
                 if (!active) e.currentTarget.style.background = 'transparent';
               }}
             >
-              <span>{collapsed ? item.label.slice(0, 1) : item.label}</span>
+              <span title={collapsed ? item.label : undefined} aria-label={collapsed ? item.label : undefined}>{collapsed ? (item.icon ?? item.label.slice(0, 1)) : item.label}</span>
               {!collapsed && item.count != null && <span style={{ fontSize: 'var(--text-2xs)', color: 'var(--text-faint)' }}>{item.count}</span>}
             </a>
           );

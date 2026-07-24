@@ -233,13 +233,13 @@ export function App(): React.JSX.Element {
     route.page === 'run-detail' ? '/runs' : route.page === 'backlog-detail' ? '/board' : `/${route.page}`;
 
   const navItems: SidebarNavItem[] = [
-    { path: '/projects', label: 'Projects', count: state?.projects.filter((project) => project.archivedAt === null).length },
-    { path: '/board', label: 'Board' },
-    { path: '/runs', label: 'Runs' },
-    { path: '/gates', label: 'Gates', count: state?.gates.length },
-    { path: '/archived', label: 'Archived' },
-    { path: '/analytics', label: 'Analytics' },
-    { path: '/config', label: 'Settings' },
+    { path: '/projects', label: 'Projects', icon: '◈', count: state?.projects.filter((project) => project.archivedAt === null).length },
+    { path: '/board', label: 'Board', icon: '⊞' },
+    { path: '/runs', label: 'Runs', icon: '▶' },
+    { path: '/gates', label: 'Gates', icon: '⬡', count: state?.gates.length },
+    { path: '/archived', label: 'Archived', icon: '⊟' },
+    { path: '/analytics', label: 'Analytics', icon: '▲' },
+    { path: '/config', label: 'Settings', icon: '⚙' },
   ];
 
   const totalTokens = (state?.runs ?? []).reduce((s, r) => s + (r.totalTokens ?? 0), 0);
